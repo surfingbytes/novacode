@@ -2021,7 +2021,7 @@ onUnmounted(() => {
                 :placeholder="promptPlaceholder"
                 rows="1"
                 class="flex-1 min-w-0 resize-none self-center bg-transparent text-text-primary placeholder-text-muted text-sm px-2 py-1.5 leading-5 rounded-none border-0 shadow-none focus:outline-none focus:ring-0 box-border"
-                style="max-height: 160px; overflow-y: auto; field-sizing: content"
+                style="height: 32px; max-height: 160px; overflow-y: auto"
               ></textarea>
               <button
                 type="button"
