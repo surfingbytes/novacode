@@ -11,10 +11,14 @@ import ConfirmModal from '@/components/ConfirmModal.vue';
 
 // classes
 import { orchestratorApi } from '@/classes/api';
+
+// stores
 import { useWorkspacesStore } from '@/stores/workspaces';
 
 // types
 import type { Orchestrator } from '@/@types/index';
+
+// -------------------------------------------------- Props --------------------------------------------------
 
 const props = defineProps<{
   workspaceId: string;
@@ -22,30 +26,44 @@ const props = defineProps<{
   showSidebarToggle?: boolean;
 }>();
 
-const router = useRouter();
-const workspacesStore = useWorkspacesStore();
+// -------------------------------------------------- Emits --------------------------------------------------
+
 const emit = defineEmits<{
   (e: 'toggle-sidebar'): void;
 }>();
 
+// -------------------------------------------------- Store --------------------------------------------------
+
+const router = useRouter();
+const workspacesStore = useWorkspacesStore();
+
+// -------------------------------------------------- Refs --------------------------------------------------
+
 const orchestrator = ref<Orchestrator | null>(null);
-const loading = ref(true);
+const bLoading = ref(true);
 const error = ref<string | null>(null);
-const showDeleteModal = ref(false);
-const isDeleting = ref(false);
+const bShowDeleteModal = ref(false);
+const bDeleting = ref(false);
 const activeTab = ref<'orchestrator' | 'files' | 'git'>('orchestrator');
-const mobileOrchestratorMenuOpen = ref(false);
+const bMobileOrchestratorMenuOpen = ref(false);
 const mobileOrchestratorMenuRef = ref<HTMLElement | null>(null);
+
+// -------------------------------------------------- Computed --------------------------------------------------
+
 const workspaceName = computed(
-  () => workspacesStore.workspaces.find((w) => w.id === props.workspaceId)?.name ?? 'Workspace'
+  () => workspacesStore.workspaces.find((w) => w.id === props.workspaceId)?.name ?? 'Workspace',
 );
 
+// -------------------------------------------------- Methods --------------------------------------------------
+
 function closeMobileOrchestratorMenu(): void {
-  mobileOrchestratorMenuOpen.value = false;
+  bMobileOrchestratorMenuOpen.value = false;
 }
 
 function handleDocumentClickMobileMenu(e: MouseEvent): void {
-  if (!mobileOrchestratorMenuOpen.value) return;
+  if (!bMobileOrchestratorMenuOpen.value) {
+    return;
+  }
   const el = mobileOrchestratorMenuRef.value;
   if (el && !el.contains(e.target as Node)) {
     closeMobileOrchestratorMenu();
@@ -53,11 +71,13 @@ function handleDocumentClickMobileMenu(e: MouseEvent): void {
 }
 
 function handleKeydownMobileMenu(e: KeyboardEvent): void {
-  if (e.key === 'Escape' && mobileOrchestratorMenuOpen.value) closeMobileOrchestratorMenu();
+  if (e.key === 'Escape' && bMobileOrchestratorMenuOpen.value) {
+    closeMobileOrchestratorMenu();
+  }
 }
 
-async function fetchOrchestrator() {
-  loading.value = true;
+async function fetchOrchestrator(): Promise<void> {
+  bLoading.value = true;
   error.value = null;
   try {
     const { data } = await orchestratorApi.get(props.workspaceId, props.orchestratorId);
@@ -66,27 +86,29 @@ async function fetchOrchestrator() {
     error.value = 'Failed to load orchestrator';
     console.error('Failed to fetch orchestrator:', e);
   } finally {
-    loading.value = false;
+    bLoading.value = false;
   }
 }
 
-async function deleteOrchestrator() {
-  isDeleting.value = true;
+async function deleteOrchestrator(): Promise<void> {
+  bDeleting.value = true;
   try {
     await orchestratorApi.remove(props.workspaceId, props.orchestratorId);
     router.push({ name: 'workspace', params: { id: props.workspaceId } });
   } catch (e) {
     console.error('Failed to delete orchestrator:', e);
-    isDeleting.value = false;
-    showDeleteModal.value = false;
+    bDeleting.value = false;
+    bShowDeleteModal.value = false;
   }
 }
 
-async function toggleArchive() {
-  if (!orchestrator.value) return;
+async function toggleArchive(): Promise<void> {
+  if (!orchestrator.value) {
+    return;
+  }
   try {
     const { data: updated } = await orchestratorApi.update(props.workspaceId, props.orchestratorId, {
-      archived: !orchestrator.value.archived
+      archived: !orchestrator.value.archived,
     });
     orchestrator.value = updated;
   } catch (e) {
@@ -94,16 +116,22 @@ async function toggleArchive() {
   }
 }
 
-async function openEditOrchestratorName() {
-  if (!orchestrator.value) return;
+async function openEditOrchestratorName(): Promise<void> {
+  if (!orchestrator.value) {
+    return;
+  }
   const currentName = orchestrator.value.name ?? 'Orchestrator';
   const nextName = window.prompt('Edit orchestrator name', currentName);
-  if (nextName == null) return;
+  if (nextName == null) {
+    return;
+  }
   const trimmedName = nextName.trim();
-  if (!trimmedName || trimmedName === currentName) return;
+  if (!trimmedName || trimmedName === currentName) {
+    return;
+  }
   try {
     const { data: updated } = await orchestratorApi.update(props.workspaceId, props.orchestratorId, {
-      name: trimmedName
+      name: trimmedName,
     });
     orchestrator.value = updated;
   } catch (e) {
@@ -111,9 +139,11 @@ async function openEditOrchestratorName() {
   }
 }
 
-function updateOrchestratorFromPanel(o: Orchestrator) {
+function updateOrchestratorFromPanel(o: Orchestrator): void {
   orchestrator.value = o;
 }
+
+// -------------------------------------------------- Lifecycle --------------------------------------------------
 
 onMounted(() => {
   fetchOrchestrator();
@@ -129,11 +159,13 @@ onUnmounted(() => {
 watch(
   () => props.orchestratorId,
   (newId, oldId) => {
-    if (!newId || newId === oldId) return;
+    if (!newId || newId === oldId) {
+      return;
+    }
     orchestrator.value = null;
     activeTab.value = 'orchestrator';
     fetchOrchestrator();
-  }
+  },
 );
 </script>
 
@@ -149,15 +181,11 @@ watch(
             class="button is-transparent is-icon mr-2"
             title="Toggle sessions"
           >
-            <span
-              class="material-symbols-outlined select-none"
-              style="font-size: 18px; vertical-align: middle"
-              >menu_open</span
-            >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" class="select-none" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/><path d="M19 6l-6 6 6 6"/></svg>
           </button>
           <div class="flex flex-col min-w-0">
             <h1 class="text-base font-semibold text-text-primary truncate">
-              {{ loading ? '…' : (orchestrator?.name ?? 'Orchestrator') }}
+              {{ bLoading ? '…' : (orchestrator?.name ?? 'Orchestrator') }}
             </h1>
             <p class="text-xs text-text-muted">
               {{ workspaceName }}
@@ -165,44 +193,41 @@ watch(
           </div>
         </div>
       </div>
-      <div v-if="!loading" class="hidden lg:flex items-center gap-1 shrink-0">
+      <div v-if="!bLoading" class="hidden lg:flex items-center gap-1 shrink-0">
         <button class="button is-transparent is-icon" title="Edit orchestrator" @click="openEditOrchestratorName">
-          <span class="material-symbols-outlined select-none">edit</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="select-none" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
         </button>
         <button
           class="button is-transparent is-icon"
           :title="orchestrator?.archived ? 'Unarchive orchestrator' : 'Archive orchestrator'"
           @click="toggleArchive"
         >
-          <span
-            class="material-symbols-outlined select-none"
-            :class="orchestrator?.archived ? 'text-primary' : 'text-warning'"
-            >{{ orchestrator?.archived ? 'unarchive' : 'inventory_2' }}</span
-          >
+          <svg v-if="orchestrator?.archived" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="select-none text-primary" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"/></svg>
+          <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="select-none text-warning" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"/></svg>
         </button>
         <button
           class="button is-transparent is-icon"
           title="Delete orchestrator"
-          @click="showDeleteModal = true"
+          @click="bShowDeleteModal = true"
         >
-          <span class="material-symbols-outlined select-none text-destructive">delete</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="select-none text-destructive" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
         </button>
       </div>
 
-      <div v-if="!loading" ref="mobileOrchestratorMenuRef" class="relative lg:hidden shrink-0">
+      <div v-if="!bLoading" ref="mobileOrchestratorMenuRef" class="relative lg:hidden shrink-0">
         <button
           type="button"
           class="button is-transparent is-icon"
           aria-haspopup="true"
-          :aria-expanded="mobileOrchestratorMenuOpen"
+          :aria-expanded="bMobileOrchestratorMenuOpen"
           title="Orchestrator actions"
-          @click.stop="mobileOrchestratorMenuOpen = !mobileOrchestratorMenuOpen"
+          @click.stop="bMobileOrchestratorMenuOpen = !bMobileOrchestratorMenuOpen"
         >
-          <span class="material-symbols-outlined select-none">more_horiz</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="none" width="16" height="16" class="select-none" aria-hidden="true"><circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg>
         </button>
         <Transition name="mobile-orchestrator-menu-drop">
           <div
-            v-if="mobileOrchestratorMenuOpen"
+            v-if="bMobileOrchestratorMenuOpen"
             class="absolute right-0 top-full mt-1 z-50 min-w-[11rem] rounded-lg border border-border bg-surface py-1 shadow-lg"
             role="menu"
             @click.stop
@@ -216,7 +241,7 @@ watch(
                 openEditOrchestratorName();
               "
             >
-              <span class="material-symbols-outlined text-base shrink-0">edit</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="shrink-0" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
               Edit
             </button>
             <button
@@ -228,11 +253,8 @@ watch(
                 toggleArchive();
               "
             >
-              <span
-                class="material-symbols-outlined text-base shrink-0"
-                :class="orchestrator?.archived ? 'text-primary' : 'text-warning'"
-                >{{ orchestrator?.archived ? 'unarchive' : 'inventory_2' }}</span
-              >
+              <svg v-if="orchestrator?.archived" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="shrink-0 text-primary" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"/></svg>
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="shrink-0 text-warning" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"/></svg>
               {{ orchestrator?.archived ? 'Unarchive' : 'Archive' }}
             </button>
             <button
@@ -241,10 +263,10 @@ watch(
               role="menuitem"
               @click="
                 closeMobileOrchestratorMenu();
-                showDeleteModal = true;
+                bShowDeleteModal = true;
               "
             >
-              <span class="material-symbols-outlined text-base shrink-0">delete</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="shrink-0" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
               Delete
             </button>
           </div>
@@ -264,7 +286,7 @@ watch(
       <!-- Orchestrator tab -->
       <template v-if="activeTab === 'orchestrator'">
         <!-- Loading skeleton -->
-        <div v-if="loading" class="flex-1 overflow-y-auto px-4 md:px-6 py-4 space-y-4">
+        <div v-if="bLoading" class="flex-1 overflow-y-auto px-4 md:px-6 py-4 space-y-4">
           <div class="h-4 w-3/4 max-w-md rounded bg-fg/10 animate-pulse" />
           <div class="space-y-2">
             <div class="h-20 rounded-xl bg-fg/10 animate-pulse" />
@@ -346,11 +368,11 @@ watch(
     </div>
 
     <ConfirmModal
-      v-model="showDeleteModal"
+      v-model="bShowDeleteModal"
       title="Delete orchestrator"
       :description="`Delete '${orchestrator?.name}'? The task list and any step sessions from this plan will be permanently removed.`"
       confirm-label="Delete"
-      :loading="isDeleting"
+      :loading="bDeleting"
       @confirm="deleteOrchestrator"
     />
   </div>

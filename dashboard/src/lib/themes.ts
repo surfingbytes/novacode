@@ -2,6 +2,7 @@ export interface Theme {
   id: string;
   name: string;
   dark: boolean;
+  // Tailwind CSS variable values (--color-*)
   bg: string;
   surface: string;
   card: string;
@@ -12,194 +13,228 @@ export interface Theme {
   destructive: string;
   textPrimary: string;
   textMuted: string;
+  // Design token values (--bg-*, --fg-*, --accent-*, etc.)
+  bgHover: string;
+  line: string;
+  lineStrong: string;
+  fgSubtle: string;
+  fgFaint: string;
+  accentSoft: string;
+  accentLine: string;
+  warn: string;
+  danger: string;
+  agentClaude: string;
+  agentCursor: string;
+  agentVibe: string;
+  // Swatch dots for theme picker [bg, accent, surface]
+  previewDots: [string, string, string];
 }
 
 export const themes: Theme[] = [
   {
-    id: 'deep-space',
-    name: 'Deep Space',
+    id: 'graphite',
+    name: 'Graphite',
     dark: true,
-    bg: '#0d0f14',
-    surface: '#13161e',
-    card: '#1a1d2b',
-    primary: '#6c8aff',
-    primaryHover: '#8ba1ff',
-    success: '#34d399',
-    warning: '#fbbf24',
-    destructive: '#f87171',
-    textPrimary: '#e2e8f0',
-    textMuted: '#64748b'
-  },
-  {
-    id: 'carbon',
-    name: 'Carbon',
-    dark: true,
-    bg: '#111111',
-    surface: '#1c1c1c',
-    card: '#242424',
-    primary: '#3b82f6',
-    primaryHover: '#60a5fa',
-    success: '#22c55e',
-    warning: '#fbbf24',
-    destructive: '#f87171',
-    textPrimary: '#f5f5f5',
-    textMuted: '#71717a'
-  },
-  {
-    id: 'terminal-green',
-    name: 'Terminal Green',
-    dark: true,
-    bg: '#0a0f0a',
-    surface: '#0d1a0d',
-    card: '#0f200f',
-    primary: '#00ff41',
-    primaryHover: '#00cc33',
-    success: '#00ff41',
-    warning: '#ffd60a',
-    destructive: '#ff453a',
-    textPrimary: '#c8ffc8',
-    textMuted: '#4d7a4d'
-  },
-  {
-    id: 'midnight-violet',
-    name: 'Midnight Violet',
-    dark: true,
-    bg: '#0f0e17',
-    surface: '#16152a',
-    card: '#1e1c35',
-    primary: '#7c6af5',
-    primaryHover: '#9585f8',
-    success: '#4ade80',
-    warning: '#fbbf24',
-    destructive: '#f87171',
-    textPrimary: '#fffffe',
-    textMuted: '#6b5f8a'
+    bg: '#0f0e0d',
+    surface: '#171614',
+    card: '#1d1b18',
+    bgHover: '#23201d',
+    line: 'rgba(255,248,235,0.06)',
+    lineStrong: 'rgba(255,248,235,0.10)',
+    primary: '#8b85ff',
+    primaryHover: '#a09bff',
+    accentSoft: 'rgba(139,133,255,0.14)',
+    accentLine: 'rgba(139,133,255,0.28)',
+    textPrimary: '#f5f1ea',
+    textMuted: '#a6a098',
+    fgSubtle: '#6e6963',
+    fgFaint: '#48443f',
+    success: '#7ec994',
+    warning: '#e6b067',
+    destructive: '#e87676',
+    warn: '#e6b067',
+    danger: '#e87676',
+    agentClaude: '#d97757',
+    agentCursor: '#7aa2ff',
+    agentVibe: '#7ec994',
+    previewDots: ['#0f0e0d', '#8b85ff', '#171614']
   },
   {
     id: 'ember',
     name: 'Ember',
     dark: true,
-    bg: '#110a0a',
-    surface: '#1c1010',
-    card: '#251616',
-    primary: '#e53e3e',
-    primaryHover: '#f56565',
-    success: '#68d391',
-    warning: '#f6ad55',
-    destructive: '#fc8181',
-    textPrimary: '#faf0f0',
-    textMuted: '#7a5858'
-  },
-  {
-    id: 'bloodline',
-    name: 'Bloodline',
-    dark: true,
-    bg: '#0d0d0d',
-    surface: '#181010',
-    card: '#211515',
-    primary: '#cc2222',
-    primaryHover: '#e53e3e',
-    success: '#4ade80',
-    warning: '#facc15',
-    destructive: '#f87171',
-    textPrimary: '#f5f5f5',
-    textMuted: '#6b5b5b'
-  },
-  {
-    id: 'rust',
-    name: 'Rust',
-    dark: true,
-    bg: '#0f0c0a',
+    bg: '#100c0a',
     surface: '#1a1210',
-    card: '#231916',
-    primary: '#c0452a',
-    primaryHover: '#d4845a',
-    success: '#6ee7b7',
-    warning: '#fbbf24',
-    destructive: '#f87171',
-    textPrimary: '#f0ebe8',
-    textMuted: '#7a6560'
+    card: '#221812',
+    bgHover: '#2c1e17',
+    line: 'rgba(255,248,235,0.06)',
+    lineStrong: 'rgba(255,248,235,0.10)',
+    primary: '#ff8a4c',
+    primaryHover: '#ff9d68',
+    accentSoft: 'rgba(255,138,76,0.14)',
+    accentLine: 'rgba(255,138,76,0.28)',
+    textPrimary: '#f5f1ea',
+    textMuted: '#a6a098',
+    fgSubtle: '#6e6963',
+    fgFaint: '#48443f',
+    success: '#7ec994',
+    warning: '#e6b067',
+    destructive: '#e87676',
+    warn: '#e6b067',
+    danger: '#e87676',
+    agentClaude: '#ff8a4c',
+    agentCursor: '#7aa2ff',
+    agentVibe: '#7ec994',
+    previewDots: ['#100c0a', '#ff8a4c', '#1a1210']
   },
   {
-    id: 'infrared',
-    name: 'Infrared',
+    id: 'terminal',
+    name: 'Terminal',
     dark: true,
-    bg: '#0a0a0f',
-    surface: '#130e18',
-    card: '#1b1222',
-    primary: '#ff2d55',
-    primaryHover: '#ff4d72',
-    success: '#30d158',
-    warning: '#ffd60a',
-    destructive: '#ff453a',
-    textPrimary: '#f2f2f7',
-    textMuted: '#636369'
+    bg: '#0c0e0c',
+    surface: '#111911',
+    card: '#172017',
+    bgHover: '#1c271c',
+    line: 'rgba(255,248,235,0.06)',
+    lineStrong: 'rgba(255,248,235,0.10)',
+    primary: '#7ec994',
+    primaryHover: '#96d4a9',
+    accentSoft: 'rgba(126,201,148,0.14)',
+    accentLine: 'rgba(126,201,148,0.28)',
+    textPrimary: '#e8f5e8',
+    textMuted: '#96b396',
+    fgSubtle: '#608060',
+    fgFaint: '#3a5a3a',
+    success: '#7ec994',
+    warning: '#e6b067',
+    destructive: '#e87676',
+    warn: '#e6b067',
+    danger: '#e87676',
+    agentClaude: '#d97757',
+    agentCursor: '#7aa2ff',
+    agentVibe: '#7ec994',
+    previewDots: ['#0c0e0c', '#7ec994', '#111911']
   },
   {
-    id: 'cloud',
-    name: 'Cloud',
-    dark: false,
-    bg: '#f8f9fc',
-    surface: '#eef0f6',
-    card: '#e4e7f0',
-    primary: '#4f6ef7',
-    primaryHover: '#3b5af5',
-    success: '#12a06e',
-    warning: '#d97706',
-    destructive: '#dc2626',
-    textPrimary: '#111827',
-    textMuted: '#6b7280'
+    id: 'cobalt',
+    name: 'Cobalt',
+    dark: true,
+    bg: '#0a0c12',
+    surface: '#111525',
+    card: '#181d30',
+    bgHover: '#1e2338',
+    line: 'rgba(200,215,255,0.06)',
+    lineStrong: 'rgba(200,215,255,0.10)',
+    primary: '#7aa2ff',
+    primaryHover: '#94b5ff',
+    accentSoft: 'rgba(122,162,255,0.14)',
+    accentLine: 'rgba(122,162,255,0.28)',
+    textPrimary: '#eaecf5',
+    textMuted: '#8a95b8',
+    fgSubtle: '#5a6585',
+    fgFaint: '#3a4560',
+    success: '#7ec994',
+    warning: '#e6b067',
+    destructive: '#e87676',
+    warn: '#e6b067',
+    danger: '#e87676',
+    agentClaude: '#d97757',
+    agentCursor: '#7aa2ff',
+    agentVibe: '#7ec994',
+    previewDots: ['#0a0c12', '#7aa2ff', '#111525']
   },
   {
-    id: 'cream',
-    name: 'Cream',
-    dark: false,
-    bg: '#faf8f2',
-    surface: '#f2ede0',
-    card: '#e8e0cc',
-    primary: '#b45309',
-    primaryHover: '#92400e',
-    success: '#059669',
-    warning: '#d97706',
-    destructive: '#dc2626',
-    textPrimary: '#1c1917',
-    textMuted: '#78716c'
+    id: 'mono',
+    name: 'Mono',
+    dark: true,
+    bg: '#0a0a0a',
+    surface: '#141414',
+    card: '#1c1c1c',
+    bgHover: '#242424',
+    line: 'rgba(255,255,255,0.06)',
+    lineStrong: 'rgba(255,255,255,0.10)',
+    primary: '#d4d4d4',
+    primaryHover: '#e8e8e8',
+    accentSoft: 'rgba(212,212,212,0.12)',
+    accentLine: 'rgba(212,212,212,0.25)',
+    textPrimary: '#f4f4f4',
+    textMuted: '#828282',
+    fgSubtle: '#5a5a5a',
+    fgFaint: '#363636',
+    success: '#7ec994',
+    warning: '#e6b067',
+    destructive: '#e87676',
+    warn: '#e6b067',
+    danger: '#e87676',
+    agentClaude: '#d97757',
+    agentCursor: '#aaaaaa',
+    agentVibe: '#7ec994',
+    previewDots: ['#0a0a0a', '#d4d4d4', '#141414']
   },
   {
-    id: 'frost',
-    name: 'Frost',
+    id: 'mojave',
+    name: 'Mojave',
     dark: false,
-    bg: '#f0f5fb',
-    surface: '#e1ecf7',
-    card: '#cfe0f0',
-    primary: '#0284c7',
-    primaryHover: '#0369a1',
-    success: '#059669',
-    warning: '#d97706',
-    destructive: '#dc2626',
-    textPrimary: '#0f172a',
-    textMuted: '#475569'
-  },
-  {
-    id: 'sakura',
-    name: 'Sakura',
-    dark: false,
-    bg: '#fdf4f8',
-    surface: '#fce7f2',
-    card: '#f9d5e8',
-    primary: '#db2777',
-    primaryHover: '#be185d',
-    success: '#059669',
-    warning: '#d97706',
-    destructive: '#dc2626',
-    textPrimary: '#1f1720',
-    textMuted: '#9d6f85'
+    bg: '#f6f3ec',
+    surface: '#fbf9f4',
+    card: '#ffffff',
+    bgHover: '#eee9df',
+    line: 'rgba(25,20,10,0.08)',
+    lineStrong: 'rgba(25,20,10,0.14)',
+    primary: '#4f48e6',
+    primaryHover: '#6961ea',
+    accentSoft: 'rgba(79,72,230,0.10)',
+    accentLine: 'rgba(79,72,230,0.24)',
+    textPrimary: '#1a1815',
+    textMuted: '#56524b',
+    fgSubtle: '#807a70',
+    fgFaint: '#b5afa4',
+    success: '#3f8a5a',
+    warning: '#b37410',
+    destructive: '#b3452e',
+    warn: '#b37410',
+    danger: '#b3452e',
+    agentClaude: '#b05a3c',
+    agentCursor: '#3a6ad9',
+    agentVibe: '#3f8a5a',
+    previewDots: ['#f6f3ec', '#4f48e6', '#fbf9f4']
   }
 ];
 
-export const DEFAULT_THEME_ID = 'infrared';
-export const DEFAULT_DARK_THEME_ID = 'deep-space';
-export const DEFAULT_LIGHT_THEME_ID = 'cloud';
+export const DEFAULT_THEME_ID = 'graphite';
+export const DEFAULT_DARK_THEME_ID = 'graphite';
+export const DEFAULT_LIGHT_THEME_ID = 'mojave';
+
+export function resolveStoredThemeId(themeId: string): string {
+  // Legacy theme id migrations
+  const legacyMap: Record<string, string> = {
+    'rust': 'graphite',
+    'deep-space': 'graphite',
+    'carbon': 'mono',
+    'terminal-green': 'terminal',
+    'midnight-violet': 'cobalt',
+    'bloodline': 'ember',
+    'oled': 'mono',
+    'infrared': 'graphite',
+    'cloud': 'mojave',
+    'cream': 'mojave',
+    'frost': 'mojave',
+    'sakura': 'mojave'
+  };
+  return legacyMap[themeId] ?? (themes.find(t => t.id === themeId) ? themeId : DEFAULT_THEME_ID);
+}
+
+export function migrateLegacyThemeLocalStorage(): void {
+  for (const key of ['theme', 'darkTheme', 'lightTheme'] as const) {
+    const v = localStorage.getItem(key);
+    if (v) {
+      const migrated = resolveStoredThemeId(v);
+      if (migrated !== v) {
+        localStorage.setItem(key, migrated);
+      }
+    }
+  }
+}
 
 function isLightHex(hex: string): boolean {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -209,9 +244,12 @@ function isLightHex(hex: string): boolean {
 }
 
 export function applyTheme(themeId: string): void {
+  const resolvedId = resolveStoredThemeId(themeId);
   const theme =
-    themes.find((t) => t.id === themeId) ?? themes.find((t) => t.id === DEFAULT_THEME_ID)!;
+    themes.find((t) => t.id === resolvedId) ?? themes.find((t) => t.id === DEFAULT_THEME_ID)!;
   const root = document.documentElement;
+
+  // Old Tailwind CSS variables (--color-*)
   root.style.setProperty('--color-bg', theme.bg);
   root.style.setProperty('--color-surface', theme.surface);
   root.style.setProperty('--color-card', theme.card);
@@ -225,6 +263,28 @@ export function applyTheme(themeId: string): void {
   root.style.setProperty('--color-text-primary', theme.textPrimary);
   root.style.setProperty('--color-text-muted', theme.textMuted);
   root.style.setProperty('--color-fg', isLightHex(theme.bg) ? '#000000' : '#ffffff');
+
+  // New design token CSS variables
+  root.style.setProperty('--bg', theme.bg);
+  root.style.setProperty('--bg-elev', theme.surface);
+  root.style.setProperty('--bg-elev-2', theme.card);
+  root.style.setProperty('--bg-hover', theme.bgHover);
+  root.style.setProperty('--line', theme.line);
+  root.style.setProperty('--line-strong', theme.lineStrong);
+  root.style.setProperty('--fg', theme.textPrimary);
+  root.style.setProperty('--fg-muted', theme.textMuted);
+  root.style.setProperty('--fg-subtle', theme.fgSubtle);
+  root.style.setProperty('--fg-faint', theme.fgFaint);
+  root.style.setProperty('--accent', theme.primary);
+  root.style.setProperty('--accent-soft', theme.accentSoft);
+  root.style.setProperty('--accent-line', theme.accentLine);
+  root.style.setProperty('--success', theme.success);
+  root.style.setProperty('--warn', theme.warn);
+  root.style.setProperty('--danger', theme.danger);
+  root.style.setProperty('--agent-claude', theme.agentClaude);
+  root.style.setProperty('--agent-cursor', theme.agentCursor);
+  root.style.setProperty('--agent-vibe', theme.agentVibe);
+
   root.setAttribute('data-theme', theme.dark ? 'dark' : 'light');
   document.body.style.background = theme.bg;
   document.body.style.color = theme.textPrimary;
@@ -236,10 +296,9 @@ let _colorSchemeQuery: MediaQueryList | null = null;
 export function resolveAutoTheme(): string {
   const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
   if (prefersDark) {
-    return localStorage.getItem('darkTheme') ?? DEFAULT_DARK_THEME_ID;
-  } else {
-    return localStorage.getItem('lightTheme') ?? DEFAULT_LIGHT_THEME_ID;
+    return resolveStoredThemeId(localStorage.getItem('darkTheme') ?? DEFAULT_DARK_THEME_ID);
   }
+  return resolveStoredThemeId(localStorage.getItem('lightTheme') ?? DEFAULT_LIGHT_THEME_ID);
 }
 
 export function startAutoThemeWatcher(): void {

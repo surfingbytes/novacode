@@ -31,7 +31,9 @@ export function ensureSshKey(configDir: string): void {
     }
     try {
       chmodSync(privatePath, 0o600);
-      if (existsSync(publicPath)) chmodSync(publicPath, 0o644);
+      if (existsSync(publicPath)) {
+        chmodSync(publicPath, 0o644);
+      }
     } catch {
       // ignore chmod issues
     }
@@ -41,7 +43,7 @@ export function ensureSshKey(configDir: string): void {
   const configPath = join(sshDir, 'config');
   const identityFile = join(sshDir, PRIVATE_NAME);
   const configBody =
-    '# NovaCode managed — identity for Git and SSH from the app\n' +
+    '# Nova Code managed — identity for Git and SSH from the app\n' +
     'Host *\n' +
     `  IdentityFile ${identityFile}\n` +
     '  IdentitiesOnly yes\n' +
@@ -66,8 +68,12 @@ export function readSshKeyMaterial(configDir: string): {
   let sshPublicKey = '';
   let sshPrivateKey = '';
   try {
-    if (existsSync(publicPath)) sshPublicKey = readFileSync(publicPath, 'utf8').trim();
-    if (existsSync(privatePath)) sshPrivateKey = readFileSync(privatePath, 'utf8').trim();
+    if (existsSync(publicPath)) {
+      sshPublicKey = readFileSync(publicPath, 'utf8').trim();
+    }
+    if (existsSync(privatePath)) {
+      sshPrivateKey = readFileSync(privatePath, 'utf8').trim();
+    }
   } catch {
     // leave empty
   }

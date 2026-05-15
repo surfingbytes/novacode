@@ -9,11 +9,12 @@ import AppTerminal from '@/components/AppTerminal.vue';
 // stores
 import { useAuthStore } from '@/stores/auth';
 
-// classes
+// api
 import { authApi, agentAuthApi, settingsApi } from '@/classes/api';
 
-// lib
-import { themes, applyTheme, DEFAULT_THEME_ID } from '@/lib/themes';
+
+// classes
+import { themes, applyTheme, DEFAULT_THEME_ID, resolveStoredThemeId } from '@/lib/themes';
 import {
   isNotificationsEnabled,
   setNotificationsEnabled,
@@ -27,23 +28,23 @@ import {
 const router = useRouter();
 const auth = useAuthStore();
 
-// -------------------------------------------------- Data --------------------------------------------------
+// -------------------------------------------------- Refs --------------------------------------------------
 const step = ref<1 | 2 | 3 | 4>(1);
 
 // Step 1: Profile
 const username = ref<string>('');
 const password = ref<string>('');
 const passwordConfirm = ref<string>('');
-const selectedThemeId = ref<string>(localStorage.getItem('theme') ?? DEFAULT_THEME_ID);
+const selectedThemeId = ref<string>(
+  resolveStoredThemeId(localStorage.getItem('theme') ?? DEFAULT_THEME_ID)
+);
 const profileError = ref<string>('');
 const bSavingProfile = ref<boolean>(false);
 
 // Step 2: AI Agents
 const bClaudeAuthenticated = ref<boolean>(false);
-const bCursorAuthenticated = ref<boolean>(false);
-const bStartingCursorLogin = ref<boolean>(false);
+const bVibeConfigured = ref<boolean>(false);
 const bStartingClaudeLogin = ref<boolean>(false);
-const bLoggingOutCursor = ref<boolean>(false);
 const bLoggingOutClaude = ref<boolean>(false);
 const authSessionId = ref<string | null>(null);
 const authCode = ref<string>('');
@@ -51,6 +52,11 @@ const authUrl = ref<string | null>(null);
 const bClaudeAuthSuccess = ref<boolean>(false);
 const claudeAuthError = ref<string>('');
 const authTerminalRef = ref<InstanceType<typeof AppTerminal> | null>(null);
+// Vibe (Mistral) API key
+const vibeApiKey = ref<string>('');
+const bSavingVibeKey = ref<boolean>(false);
+const bClearingVibeKey = ref<boolean>(false);
+const vibeKeyError = ref<string>('');
 
 // Step 3: Git Credentials
 const gitName = ref<string>('');
@@ -60,7 +66,7 @@ const gitError = ref<string>('');
 
 // Step 4: Finalize
 const bNotifications = ref<boolean>(isNotificationsEnabled());
-const notifPermission = ref<NotificationPermission | 'unsupported'>(getPermissionState());
+const notificationPermission = ref<NotificationPermission | 'unsupported'>(getPermissionState());
 const bFinishing = ref<boolean>(false);
 
 // -------------------------------------------------- Computed --------------------------------------------------
@@ -76,9 +82,9 @@ const passwordMismatch = computed((): boolean => {
   return passwordConfirm.value.length > 0 && password.value !== passwordConfirm.value;
 });
 
-const canProceedStep2 = computed((): boolean => bClaudeAuthenticated.value || bCursorAuthenticated.value);
+const canProceedStep2 = computed((): boolean => bClaudeAuthenticated.value || bVibeConfigured.value);
 
-const stepStatuses = computed(() => ({
+const stepStatuses = computed<Record<1 | 2 | 3 | 4, 'complete' | 'active' | 'pending'>>(() => ({
   1: step.value > 1 ? 'complete' : step.value === 1 ? 'active' : 'pending',
   2: step.value > 2 ? 'complete' : step.value === 2 ? 'active' : 'pending',
   3: step.value > 3 ? 'complete' : step.value === 3 ? 'active' : 'pending',
@@ -86,6 +92,7 @@ const stepStatuses = computed(() => ({
 }));
 
 // -------------------------------------------------- Methods --------------------------------------------------
+// --- profile ---
 const selectTheme = (themeId: string): void => {
   selectedThemeId.value = themeId;
   localStorage.setItem('theme', themeId);
@@ -93,12 +100,15 @@ const selectTheme = (themeId: string): void => {
 };
 
 const handleStep1Next = async (): Promise<void> => {
-  if (!canProceedStep1.value) return;
+  if (!canProceedStep1.value) {
+    return;
+  }
   profileError.value = '';
   bSavingProfile.value = true;
   try {
     const response = await authApi.setup(username.value.trim(), password.value);
     auth.setToken(response.data.token, username.value.trim());
+    await refreshAuthStatus();
     step.value = 2;
   } catch (e: unknown) {
     profileError.value =
@@ -109,32 +119,19 @@ const handleStep1Next = async (): Promise<void> => {
   }
 };
 
+// --- agent auth ---
 const refreshAuthStatus = async (): Promise<void> => {
-  try {
-    const cursorResponse = await agentAuthApi.cursorStatus();
-    bCursorAuthenticated.value = cursorResponse.data.authenticated;
-  } catch {
-    // ignore
-  }
   try {
     const claudeResponse = await agentAuthApi.claudeStatus();
     bClaudeAuthenticated.value = claudeResponse.data.authenticated;
   } catch {
     // ignore
   }
-};
-
-const startCursorLogin = async (): Promise<void> => {
-  bStartingCursorLogin.value = true;
   try {
-    authUrl.value = null;
-    authCode.value = '';
-    const response = await agentAuthApi.cursorLogin();
-    authSessionId.value = response.data.sessionId;
+    const vibeResponse = await settingsApi.getVibeApiKeyStatus();
+    bVibeConfigured.value = vibeResponse.data.configured;
   } catch {
     // ignore
-  } finally {
-    bStartingCursorLogin.value = false;
   }
 };
 
@@ -152,18 +149,6 @@ const startClaudeLogin = async (): Promise<void> => {
   }
 };
 
-const logoutCursor = async (): Promise<void> => {
-  bLoggingOutCursor.value = true;
-  try {
-    await agentAuthApi.cursorLogout();
-    await refreshAuthStatus();
-  } catch {
-    // ignore
-  } finally {
-    bLoggingOutCursor.value = false;
-  }
-};
-
 const logoutClaude = async (): Promise<void> => {
   bLoggingOutClaude.value = true;
   try {
@@ -178,7 +163,9 @@ const logoutClaude = async (): Promise<void> => {
 
 const submitAuthCode = async (): Promise<void> => {
   const code = authCode.value.trim();
-  if (!code) return;
+  if (!code) {
+    return;
+  }
   authTerminalRef.value?.sendInput(code);
   await new Promise((resolve) => setTimeout(resolve, 100));
   authTerminalRef.value?.sendInput('\r');
@@ -187,7 +174,9 @@ const submitAuthCode = async (): Promise<void> => {
 
 const onAuthTokenFound = async (token: string): Promise<void> => {
   const trimmedToken = token.trim();
-  if (!trimmedToken) return;
+  if (!trimmedToken) {
+    return;
+  }
   try {
     claudeAuthError.value = '';
     const response = await agentAuthApi.claudeSaveToken(trimmedToken);
@@ -215,13 +204,45 @@ const dismissAuthTerminal = (): void => {
   authSessionId.value = null;
   authUrl.value = null;
   authCode.value = '';
-  refreshAuthStatus();
+  agentAuthApi.claudeStatus()
+    .then((r) => { bClaudeAuthenticated.value = r.data.authenticated; })
+    .catch(() => {});
 };
 
 const onAuthSessionEnded = (): void => {
   refreshAuthStatus();
 };
 
+// --- Vibe (Mistral) API key ---
+const saveVibeApiKey = async (): Promise<void> => {
+  const key = vibeApiKey.value.trim();
+  if (!key) return;
+  bSavingVibeKey.value = true;
+  vibeKeyError.value = '';
+  try {
+    await settingsApi.setVibeApiKey(key);
+    vibeApiKey.value = '';
+    await refreshAuthStatus();
+  } catch {
+    vibeKeyError.value = 'Failed to save API key.';
+  } finally {
+    bSavingVibeKey.value = false;
+  }
+};
+
+const clearVibeApiKey = async (): Promise<void> => {
+  bClearingVibeKey.value = true;
+  try {
+    await settingsApi.clearVibeApiKey();
+    await refreshAuthStatus();
+  } catch {
+    // ignore
+  } finally {
+    bClearingVibeKey.value = false;
+  }
+};
+
+// --- git setup ---
 const handleStep3Next = async (): Promise<void> => {
   if (!gitName.value.trim() && !gitEmail.value.trim()) {
     step.value = 4;
@@ -244,13 +265,18 @@ const handleStep3Next = async (): Promise<void> => {
   }
 };
 
+// --- notifications + finalize ---
 const toggleNotifications = async (): Promise<void> => {
-  if (!canRequestPermission()) return;
+  if (!canRequestPermission()) {
+    return;
+  }
   const enabling = !bNotifications.value;
   if (enabling && Notification.permission !== 'granted') {
-    const perm = await requestPermission();
-    notifPermission.value = perm;
-    if (perm !== 'granted') return;
+    const permissionState = await requestPermission();
+    notificationPermission.value = permissionState;
+    if (permissionState !== 'granted') {
+      return;
+    }
   }
   bNotifications.value = enabling;
   setNotificationsEnabled(enabling);
@@ -278,8 +304,8 @@ onMounted((): void => {
     <header class="border-b border-border bg-surface px-6 py-4 shrink-0">
       <div class="max-w-5xl mx-auto flex items-center justify-between">
         <div class="flex items-center gap-2.5">
-          <img src="/logo.svg" alt="NovaCode" class="w-8 h-8" />
-          <span class="font-bold text-lg text-text-primary tracking-tight">NovaCode</span>
+          <img src="/logo.svg" alt="Nova Code" class="w-8 h-8" />
+          <span class="font-bold text-lg text-text-primary tracking-tight">Nova Code</span>
         </div>
         <span class="text-xs font-semibold text-text-muted uppercase tracking-widest hidden sm:block"
           >Initial Setup</span
@@ -313,12 +339,11 @@ onMounted((): void => {
                     stepStatuses[((i + 1) as 1 | 2 | 3 | 4)] === 'pending'
                 }"
               >
-                <span
+                <svg
                   v-if="stepStatuses[((i + 1) as 1 | 2 | 3 | 4)] === 'complete'"
-                  class="material-symbols-outlined"
-                  style="font-size: 18px"
-                  >check</span
-                >
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"
+                  width="18" height="18" aria-hidden="true"
+                ><polyline points="20 6 9 17 4 12"/></svg>
                 <span v-else>{{ i + 1 }}</span>
               </div>
               <span
@@ -364,7 +389,7 @@ onMounted((): void => {
                 <label class="label">Username</label>
                 <div class="input-wrap">
                   <span class="icon">
-                    <span class="material-symbols-outlined">person</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                   </span>
                   <input
                     v-model="username"
@@ -381,7 +406,7 @@ onMounted((): void => {
                   <label class="label">Password</label>
                   <div class="input-wrap">
                     <span class="icon">
-                      <span class="material-symbols-outlined">lock</span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
                     </span>
                     <input
                       v-model="password"
@@ -399,7 +424,7 @@ onMounted((): void => {
                   <label class="label">Confirm Password</label>
                   <div class="input-wrap">
                     <span class="icon">
-                      <span class="material-symbols-outlined">lock_reset</span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 018-4.47"/><path d="M17 3l2 2-2 2"/></svg>
                     </span>
                     <input
                       v-model="passwordConfirm"
@@ -456,9 +481,7 @@ onMounted((): void => {
                     v-if="selectedThemeId === theme.id"
                     class="absolute top-1 right-1 w-4 h-4 bg-primary rounded-full flex items-center justify-center"
                   >
-                    <span class="material-symbols-outlined text-white" style="font-size: 11px"
-                      >check</span
-                    >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="10" height="10" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
                   </div>
                   <!-- Label tooltip -->
                   <p class="text-center text-[10px] font-semibold text-text-muted mt-1.5 truncate px-1">
@@ -482,67 +505,13 @@ onMounted((): void => {
           </div>
 
           <div class="space-y-4 mb-6">
-            <!-- Cursor Card -->
-            <div class="bg-fg/[0.02] border border-fg/[0.07] rounded-xl p-5">
-              <div class="flex items-start justify-between gap-4 mb-4">
-                <div class="min-w-0">
-                  <p class="font-medium text-text-primary text-sm">Cursor</p>
-                  <p class="text-xs text-text-muted mt-1">
-                    Uses
-                    <code class="bg-fg/[0.06] border border-fg/[0.08] px-1.5 py-0.5 rounded text-text-primary font-mono text-[11px]">cursor-agent login</code>
-                    — sign in with your Cursor account
-                  </p>
-                </div>
-                <span
-                  class="inline-flex items-center text-xs px-2.5 py-1 rounded-full border flex-shrink-0 font-medium"
-                  :class="bCursorAuthenticated
-                    ? 'bg-success/10 text-success border-success/20'
-                    : 'bg-warning/10 text-warning border-warning/20'"
-                >
-                  <span class="w-1.5 h-1.5 rounded-full mr-1.5" :class="bCursorAuthenticated ? 'bg-success' : 'bg-warning'"></span>
-                  {{ bCursorAuthenticated ? 'Authenticated' : 'Not authenticated' }}
-                </span>
-              </div>
-              <div class="flex items-center gap-3">
-                <button
-                  v-if="!bCursorAuthenticated"
-                  class="flex items-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all"
-                  :disabled="bStartingCursorLogin"
-                  @click="startCursorLogin"
-                >
-                  <div v-if="bStartingCursorLogin" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                  Login to Cursor
-                </button>
-                <button
-                  v-else
-                  class="flex items-center gap-2 bg-fg/[0.05] hover:bg-fg/[0.09] disabled:opacity-50 disabled:cursor-not-allowed border border-fg/[0.1] text-text-primary text-sm font-medium px-4 py-2.5 rounded-lg transition-all"
-                  :disabled="bLoggingOutCursor"
-                  @click="logoutCursor"
-                >
-                  <div v-if="bLoggingOutCursor" class="w-3.5 h-3.5 border-2 border-fg/30 border-t-fg rounded-full animate-spin"></div>
-                  Logout
-                </button>
-                <a
-                  href="https://cursor.com/dashboard?tab=spending"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="text-xs text-primary hover:text-primary-hover transition-colors"
-                >View account &amp; usage &rarr;</a>
-              </div>
-              <p v-if="!bCursorAuthenticated" class="text-xs text-text-muted mt-2">
-                A terminal will appear in an overlay. Complete the login flow in the terminal.
-              </p>
-            </div>
-
             <!-- Claude Card -->
             <div class="bg-fg/[0.02] border border-fg/[0.07] rounded-xl p-5">
               <div class="flex items-start justify-between gap-4 mb-4">
                 <div class="min-w-0">
                   <p class="font-medium text-text-primary text-sm">Claude Code</p>
                   <p class="text-xs text-text-muted mt-1">
-                    Uses
-                    <code class="bg-fg/[0.06] border border-fg/[0.08] px-1.5 py-0.5 rounded text-text-primary font-mono text-[11px]">claude setup-token</code>
-                    — sign in with your Claude account and paste the issued token into the terminal overlay.
+                    Sign in with your Anthropic account. A terminal will open — click the sign-in link, then paste the token shown in your browser.
                   </p>
                 </div>
                 <span
@@ -552,7 +521,7 @@ onMounted((): void => {
                     : 'bg-warning/10 text-warning border-warning/20'"
                 >
                   <span class="w-1.5 h-1.5 rounded-full mr-1.5" :class="bClaudeAuthenticated ? 'bg-success' : 'bg-warning'"></span>
-                  {{ bClaudeAuthenticated ? 'Configured' : 'Not configured' }}
+                  {{ bClaudeAuthenticated ? 'Authenticated' : 'Not authenticated' }}
                 </span>
               </div>
               <div class="flex items-center gap-3">
@@ -579,15 +548,73 @@ onMounted((): void => {
                   target="_blank"
                   rel="noopener noreferrer"
                   class="text-xs text-primary hover:text-primary-hover transition-colors"
-                >Manage account &amp; usage &rarr;</a>
+                >Manage account &rarr;</a>
               </div>
-              <p v-if="!bClaudeAuthenticated" class="text-xs text-text-muted mt-2">
-                A terminal will appear in an overlay. Use the sign-in link shown there, then paste the token from your browser into the field below the terminal.
-              </p>
               <p v-if="bClaudeAuthSuccess" class="text-xs text-success mt-2">
                 Claude token saved. You're ready to use Claude Code.
               </p>
               <p v-if="claudeAuthError" class="text-xs text-destructive mt-2">{{ claudeAuthError }}</p>
+            </div>
+
+            <!-- Mistral Vibe Card -->
+            <div class="bg-fg/[0.02] border border-fg/[0.07] rounded-xl p-5">
+              <div class="flex items-start justify-between gap-4 mb-4">
+                <div class="min-w-0">
+                  <p class="font-medium text-text-primary text-sm">Mistral Vibe</p>
+                  <p class="text-xs text-text-muted mt-1">
+                    Enter your Mistral API key to use Mistral's coding agent.
+                  </p>
+                </div>
+                <span
+                  class="inline-flex items-center text-xs px-2.5 py-1 rounded-full border flex-shrink-0 font-medium"
+                  :class="bVibeConfigured
+                    ? 'bg-success/10 text-success border-success/20'
+                    : 'bg-warning/10 text-warning border-warning/20'"
+                >
+                  <span class="w-1.5 h-1.5 rounded-full mr-1.5" :class="bVibeConfigured ? 'bg-success' : 'bg-warning'"></span>
+                  {{ bVibeConfigured ? 'Configured' : 'Not configured' }}
+                </span>
+              </div>
+
+              <div v-if="!bVibeConfigured" class="flex items-center gap-2">
+                <div class="input-wrap flex-1">
+                  <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></span>
+                  <input
+                    v-model="vibeApiKey"
+                    type="password"
+                    placeholder="Mistral API key"
+                    autocomplete="off"
+                    @keydown.enter="saveVibeApiKey"
+                  />
+                </div>
+                <button
+                  class="flex items-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all shrink-0"
+                  :disabled="bSavingVibeKey || !vibeApiKey.trim()"
+                  @click="saveVibeApiKey"
+                >
+                  <div v-if="bSavingVibeKey" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  <span v-else>Save</span>
+                </button>
+              </div>
+
+              <div v-else class="flex items-center gap-3">
+                <button
+                  class="flex items-center gap-2 bg-fg/[0.05] hover:bg-fg/[0.09] disabled:opacity-50 disabled:cursor-not-allowed border border-fg/[0.1] text-text-primary text-sm font-medium px-4 py-2.5 rounded-lg transition-all"
+                  :disabled="bClearingVibeKey"
+                  @click="clearVibeApiKey"
+                >
+                  <div v-if="bClearingVibeKey" class="w-3.5 h-3.5 border-2 border-fg/30 border-t-fg rounded-full animate-spin"></div>
+                  Remove key
+                </button>
+                <a
+                  href="https://console.mistral.ai/api-keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="text-xs text-primary hover:text-primary-hover transition-colors"
+                >Manage API keys &rarr;</a>
+              </div>
+
+              <p v-if="vibeKeyError" class="text-xs text-destructive mt-2">{{ vibeKeyError }}</p>
             </div>
           </div>
 
@@ -614,7 +641,7 @@ onMounted((): void => {
                 <label class="label">Git Username</label>
                 <div class="input-wrap">
                   <span class="icon">
-                    <span class="material-symbols-outlined">person</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                   </span>
                   <input
                     v-model="gitName"
@@ -629,7 +656,7 @@ onMounted((): void => {
                 <label class="label">Git Email</label>
                 <div class="input-wrap">
                   <span class="icon">
-                    <span class="material-symbols-outlined">mail</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
                   </span>
                   <input
                     v-model="gitEmail"
@@ -667,9 +694,7 @@ onMounted((): void => {
               <div
                 class="w-14 h-14 bg-primary/10 rounded-xl flex items-center justify-center shrink-0"
               >
-                <span class="material-symbols-outlined text-primary" style="font-size: 28px"
-                  >notifications_active</span
-                >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="28" height="28" class="text-primary" aria-hidden="true"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
               </div>
               <div class="flex-1">
                 <h2 class="text-base font-bold text-text-primary mb-1">Desktop Notifications</h2>
@@ -690,8 +715,12 @@ onMounted((): void => {
                   <button
                     class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none"
                     :class="bNotifications ? 'bg-primary' : 'bg-border'"
-                    :disabled="notifPermission === 'denied'"
-                    :title="notifPermission === 'denied' ? 'Notifications blocked in browser settings' : ''"
+                    :disabled="notificationPermission === 'denied'"
+                    :title="
+                      notificationPermission === 'denied'
+                        ? 'Notifications blocked in browser settings'
+                        : ''
+                    "
                     role="switch"
                     :aria-checked="bNotifications"
                     @click="toggleNotifications"
@@ -704,10 +733,10 @@ onMounted((): void => {
                 </div>
 
                 <p
-                  v-if="notifPermission === 'denied'"
+                  v-if="notificationPermission === 'denied'"
                   class="text-xs text-warning mt-3 flex items-center gap-1.5"
                 >
-                  <span class="material-symbols-outlined" style="font-size: 14px">warning</span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                   Notifications are blocked. Enable them in your browser settings to use this
                   feature.
                 </p>
@@ -718,9 +747,7 @@ onMounted((): void => {
           <!-- Summary -->
           <div class="bg-primary/5 border border-primary/15 rounded-xl px-6 py-4">
             <div class="flex gap-3">
-              <span class="material-symbols-outlined text-primary shrink-0" style="font-size: 20px"
-                >info</span
-              >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" class="text-primary shrink-0" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
               <p class="text-sm text-text-muted leading-relaxed">
                 By finishing setup you agree to use this software responsibly. All settings can be
                 changed at any time from
@@ -741,7 +768,7 @@ onMounted((): void => {
           class="button"
           @click="step = ((step - 1) as 1 | 2 | 3 | 4)"
         >
-          <span class="material-symbols-outlined">arrow_back</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           Back
         </button>
         <div v-else></div>
@@ -782,7 +809,7 @@ onMounted((): void => {
               class="loading-spinner"
             ></div>
             <span v-else>Next Step</span>
-            <span v-if="!(step === 1 && bSavingProfile) && !(step === 3 && bSavingGit)" class="material-symbols-outlined">arrow_forward</span>
+            <svg v-if="!(step === 1 && bSavingProfile) && !(step === 3 && bSavingGit)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
           </button>
 
           <button
@@ -793,8 +820,8 @@ onMounted((): void => {
           >
             <div v-if="bFinishing" class="loading-spinner"></div>
             <template v-else>
-              <span>Launch NovaCode</span>
-              <span class="material-symbols-outlined">rocket_launch</span>
+              <span>Launch Nova Code</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 00-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 012-3.95A12.88 12.88 0 0122 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 01-4 2z"/></svg>
             </template>
           </button>
         </div>

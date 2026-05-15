@@ -17,8 +17,24 @@ export const config = {
   port: parseInt(optional('PORT', '3000'), 10),
   cursorCommand: '/root/.local/bin/cursor-agent',
   claudeCommand: 'claude',
-  /** Mistral Vibe CLI (`vibe`). */
-  vibeCommand: optional('VIBE_COMMAND', 'vibe'),
+  /** Cursor ACP server entrypoint. Spawned per prompt turn for ACP communication. */
+  get cursorAcpCommand(): string {
+    const override = process.env['CURSOR_ACP_COMMAND'];
+    if (override) return override;
+    return existsSync('/root/.local/bin/cursor-agent-acp') ? '/root/.local/bin/cursor-agent-acp' : 'cursor-agent-acp';
+  },
+  /** Mistral Vibe CLI (interactive). Resolved lazily so fresh installs are picked up. */
+  get vibeCommand(): string {
+    const override = process.env['VIBE_COMMAND'];
+    if (override) return override;
+    return existsSync('/root/.local/bin/vibe') ? '/root/.local/bin/vibe' : 'vibe';
+  },
+  /** Mistral Vibe ACP server entrypoint. Spawned per prompt turn for ACP communication. */
+  get vibeAcpCommand(): string {
+    const override = process.env['VIBE_ACP_COMMAND'];
+    if (override) return override;
+    return existsSync('/root/.local/bin/vibe-acp') ? '/root/.local/bin/vibe-acp' : 'vibe-acp';
+  },
   configDir: '/config',
   /** Root directory on the host; workspace paths are relative to this. */
   workspaceBrowseRoot: '/data-root',
@@ -39,7 +55,9 @@ export const config = {
       'VIBE_HOME'
     ];
     for (const key of forward) {
-      if (process.env[key]) env[key] = process.env[key]!;
+      if (process.env[key]) {
+        env[key] = process.env[key]!;
+      }
     }
     for (const [k, v] of Object.entries(process.env)) {
       if (k.startsWith('AGENT_ENV_') && v) {
@@ -47,6 +65,17 @@ export const config = {
       }
     }
     env['TERM'] = env['TERM'] || 'xterm-256color';
+
+    // ensure user-local bin dirs are always on PATH so tools installed post-startup (e.g. vibe) are found
+    const localBins = ['/root/.local/bin', '/usr/local/bin'];
+    const currentPath = env['PATH'] || '';
+    const pathParts = currentPath.split(':').filter(Boolean);
+    for (const bin of localBins) {
+      if (!pathParts.includes(bin)) {
+        pathParts.unshift(bin);
+      }
+    }
+    env['PATH'] = pathParts.join(':');
 
     // home directories
     env['HOME'] = configDir;
@@ -116,42 +145,57 @@ export function setVibeApiKey(configDir: string, apiKey: string): void {
 
 export function clearVibeApiKey(configDir: string): void {
   const envPath = join(configDir, VIBE_ENV_DIR, VIBE_ENV_FILE);
-  if (!existsSync(envPath)) return;
+  if (!existsSync(envPath)) {
+    return;
+  }
   writeFileSync(envPath, '', 'utf8');
 }
 
-export function isClaudeAvailable(configDir: string): boolean {
+/**
+ * Claude is available via ACP when the @agentclientprotocol/claude-agent-acp package is
+ * installed (always true in this build) and a Claude OAuth token has been stored.
+ * The token check is done at the call site since it requires DB access.
+ */
+export function isClaudeAvailable(_configDir: string): boolean {
   try {
-    const env = { ...process.env, ...config.agentEnv() };
-    const result = spawnSync(config.claudeCommand, ['--help'], {
-      encoding: 'utf8',
-      timeout: 5000,
-      cwd: configDir,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
-    if (result.status !== 0) return false;
-    const out = [result.stdout, result.stderr].filter(Boolean).join('\n');
-    return out.trim().length > 0;
+    // The ACP package is ESM-only; probe via the wildcard export (./*) which
+    // exposes package.json and avoids the CJS-import-of-ESM failure.
+    require.resolve('@agentclientprotocol/claude-agent-acp/package.json');
+    return true;
   } catch {
     return false;
   }
 }
 
-/** True when the Vibe CLI is on PATH and responds to `--help`. */
+/** True when the vibe-acp ACP server binary is on PATH and exits cleanly for --version. */
 export function isVibeCliAvailable(configDir: string): boolean {
   try {
     const env = { ...process.env, ...config.agentEnv() };
-    const result = spawnSync(config.vibeCommand, ['--help'], {
+    const result = spawnSync(config.vibeAcpCommand, ['--version'], {
       encoding: 'utf8',
       timeout: 5000,
       cwd: configDir,
       env,
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
-    if (result.status !== 0) return false;
-    const out = [result.stdout, result.stderr].filter(Boolean).join('\n');
-    return out.trim().length > 0;
+    return result.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** True when the cursor-agent-acp ACP server binary is on PATH and exits cleanly for --version. */
+export function isCursorAcpAvailable(configDir: string): boolean {
+  try {
+    const env = { ...process.env, ...config.agentEnv() };
+    const result = spawnSync(config.cursorAcpCommand, ['--version'], {
+      encoding: 'utf8',
+      timeout: 5000,
+      cwd: configDir,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return result.status === 0;
   } catch {
     return false;
   }

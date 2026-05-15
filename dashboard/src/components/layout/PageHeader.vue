@@ -1,36 +1,62 @@
 <script setup lang="ts">
-// -------------------------------------------------- Props --------------------------------------------------
 defineProps<{
   icon?: string;
+  eyebrow?: string;
   title: string;
   subtitle?: string;
 }>();
 </script>
 
 <template>
-  <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
-    <div class="flex items-start gap-2">
-      <span
-        v-if="icon"
-        class="material-symbols-outlined select-none mt-[2px] text-text-muted"
-        style="font-size: 22px"
-      >
-        {{ icon }}
-      </span>
-      <div>
-        <h1 class="text-xl font-semibold text-text-primary">
-          <slot name="title">
-            {{ title }}
-          </slot>
-        </h1>
-        <p v-if="subtitle" class="text-sm text-text-muted mt-1">
-          {{ subtitle }}
-        </p>
-      </div>
+  <header class="page-header">
+    <div>
+      <div v-if="eyebrow" class="nc-eyebrow page-header__eyebrow">{{ eyebrow }}</div>
+      <h1 class="page-header__title">
+        <slot name="title">{{ title }}</slot>
+      </h1>
+      <p v-if="subtitle" class="page-header__subtitle">{{ subtitle }}</p>
     </div>
-    <div class="shrink-0">
+    <div class="page-header__actions">
       <slot name="actions" />
     </div>
   </header>
 </template>
 
+<style scoped>
+.page-header {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 4px;
+}
+
+@media (min-width: 640px) {
+  .page-header {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+}
+
+.page-header__eyebrow {
+  margin-bottom: 10px;
+}
+
+.page-header__title {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+  margin: 0;
+}
+
+.page-header__subtitle {
+  font-size: 14px;
+  color: var(--fg-muted);
+  margin: 6px 0 0;
+}
+
+.page-header__actions {
+  flex-shrink: 0;
+}
+</style>

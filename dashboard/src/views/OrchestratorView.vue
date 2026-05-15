@@ -17,22 +17,28 @@ import { useWorkspacesStore } from '@/stores/workspaces';
 // types
 import type { Orchestrator } from '@/@types/index';
 
+// -------------------------------------------------- Store --------------------------------------------------
+
 const route = useRoute();
 const router = useRouter();
 const store = useWorkspacesStore();
+
+// -------------------------------------------------- Refs --------------------------------------------------
 
 const workspaceId = route.params.id as string;
 const orchestratorId = ref(route.params.orchestratorId as string);
 
 const orchestrator = ref<Orchestrator | null>(null);
-const loading = ref(true);
+const bLoading = ref(true);
 const error = ref<string | null>(null);
-const showDeleteModal = ref(false);
-const isDeleting = ref(false);
+const bShowDeleteModal = ref(false);
+const bDeleting = ref(false);
 
-async function fetchOrchestrator() {
+// -------------------------------------------------- Methods --------------------------------------------------
+
+async function fetchOrchestrator(): Promise<void> {
   try {
-    loading.value = true;
+    bLoading.value = true;
     error.value = null;
     const { data } = await orchestratorApi.get(workspaceId, orchestratorId.value);
     orchestrator.value = data;
@@ -40,29 +46,31 @@ async function fetchOrchestrator() {
     error.value = 'Failed to load orchestrator';
     console.error('Failed to fetch orchestrator:', e);
   } finally {
-    loading.value = false;
+    bLoading.value = false;
   }
 }
 
-function goBack() {
+function goBack(): void {
   router.push({ name: 'workspace', params: { id: workspaceId } });
 }
 
-async function deleteOrchestrator() {
-  isDeleting.value = true;
+async function deleteOrchestrator(): Promise<void> {
+  bDeleting.value = true;
   try {
     await orchestratorApi.remove(workspaceId, orchestratorId.value);
     router.push({ name: 'workspace', params: { id: workspaceId } });
   } catch (e) {
     console.error('Failed to delete orchestrator:', e);
-    isDeleting.value = false;
-    showDeleteModal.value = false;
+    bDeleting.value = false;
+    bShowDeleteModal.value = false;
   }
 }
 
-function updateOrchestratorFromPanel(o: Orchestrator) {
+function updateOrchestratorFromPanel(o: Orchestrator): void {
   orchestrator.value = o;
 }
+
+// -------------------------------------------------- Lifecycle --------------------------------------------------
 
 onMounted(() => {
   fetchOrchestrator();
@@ -73,10 +81,12 @@ onMounted(() => {
 watch(
   () => route.params.orchestratorId as string,
   (newId, oldId) => {
-    if (!newId || newId === oldId) return;
+    if (!newId || newId === oldId) {
+      return;
+    }
     orchestratorId.value = newId;
     fetchOrchestrator();
-  }
+  },
 );
 
 </script>
@@ -98,27 +108,21 @@ watch(
               @click="goBack"
               class="shrink-0 text-sm text-text-muted hover:text-text-primary transition-colors flex items-center gap-1"
             >
-              <span
-                class="material-symbols-outlined select-none"
-                style="font-size: 14px; vertical-align: middle"
-                >arrow_back</span
-              >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
               Back
             </button>
             <div class="flex-1 min-w-0">
               <h1 class="text-base font-semibold text-text-primary truncate">
-                {{ loading ? '…' : (orchestrator?.name ?? 'Orchestrator') }}
+                {{ bLoading ? '…' : (orchestrator?.name ?? 'Orchestrator') }}
               </h1>
             </div>
-            <div v-if="!loading" class="flex items-center gap-1 shrink-0">
+            <div v-if="!bLoading" class="flex items-center gap-1 shrink-0">
               <button
                 class="p-2 rounded text-text-muted hover:text-destructive hover:bg-fg/[0.06] transition-colors"
                 title="Delete orchestrator"
-                @click="showDeleteModal = true"
+                @click="bShowDeleteModal = true"
               >
-                <span class="material-symbols-outlined select-none" style="font-size: 18px"
-                  >delete</span
-                >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
               </button>
             </div>
           </div>
@@ -132,7 +136,7 @@ watch(
 
           <div class="flex-1 flex flex-col overflow-hidden">
             <!-- Loading skeleton -->
-            <div v-if="loading" class="flex-1 overflow-y-auto px-4 md:px-6 py-4 space-y-4">
+            <div v-if="bLoading" class="flex-1 overflow-y-auto px-4 md:px-6 py-4 space-y-4">
               <div class="h-4 w-3/4 max-w-md rounded bg-fg/10 animate-pulse" />
               <div class="space-y-2">
                 <div class="h-20 rounded-xl bg-fg/10 animate-pulse" />
@@ -158,11 +162,11 @@ watch(
       </div>
 
       <ConfirmModal
-        v-model="showDeleteModal"
+        v-model="bShowDeleteModal"
         title="Delete orchestrator"
         :description="`Delete '${orchestrator?.name}'? The task list and any step sessions from this plan will be permanently removed.`"
         confirm-label="Delete"
-        :loading="isDeleting"
+        :loading="bDeleting"
         @confirm="deleteOrchestrator"
       />
     </div>

@@ -7,11 +7,17 @@ import { join } from 'node:path';
  * Example: `session_20260330_220714_85007cf6` → `85007cf6` (suffix after the final `_`).
  */
 export function extractVibeSessionIdFromFolderName(name: string): string | null {
-  if (!name.startsWith('session_')) return null;
+  if (!name.startsWith('session_')) {
+    return null;
+  }
   const idx = name.lastIndexOf('_');
-  if (idx <= 0 || idx >= name.length - 1) return null;
+  if (idx <= 0 || idx >= name.length - 1) {
+    return null;
+  }
   const suffix = name.slice(idx + 1);
-  if (!suffix.trim()) return null;
+  if (!suffix.trim()) {
+    return null;
+  }
   return suffix;
 }
 
@@ -20,7 +26,9 @@ const SESSION_FOLDER_EMBEDDED_TS = /^session_(\d{8})_(\d{6})_(.+)$/;
 
 export function parseVibeSessionFolderEmbeddedTimestampMs(name: string): number | null {
   const m = SESSION_FOLDER_EMBEDDED_TS.exec(name);
-  if (!m) return null;
+  if (!m) {
+    return null;
+  }
   const ymd = m[1];
   const hms = m[2];
   const y = Number(ymd.slice(0, 4));
@@ -52,7 +60,9 @@ export function getCandidateVibeSessionLogDirs(env: Record<string, string>): str
   const vibeHome = env['VIBE_HOME'];
   if (vibeHome) {
     const p = join(vibeHome, 'logs', 'session');
-    if (!out.includes(p)) out.push(p);
+    if (!out.includes(p)) {
+      out.push(p);
+    }
   }
   return out;
 }
@@ -82,11 +92,17 @@ export async function listVibeSessionDirsInLogDir(logDir: string): Promise<VibeS
 
   const rows: VibeSessionDirRow[] = [];
   for (const e of entries) {
-    if (!e.isDirectory()) continue;
-    if (!e.name.startsWith('session_')) continue;
+    if (!e.isDirectory()) {
+      continue;
+    }
+    if (!e.name.startsWith('session_')) {
+      continue;
+    }
     try {
       const st = await stat(join(logDir, e.name));
-      if (!st.isDirectory()) continue;
+      if (!st.isDirectory()) {
+        continue;
+      }
       const embeddedTsMs = parseVibeSessionFolderEmbeddedTimestampMs(e.name);
       rows.push({
         name: e.name,
@@ -106,7 +122,9 @@ export async function listVibeSessionDirsInLogDir(logDir: string): Promise<VibeS
  * Tie-break: mtime descending.
  */
 export function pickLatestVibeSessionFolder(rows: VibeSessionDirRow[]): VibeSessionDirRow | null {
-  if (rows.length === 0) return null;
+  if (rows.length === 0) {
+    return null;
+  }
   const withEmbedded = rows.filter((r) => r.embeddedTsMs != null) as Array<
     VibeSessionDirRow & { embeddedTsMs: number }
   >;
@@ -114,7 +132,9 @@ export function pickLatestVibeSessionFolder(rows: VibeSessionDirRow[]): VibeSess
   const sorted = [...pool].sort((a, b) => {
     const ae = a.embeddedTsMs;
     const be = b.embeddedTsMs;
-    if (ae != null && be != null && ae !== be) return be - ae;
+    if (ae != null && be != null && ae !== be) {
+      return be - ae;
+    }
     return b.mtimeMs - a.mtimeMs;
   });
   return sorted[0] ?? null;
@@ -128,7 +148,9 @@ export async function resolveVibeSessionIdFromSessionLogDir(logDir: string): Pro
   const rows = await listVibeSessionDirsInLogDir(logDir);
   const parseable = rows.filter((r) => extractVibeSessionIdFromFolderName(r.name) != null);
   const picked = pickLatestVibeSessionFolder(parseable);
-  if (!picked) return null;
+  if (!picked) {
+    return null;
+  }
   return extractVibeSessionIdFromFolderName(picked.name);
 }
 
@@ -142,7 +164,9 @@ export async function resolveVibeSessionIdFromFilesystemLogs(
   const candidates = getCandidateVibeSessionLogDirs(agentEnv);
   for (const dir of candidates) {
     const id = await resolveVibeSessionIdFromSessionLogDir(dir);
-    if (id) return id;
+    if (id) {
+      return id;
+    }
   }
   return null;
 }

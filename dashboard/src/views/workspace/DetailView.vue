@@ -3,11 +3,11 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useRoute, RouterLink } from 'vue-router';
 
-// stores
-import { useWorkspacesStore } from '@/stores/workspaces';
-
 // components
 import PageShell from '@/components/layout/PageShell.vue';
+
+// stores
+import { useWorkspacesStore } from '@/stores/workspaces';
 
 // classes
 import { orchestratorApi, settingsApi } from '@/classes/api';
@@ -16,93 +16,41 @@ import { orchestratorApi, settingsApi } from '@/classes/api';
 import type { Orchestrator } from '@/@types/index';
 
 // -------------------------------------------------- Store --------------------------------------------------
+
 const store = useWorkspacesStore();
 const route = useRoute();
 
-// -------------------------------------------------- Data --------------------------------------------------
+// -------------------------------------------------- Refs --------------------------------------------------
+
 const orchestrators = ref<Orchestrator[]>([]);
-const orchestratorsLoading = ref(false);
+const bOrchestratorsLoading = ref(false);
 const viewMode = ref<'list' | 'grid'>(
   (localStorage.getItem('sessionsViewMode') as 'list' | 'grid') ?? 'list'
 );
 const orchestratorsViewMode = ref<'list' | 'grid'>(
   (localStorage.getItem('orchestratorsViewMode') as 'list' | 'grid') ?? 'list'
 );
-const showArchived = ref(false);
-
-// multiselect
+const bShowArchived = ref(false);
 const selectedIds = ref<Set<string>>(new Set());
-
-watch(viewMode, (v) => localStorage.setItem('sessionsViewMode', v));
-watch(orchestratorsViewMode, (v) => localStorage.setItem('orchestratorsViewMode', v));
+const bClaudeAvailable = ref(false);
+const bCursorAvailable = ref(false);
+const longPressTimer = ref<ReturnType<typeof setTimeout> | null>(null);
+const orchLongPressTimer = ref<ReturnType<typeof setTimeout> | null>(null);
+const orchestratorPollId = ref<ReturnType<typeof setInterval> | null>(null);
 
 // -------------------------------------------------- Computed --------------------------------------------------
+
 const workspaceId = computed((): string => route.params.id as string);
 const workspace = computed(() => store.workspaces.find((w) => w.id === workspaceId.value));
 const isFilesRoute = computed(() => route.name === 'workspace-files');
 
-const claudeAvailable = ref(false);
-const cursorAvailable = ref(false);
+// -------------------------------------------------- Watchers --------------------------------------------------
 
-function clearSelection(): void {
-  selectedIds.value = new Set();
-}
-
-// long-press to enter selection mode
-const longPressTimer = ref<ReturnType<typeof setTimeout> | null>(null);
-
-const orchLongPressTimer = ref<ReturnType<typeof setTimeout> | null>(null);
-
-// -------------------------------------------------- Methods --------------------------------------------------
-const ensureData = async (): Promise<void> => {
-  if (store.workspaces.some((w) => w.id === workspaceId.value)) {
-    return;
-  }
-  await store.fetchAll();
-};
-
-const loadAgentCapabilities = async (): Promise<void> => {
-  try {
-    const { data } = await settingsApi.getAgentCapabilities();
-    claudeAvailable.value = data.claudeAvailable;
-    cursorAvailable.value = data.cursorAvailable;
-  } catch {
-    claudeAvailable.value = false;
-    cursorAvailable.value = false;
-  }
-};
-
-const fetchOrchestrators = async (): Promise<void> => {
-  if (!workspaceId.value) {
-    return;
-  }
-  orchestratorsLoading.value = true;
-  try {
-    const { data } = await orchestratorApi.list(workspaceId.value);
-    orchestrators.value = data ?? [];
-  } catch (error) {
-    console.error('Failed to fetch orchestrators:', error);
-    orchestrators.value = [];
-  } finally {
-    orchestratorsLoading.value = false;
-  }
-};
-
-// -------------------------------------------------- Lifecycle --------------------------------------------------
-onMounted(() => {
-  ensureData();
-  loadAgentCapabilities();
-  // Centralized sessions state (includes WS subscription)
-  store.setActiveWorkspace(workspaceId.value);
-  fetchOrchestrators();
+watch(viewMode, (v) => {
+  localStorage.setItem('sessionsViewMode', v);
 });
-onBeforeUnmount(() => {
-  if (longPressTimer.value) {
-    clearTimeout(longPressTimer.value);
-  }
-  if (orchLongPressTimer.value) {
-    clearTimeout(orchLongPressTimer.value);
-  }
+watch(orchestratorsViewMode, (v) => {
+  localStorage.setItem('orchestratorsViewMode', v);
 });
 watch(workspaceId, (id) => {
   if (!id) {
@@ -112,12 +60,9 @@ watch(workspaceId, (id) => {
   store.setActiveWorkspace(id);
   fetchOrchestrators();
 });
-watch(showArchived, () => {
+watch(bShowArchived, () => {
   clearSelection();
 });
-
-// Poll orchestrators list while any is running (so list shows run state)
-const orchestratorPollId = ref<ReturnType<typeof setInterval> | null>(null);
 watch(
   () => orchestrators.value.some((o) => o.runStatus === 'running'),
   (anyRunning) => {
@@ -133,7 +78,63 @@ watch(
   },
   { immediate: true }
 );
+
+// -------------------------------------------------- Methods --------------------------------------------------
+
+function clearSelection(): void {
+  selectedIds.value = new Set();
+}
+
+const ensureData = async (): Promise<void> => {
+  if (store.workspaces.some((w) => w.id === workspaceId.value)) {
+    return;
+  }
+  await store.fetchAll();
+};
+
+const loadAgentCapabilities = async (): Promise<void> => {
+  try {
+    const { data } = await settingsApi.getAgentCapabilities();
+    bClaudeAvailable.value = data.claudeAvailable;
+    bCursorAvailable.value = data.cursorAvailable;
+  } catch {
+    bClaudeAvailable.value = false;
+    bCursorAvailable.value = false;
+  }
+};
+
+const fetchOrchestrators = async (): Promise<void> => {
+  if (!workspaceId.value) {
+    return;
+  }
+  bOrchestratorsLoading.value = true;
+  try {
+    const { data } = await orchestratorApi.list(workspaceId.value);
+    orchestrators.value = data ?? [];
+  } catch (error) {
+    console.error('Failed to fetch orchestrators:', error);
+    orchestrators.value = [];
+  } finally {
+    bOrchestratorsLoading.value = false;
+  }
+};
+
+// -------------------------------------------------- Lifecycle --------------------------------------------------
+
+onMounted(() => {
+  ensureData();
+  loadAgentCapabilities();
+  store.setActiveWorkspace(workspaceId.value);
+  fetchOrchestrators();
+});
+
 onBeforeUnmount(() => {
+  if (longPressTimer.value) {
+    clearTimeout(longPressTimer.value);
+  }
+  if (orchLongPressTimer.value) {
+    clearTimeout(orchLongPressTimer.value);
+  }
   if (orchestratorPollId.value) {
     clearInterval(orchestratorPollId.value);
   }
@@ -142,44 +143,22 @@ onBeforeUnmount(() => {
 
 <template>
   <PageShell>
-    <!-- Breadcrumb -->
-    <div class="breadcrumps">
-      <RouterLink :to="{ name: 'workspaces' }">
-        <span class="material-symbols-outlined select-none">arrow_back</span>
-        Workspaces
-      </RouterLink>
-      <div></div>
-      <RouterLink :to="{ name: 'workspace', params: { id: workspaceId } }">{{
-        workspace?.name ?? '…'
-      }}</RouterLink>
-    </div>
-
     <!-- Header -->
-    <div class="flex flex-col gap-4 mb-4 sm:flex-row sm:items-start sm:justify-between">
-      <div>
-        <h1 class="text-xl font-semibold text-text-primary flex items-center gap-2">
-          <div class="icon w-9 h-9 flex items-center justify-center bg-primary/10 rounded-lg">
-            <span class="material-symbols-outlined select-none text-primary" style="font-size: 18px"
-              >folder</span
-            >
-          </div>
-          <!-- group-->
-          <template v-if="workspace?.group">
-            <span>
-              {{ workspace?.group }}
-            </span>
-            <div class="h-4 border-l-2 border-text-primary"></div>
-          </template>
-          <span>{{ workspace?.name ?? '…' }}</span>
-        </h1>
-        <p
-          style="line-height: 1"
-          class="text-xs font-mono text-text-muted mt-1 flex items-center gap-1"
-        >
-          {{ workspace?.path }}
-        </p>
-      </div>
-      <!-- -->
+    <div class="wd-header">
+      <div class="nc-eyebrow wd-eyebrow">// workspace</div>
+      <h1 class="wd-title">
+        <div class="wd-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+        </div>
+        <template v-if="workspace?.group">
+          <span class="wd-group">{{ workspace.group }}</span>
+          <span class="wd-sep" />
+        </template>
+        <span>{{ workspace?.name ?? '…' }}</span>
+      </h1>
+      <p class="wd-subtitle nc-mono">
+        {{ workspace?.path }}
+      </p>
     </div>
 
     <!-- Workspace tabs -->
@@ -190,7 +169,7 @@ onBeforeUnmount(() => {
           'is-active': route.name === 'workspace-sessions'
         }"
       >
-        <span class="material-symbols-outlined select-none">chat</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
         <span> Sessions </span>
       </RouterLink>
 
@@ -200,7 +179,7 @@ onBeforeUnmount(() => {
           'is-active': route.name === 'workspace-files'
         }"
       >
-        <span class="material-symbols-outlined select-none">folder_code</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/><path d="M9 12l-2 2 2 2M13 12l2 2-2 2"/></svg>
         <span> Files </span>
       </RouterLink>
 
@@ -210,7 +189,7 @@ onBeforeUnmount(() => {
           'is-active': route.name === 'workspace-git'
         }"
       >
-        <span class="material-symbols-outlined select-none">merge</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 009 9"/></svg>
         <span> Git </span>
       </RouterLink>
 
@@ -220,7 +199,7 @@ onBeforeUnmount(() => {
           'is-active': route.name === 'workspace-rules'
         }"
       >
-        <span class="material-symbols-outlined select-none">rule</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="12" y2="16"/></svg>
         <span> Rules </span>
       </RouterLink>
     </nav>
@@ -229,10 +208,10 @@ onBeforeUnmount(() => {
     <div
       v-if="store.bIsLoading && !workspace"
       key="loading"
-      class="flex flex-col items-center justify-center py-32 gap-4"
+      class="wd-state"
     >
-      <div class="w-8 h-8 border-2 border-surface border-t-primary rounded-full animate-spin"></div>
-      <p class="text-sm text-text-muted">Loading…</p>
+      <div class="wd-spinner" />
+      <p class="wd-state-text">Loading workspace…</p>
     </div>
     <RouterView
       v-else-if="workspace"
@@ -245,11 +224,11 @@ onBeforeUnmount(() => {
     />
 
     <!-- Not found -->
-    <div v-else key="notfound" class="flex flex-col items-center justify-center py-32 gap-4">
-      <p class="text-destructive">Workspace not found.</p>
+    <div v-else key="notfound" class="wd-state">
+      <p class="wd-state-title">Workspace not found</p>
       <RouterLink
         :to="{ name: 'workspaces' }"
-        class="text-sm text-primary hover:text-primary-hover underline transition-colors"
+        class="wd-back-link"
       >
         Back to workspaces
       </RouterLink>
@@ -267,34 +246,103 @@ onBeforeUnmount(() => {
   opacity: 0;
 }
 
-.busy-badge {
-  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
-  animation: busy-glow 2s ease-in-out infinite;
+.wd-header {
+  margin-bottom: 28px;
 }
 
-@keyframes busy-glow {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-primary) 0%, transparent);
-  }
-  50% {
-    box-shadow: 0 0 8px 2px color-mix(in srgb, var(--color-primary) 25%, transparent);
-  }
+.wd-eyebrow {
+  margin-bottom: 10px;
 }
 
-.busy-spinner {
-  width: 10px;
-  height: 10px;
+.wd-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 4px 0 6px;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+}
+
+.wd-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in oklab, var(--accent) 16%, transparent);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.wd-group {
+  color: var(--fg-muted);
+  font-weight: 500;
+}
+
+.wd-sep {
+  display: inline-block;
+  width: 1px;
+  height: 14px;
+  background: var(--line-strong);
+}
+
+.wd-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--fg-subtle);
+  line-height: 1.5;
+}
+
+.wd-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 72px 24px;
+  gap: 10px;
+  text-align: center;
+}
+
+.wd-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--accent);
   border-radius: 50%;
-  border: 1.5px solid color-mix(in srgb, var(--color-primary) 30%, transparent);
-  border-top-color: var(--color-primary);
-  animation: busy-spin 0.8s linear infinite;
+  animation: ws-spin 0.7s linear infinite;
 }
 
-@keyframes busy-spin {
-  to {
-    transform: rotate(360deg);
-  }
+@keyframes ws-spin {
+  to { transform: rotate(360deg); }
+}
+
+.wd-state-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.wd-state-text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--fg-subtle);
+  line-height: 1.5;
+  max-width: 340px;
+}
+
+.wd-back-link {
+  font-size: 13px;
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid var(--accent-line);
+  transition: border-color 0.12s;
+}
+
+.wd-back-link:hover {
+  border-bottom-color: var(--accent);
 }
 </style>

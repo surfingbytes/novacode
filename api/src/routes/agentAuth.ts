@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 
 // classes
 import { jwtPreHandler } from '../classes/auth';
-import { config, markClaudeOnboardingComplete } from '../classes/config';
+import { config } from '../classes/config';
 import { db } from '../classes/database';
 import { sessionManager } from '../classes/sessionManager';
 
@@ -37,62 +37,26 @@ export const cursorAuthenticated = (): boolean => {
 export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
   const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
 
+  // ─── Cursor auth (UI intact; backend spawning removed in later update) ───
+
   fastifyInstance.get(
     '/api/agent-auth/cursor/status',
     {
       preHandler: jwtPreHandler,
-      schema: {
-        response: {
-          200: Type.Object({ authenticated: Type.Boolean() })
-        }
-      }
+      schema: { response: { 200: Type.Object({ authenticated: Type.Boolean() }) } }
     },
-    async () => {
-      return { authenticated: cursorAuthenticated() };
-    }
+    async () => ({ authenticated: cursorAuthenticated() })
   );
 
-  fastifyInstance.get(
-    '/api/agent-auth/claude/status',
-    {
-      preHandler: jwtPreHandler,
-      schema: {
-        response: {
-          200: Type.Object({ authenticated: Type.Boolean() })
-        }
-      }
-    },
-    async (request) => {
-      const user = await db.getUserById(request.jwtUser!.id);
-      return { authenticated: !!user?.claudeToken };
-    }
-  );
-
-  fastifyInstance.post(
-    '/api/agent-auth/cursor/login',
-    {
-      preHandler: jwtPreHandler,
-      schema: {
-        response: {
-          201: Type.Object({ sessionId: Type.String() })
-        }
-      }
-    },
-    async (_request, reply) => {
-      const session = sessionManager.createAuthSession(config.cursorCommand, ['-f', 'login']);
-      return reply.code(201).send({ sessionId: session.id });
-    }
-  );
+  // ─── Claude auth via ACP + token flow ──────────────────────────────────────
+  // The PTY login route spawns `claude setup-token` so users can authenticate
+  // via browser in the terminal overlay and have the token auto-detected.
 
   fastifyInstance.post(
     '/api/agent-auth/claude/login',
     {
       preHandler: jwtPreHandler,
-      schema: {
-        response: {
-          201: Type.Object({ sessionId: Type.String() })
-        }
-      }
+      schema: { response: { 201: Type.Object({ sessionId: Type.String() }) } }
     },
     async (_request, reply) => {
       const session = sessionManager.createAuthSession(config.claudeCommand, ['setup-token']);
@@ -101,25 +65,14 @@ export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
   );
 
   fastifyInstance.post(
-    '/api/agent-auth/claude/token',
+    '/api/agent-auth/cursor/login',
     {
       preHandler: jwtPreHandler,
-      schema: {
-        body: Type.Object({ token: Type.String() }),
-        response: {
-          200: Type.Object({ ok: Type.Boolean() })
-        }
-      }
+      schema: { response: { 201: Type.Object({ sessionId: Type.String() }) } }
     },
-    async (request) => {
-      const { token } = request.body as { token: string };
-      const trimmed = token.trim();
-      if (!trimmed) {
-        return { ok: false };
-      }
-      await db.updateUser(request.jwtUser!.id, { claudeToken: trimmed });
-      markClaudeOnboardingComplete(config.configDir);
-      return { ok: true };
+    async (_request, reply) => {
+      const session = sessionManager.createAuthSession(config.cursorCommand, ['-f', 'login']);
+      return reply.code(201).send({ sessionId: session.id });
     }
   );
 
@@ -130,6 +83,36 @@ export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
       const authPath = join(config.configDir, CURSOR_AUTH_FILE);
       if (existsSync(authPath)) rmSync(authPath, { force: true });
       return reply.code(204).send(null);
+    }
+  );
+
+  fastifyInstance.get(
+    '/api/agent-auth/claude/status',
+    {
+      preHandler: jwtPreHandler,
+      schema: { response: { 200: Type.Object({ authenticated: Type.Boolean() }) } }
+    },
+    async (request) => {
+      const user = await db.getUserById(request.jwtUser!.id);
+      return { authenticated: !!user?.claudeToken };
+    }
+  );
+
+  fastifyInstance.post(
+    '/api/agent-auth/claude/token',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        body: Type.Object({ token: Type.String() }),
+        response: { 200: Type.Object({ ok: Type.Boolean() }) }
+      }
+    },
+    async (request) => {
+      const { token } = request.body as { token: string };
+      const trimmed = token.trim();
+      if (!trimmed) return { ok: false };
+      await db.updateUser(request.jwtUser!.id, { claudeToken: trimmed });
+      return { ok: true };
     }
   );
 

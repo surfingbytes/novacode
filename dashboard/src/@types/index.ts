@@ -97,6 +97,7 @@ export interface AppSettings {
   darkTheme: string;
   lightTheme: string;
   modelSelection: string;
+  claudeAutoContinue: boolean;
   /** ed25519 public key — add to your Git host for SSH git access */
   sshPublicKey: string;
   /** Same keypair’s private key — secret; stored on server config volume */
@@ -216,6 +217,7 @@ export interface ChatWsServerMessage {
     | 'history-page'
     | 'stream'
     | 'done'
+    | 'claude_limit_detected'
     | 'error'
     | 'server-shutdown'
     | 'queue-updated'
@@ -232,4 +234,6 @@ export interface ChatWsServerMessage {
     imagePaths?: string[];
     createdAt: string;
   };
+  resetTime?: string;
+  resetTimeReadable?: string;
 }

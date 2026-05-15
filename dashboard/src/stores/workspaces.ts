@@ -9,7 +9,7 @@ import { sessionsApi, workspaceApi, buildSessionsWsUrl } from '@/classes/api';
 import type { Workspace, CreateWorkspacePayload, UpdateWorkspacePayload, Session } from '@/@types/index';
 
 export const useWorkspacesStore = defineStore('workspaces', () => {
-  // -------------------------------------------------- Data --------------------------------------------------
+  // -------------------------------------------------- Refs --------------------------------------------------
   const workspaces = ref<Workspace[]>([]);
   const bIsLoading = ref<boolean>(false);
 
@@ -18,27 +18,35 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
   const allSessions = ref<Session[]>([]);
   const bSessionsLoading = ref<boolean>(false);
 
-  let sessionsWs: WebSocket | null = null;
-  let sessionsWsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  let sessionsWsUnmounted = false;
+  let sessionSocket: WebSocket | null = null;
+  let sessionSocketReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let bSessionSocketUnmounted = false;
   let sessionsInitialized = false;
 
+  // -------------------------------------------------- Computed --------------------------------------------------
   const activeSessions = computed<Session[]>(() => {
-    const wid = activeWorkspaceId.value;
-    if (!wid) return [];
-    return allSessions.value.filter((s) => s.workspaceId === wid && !s.archived);
+    const workspaceId = activeWorkspaceId.value;
+    if (!workspaceId) {
+      return [];
+    }
+    return allSessions.value.filter((session) => session.workspaceId === workspaceId && !session.archived);
   });
 
   const archivedSessions = computed<Session[]>(() => {
-    const wid = activeWorkspaceId.value;
-    if (!wid) return [];
-    return allSessions.value.filter((s) => s.workspaceId === wid && s.archived);
+    const workspaceId = activeWorkspaceId.value;
+    if (!workspaceId) {
+      return [];
+    }
+    return allSessions.value.filter((session) => session.workspaceId === workspaceId && session.archived);
   });
 
   const activeBusySessions = computed<Session[]>(() =>
     allSessions.value
-      .filter((s) => !s.archived && s.busy)
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+      .filter((session) => !session.archived && session.busy)
+      .sort(
+        (leftSession, rightSession) =>
+          new Date(rightSession.updatedAt).getTime() - new Date(leftSession.updatedAt).getTime()
+      )
   );
 
   // -------------------------------------------------- Methods --------------------------------------------------
@@ -53,31 +61,33 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
   };
 
   function upsertSession(next: Session): void {
-    const idx = allSessions.value.findIndex((s) => s.id === next.id);
-    const prev = idx === -1 ? null : allSessions.value[idx];
+    const sessionIndex = allSessions.value.findIndex((session) => session.id === next.id);
+    const previousSession = sessionIndex === -1 ? null : allSessions.value[sessionIndex];
     const merged: Session = {
-      ...(prev ?? {}),
+      ...(previousSession ?? {}),
       ...next,
       messageJson:
         typeof next.messageJson === 'string' && next.messageJson.length > 0
           ? next.messageJson
-          : (prev?.messageJson ?? '[]')
+          : (previousSession?.messageJson ?? '[]'),
     };
-    if (idx === -1) {
+    if (sessionIndex === -1) {
       allSessions.value = [merged, ...allSessions.value];
       return;
     }
     const updated = [...allSessions.value];
-    updated[idx] = merged;
+    updated[sessionIndex] = merged;
     allSessions.value = updated;
   }
 
   function removeSession(sessionId: string): void {
-    allSessions.value = allSessions.value.filter((s) => s.id !== sessionId);
+    allSessions.value = allSessions.value.filter((session) => session.id !== sessionId);
   }
 
   function setSessionBusy(sessionId: string, busy: boolean): void {
-    allSessions.value = allSessions.value.map((s) => (s.id === sessionId ? { ...s, busy } : s));
+    allSessions.value = allSessions.value.map((session) =>
+      session.id === sessionId ? { ...session, busy } : session
+    );
   }
 
   const fetchAllSessions = async (): Promise<void> => {
@@ -85,32 +95,34 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     try {
       const response = await sessionsApi.listAll();
       allSessions.value = response.data ?? [];
-    } catch (err) {
-      console.error('Failed to fetch sessions:', err);
+    } catch (error) {
+      console.error('Failed to fetch sessions:', error);
       allSessions.value = [];
     } finally {
       bSessionsLoading.value = false;
     }
   };
 
-  function disconnectSessionsWs(): void {
-    if (sessionsWsReconnectTimer !== null) {
-      clearTimeout(sessionsWsReconnectTimer);
-      sessionsWsReconnectTimer = null;
+  function disconnectSessionSocket(): void {
+    if (sessionSocketReconnectTimer !== null) {
+      clearTimeout(sessionSocketReconnectTimer);
+      sessionSocketReconnectTimer = null;
     }
-    if (sessionsWs) {
-      sessionsWs.close();
-      sessionsWs = null;
+    if (sessionSocket) {
+      sessionSocket.close();
+      sessionSocket = null;
     }
   }
 
-  function connectSessionsWs(): void {
-    if (sessionsWs) return;
-    sessionsWs = new WebSocket(buildSessionsWsUrl());
+  function connectSessionSocket(): void {
+    if (sessionSocket) {
+      return;
+    }
+    sessionSocket = new WebSocket(buildSessionsWsUrl());
 
-    sessionsWs.onmessage = (event: MessageEvent) => {
+    sessionSocket.onmessage = (event: MessageEvent) => {
       try {
-        const msg = JSON.parse(event.data as string) as
+        const messagePayload = JSON.parse(event.data as string) as
           | { type: 'global-snapshot'; sessions: Session[] }
           | { type: 'session-upsert'; session: Session }
           | { type: 'session-deleted'; id: string; workspaceId?: string }
@@ -118,15 +130,19 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
           | { type: 'refresh' }
           | { type: 'server-shutdown' };
 
-        if (msg.type === 'global-snapshot') {
-          allSessions.value = msg.sessions ?? [];
-        } else if (msg.type === 'session-upsert') {
-          if (msg.session) upsertSession(msg.session);
-        } else if (msg.type === 'session-deleted') {
-          if (msg.id) removeSession(msg.id);
-        } else if (msg.type === 'busy-changed') {
-          setSessionBusy(msg.id, msg.busy);
-        } else if (msg.type === 'refresh') {
+        if (messagePayload.type === 'global-snapshot') {
+          allSessions.value = messagePayload.sessions ?? [];
+        } else if (messagePayload.type === 'session-upsert') {
+          if (messagePayload.session) {
+            upsertSession(messagePayload.session);
+          }
+        } else if (messagePayload.type === 'session-deleted') {
+          if (messagePayload.id) {
+            removeSession(messagePayload.id);
+          }
+        } else if (messagePayload.type === 'busy-changed') {
+          setSessionBusy(messagePayload.id, messagePayload.busy);
+        } else if (messagePayload.type === 'refresh') {
           fetchAllSessions();
         }
       } catch {
@@ -134,23 +150,27 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
       }
     };
 
-    sessionsWs.onclose = (event: CloseEvent) => {
-      sessionsWs = null;
-      if (event.code === 4001 || event.code === 4004) return; // auth/workspace errors
-      if (!sessionsWsUnmounted) {
-        sessionsWsReconnectTimer = setTimeout(() => {
-          sessionsWsReconnectTimer = null;
-          connectSessionsWs();
+    sessionSocket.onclose = (event: CloseEvent) => {
+      sessionSocket = null;
+      if (event.code === 4001 || event.code === 4004) {
+        return;
+      } // auth/workspace errors
+      if (!bSessionSocketUnmounted) {
+        sessionSocketReconnectTimer = setTimeout(() => {
+          sessionSocketReconnectTimer = null;
+          connectSessionSocket();
         }, 2000);
       }
     };
   }
 
   async function ensureSessionsInitialized(): Promise<void> {
-    if (sessionsInitialized) return;
-    sessionsWsUnmounted = false;
+    if (sessionsInitialized) {
+      return;
+    }
+    bSessionSocketUnmounted = false;
     await fetchAllSessions();
-    connectSessionsWs();
+    connectSessionSocket();
     sessionsInitialized = true;
   }
 
@@ -160,8 +180,8 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
   };
 
   const teardownActiveWorkspace = (): void => {
-    sessionsWsUnmounted = true;
-    disconnectSessionsWs();
+    bSessionSocketUnmounted = true;
+    disconnectSessionSocket();
     activeWorkspaceId.value = null;
     allSessions.value = [];
     sessionsInitialized = false;
@@ -175,7 +195,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
 
   const updateWorkspace = async (id: string, payload: UpdateWorkspacePayload): Promise<void> => {
     const response = await workspaceApi.update(id, payload);
-    const index = workspaces.value.findIndex((w) => w.id === id);
+    const index = workspaces.value.findIndex((workspace) => workspace.id === id);
     if (index !== -1) {
       workspaces.value[index] = response.data;
     }
@@ -183,7 +203,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
 
   const archiveWorkspace = async (id: string, archived: boolean): Promise<void> => {
     const response = await workspaceApi.archive(id, archived);
-    const index = workspaces.value.findIndex((w) => w.id === id);
+    const index = workspaces.value.findIndex((workspace) => workspace.id === id);
     if (index !== -1) {
       workspaces.value[index] = response.data;
     }
@@ -191,12 +211,12 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
 
   const deleteWorkspace = async (id: string): Promise<void> => {
     await workspaceApi.remove(id);
-    workspaces.value = workspaces.value.filter((w) => w.id !== id);
+    workspaces.value = workspaces.value.filter((workspace) => workspace.id !== id);
   };
 
   const reorderWorkspaces = async (ids: string[]): Promise<void> => {
     await workspaceApi.reorder(ids);
-    const byId = new Map(workspaces.value.map((w) => [w.id, w]));
+    const byId = new Map(workspaces.value.map((workspace) => [workspace.id, workspace]));
     workspaces.value = ids.map((id) => byId.get(id)).filter(Boolean) as Workspace[];
   };
 

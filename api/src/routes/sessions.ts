@@ -17,43 +17,62 @@ import {
 // types
 import type { AgentType } from '../@types/index';
 
+// -------------------------------------------------- Helpers --------------------------------------------------
+
 function parseTagsFromBody(body: unknown): string[] | null | undefined {
-  if (!body || typeof body !== 'object' || !('tags' in body)) return undefined;
+  if (!body || typeof body !== 'object' || !('tags' in body)) {
+    return undefined;
+  }
   const raw = (body as Record<string, unknown>)['tags'];
-  if (raw === undefined) return undefined;
-  if (raw === null) return null;
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (raw === null) {
+    return null;
+  }
   if (Array.isArray(raw)) {
-    const n = normalizeTagStringList(raw);
-    return n.length > 0 ? n : null;
+    const normalizedTags = normalizeTagStringList(raw);
+    return normalizedTags.length > 0 ? normalizedTags : null;
   }
   if (typeof raw === 'string') {
-    const t = raw.trim();
-    if (!t) return null;
-    const n = normalizeTagStringList(t.split(',').map((x) => x.trim()));
-    return n.length > 0 ? n : null;
+    const trimmedRawTags = raw.trim();
+    if (!trimmedRawTags) {
+      return null;
+    }
+    const normalizedTags = normalizeTagStringList(
+      trimmedRawTags.split(',').map((tag) => tag.trim()),
+    );
+    return normalizedTags.length > 0 ? normalizedTags : null;
   }
   return null;
 }
 
 export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
+  // -------------------------------------------------- Session listing --------------------------------------------------
+
   // GET /api/sessions
   fastify.get('/api/sessions', { preHandler: jwtPreHandler }, async (_request, reply) => {
-    const busyIds = getActiveSessionIds();
+    const activeSessionIds = getActiveSessionIds();
     const allWorkspaces = await db.listWorkspaces({ includeArchived: true });
-    const byWorkspace = await Promise.all(
-      allWorkspaces.map((w) =>
+    const sessionsByWorkspace = await Promise.all(
+      allWorkspaces.map((workspace) =>
         Promise.all([
-          db.listSessionsByWorkspace(w.id, { archived: false }),
-          db.listSessionsByWorkspace(w.id, { archived: true })
-        ])
-      )
+          db.listSessionsByWorkspace(workspace.id, { archived: false }),
+          db.listSessionsByWorkspace(workspace.id, { archived: true }),
+        ]),
+      ),
     );
-    const allSessions = byWorkspace
+    const allSessions = sessionsByWorkspace
       .flatMap(([active, archived]) => [...active, ...archived])
-      .map((s) => ({ ...normalizeSessionForApi(s), busy: busyIds.has(s.id) }));
+      .map((session) => ({
+        ...normalizeSessionForApi(session),
+        busy: activeSessionIds.has(session.id),
+      }));
     await db.enrichSessionListPreviews(allSessions);
     return reply.send(allSessions);
   });
+
+  // -------------------------------------------------- Session create --------------------------------------------------
 
   // POST /api/workspaces/:workspaceId/sessions
   fastify.post(
@@ -72,14 +91,14 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         workspaceId,
         name: body.name,
         tags: tagsParsed === undefined ? null : tagsParsed,
-        agentType: body.agentType
+        agentType: body.agentType,
       });
 
       if (result.error) {
         const status = result.error === 'Workspace not found' ? 404 : 502;
         return reply.status(status).send({
           error: result.error === 'Workspace not found' ? result.error : 'Failed to create chat',
-          ...(status === 502 ? { details: result.error } : {})
+          ...(status === 502 ? { details: result.error } : {}),
         });
       }
       if (!result.session) {
@@ -92,6 +111,8 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
+  // -------------------------------------------------- Session list/get/update --------------------------------------------------
+
   // GET /api/workspaces/:workspaceId/sessions
   fastify.get(
     '/api/workspaces/:workspaceId/sessions',
@@ -102,10 +123,10 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       const archived =
         query.archived === 'true' ? true : query.archived === 'false' ? false : undefined;
       const sessions = await db.listSessionsByWorkspace(workspaceId, { archived });
-      const busyIds = getActiveSessionIds();
-      const enriched = sessions.map((s) => ({
-        ...normalizeSessionForApi(s),
-        busy: busyIds.has(s.id)
+      const activeSessionIds = getActiveSessionIds();
+      const enriched = sessions.map((session) => ({
+        ...normalizeSessionForApi(session),
+        busy: activeSessionIds.has(session.id),
       }));
       await db.enrichSessionListPreviews(enriched);
       return reply.send(enriched);
@@ -152,11 +173,15 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         tags?: string[] | null;
         archived?: boolean;
       } = {};
-      if (body.name !== undefined) patch.name = body.name;
+      if (body.name !== undefined) {
+        patch.name = body.name;
+      }
       if ('tags' in (request.body as object)) {
         patch.tags = parseTagsFromBody(request.body) ?? null;
       }
-      if (body.archived !== undefined) patch.archived = body.archived;
+      if (body.archived !== undefined) {
+        patch.archived = body.archived;
+      }
       const updated = await db.updateSession(sessionId, patch);
       if (!updated) {
         return reply.status(500).send({ error: 'Failed to update session' });
@@ -166,6 +191,8 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.send(normalized);
     }
   );
+
+  // -------------------------------------------------- Session bulk actions --------------------------------------------------
 
   // POST /api/workspaces/:workspaceId/sessions/bulk-delete
   fastify.post(
@@ -179,7 +206,7 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       }
       const count = await db.deleteManySessions(ids, workspaceId);
       // clean up uploaded images for each session (non-critical)
-      await Promise.all(ids.map((id) => deleteSessionImages(id)));
+      await Promise.all(ids.map((sessionId) => deleteSessionImages(sessionId)));
       broadcastWorkspaceSessionsRefresh(workspaceId);
       return reply.send({ deleted: count });
     }
@@ -200,6 +227,8 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.send({ updated: count });
     }
   );
+
+  // -------------------------------------------------- Session delete --------------------------------------------------
 
   // DELETE /api/workspaces/:workspaceId/sessions/:sessionId
   fastify.delete(

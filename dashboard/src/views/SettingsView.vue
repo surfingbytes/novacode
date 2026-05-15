@@ -18,6 +18,7 @@ import {
   DEFAULT_DARK_THEME_ID,
   DEFAULT_LIGHT_THEME_ID,
   resolveAutoTheme,
+  resolveStoredThemeId,
   startAutoThemeWatcher,
   stopAutoThemeWatcher
 } from '@/lib/themes';
@@ -33,7 +34,7 @@ import {
 // types
 import type { McpClientServer, McpConnectivityCheckResult } from '@/@types/index';
 
-// -------------------------------------------------- Data --------------------------------------------------
+// -------------------------------------------------- Refs --------------------------------------------------
 const activeTab = ref<'general' | 'git' | 'integrations' | 'mcp'>('general');
 const bCursorAuthenticated = ref<boolean>(false);
 const bClaudeAuthenticated = ref<boolean>(false);
@@ -56,16 +57,26 @@ const sshPrivateKey = ref<string>('');
 const bCopiedSshPublic = ref<boolean>(false);
 const bCopiedSshPrivate = ref<boolean>(false);
 
-const activeThemeId = ref<string>(localStorage.getItem('theme') ?? DEFAULT_THEME_ID);
+const activeThemeId = ref<string>(
+  resolveStoredThemeId(localStorage.getItem('theme') ?? DEFAULT_THEME_ID)
+);
 const bAutoTheme = ref<boolean>(
   localStorage.getItem('autoTheme') === null ? true : localStorage.getItem('autoTheme') === 'true'
 );
-const darkThemeId = ref<string>(localStorage.getItem('darkTheme') ?? DEFAULT_DARK_THEME_ID);
-const lightThemeId = ref<string>(localStorage.getItem('lightTheme') ?? DEFAULT_LIGHT_THEME_ID);
+const darkThemeId = ref<string>(
+  resolveStoredThemeId(localStorage.getItem('darkTheme') ?? DEFAULT_DARK_THEME_ID)
+);
+const lightThemeId = ref<string>(
+  resolveStoredThemeId(localStorage.getItem('lightTheme') ?? DEFAULT_LIGHT_THEME_ID)
+);
 const bSavingTheme = ref<boolean>(false);
 
 const bNotifications = ref<boolean>(isNotificationsEnabled());
 const notifPermission = ref<NotificationPermission | 'unsupported'>(getPermissionState());
+
+// Claude Auto-Continue
+const bClaudeAutoContinue = ref<boolean>(false);
+const bSavingClaudeAutoContinue = ref<boolean>(false);
 
 // Mistral Vibe API key
 const bVibeConfigured = ref<boolean>(false);
@@ -212,6 +223,19 @@ const toggleAutoTheme = async (): Promise<void> => {
   }
 };
 
+const toggleClaudeAutoContinue = async (): Promise<void> => {
+  bClaudeAutoContinue.value = !bClaudeAutoContinue.value;
+  bSavingClaudeAutoContinue.value = true;
+  try {
+    await settingsApi.update({ claudeAutoContinue: bClaudeAutoContinue.value });
+  } catch {
+    // ignore
+    bClaudeAutoContinue.value = !bClaudeAutoContinue.value; // Revert on error
+  } finally {
+    bSavingClaudeAutoContinue.value = false;
+  }
+};
+
 const loadSettings = async (): Promise<void> => {
   try {
     const response = await settingsApi.get();
@@ -245,6 +269,12 @@ const loadSettings = async (): Promise<void> => {
     }
     sshPublicKey.value = response.data.sshPublicKey ?? '';
     sshPrivateKey.value = response.data.sshPrivateKey ?? '';
+    
+    // Load Claude Auto-Continue preference
+    if (typeof response.data.claudeAutoContinue === 'boolean') {
+      bClaudeAutoContinue.value = response.data.claudeAutoContinue;
+    }
+    
     if (bAutoTheme.value) {
       applyTheme(resolveAutoTheme());
       startAutoThemeWatcher();
@@ -634,241 +664,233 @@ onMounted((): void => {
 <template>
   <PageShell>
     <PageHeader
+      eyebrow="// settings"
       title="Settings"
       subtitle="Configure agent authentication, appearance, and preferences."
     />
 
       <!-- Tab bar -->
-      <div
-        class="flex gap-1 p-1 mb-6 rounded-xl bg-fg/[0.04] border border-fg/[0.07] overflow-x-auto"
-        role="tablist"
-      >
+      <div class="settings-tabs" role="tablist">
         <button
+          v-for="tab in [
+            { id: 'general',      label: 'General' },
+            { id: 'git',          label: 'Git' },
+            { id: 'integrations', label: 'Integrations' },
+            { id: 'mcp',          label: 'MCP' },
+          ]"
+          :key="tab.id"
           type="button"
           role="tab"
-          :aria-selected="activeTab === 'general'"
-          class="settings-tab px-4 py-2.5 text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
-          :class="
-            activeTab === 'general'
-              ? 'bg-fg/[0.08] text-text-primary'
-              : 'text-text-muted hover:text-text-primary hover:bg-fg/[0.04]'
-          "
-          @click="activeTab = 'general'"
+          :aria-selected="activeTab === tab.id"
+          class="settings-tab"
+          :class="activeTab === tab.id ? 'settings-tab--active' : ''"
+          @click="(activeTab as any) = tab.id"
         >
-          General
-        </button>
-        <button
-          type="button"
-          role="tab"
-          :aria-selected="activeTab === 'git'"
-          class="settings-tab px-4 py-2.5 text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
-          :class="
-            activeTab === 'git'
-              ? 'bg-fg/[0.08] text-text-primary'
-              : 'text-text-muted hover:text-text-primary hover:bg-fg/[0.04]'
-          "
-          @click="activeTab = 'git'"
-        >
-          Git
-        </button>
-        <button
-          type="button"
-          role="tab"
-          :aria-selected="activeTab === 'integrations'"
-          class="settings-tab px-4 py-2.5 text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
-          :class="
-            activeTab === 'integrations'
-              ? 'bg-fg/[0.08] text-text-primary'
-              : 'text-text-muted hover:text-text-primary hover:bg-fg/[0.04]'
-          "
-          @click="activeTab = 'integrations'"
-        >
-          Integrations
-        </button>
-        <button
-          type="button"
-          role="tab"
-          :aria-selected="activeTab === 'mcp'"
-          class="settings-tab px-4 py-2.5 text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
-          :class="
-            activeTab === 'mcp'
-              ? 'bg-fg/[0.08] text-text-primary'
-              : 'text-text-muted hover:text-text-primary hover:bg-fg/[0.04]'
-          "
-          @click="activeTab = 'mcp'"
-        >
-          MCP
+          {{ tab.label }}
         </button>
       </div>
 
       <!-- Tab panel: General -->
-      <div v-show="activeTab === 'general'" role="tabpanel" class="space-y-8">
+      <div v-show="activeTab === 'general'" role="tabpanel">
+
         <!-- Appearance -->
-        <div>
-          <h2 class="text-sm font-semibold text-text-muted uppercase tracking-widest mb-5">
-            Appearance
-          </h2>
-
-          <!-- Auto theme toggle -->
-          <div class="bg-fg/[0.02] border border-fg/[0.07] rounded-xl p-5 mb-4">
-            <div class="flex items-center justify-between gap-4">
-              <div>
-                <p class="text-sm font-medium text-text-primary">Automatic dark / light mode</p>
-                <p class="text-xs text-text-muted mt-1">
-                  Switches between your chosen dark and light themes based on your browser or OS
-                  preference.
-                </p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                :aria-checked="bAutoTheme"
-                :disabled="bSavingTheme"
-                class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-50 disabled:cursor-not-allowed"
-                :class="bAutoTheme ? 'bg-primary' : 'bg-fg/[0.1]'"
-                @click="toggleAutoTheme"
-              >
-                <span
-                  class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200"
-                  :class="bAutoTheme ? 'translate-x-5' : 'translate-x-0'"
-                ></span>
-              </button>
+        <div class="settings-section-label nc-eyebrow">Appearance</div>
+        <div class="settings-pref-list">
+          <div class="settings-pref-row">
+            <div class="settings-pref-row__text">
+              <div class="settings-pref-row__title">Automatic dark / light mode</div>
+              <div class="settings-pref-row__desc">Switches between your chosen dark and light themes based on your browser or OS preference.</div>
             </div>
+            <button
+              type="button"
+              role="switch"
+              :aria-checked="bAutoTheme"
+              :disabled="bSavingTheme"
+              class="nc-toggle"
+              :class="bAutoTheme ? 'on' : ''"
+              @click="toggleAutoTheme"
+            ><span class="nc-toggle-knob" /></button>
           </div>
-
-          <!-- Auto mode: dark + light pickers -->
-          <template v-if="bAutoTheme">
-            <!-- Dark theme picker -->
-            <div class="mb-4">
-              <p class="text-xs font-semibold text-text-muted uppercase tracking-widest mb-3 flex items-center gap-2">
-                <span class="material-symbols-outlined select-none" style="font-size:14px">dark_mode</span>
-                Dark theme
-              </p>
-              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <button
-                  v-for="theme in themes.filter(t => t.dark)"
-                  :key="theme.id"
-                  class="group relative flex flex-col gap-2 p-3 rounded-xl border transition-all text-left"
-                  :class="
-                    darkThemeId === theme.id
-                      ? 'border-fg/30 bg-fg/[0.06]'
-                      : 'border-fg/[0.07] bg-fg/[0.02] hover:border-fg/[0.15] hover:bg-fg/[0.04]'
-                  "
-                  @click="selectDarkTheme(theme.id)"
-                >
-                  <div class="flex gap-1.5 items-center">
-                    <span class="w-5 h-5 rounded-full flex-shrink-0 ring-1 ring-fg/10" :style="{ background: theme.bg }"></span>
-                    <span class="w-5 h-5 rounded-full flex-shrink-0 ring-1 ring-fg/10" :style="{ background: theme.primary }"></span>
-                    <span class="w-5 h-5 rounded-full flex-shrink-0 ring-1 ring-fg/10" :style="{ background: theme.surface }"></span>
-                  </div>
-                  <span class="text-xs font-medium text-text-muted leading-none">{{ theme.name }}</span>
-                  <span v-if="darkThemeId === theme.id" class="absolute top-2 right-2 w-2 h-2 rounded-full bg-fg/60"></span>
-                </button>
-              </div>
+          <div class="settings-pref-row">
+            <div class="settings-pref-row__text">
+              <div class="settings-pref-row__title">Auto-continue Claude conversations</div>
+              <div class="settings-pref-row__desc">Automatically continue conversations when Claude API limits reset.</div>
             </div>
+            <button
+              type="button"
+              role="switch"
+              :aria-checked="bClaudeAutoContinue"
+              :disabled="bSavingClaudeAutoContinue"
+              class="nc-toggle"
+              :class="bClaudeAutoContinue ? 'on' : ''"
+              @click="toggleClaudeAutoContinue"
+            ><span class="nc-toggle-knob" /></button>
+          </div>
+        </div>
 
-            <!-- Light theme picker -->
-            <div>
-              <p class="text-xs font-semibold text-text-muted uppercase tracking-widest mb-3 flex items-center gap-2">
-                <span class="material-symbols-outlined select-none" style="font-size:14px">light_mode</span>
-                Light theme
-              </p>
-              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <button
-                  v-for="theme in themes.filter(t => !t.dark)"
-                  :key="theme.id"
-                  class="group relative flex flex-col gap-2 p-3 rounded-xl border transition-all text-left"
-                  :class="
-                    lightThemeId === theme.id
-                      ? 'border-fg/30 bg-fg/[0.06]'
-                      : 'border-fg/[0.07] bg-fg/[0.02] hover:border-fg/[0.15] hover:bg-fg/[0.04]'
-                  "
-                  @click="selectLightTheme(theme.id)"
-                >
-                  <div class="flex gap-1.5 items-center">
-                    <span class="w-5 h-5 rounded-full flex-shrink-0 ring-1 ring-fg/10" :style="{ background: theme.bg }"></span>
-                    <span class="w-5 h-5 rounded-full flex-shrink-0 ring-1 ring-fg/10" :style="{ background: theme.primary }"></span>
-                    <span class="w-5 h-5 rounded-full flex-shrink-0 ring-1 ring-fg/10" :style="{ background: theme.surface }"></span>
-                  </div>
-                  <span class="text-xs font-medium text-text-muted leading-none">{{ theme.name }}</span>
-                  <span v-if="lightThemeId === theme.id" class="absolute top-2 right-2 w-2 h-2 rounded-full bg-fg/60"></span>
-                </button>
-              </div>
+        <!-- Dark Theme -->
+        <div class="settings-section-label nc-eyebrow" style="margin-top: 36px;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg>
+          Dark Theme
+        </div>
+        <div class="settings-theme-grid">
+          <button
+            v-for="theme in themes.filter(t => t.dark)"
+            :key="theme.id"
+            type="button"
+            class="settings-theme-swatch"
+            :class="(bAutoTheme ? darkThemeId === theme.id : activeThemeId === theme.id) ? 'settings-theme-swatch--active' : ''"
+            @click="bAutoTheme ? selectDarkTheme(theme.id) : selectTheme(theme.id)"
+          >
+            <div class="settings-theme-swatch__dots">
+              <span v-for="(dot, i) in theme.previewDots" :key="i" class="settings-theme-swatch__dot" :style="{ background: dot }" />
             </div>
-          </template>
+            <div class="settings-theme-swatch__name">{{ theme.name }}</div>
+            <div v-if="bAutoTheme ? darkThemeId === theme.id : activeThemeId === theme.id" class="settings-theme-swatch__active-dot" />
+          </button>
+        </div>
 
-          <!-- Manual mode: single theme picker -->
-          <template v-else>
-            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <button
-                v-for="theme in themes"
-                :key="theme.id"
-                class="group relative flex flex-col gap-2 p-3 rounded-xl border transition-all text-left"
-                :class="
-                  activeThemeId === theme.id
-                    ? 'border-fg/30 bg-fg/[0.06]'
-                    : 'border-fg/[0.07] bg-fg/[0.02] hover:border-fg/[0.15] hover:bg-fg/[0.04]'
-                "
-                @click="selectTheme(theme.id)"
-              >
-                <div class="flex gap-1.5 items-center">
-                  <span class="w-5 h-5 rounded-full flex-shrink-0 ring-1 ring-fg/10" :style="{ background: theme.bg }"></span>
-                  <span class="w-5 h-5 rounded-full flex-shrink-0 ring-1 ring-fg/10" :style="{ background: theme.primary }"></span>
-                  <span class="w-5 h-5 rounded-full flex-shrink-0 ring-1 ring-fg/10" :style="{ background: theme.surface }"></span>
-                </div>
-                <span class="text-xs font-medium text-text-muted leading-none">{{ theme.name }}</span>
-                <span v-if="activeThemeId === theme.id" class="absolute top-2 right-2 w-2 h-2 rounded-full bg-fg/60"></span>
-              </button>
+        <!-- Light Theme -->
+        <div class="settings-section-label nc-eyebrow" style="margin-top: 36px;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v2 M12 20v2 M4.9 4.9l1.4 1.4 M17.7 17.7l1.4 1.4 M2 12h2 M20 12h2 M4.9 19.1l1.4-1.4 M17.7 6.3l1.4-1.4 M12 7a5 5 0 100 10 5 5 0 000-10z"/></svg>
+          Light Theme
+        </div>
+        <div class="settings-theme-grid">
+          <button
+            v-for="theme in themes.filter(t => !t.dark)"
+            :key="theme.id"
+            type="button"
+            class="settings-theme-swatch"
+            :class="(bAutoTheme ? lightThemeId === theme.id : activeThemeId === theme.id) ? 'settings-theme-swatch--active' : ''"
+            @click="bAutoTheme ? selectLightTheme(theme.id) : selectTheme(theme.id)"
+          >
+            <div class="settings-theme-swatch__dots">
+              <span v-for="(dot, i) in theme.previewDots" :key="i" class="settings-theme-swatch__dot" :style="{ background: dot }" />
             </div>
-          </template>
+            <div class="settings-theme-swatch__name">{{ theme.name }}</div>
+            <div v-if="bAutoTheme ? lightThemeId === theme.id : activeThemeId === theme.id" class="settings-theme-swatch__active-dot" />
+          </button>
         </div>
 
         <!-- Notifications -->
-        <div v-if="canRequestPermission()">
-          <h2 class="text-sm font-semibold text-text-muted uppercase tracking-widest mb-5">
-            Notifications
-          </h2>
-          <div class="bg-fg/[0.02] border border-fg/[0.07] rounded-xl p-5">
-            <div class="flex items-center justify-between gap-4">
-              <div>
-                <p class="text-sm font-medium text-text-primary">Task completion notifications</p>
-                <p class="text-xs text-text-muted mt-1">
-                  Get a browser notification when an agent task finishes while the tab is in the
-                  background.
-                </p>
-                <p v-if="notifPermission === 'denied'" class="text-xs text-destructive mt-1.5">
-                  Notifications are blocked by your browser. Allow them in your browser's site
-                  settings.
-                </p>
+        <template v-if="canRequestPermission()">
+          <div class="settings-section-label nc-eyebrow" style="margin-top: 36px;">Notifications</div>
+          <div class="settings-pref-list">
+            <div class="settings-pref-row">
+              <div class="settings-pref-row__text">
+                <div class="settings-pref-row__title">Task completion notifications</div>
+                <div class="settings-pref-row__desc">
+                  Get a browser notification when an agent task finishes while the tab is in the background.
+                  <span v-if="notifPermission === 'denied'" class="settings-pref-row__warn">
+                    Notifications are blocked by your browser. Allow them in your browser's site settings.
+                  </span>
+                </div>
               </div>
               <button
                 type="button"
                 role="switch"
                 :aria-checked="bNotifications"
                 :disabled="notifPermission === 'denied'"
-                class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-50 disabled:cursor-not-allowed"
-                :class="bNotifications ? 'bg-primary' : 'bg-fg/[0.1]'"
+                class="nc-toggle"
+                :class="bNotifications ? 'on' : ''"
                 @click="toggleNotifications"
-              >
-                <span
-                  class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200"
-                  :class="bNotifications ? 'translate-x-5' : 'translate-x-0'"
-                ></span>
-              </button>
+              ><span class="nc-toggle-knob" /></button>
             </div>
           </div>
+        </template>
+
+        <!-- Agent Authentication -->
+        <div class="settings-section-label nc-eyebrow" style="margin-top: 36px;">Agent Authentication</div>
+        <p class="settings-section-desc">Log in to AI services. Credentials are stored in the config volume and persist across restarts.</p>
+        <div class="settings-auth-list">
+
+          <!-- Cursor -->
+          <div class="settings-auth-card">
+            <div class="settings-auth-card__top">
+              <div class="settings-auth-card__info">
+                <div class="settings-auth-card__name">Cursor</div>
+                <div class="settings-auth-card__desc">
+                  Uses <code class="settings-mono-chip">cursor-agent login</code> — sign in with your Cursor account
+                </div>
+              </div>
+              <span class="nc-chip" :class="bCursorAuthenticated ? 'success' : ''">
+                {{ bCursorAuthenticated ? 'Authenticated' : 'Not authenticated' }}
+              </span>
+            </div>
+            <div class="settings-auth-card__actions">
+              <button v-if="!bCursorAuthenticated" class="settings-btn-primary" :disabled="bStartingCursorLogin" @click="startCursorLogin">
+                <span v-if="bStartingCursorLogin" class="settings-spinner" />
+                Login to Cursor
+              </button>
+              <button v-else class="settings-btn" :disabled="bLoggingOutCursor" @click="logoutCursor">
+                <span v-if="bLoggingOutCursor" class="settings-spinner" />
+                Logout
+              </button>
+              <a href="https://cursor.com/dashboard?tab=spending" target="_blank" rel="noopener noreferrer" class="settings-auth-link">View account &amp; usage →</a>
+            </div>
+            <p v-if="!bCursorAuthenticated" class="settings-auth-card__hint">A terminal will appear in an overlay. Complete the login flow in the terminal.</p>
+          </div>
+
+          <!-- Claude Code -->
+          <div class="settings-auth-card">
+            <div class="settings-auth-card__top">
+              <div class="settings-auth-card__info">
+                <div class="settings-auth-card__name">Claude Code</div>
+                <div class="settings-auth-card__desc">
+                  Uses <code class="settings-mono-chip">claude setup-token</code> — sign in with your Claude account and paste the issued token into the terminal overlay.
+                </div>
+              </div>
+              <span class="nc-chip" :class="bClaudeAuthenticated ? 'success' : ''">
+                {{ bClaudeAuthenticated ? 'Configured' : 'Not configured' }}
+              </span>
+            </div>
+            <div class="settings-auth-card__actions">
+              <button v-if="!bClaudeAuthenticated" class="settings-btn-primary" :disabled="bStartingClaudeLogin" @click="startClaudeLogin">
+                <span v-if="bStartingClaudeLogin" class="settings-spinner" />
+                Login to Claude
+              </button>
+              <button v-else class="settings-btn" :disabled="bLoggingOutClaude" @click="logoutClaude">
+                <span v-if="bLoggingOutClaude" class="settings-spinner" />
+                Logout
+              </button>
+              <a href="https://claude.ai" target="_blank" rel="noopener noreferrer" class="settings-auth-link">Manage account &amp; usage →</a>
+            </div>
+            <p v-if="!bClaudeAuthenticated" class="settings-auth-card__hint">A terminal will appear in an overlay. Paste the token from your browser into the field below the terminal and press Enter.</p>
+            <p v-if="bClaudeAuthSuccess" class="settings-auth-card__success">Claude token saved. You're ready to use Claude Code.</p>
+            <p v-if="claudeAuthError" class="settings-auth-card__error">{{ claudeAuthError }}</p>
+          </div>
+
+          <!-- Mistral Vibe -->
+          <div class="settings-auth-card">
+            <div class="settings-auth-card__top">
+              <div class="settings-auth-card__info">
+                <div class="settings-auth-card__name">Mistral Vibe</div>
+                <div class="settings-auth-card__desc">
+                  API key for the Vibe CLI. Stored in <code class="settings-mono-chip">~/.vibe/.env</code> and used when running Vibe as an agent tool.
+                </div>
+              </div>
+              <span class="nc-chip" :class="bVibeConfigured ? 'success' : ''">
+                {{ bLoadingVibeStatus ? '…' : bVibeConfigured ? 'Configured' : 'Not configured' }}
+              </span>
+            </div>
+            <div class="settings-auth-card__actions">
+              <button class="settings-btn-accent" :disabled="bLoadingVibeStatus" @click="openVibeApiKeyModal">
+                {{ bVibeConfigured ? 'Update API key' : 'Set API key' }}
+              </button>
+            </div>
+            <p class="settings-auth-card__hint">Get your key from <a href="https://console.mistral.ai/codestral/vibe" target="_blank" rel="noopener noreferrer" class="settings-auth-link">Mistral Console</a>.</p>
+          </div>
+
         </div>
 
       </div>
 
       <!-- Tab panel: Git -->
-      <div v-show="activeTab === 'git'" role="tabpanel" class="space-y-8">
+      <div v-show="activeTab === 'git'" role="tabpanel">
         <!-- Git Identity -->
         <div>
-          <h2 class="text-sm font-semibold text-text-muted uppercase tracking-widest mb-5">
-            Git Identity
-          </h2>
-          <p class="text-sm text-text-muted -mt-3 mb-5">
+          <div class="settings-section-label nc-eyebrow">Git Identity</div>
+          <p class="settings-section-desc">
             Global git user name and email. Individual workspaces can override these.
           </p>
           <div class="bg-fg/[0.02] border border-fg/[0.07] rounded-xl p-5 space-y-4">
@@ -908,11 +930,9 @@ onMounted((): void => {
         </div>
 
         <!-- SSH key (Docker / server identity for git push) -->
-        <div>
-          <h2 class="text-sm font-semibold text-text-muted uppercase tracking-widest mb-5">
-            SSH key for Git remotes
-          </h2>
-          <p class="text-sm text-text-muted -mt-3 mb-5">
+        <div style="margin-top: 36px;">
+          <div class="settings-section-label nc-eyebrow">SSH key for Git remotes</div>
+          <p class="settings-section-desc">
             On first startup the server creates an ed25519 keypair under your config volume (
             <code
               class="bg-fg/[0.06] border border-fg/[0.08] px-1.5 py-0.5 rounded text-text-primary font-mono text-[11px]"
@@ -970,217 +990,73 @@ onMounted((): void => {
         </div>
       </div>
 
-      <!-- Tab panel: Integrations -->
-      <div v-show="activeTab === 'integrations'" role="tabpanel" class="space-y-8">
-        <div>
-          <h2 class="text-sm font-semibold text-text-muted uppercase tracking-widest mb-5">
-            Agent Authentication
-          </h2>
-          <p class="text-sm text-text-muted -mt-3 mb-5">
-            Log in to AI services. Credentials are stored in the config volume and persist across
-            restarts.
-          </p>
-
-          <!-- Cursor -->
-          <div class="bg-fg/[0.02] border border-fg/[0.07] rounded-xl p-5">
-            <div class="flex items-start justify-between gap-4 mb-4">
-              <div class="min-w-0">
-                <p class="font-medium text-text-primary text-sm">Cursor</p>
-                <p class="text-xs text-text-muted mt-1">
-                  Uses
-                  <code
-                    class="bg-fg/[0.06] border border-fg/[0.08] px-1.5 py-0.5 rounded text-text-primary font-mono text-[11px]"
-                    >cursor-agent login</code
-                  >
-                  — sign in with your Cursor account
-                </p>
+      <!-- Tab panel: Integrations (redirects to General for agent auth) -->
+      <div v-show="activeTab === 'integrations'" role="tabpanel">
+        <div class="settings-section-label nc-eyebrow">Agent Authentication</div>
+        <p class="settings-section-desc">
+          Agent authentication is now managed in the
+          <button class="settings-inline-link" @click="(activeTab as any) = 'general'">General tab</button>.
+        </p>
+        <div class="settings-auth-list">
+          <div class="settings-auth-card">
+            <div class="settings-auth-card__top">
+              <div class="settings-auth-card__info">
+                <div class="settings-auth-card__name">Cursor</div>
+                <div class="settings-auth-card__desc">Uses <code class="settings-mono-chip">cursor-agent login</code> — sign in with your Cursor account</div>
               </div>
-              <span
-                class="inline-flex items-center text-xs px-2.5 py-1 rounded-full border flex-shrink-0 font-medium"
-                :class="
-                  bCursorAuthenticated
-                    ? 'bg-success/10 text-success border-success/20'
-                    : 'bg-warning/10 text-warning border-warning/20'
-                "
-              >
-                <span
-                  class="w-1.5 h-1.5 rounded-full mr-1.5"
-                  :class="bCursorAuthenticated ? 'bg-success' : 'bg-warning'"
-                ></span>
-                {{ bCursorAuthenticated ? 'Authenticated' : 'Not authenticated' }}
-              </span>
+              <span class="nc-chip" :class="bCursorAuthenticated ? 'success' : ''">{{ bCursorAuthenticated ? 'Authenticated' : 'Not authenticated' }}</span>
             </div>
-            <div class="flex items-center gap-3">
-              <button
-                v-if="!bCursorAuthenticated"
-                class="flex items-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all"
-                :disabled="bStartingCursorLogin"
-                @click="startCursorLogin"
-              >
-                <div
-                  v-if="bStartingCursorLogin"
-                  class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"
-                ></div>
-                Login to Cursor
+            <div class="settings-auth-card__actions">
+              <button v-if="!bCursorAuthenticated" class="settings-btn-primary" :disabled="bStartingCursorLogin" @click="startCursorLogin">
+                <span v-if="bStartingCursorLogin" class="settings-spinner" />Login to Cursor
               </button>
-              <button
-                v-else
-                class="flex items-center gap-2 bg-fg/[0.05] hover:bg-fg/[0.09] disabled:opacity-50 disabled:cursor-not-allowed border border-fg/[0.1] text-text-primary text-sm font-medium px-4 py-2.5 rounded-lg transition-all"
-                :disabled="bLoggingOutCursor"
-                @click="logoutCursor"
-              >
-                <div
-                  v-if="bLoggingOutCursor"
-                  class="w-3.5 h-3.5 border-2 border-fg/30 border-t-fg rounded-full animate-spin"
-                ></div>
-                Logout
+              <button v-else class="settings-btn" :disabled="bLoggingOutCursor" @click="logoutCursor">
+                <span v-if="bLoggingOutCursor" class="settings-spinner" />Logout
               </button>
-              <a
-                href="https://cursor.com/dashboard?tab=spending"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-xs text-primary hover:text-primary-hover transition-colors"
-                >View account &amp; usage &rarr;</a
-              >
+              <a href="https://cursor.com/dashboard?tab=spending" target="_blank" rel="noopener noreferrer" class="settings-auth-link">View account &amp; usage →</a>
             </div>
-            <p v-if="!bCursorAuthenticated" class="text-xs text-text-muted mt-2">
-              A terminal will appear in an overlay. Complete the login flow in the terminal.
-            </p>
           </div>
-
-          <!-- Claude Code -->
-          <div class="bg-fg/[0.02] border border-fg/[0.07] rounded-xl p-5 mt-6">
-            <div class="flex items-start justify-between gap-4 mb-4">
-              <div class="min-w-0">
-                <p class="font-medium text-text-primary text-sm">Claude Code</p>
-                <p class="text-xs text-text-muted mt-1">
-                  Uses
-                  <code
-                    class="bg-fg/[0.06] border border-fg/[0.08] px-1.5 py-0.5 rounded text-text-primary font-mono text-[11px]"
-                    >claude setup-token</code
-                  >
-                  — sign in with your Claude account and paste the issued token into the terminal
-                  overlay.
-                </p>
+          <div class="settings-auth-card">
+            <div class="settings-auth-card__top">
+              <div class="settings-auth-card__info">
+                <div class="settings-auth-card__name">Claude Code</div>
+                <div class="settings-auth-card__desc">Uses <code class="settings-mono-chip">claude setup-token</code> — sign in with your Claude account and paste the issued token.</div>
               </div>
-              <span
-                class="inline-flex items-center text-xs px-2.5 py-1 rounded-full border flex-shrink-0 font-medium"
-                :class="
-                  bClaudeAuthenticated
-                    ? 'bg-success/10 text-success border-success/20'
-                    : 'bg-warning/10 text-warning border-warning/20'
-                "
-              >
-                <span
-                  class="w-1.5 h-1.5 rounded-full mr-1.5"
-                  :class="bClaudeAuthenticated ? 'bg-success' : 'bg-warning'"
-                ></span>
-                {{ bClaudeAuthenticated ? 'Configured' : 'Not configured' }}
-              </span>
+              <span class="nc-chip" :class="bClaudeAuthenticated ? 'success' : ''">{{ bClaudeAuthenticated ? 'Configured' : 'Not configured' }}</span>
             </div>
-            <div class="flex items-center gap-3">
-              <button
-                v-if="!bClaudeAuthenticated"
-                class="flex items-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all"
-                :disabled="bStartingClaudeLogin"
-                @click="startClaudeLogin"
-              >
-                <div
-                  v-if="bStartingClaudeLogin"
-                  class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"
-                ></div>
-                Login to Claude
+            <div class="settings-auth-card__actions">
+              <button v-if="!bClaudeAuthenticated" class="settings-btn-primary" :disabled="bStartingClaudeLogin" @click="startClaudeLogin">
+                <span v-if="bStartingClaudeLogin" class="settings-spinner" />Login to Claude
               </button>
-              <button
-                v-else
-                class="flex items-center gap-2 bg-fg/[0.05] hover:bg-fg/[0.09] disabled:opacity-50 disabled:cursor-not-allowed border border-fg/[0.1] text-text-primary text-sm font-medium px-4 py-2.5 rounded-lg transition-all"
-                :disabled="bLoggingOutClaude"
-                @click="logoutClaude"
-              >
-                <div
-                  v-if="bLoggingOutClaude"
-                  class="w-3.5 h-3.5 border-2 border-fg/30 border-t-fg rounded-full animate-spin"
-                ></div>
-                Logout
+              <button v-else class="settings-btn" :disabled="bLoggingOutClaude" @click="logoutClaude">
+                <span v-if="bLoggingOutClaude" class="settings-spinner" />Logout
               </button>
-              <a
-                href="https://claude.ai"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-xs text-primary hover:text-primary-hover transition-colors"
-                >Manage account &amp; usage &rarr;</a
-              >
+              <a href="https://claude.ai" target="_blank" rel="noopener noreferrer" class="settings-auth-link">Manage account &amp; usage →</a>
             </div>
-            <p v-if="!bClaudeAuthenticated" class="text-xs text-text-muted mt-2">
-              A terminal will appear in an overlay. Use the sign-in link shown there, then paste the
-              token from your browser into the field below the terminal and press Enter.
-            </p>
-            <p v-if="bClaudeAuthSuccess" class="text-xs text-success mt-2">
-              Claude token saved. You’re ready to use Claude Code.
-            </p>
-            <p v-if="claudeAuthError" class="text-xs text-destructive mt-2">
-              {{ claudeAuthError }}
-            </p>
+            <p v-if="bClaudeAuthSuccess" class="settings-auth-card__success">Claude token saved.</p>
+            <p v-if="claudeAuthError" class="settings-auth-card__error">{{ claudeAuthError }}</p>
           </div>
-
-          <!-- Mistral Vibe -->
-          <div class="bg-fg/[0.02] border border-fg/[0.07] rounded-xl p-5 mt-6">
-            <div class="flex items-start justify-between gap-4 mb-4">
-              <div class="min-w-0">
-                <p class="font-medium text-text-primary text-sm">Mistral Vibe</p>
-                <p class="text-xs text-text-muted mt-1">
-                  API key for the Vibe CLI. Stored in
-                  <code
-                    class="bg-fg/[0.06] border border-fg/[0.08] px-1.5 py-0.5 rounded text-text-primary font-mono text-[11px]"
-                    >~/.vibe/.env</code
-                  >
-                  and used when running Vibe as an agent tool.
-                </p>
+          <div class="settings-auth-card">
+            <div class="settings-auth-card__top">
+              <div class="settings-auth-card__info">
+                <div class="settings-auth-card__name">Mistral Vibe</div>
+                <div class="settings-auth-card__desc">API key for the Vibe CLI. Stored in <code class="settings-mono-chip">~/.vibe/.env</code>.</div>
               </div>
-              <span
-                class="inline-flex items-center text-xs px-2.5 py-1 rounded-full border flex-shrink-0 font-medium"
-                :class="
-                  bVibeConfigured
-                    ? 'bg-success/10 text-success border-success/20'
-                    : 'bg-warning/10 text-warning border-warning/20'
-                "
-              >
-                <span
-                  class="w-1.5 h-1.5 rounded-full mr-1.5"
-                  :class="bVibeConfigured ? 'bg-success' : 'bg-warning'"
-                ></span>
-                {{ bLoadingVibeStatus ? '…' : bVibeConfigured ? 'Configured' : 'Not configured' }}
-              </span>
+              <span class="nc-chip" :class="bVibeConfigured ? 'success' : ''">{{ bLoadingVibeStatus ? '…' : bVibeConfigured ? 'Configured' : 'Not configured' }}</span>
             </div>
-            <button
-              class="flex items-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all"
-              :disabled="bLoadingVibeStatus"
-              @click="openVibeApiKeyModal"
-            >
-              {{ bVibeConfigured ? 'Update API key' : 'Set API key' }}
-            </button>
-            <p class="text-xs text-text-muted mt-2">
-              Get your key from
-              <a
-                href="https://console.mistral.ai/codestral/vibe"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-primary hover:text-primary-hover"
-                >Mistral Console</a
-              >.
-            </p>
+            <div class="settings-auth-card__actions">
+              <button class="settings-btn-accent" :disabled="bLoadingVibeStatus" @click="openVibeApiKeyModal">{{ bVibeConfigured ? 'Update API key' : 'Set API key' }}</button>
+            </div>
           </div>
         </div>
       </div>
 
       <!-- Tab panel: MCP clients -->
-      <div v-show="activeTab === 'mcp'" role="tabpanel" class="space-y-8">
+      <div v-show="activeTab === 'mcp'" role="tabpanel">
         <!-- MCP client servers -->
         <div>
-          <h2 class="text-sm font-semibold text-text-muted uppercase tracking-widest mb-5">
-            MCP client servers
-          </h2>
-          <p class="text-sm text-text-muted -mt-3 mb-5">
+          <div class="settings-section-label nc-eyebrow">MCP client servers</div>
+          <p class="settings-section-desc">
             Register <strong class="text-text-primary font-medium">external</strong> MCP servers (stdio or HTTP) for
             Cursor and Claude Code. The API writes your config volume (<code
               class="bg-fg/[0.06] border border-fg/[0.08] px-1.5 py-0.5 rounded text-text-primary font-mono text-[11px]"
@@ -1242,18 +1118,18 @@ onMounted((): void => {
               class="mb-4 rounded-lg border border-fg/[0.08] bg-fg/[0.03] divide-y divide-fg/[0.06]"
             >
               <div
-                v-for="(res, name) in mcpConnectivityResults"
+                v-for="(connectivityResult, name) in mcpConnectivityResults"
                 :key="name"
                 class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 px-3 py-2.5 text-sm"
               >
                 <span class="font-medium text-text-primary">{{ name }}</span>
                 <span
                   class="text-xs font-medium shrink-0"
-                  :class="res.ok ? 'text-success' : 'text-destructive'"
+                  :class="connectivityResult.ok ? 'text-success' : 'text-destructive'"
                 >
-                  {{ res.ok ? `${res.kind === 'http' ? 'HTTP' : 'stdio'} OK` : 'Failed' }}
-                  <span v-if="res.detail" class="text-text-muted font-normal"> — {{ res.detail }}</span>
-                  <span v-if="res.error" class="text-destructive"> — {{ res.error }}</span>
+                  {{ connectivityResult.ok ? `${connectivityResult.kind === 'http' ? 'HTTP' : 'stdio'} OK` : 'Failed' }}
+                  <span v-if="connectivityResult.detail" class="text-text-muted font-normal"> — {{ connectivityResult.detail }}</span>
+                  <span v-if="connectivityResult.error" class="text-destructive"> — {{ connectivityResult.error }}</span>
                 </span>
               </div>
             </div>
@@ -1607,3 +1483,326 @@ onMounted((): void => {
       </Transition>
     </Teleport>
 </template>
+
+<style scoped>
+/* Tab bar */
+.settings-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--line);
+  margin-top: 6px;
+  margin-bottom: 28px;
+  overflow-x: auto;
+  gap: 0;
+}
+
+.settings-tab {
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--fg-muted);
+  font-weight: 500;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  background: transparent;
+  white-space: nowrap;
+  transition: color 0.12s, border-color 0.12s;
+  font-family: inherit;
+}
+
+.settings-tab:hover {
+  color: var(--fg);
+}
+
+.settings-tab--active {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+
+/* Section labels */
+.settings-section-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 36px;
+  margin-bottom: 12px;
+}
+
+.settings-section-label:first-child {
+  margin-top: 0;
+}
+
+.settings-section-desc {
+  font-size: 12.5px;
+  color: var(--fg-subtle);
+  margin: -4px 0 12px;
+  line-height: 1.55;
+}
+
+/* Pref rows */
+.settings-pref-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-pref-row {
+  background: var(--bg-elev);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.settings-pref-row__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-pref-row__title {
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--fg);
+}
+
+.settings-pref-row__desc {
+  font-size: 12.5px;
+  color: var(--fg-subtle);
+  margin-top: 3px;
+  line-height: 1.5;
+}
+
+.settings-pref-row__warn {
+  color: var(--danger);
+  display: block;
+  margin-top: 4px;
+}
+
+/* Theme swatches */
+.settings-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+@media (max-width: 767px) {
+  .settings-theme-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.settings-theme-swatch {
+  padding: 12px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  background: var(--bg-elev);
+  box-shadow: inset 0 0 0 1px var(--line);
+  position: relative;
+  text-align: left;
+  border: none;
+  font-family: inherit;
+  transition: box-shadow 0.12s;
+}
+
+.settings-theme-swatch:hover {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.settings-theme-swatch--active {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.settings-theme-swatch__dots {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+
+.settings-theme-swatch__dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.settings-theme-swatch__name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.settings-theme-swatch__active-dot {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Auth cards (General + Integrations tabs) */
+.settings-auth-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-auth-card {
+  background: var(--bg-elev);
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+
+.settings-auth-card__top {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.settings-auth-card__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-auth-card__name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.settings-auth-card__desc {
+  font-size: 12.5px;
+  color: var(--fg-subtle);
+  margin-top: 4px;
+  line-height: 1.55;
+}
+
+.settings-auth-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.settings-auth-card__hint {
+  font-size: 12.5px;
+  color: var(--fg-subtle);
+  margin-top: 10px;
+}
+
+.settings-auth-card__success {
+  font-size: 12.5px;
+  color: var(--success);
+  margin-top: 8px;
+}
+
+.settings-auth-card__error {
+  font-size: 12.5px;
+  color: var(--danger);
+  margin-top: 8px;
+}
+
+.settings-mono-chip {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  background: var(--bg);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--fg-muted);
+  border: 1px solid var(--line);
+}
+
+.settings-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.settings-btn:hover { background: var(--bg-hover); border-color: var(--fg-faint); }
+.settings-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.settings-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  background: var(--fg);
+  color: var(--bg);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+.settings-btn-primary:hover { opacity: 0.92; }
+.settings-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.settings-btn-accent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+.settings-btn-accent:hover { opacity: 0.88; }
+.settings-btn-accent:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.settings-auth-link {
+  font-size: 13px;
+  color: var(--accent);
+  text-decoration: none;
+  transition: opacity 0.12s;
+}
+.settings-auth-link:hover { opacity: 0.8; }
+
+.settings-inline-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.settings-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>

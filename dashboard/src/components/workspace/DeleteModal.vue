@@ -37,7 +37,7 @@ const close = (): void => {
           <div class="modal-header">
             <div>Delete Workspace</div>
             <button class="close-button" @click="close">
-              <span class="material-symbols-outlined select-none">close</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M18 6L6 18M6 6l12 12"/></svg>
             </button>
           </div>
 
@@ -57,7 +57,7 @@ const close = (): void => {
             <button class="button is-transparent" @click="close">Cancel</button>
 
             <button class="button is-destructive" @click="submit">
-              <span class="material-symbols-outlined">delete</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
               Delete Workspace
             </button>
           </div>

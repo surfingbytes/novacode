@@ -1,24 +1,47 @@
 @import 'tailwindcss';
 
 @theme {
-  --color-bg: #0a0a0f;
-  --color-surface: #130e18;
-  --color-card: #1b1222;
-  --color-border: #1b1222;
-  --color-input: #130e18;
-  --color-primary: #ff2d55;
-  --color-primary-hover: #ff4d72;
-  --color-success: #30d158;
-  --color-warning: #ffd60a;
-  --color-destructive: #ff453a;
-  --color-text-primary: #f2f2f7;
-  --color-text-muted: #636369;
-  --color-info: #3b82f6;
+  --color-bg: #0f0e0d;
+  --color-surface: #171614;
+  --color-card: #1d1b18;
+  --color-border: #1d1b18;
+  --color-input: #171614;
+  --color-primary: #8b85ff;
+  --color-primary-hover: #a09bff;
+  --color-success: #7ec994;
+  --color-warning: #e6b067;
+  --color-destructive: #e87676;
+  --color-text-primary: #f5f1ea;
+  --color-text-muted: #a6a098;
+  --color-info: #7aa2ff;
   --color-fg: #ffffff;
   --font-family-sans:
     'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
     sans-serif;
-  --font-family-mono: 'Cascadia Code', 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  --font-family-mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+}
+
+/* Design token fallbacks (overridden at runtime by applyTheme) */
+:root {
+  --bg: #0f0e0d;
+  --bg-elev: #171614;
+  --bg-elev-2: #1d1b18;
+  --bg-hover: #23201d;
+  --line: rgba(255, 248, 235, 0.06);
+  --line-strong: rgba(255, 248, 235, 0.10);
+  --fg: #f5f1ea;
+  --fg-muted: #a6a098;
+  --fg-subtle: #6e6963;
+  --fg-faint: #48443f;
+  --accent: #8b85ff;
+  --accent-soft: rgba(139, 133, 255, 0.14);
+  --accent-line: rgba(139, 133, 255, 0.28);
+  --success: #7ec994;
+  --warn: #e6b067;
+  --danger: #e87676;
+  --agent-claude: #d97757;
+  --agent-cursor: #7aa2ff;
+  --agent-vibe: #7ec994;
 }
 
 *,
@@ -53,16 +76,129 @@ button:disabled {
   @apply cursor-not-allowed;
 }
 
+/* ────── NC Design System utilities ────── */
+
+.nc-mono {
+  font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  font-feature-settings: 'ss02', 'ss19';
+}
+
+.nc-eyebrow {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+  font-weight: 500;
+}
+
+.nc-panel {
+  background: var(--bg-elev);
+  border-radius: 10px;
+  padding: 20px;
+}
+
+.nc-row-hover {
+  transition: background 0.1s;
+}
+.nc-row-hover:hover {
+  background: var(--bg-hover);
+}
+
+.nc-status-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.nc-status-dot.busy {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--warn) 20%, transparent);
+}
+.nc-status-dot.idle {
+  background: var(--fg-faint);
+}
+.nc-status-dot.active {
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--success) 20%, transparent);
+}
+
+.nc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  background: var(--bg-elev-2);
+  color: var(--fg-muted);
+  border: 1px solid var(--line);
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+.nc-chip.agent-claude {
+  color: var(--agent-claude);
+  border-color: color-mix(in oklab, var(--agent-claude) 30%, var(--line));
+}
+.nc-chip.agent-cursor {
+  color: var(--agent-cursor);
+  border-color: color-mix(in oklab, var(--agent-cursor) 30%, var(--line));
+}
+.nc-chip.agent-vibe {
+  color: var(--agent-vibe);
+  border-color: color-mix(in oklab, var(--agent-vibe) 30%, var(--line));
+}
+.nc-chip.success {
+  color: var(--success);
+  border-color: color-mix(in oklab, var(--success) 30%, var(--line));
+}
+.nc-chip.success::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.nc-toggle {
+  position: relative;
+  width: 34px;
+  height: 19px;
+  border-radius: 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s;
+  background: var(--line-strong);
+}
+.nc-toggle.on {
+  background: var(--accent);
+}
+.nc-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 15px;
+  height: 15px;
+  border-radius: 8px;
+  background: var(--fg-muted);
+  transition: transform 0.15s, background 0.15s;
+}
+.nc-toggle.on .nc-toggle-knob {
+  transform: translateX(15px);
+  background: #fff;
+}
+
 .app-shell {
   position: fixed;
   inset: 0;
   overflow: hidden;
   padding-top: env(safe-area-inset-top, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
-}
-
-.material-symbols-outlined {
-  font-size: 1.1rem;
 }
 
 input,
@@ -95,9 +231,6 @@ input[type='radio'] {
     button {
       @apply flex absolute right-0 top-0 items-center gap-1 text-xs text-primary uppercase cursor-pointer;
       @apply hover:text-primary-hover;
-      .material-symbols-outlined {
-        @apply text-base;
-      }
     }
   }
 
@@ -106,10 +239,6 @@ input[type='radio'] {
 
     .icon {
       @apply absolute left-2.5 top-2.5 transition-all;
-
-      .material-symbols-outlined {
-        @apply text-base;
-      }
     }
 
     /* has .icon child */
@@ -222,10 +351,6 @@ button.button {
   .loading-spinner {
     @apply w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin;
   }
-
-  .material-symbols-outlined {
-    @apply select-none leading-none text-lg;
-  }
 }
 
 .button-select {
@@ -317,11 +442,6 @@ hr {
         @apply flex items-center gap-4;
         .icon {
           @apply w-9 h-9 flex items-center justify-center bg-primary/10 rounded-md shrink-0;
-          .material-symbols-outlined {
-            @apply text-primary text-lg;
-            @apply transition-all duration-300;
-            @apply group-hover:scale-125;
-          }
         }
         .info {
           @apply flex flex-col gap-0.5 flex-1 items-start;
@@ -425,12 +545,6 @@ hr {
   span,
   a {
     @apply text-sm text-text-muted hover:text-text-primary transition-colors flex items-center gap-1;
-    .material-symbols-outlined {
-      @apply text-base;
-    }
-    &:hover .material-symbols-outlined {
-      @apply text-text-primary;
-    }
   }
   div {
     @apply h-4 border-l-2 border-text-muted;

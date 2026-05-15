@@ -51,10 +51,14 @@ function extractThinkingFromStreamLine(line: string): string | null {
     if (event.type === 'assistant' && event.message && typeof event.message === 'object') {
       const content = (event.message as { content?: Array<{ type?: string; text?: string }> })
         .content;
-      if (!Array.isArray(content)) return null;
+      if (!Array.isArray(content)) {
+        return null;
+      }
       let out = '';
       for (const block of content) {
-        if (block?.type === 'thinking' && typeof block.text === 'string') out += block.text;
+        if (block?.type === 'thinking' && typeof block.text === 'string') {
+          out += block.text;
+        }
       }
       return out || null;
     }
@@ -65,7 +69,9 @@ function extractThinkingFromStreamLine(line: string): string | null {
 }
 
 function extractAssistantTextFromEvents(events: string[] | undefined): string {
-  if (!events?.length) return '';
+  if (!events?.length) {
+    return '';
+  }
   let text = '';
   for (const line of events) {
     try {
@@ -75,7 +81,9 @@ function extractAssistantTextFromEvents(events: string[] | undefined): string {
       };
       if (event.type === 'assistant' && Array.isArray(event.message?.content)) {
         for (const block of event.message.content) {
-          if (block.type === 'text' && typeof block.text === 'string') text += block.text;
+          if (block.type === 'text' && typeof block.text === 'string') {
+            text += block.text;
+          }
         }
       }
     } catch {
@@ -98,9 +106,12 @@ No markdown code fence; output only this JSON.`;
 function tryParseJson(str: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(str) as unknown;
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       return parsed as Record<string, unknown>;
-    if (typeof parsed === 'string') return tryParseJson(parsed);
+    }
+    if (typeof parsed === 'string') {
+      return tryParseJson(parsed);
+    }
     return null;
   } catch {
     return null;
@@ -108,12 +119,16 @@ function tryParseJson(str: string): Record<string, unknown> | null {
 }
 
 function parseSubtasksArray(arr: unknown): SubTask[] | null {
-  if (!Array.isArray(arr)) return null;
+  if (!Array.isArray(arr)) {
+    return null;
+  }
   try {
     const raw = arr as Array<{ name?: unknown; prompt?: unknown; category?: unknown }>;
     const result: SubTask[] = [];
     for (const item of raw) {
-      if (item == null || typeof item !== 'object') continue;
+      if (item == null || typeof item !== 'object') {
+        continue;
+      }
       const name = typeof item.name === 'string' ? item.name : String(item.name ?? '');
       const prompt = typeof item.prompt === 'string' ? item.prompt : String(item.prompt ?? '');
       const category =
@@ -136,21 +151,29 @@ function parsePlanFromLlmResponse(raw: string): { sharedContext: string; subtask
   let working = trimmed.includes('{') ? trimmed.slice(trimmed.indexOf('{')) : trimmed;
   let jsonStr = working;
   const codeBlock = /^```(?:json)?\s*([\s\S]*?)```\s*$/m.exec(working);
-  if (codeBlock) jsonStr = codeBlock[1].trim();
+  if (codeBlock) {
+    jsonStr = codeBlock[1].trim();
+  }
 
   let parsed = tryParseJson(jsonStr);
   if (!parsed && jsonStr.startsWith('"') && jsonStr.endsWith('"')) {
     try {
       const unescaped = JSON.parse(jsonStr) as string;
-      if (typeof unescaped === 'string') parsed = tryParseJson(unescaped);
+      if (typeof unescaped === 'string') {
+        parsed = tryParseJson(unescaped);
+      }
     } catch {
       // ignore
     }
   }
 
-  if (!parsed) return null;
+  if (!parsed) {
+    return null;
+  }
   const subtasks = parseSubtasksArray(parsed.subtasks);
-  if (!subtasks) return null;
+  if (!subtasks) {
+    return null;
+  }
   const sharedContext =
     typeof parsed.sharedContext === 'string' ? parsed.sharedContext : '';
   return { sharedContext, subtasks };
@@ -342,13 +365,17 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
 
       const finish = () => {
         db.deleteSession(tempSessionId).catch(() => {});
-        if (!raw.writableEnded) raw.end();
+        if (!raw.writableEnded) {
+          raw.end();
+        }
       };
 
       const subscriber = {
         onStream(line: string) {
           const text = extractThinkingFromStreamLine(line);
-          if (text) sendEvent({ type: 'thinking', text });
+          if (text) {
+            sendEvent({ type: 'thinking', text });
+          }
         },
         onDone(messages: ChatMessage[]) {
           const lastAssistant = messages.filter((m) => m.role === 'assistant').pop();
@@ -396,7 +423,9 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
           })
             .then(async (updated) => {
               const final = updated ?? (await db.getOrchestrator(orchestratorId));
-              if (final) sendEvent({ type: 'done', orchestrator: final });
+              if (final) {
+                sendEvent({ type: 'done', orchestrator: final });
+              }
               finish();
             })
             .catch(() => {
@@ -439,30 +468,21 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       return;
     }
 
-    console.log(
-      'orchestrator',
-      orchestrator.runStatus,
-      orchestrator.runStatus == 'running',
-      orchestrator.runCurrentStep,
-      orchestrator.runCurrentStep === 0
-    );
     const bRestart =
       orchestrator.runStatus === 'failed' ||
       (orchestrator.runStatus === 'running' && orchestrator.runCurrentStep === 0);
 
     try {
-      for (let i = startIndex; i < subtasks.length; i++) {
+      for (let subtaskIndex = startIndex; subtaskIndex < subtasks.length; subtaskIndex++) {
         // Check for cancellation/stop between steps by reading latest DB state.
         const currentState = await db.getOrchestrator(orchestratorId);
-        if ((!currentState || currentState.runStatus !== 'running') && bRestart == false) {
+        if ((!currentState || currentState.runStatus !== 'running') && bRestart === false) {
           // Stop silently if runStatus was changed (e.g. to "stopped" or "failed").
-          console.log('stopping');
           return;
         }
 
-        const task = subtasks[i];
-        const globalIndex = i;
-        console.log('globalIndex', globalIndex);
+        const task = subtasks[subtaskIndex];
+        const globalIndex = subtaskIndex;
 
         const createResult = await createSessionWithAgent({
           workspaceId,
@@ -472,7 +492,6 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
               ? normalizeTagStringList([task.category as string])
               : null
         });
-        console.log('createResult', createResult);
         if (createResult.error || !createResult.session) {
           await db.updateOrchestrator(orchestratorId, {
             runStatus: 'failed',

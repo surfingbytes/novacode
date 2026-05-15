@@ -27,12 +27,18 @@ function parseModelsOutput(stdout: string): CursorModelOption[] {
   const result: CursorModelOption[] = [];
 
   for (const line of lines) {
-    if (line === 'Available models' || line.startsWith('Tip:')) continue;
+    if (line === 'Available models' || line.startsWith('Tip:')) {
+      continue;
+    }
     const dashIdx = line.indexOf(' - ');
-    if (dashIdx === -1) continue;
+    if (dashIdx === -1) {
+      continue;
+    }
     const id = line.slice(0, dashIdx).trim();
     let label = line.slice(dashIdx + 3).trim();
-    if (!id) continue;
+    if (!id) {
+      continue;
+    }
     // Strip " (current)" or " (default)" from label for display
     label = label.replace(/\s*\((current|default)\)\s*$/i, '').trim();
     result.push({ id, label });

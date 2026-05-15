@@ -1,28 +1,26 @@
 <script setup lang="ts">
-// node_modules
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useRoute } from 'vue-router';
-
-// components
 import NavSidebar from '@/components/NavSidebar.vue';
 import NavTopBar from '@/components/NavTopBar.vue';
 import GlobalSearchModal from '@/components/GlobalSearchModal.vue';
 
 const FULL_HEIGHT_ROUTES = new Set(['session', 'orchestrator', 'workspace-files']);
+const SIDEBAR_COLLAPSED_KEY = 'sidebarCollapsed';
 
-// -------------------------------------------------- Data --------------------------------------------------
 const route = useRoute();
 const bSidebarIsOpen = ref(false);
+const bSidebarCollapsed = ref(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true');
 const bSearchModalOpen = ref(false);
 const isFullHeightRoute = computed(() => FULL_HEIGHT_ROUTES.has(route.name as string));
 
-// -------------------------------------------------- Sidebar behavior --------------------------------------------------
-// On mobile/tablet, close sidebar when route changes (e.g. after clicking a link)
+watch(bSidebarCollapsed, (val) => {
+  localStorage.setItem(SIDEBAR_COLLAPSED_KEY, val ? 'true' : 'false');
+});
+
 watch(
   () => route.path,
-  () => {
-    bSidebarIsOpen.value = false;
-  }
+  () => { bSidebarIsOpen.value = false; }
 );
 
 function toggleSidebar(): void {
@@ -33,7 +31,16 @@ function closeSidebar(): void {
   bSidebarIsOpen.value = false;
 }
 
-// -------------------------------------------------- Search behavior --------------------------------------------------
+function toggleCollapsed(): void {
+  // On desktop: toggle collapsed rail
+  // On mobile: toggle open/close
+  if (window.innerWidth >= 1024) {
+    bSidebarCollapsed.value = !bSidebarCollapsed.value;
+  } else {
+    toggleSidebar();
+  }
+}
+
 function openSearchModal(): void {
   bSearchModalOpen.value = true;
 }
@@ -48,16 +55,9 @@ function handleSearchNavigate(): void {
 }
 
 function handleMobileSearch(): void {
-  // On mobile, we need to close the sidebar first, then open search
-  // Use setTimeout to ensure the sidebar closes before search opens
   closeSidebar();
-  setTimeout(() => {
-    openSearchModal();
-  }, 100);
+  setTimeout(() => { openSearchModal(); }, 100);
 }
-
-// Keyboard shortcut for search (Ctrl+K)
-import { onMounted, onBeforeUnmount } from 'vue';
 
 function handleKeyDown(event: KeyboardEvent): void {
   if ((event.ctrlKey || event.metaKey) && event.key === 'k') {
@@ -66,45 +66,42 @@ function handleKeyDown(event: KeyboardEvent): void {
   }
 }
 
-onMounted(() => {
-  window.addEventListener('keydown', handleKeyDown);
-});
-
-onBeforeUnmount(() => {
-  window.removeEventListener('keydown', handleKeyDown);
-});
+onMounted(() => { window.addEventListener('keydown', handleKeyDown); });
+onBeforeUnmount(() => { window.removeEventListener('keydown', handleKeyDown); });
 </script>
 
 <template>
   <div class="flex h-full bg-bg">
-    <!-- Backdrop: only on mobile/tablet when sidebar is open -->
-    <button
-      type="button"
-      class="lg:hidden fixed inset-0 z-40 bg-black/40 backdrop-blur-sm transition-opacity duration-200"
-      :class="bSidebarIsOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'"
-      aria-label="Close menu"
-      tabindex="-1"
-      @click="closeSidebar"
+    <!-- Sidebar -->
+    <NavSidebar
+      :is-open="bSidebarIsOpen"
+      :collapsed="bSidebarCollapsed"
+      :on-navigate="closeSidebar"
+      @search="handleMobileSearch"
     />
 
-    <!-- Sidebar: always visible on desktop (lg+), overlay on mobile/tablet -->
-    <NavSidebar :is-open="bSidebarIsOpen" :on-navigate="closeSidebar" @search="handleMobileSearch" />
-
-    <!-- Main content column: top bar + page -->
+    <!-- Main content -->
     <div class="flex flex-1 flex-col min-w-0 h-full">
-      <!-- Top bar: only on mobile and tablet (hidden on desktop) -->
-      <NavTopBar :sidebar-open="bSidebarIsOpen" :on-menu-click="toggleSidebar" :on-search-click="openSearchModal" />
+      <NavTopBar
+        :sidebar-open="bSidebarIsOpen"
+        :sidebar-collapsed="bSidebarCollapsed"
+        :on-menu-click="toggleSidebar"
+        :on-search-click="openSearchModal"
+        @toggle-collapsed="toggleCollapsed"
+      />
 
-      <main class="flex flex-1 flex-col min-h-0" :class="isFullHeightRoute ? 'overflow-hidden' : 'overflow-y-auto'">
+      <main
+        class="flex flex-1 flex-col min-h-0"
+        :class="isFullHeightRoute ? 'overflow-hidden' : 'overflow-y-auto'"
+      >
         <RouterView v-slot="{ Component }">
           <component :is="Component" />
         </RouterView>
       </main>
-      
-      <!-- Global Search Modal -->
-      <GlobalSearchModal 
-        :is-open="bSearchModalOpen" 
-        :on-close="closeSearchModal" 
+
+      <GlobalSearchModal
+        :is-open="bSearchModalOpen"
+        :on-close="closeSearchModal"
         @navigate="handleSearchNavigate"
       />
     </div>

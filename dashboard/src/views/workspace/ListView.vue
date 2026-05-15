@@ -7,6 +7,8 @@ import { useRouter } from 'vue-router';
 import PageShell from '@/components/layout/PageShell.vue';
 import WorkspaceDeleteModal from '@/components/workspace/DeleteModal.vue';
 import WorkspaceEditModal from '@/components/workspace/EditModal.vue';
+import ContextMenu from '@/components/ContextMenu.vue';
+import type { ContextMenuItem } from '@/components/ContextMenu.vue';
 
 // stores
 import { useWorkspacesStore } from '@/stores/workspaces';
@@ -21,7 +23,7 @@ import type { AgentType, Workspace } from '@/@types/index';
 const store = useWorkspacesStore();
 const router = useRouter();
 
-// -------------------------------------------------- Data --------------------------------------------------
+// -------------------------------------------------- Refs --------------------------------------------------
 const bShowWorkspaceModal = ref<boolean>(false);
 const editingWorkspace = ref<Workspace | undefined>(undefined);
 const deletingId = ref<string | null>(null);
@@ -30,14 +32,20 @@ const archivingId = ref<string | null>(null);
 const bShowArchived = ref<boolean>(false);
 
 // First-start overlay: show when no integration is active or no git credentials
-const firstStartCheckDone = ref<boolean>(false);
+const bFirstStartCheckDone = ref<boolean>(false);
 const bCursorAuthenticated = ref<boolean>(false);
 const bClaudeAuthenticated = ref<boolean>(false);
 const bVibeConfigured = ref<boolean>(false);
-const hasGitCredentials = ref<boolean>(false);
+const bHasGitCredentials = ref<boolean>(false);
 const newGroupNames = ref<string[]>([]);
 const bShowWorkspaceDeleteModal = ref<boolean>(false);
 const deletingWorkspace = ref<Workspace | undefined>(undefined);
+
+const bCtxMenuOpen = ref<boolean>(false);
+const ctxMenuX = ref(0);
+const ctxMenuY = ref(0);
+const ctxMenuItems = ref<ContextMenuItem[]>([]);
+let ctxWorkspacePickHandler: ((key: string) => void) | null = null;
 
 // -------------------------------------------------- Computed --------------------------------------------------
 /** Groups for workspace modal suggestions (unique non-empty group names, sorted). */
@@ -81,13 +89,13 @@ function buildGroupedList(
 ): { groupLabel: string; workspaces: Workspace[] }[] {
   const byGroup = new Map<string, Workspace[]>();
   const ungrouped: Workspace[] = [];
-  for (const ws of workspaces) {
-    const g = ws.group?.trim() || null;
+  for (const workspace of workspaces) {
+    const g = workspace.group?.trim() || null;
     if (!g) {
-      ungrouped.push(ws);
+      ungrouped.push(workspace);
     } else {
       const list = byGroup.get(g) ?? [];
-      list.push(ws);
+      list.push(workspace);
       byGroup.set(g, list);
     }
   }
@@ -136,8 +144,8 @@ const openCreateWorkspace = (): void => {
   bShowWorkspaceModal.value = true;
 };
 
-const openEditWorkspace = (ws: Workspace): void => {
-  editingWorkspace.value = ws;
+const openEditWorkspace = (workspace: Workspace): void => {
+  editingWorkspace.value = workspace;
   bShowWorkspaceModal.value = true;
 };
 
@@ -195,6 +203,48 @@ const handleDeleteWorkspace = async (id: string): Promise<void> => {
   }
 };
 
+function workspaceContextItems(workspace: Workspace): ContextMenuItem[] {
+  const arch = workspace.archived;
+  return [
+    { key: 'open', label: 'Open', icon: 'open_in_new' },
+    { key: 'edit', label: 'Edit…', icon: 'edit' },
+    { key: 'archive', label: arch ? 'Unarchive' : 'Archive', icon: arch ? 'unarchive' : 'inventory_2' },
+    { key: 'delete', label: 'Delete…', icon: 'delete', danger: true }
+  ];
+}
+
+function openWorkspaceContextMenu(e: MouseEvent, workspace: Workspace): void {
+  e.preventDefault();
+  e.stopPropagation();
+  ctxMenuItems.value = workspaceContextItems(workspace);
+  ctxWorkspacePickHandler = (key: string) => {
+    if (key === 'open') {
+      openWorkspace(workspace.id);
+      return;
+    }
+    if (key === 'edit') {
+      openEditWorkspace(workspace);
+      return;
+    }
+    if (key === 'archive') {
+      void handleArchiveWorkspace(workspace, !workspace.archived);
+      return;
+    }
+    if (key === 'delete') {
+      openDeleteWorkspace(workspace);
+    }
+  };
+  ctxMenuX.value = e.clientX;
+  ctxMenuY.value = e.clientY;
+  bCtxMenuOpen.value = true;
+}
+
+function onWorkspaceContextPick(key: string): void {
+  const fn = ctxWorkspacePickHandler;
+  ctxWorkspacePickHandler = null;
+  fn?.(key);
+}
+
 const fetchFirstStartStatus = async (): Promise<void> => {
   const [cursorResult, claudeResult, vibeResult, settingsResult] = await Promise.allSettled([
     agentAuthApi.cursorStatus(),
@@ -214,9 +264,9 @@ const fetchFirstStartStatus = async (): Promise<void> => {
   if (settingsResult.status === 'fulfilled') {
     const name = settingsResult.value.data.gitUserName?.trim() ?? '';
     const email = settingsResult.value.data.gitUserEmail?.trim() ?? '';
-    hasGitCredentials.value = name.length > 0 && email.length > 0;
+    bHasGitCredentials.value = name.length > 0 && email.length > 0;
   }
-  firstStartCheckDone.value = true;
+  bFirstStartCheckDone.value = true;
 };
 
 // -------------------------------------------------- Lifecycle --------------------------------------------------
@@ -229,245 +279,140 @@ onMounted((): void => {
 
 <template>
   <PageShell>
-    <!-- Breadcrumb -->
-
     <!-- Header -->
-    <div class="flex items-start justify-between gap-4 mb-8">
+    <div class="ws-header">
       <div>
-        <h1 class="text-xl font-bold text-text-primary">Workspaces</h1>
-        <p class="text-sm text-text-muted mt-1">
+        <div class="nc-eyebrow ws-eyebrow">// workspaces</div>
+        <h1 class="ws-title">Workspaces</h1>
+        <p class="ws-subtitle">
           Select a workspace to browse files and manage git. Paths are under
-          <code class="text-xs bg-input px-1.5 py-0.5 rounded text-text-primary font-mono"
-            >/data-root</code
-          >.
+          <code class="ws-path-pill nc-mono">/data-root</code>.
         </p>
       </div>
       <button
         v-if="!store.bIsLoading && store.workspaces.length > 0"
-        class="shrink-0 flex items-center gap-1.5 bg-primary hover:bg-primary-hover text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all shadow-lg shadow-primary/20"
+        class="ws-add-btn"
         @click="openCreateWorkspace"
       >
-        <span class="material-symbols-outlined select-none leading-none" style="font-size: 18px"
-          >add</span
-        >
-        Add Workspace
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14 M5 12h14"/></svg>
+        Add workspace
       </button>
     </div>
 
     <!-- Loading -->
     <Transition name="fade" mode="out-in">
-      <div
-        v-if="store.bIsLoading"
-        key="loading"
-        class="flex flex-col items-center justify-center py-32 gap-4 flex-1"
-      >
-        <div
-          class="w-8 h-8 border-2 border-surface border-t-primary rounded-full animate-spin"
-        ></div>
-        <p class="text-sm text-text-muted">Loading workspaces…</p>
+      <div v-if="store.bIsLoading" key="loading" class="ws-state">
+        <div class="ws-spinner" />
+        <p class="ws-state-text">Loading workspaces…</p>
       </div>
 
       <!-- Empty state -->
-      <div
-        v-else-if="store.workspaces.length === 0"
-        key="empty"
-        class="flex flex-col items-center justify-center py-32 gap-5 flex-1"
-      >
-        <div
-          class="w-16 h-16 rounded-2xl bg-fg/4 border border-fg/8 flex items-center justify-center"
-        >
-          <span
-            class="material-symbols-outlined select-none text-text-muted"
-            style="font-size: 32px"
-            >folder</span
-          >
+      <div v-else-if="store.workspaces.length === 0" key="empty" class="ws-state">
+        <div class="ws-empty-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 012-2h3.5l2 2H19a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
         </div>
-        <div class="text-center">
-          <p class="text-xl font-bold text-text-primary">No workspaces yet</p>
-          <p class="text-sm text-text-muted mt-1 max-w-sm">
-            Get started by adding your first workspace to manage your projects and collaborate with
-            AI.
-          </p>
-        </div>
-        <button class="button is-primary" @click="openCreateWorkspace">
-          <span class="material-symbols-outlined">add</span>
-          Add Workspace
+        <p class="ws-state-title">No workspaces yet</p>
+        <p class="ws-state-text">Add your first workspace to manage projects and collaborate with AI.</p>
+        <button class="ws-add-btn" @click="openCreateWorkspace">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14 M5 12h14"/></svg>
+          Add workspace
         </button>
       </div>
 
       <!-- Workspace grid (grouped) -->
-      <div v-else key="grid" class="grid-view">
-        <!-- Active workspaces -->
+      <div v-else key="grid">
         <template v-for="section in groupedWorkspaces" :key="section.groupLabel">
-          <div class="group-header">
-            <h2>{{ section.groupLabel }}</h2>
-            <hr />
+          <div class="ws-group-header">
+            <span class="nc-eyebrow">// {{ section.groupLabel.toLowerCase() }}</span>
+            <span class="ws-group-count nc-mono">{{ section.workspaces.length }} workspace{{ section.workspaces.length === 1 ? '' : 's' }}</span>
           </div>
-          <TransitionGroup name="list-stagger" tag="div" class="grid-view-items">
+          <div class="ws-grid">
             <div
-              v-for="(workspace, index) in section.workspaces"
+              v-for="workspace in section.workspaces"
               :key="workspace.id"
-              :style="{ '--stagger-index': index }"
-              class="group grid-item"
+              class="ws-card nc-row-hover"
               @click="openWorkspace(workspace.id)"
+              @contextmenu.prevent.stop="openWorkspaceContextMenu($event, workspace)"
             >
-              <div
-                v-if="workspace.color"
-                class="line"
-                :style="{ backgroundColor: workspace.color }"
-              ></div>
-              <div class="top">
-                <div class="icon">
-                  <span class="material-symbols-outlined">folder</span>
+              <!-- 3px color bar -->
+              <div class="ws-card__bar" :style="{ background: workspace.color || 'var(--accent)' }" />
+              <!-- Top row: icon + name/path + actions -->
+              <div class="ws-card__top">
+                <div class="ws-card__folder-icon" :style="{ background: `color-mix(in oklab, ${workspace.color || 'var(--accent)'} 22%, transparent)`, color: workspace.color || 'var(--accent)' }">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 012-2h3.5l2 2H19a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
                 </div>
-                <div class="info">
-                  <p class="title">{{ workspace.name }}</p>
-                  <p class="subtitle font-mono">{{ workspace.path }}</p>
+                <div class="ws-card__info">
+                  <div class="ws-card__name">{{ workspace.name }}</div>
+                  <div class="ws-card__path nc-mono">{{ workspace.path }}</div>
                 </div>
-                <span
-                  v-if="workspaceHasBusySession(workspace.id)"
-                  class="inline-flex items-center gap-1.5 text-[11px] text-primary shrink-0"
-                >
-                  <span
-                    class="w-3 h-3 border-2 border-primary/40 border-t-primary rounded-full animate-spin"
-                  />
-                  Busy
-                </span>
-                <div class="buttons">
-                  <button
-                    class="button is-icon"
-                    title="Edit"
-                    @click.prevent.stop="openEditWorkspace(workspace)"
-                  >
-                    <span class="material-symbols-outlined">edit</span>
+                <!-- Busy indicator -->
+                <span v-if="workspaceHasBusySession(workspace.id)" class="nc-status-dot busy" />
+                <!-- Action cluster (hover-only) -->
+                <div class="ws-card__actions">
+                  <button class="ws-icon-btn" title="Edit" @click.prevent.stop="openEditWorkspace(workspace)">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6 M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
                   </button>
-                  <button
-                    class="button is-icon hover:bg-warning/10! hover:border-warning!"
-                    title="Archive"
-                    :disabled="archivingId === workspace.id"
-                    @click.prevent.stop="handleArchiveWorkspace(workspace, true)"
-                  >
-                    <div
-                      v-if="archivingId === workspace.id"
-                      class="w-3.5 h-3.5 border-2 border-text-muted/30 border-t-text-muted rounded-full animate-spin"
-                    ></div>
-                    <span v-else class="material-symbols-outlined text-warning">archive</span>
+                  <button class="ws-icon-btn ws-icon-btn--warn" title="Archive" :disabled="archivingId === workspace.id" @click.prevent.stop="handleArchiveWorkspace(workspace, true)">
+                    <div v-if="archivingId === workspace.id" class="ws-btn-spinner" />
+                    <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18 M5 7v12a2 2 0 002 2h10a2 2 0 002-2V7 M10 11h4"/></svg>
                   </button>
-                  <button
-                    class="button is-icon hover:bg-destructive/10! hover:border-destructive!"
-                    title="Delete"
-                    @click.prevent.stop="openDeleteWorkspace(workspace)"
-                  >
-                    <span class="material-symbols-outlined text-destructive">delete</span>
+                  <button class="ws-icon-btn ws-icon-btn--danger" title="Delete" @click.prevent.stop="openDeleteWorkspace(workspace)">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18 M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2 M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
                   </button>
                 </div>
               </div>
-              <div
-                class="bottom border-t border-border mt-4 flex items-center justify-between pt-4 pb-0"
-              >
-                <div class="tags flex flex-wrap gap-1.5">
-                  <div
-                    v-for="tag in workspace.tags"
-                    :key="tag"
-                    class="tag text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full border border-primary/20 font-medium"
-                  >
-                    {{ tag }}
-                  </div>
-                </div>
-                <div class="agent-type text-xs text-text-muted flex items-center gap-1">
-                  <template v-if="workspace.defaultAgentType === 'cursor-agent'">
-                    <span class="material-symbols-outlined">code</span>
-                    Cursor
-                  </template>
-                  <template v-else-if="workspace.defaultAgentType === 'mistral-vibe'">
-                    <span class="material-symbols-outlined">waves</span>
-                    Mistral Vibe
-                  </template>
-                  <template v-else-if="workspace.defaultAgentType === 'claude'">
-                    <span class="material-symbols-outlined">chat</span>
-                    Claude
-                  </template>
-                </div>
+              <!-- Bottom row: agent chip -->
+              <div class="ws-card__bottom">
+                <span v-if="workspace.defaultAgentType" class="nc-chip" :class="{
+                  'agent-claude': workspace.defaultAgentType === 'claude',
+                  'agent-cursor': workspace.defaultAgentType === 'cursor-agent',
+                  'agent-vibe': workspace.defaultAgentType === 'mistral-vibe',
+                }">
+                  {{ workspace.defaultAgentType === 'cursor-agent' ? 'cursor' : workspace.defaultAgentType === 'mistral-vibe' ? 'vibe' : 'claude' }}
+                </span>
+                <span v-if="workspace.defaultAgentType" class="ws-card__agent-label nc-mono">· default agent</span>
               </div>
             </div>
-          </TransitionGroup>
+          </div>
         </template>
 
         <!-- Archived workspaces toggle -->
-        <div v-if="archivedCount > 0" class="mt-6">
-          <button
-            class="flex items-center gap-2 text-sm text-text-muted hover:text-text-primary transition-colors font-medium select-none"
-            @click="bShowArchived = !bShowArchived"
-          >
-            <span
-              class="material-symbols-outlined transition-transform duration-200"
-              :class="bShowArchived ? 'rotate-90' : ''"
-              style="font-size: 18px"
-              >chevron_right</span
-            >
+        <div v-if="archivedCount > 0" style="margin-top: 32px;">
+          <button class="ws-archived-toggle" @click="bShowArchived = !bShowArchived">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" :style="{ transform: bShowArchived ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
             Archived
-            <span class="text-xs bg-fg/[0.07] border border-fg/10 rounded-full px-2 py-0.5">{{
-              archivedCount
-            }}</span>
+            <span class="ws-archived-count">{{ archivedCount }}</span>
           </button>
 
           <Transition name="fade">
-            <div v-if="bShowArchived" class="mt-4">
-              <template
-                v-for="section in groupedArchivedWorkspaces"
-                :key="'arch-' + section.groupLabel"
-              >
-                <div class="group-header opacity-60">
-                  <h2>{{ section.groupLabel }}</h2>
-                  <hr />
+            <div v-if="bShowArchived" style="margin-top: 16px;">
+              <template v-for="section in groupedArchivedWorkspaces" :key="'arch-' + section.groupLabel">
+                <div class="ws-group-header" style="opacity: 0.6;">
+                  <span class="nc-eyebrow">// {{ section.groupLabel.toLowerCase() }}</span>
                 </div>
-                <div class="grid-view-items">
+                <div class="ws-grid" style="opacity: 0.55;">
                   <div
                     v-for="workspace in section.workspaces"
                     :key="workspace.id"
-                    class="grid-item opacity-50 hover:opacity-70 transition-opacity cursor-default"
+                    class="ws-card"
+                    @contextmenu.prevent.stop="openWorkspaceContextMenu($event, workspace)"
                   >
-                    <div
-                      v-if="workspace.color"
-                      class="line"
-                      :style="{ backgroundColor: workspace.color }"
-                    ></div>
-                    <div class="top">
-                      <div class="icon">
-                        <span class="material-symbols-outlined">folder</span>
+                    <div class="ws-card__bar" :style="{ background: workspace.color || 'var(--accent)' }" />
+                    <div class="ws-card__top">
+                      <div class="ws-card__folder-icon" :style="{ background: `color-mix(in oklab, ${workspace.color || 'var(--accent)'} 22%, transparent)`, color: workspace.color || 'var(--accent)' }">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h3.5l2 2H19a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
                       </div>
-                      <div class="info">
-                        <p class="title">{{ workspace.name }}</p>
-                        <p class="subtitle font-mono">{{ workspace.path }}</p>
+                      <div class="ws-card__info">
+                        <div class="ws-card__name">{{ workspace.name }}</div>
+                        <div class="ws-card__path nc-mono">{{ workspace.path }}</div>
                       </div>
-                      <span
-                        v-if="workspaceHasBusySession(workspace.id)"
-                        class="inline-flex items-center gap-1.5 text-[11px] text-primary shrink-0"
-                      >
-                        <span
-                          class="w-3 h-3 border-2 border-primary/40 border-t-primary rounded-full animate-spin"
-                        />
-                        Busy
-                      </span>
-                      <div class="buttons">
-                        <button
-                          class="button is-icon"
-                          title="Unarchive"
-                          :disabled="archivingId === workspace.id"
-                          @click.prevent.stop="handleArchiveWorkspace(workspace, false)"
-                        >
-                          <div
-                            v-if="archivingId === workspace.id"
-                            class="w-3.5 h-3.5 border-2 border-text-muted/30 border-t-text-muted rounded-full animate-spin"
-                          ></div>
-                          <span v-else class="material-symbols-outlined text-primary">unarchive</span>
+                      <div class="ws-card__actions">
+                        <button class="ws-icon-btn" title="Unarchive" :disabled="archivingId === workspace.id" @click.prevent.stop="handleArchiveWorkspace(workspace, false)">
+                          <div v-if="archivingId === workspace.id" class="ws-btn-spinner" />
+                          <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18 M5 7l2-4h10l2 4 M9 11v6 M15 11v6"/></svg>
                         </button>
-                        <button
-                          class="button is-icon hover:bg-destructive/10! hover:border-destructive!"
-                          title="Delete"
-                          @click.prevent.stop="openDeleteWorkspace(workspace)"
-                        >
-                          <span class="material-symbols-outlined text-destructive">delete</span>
+                        <button class="ws-icon-btn ws-icon-btn--danger" title="Delete" @click.prevent.stop="openDeleteWorkspace(workspace)">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18 M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2 M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
                         </button>
                       </div>
                     </div>
@@ -495,9 +440,18 @@ onMounted((): void => {
     :workspace="deletingWorkspace"
     @delete="handleDeleteWorkspace"
   />
+
+  <ContextMenu
+    v-model="bCtxMenuOpen"
+    :x="ctxMenuX"
+    :y="ctxMenuY"
+    :items="ctxMenuItems"
+    @pick="onWorkspaceContextPick"
+  />
 </template>
 
 <style scoped>
+/* ── transitions ─────────────────────────────────────────── */
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.2s ease;
@@ -505,5 +459,307 @@ onMounted((): void => {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* ── page header ─────────────────────────────────────────── */
+.ws-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.ws-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--fg);
+  margin: 4px 0 6px;
+  letter-spacing: -0.3px;
+}
+
+.ws-subtitle {
+  font-size: 13px;
+  color: var(--fg-subtle);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.ws-path-pill {
+  display: inline;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+
+.ws-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: opacity 0.1s;
+}
+.ws-add-btn:hover {
+  opacity: 0.88;
+}
+
+/* ── loading / empty states ──────────────────────────────── */
+.ws-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 72px 24px;
+  gap: 10px;
+  text-align: center;
+}
+
+.ws-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: ws-spin 0.7s linear infinite;
+}
+
+@keyframes ws-spin {
+  to { transform: rotate(360deg); }
+}
+
+.ws-empty-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted);
+  margin-bottom: 4px;
+}
+
+.ws-state-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+  margin: 0;
+}
+
+.ws-state-text {
+  font-size: 13px;
+  color: var(--fg-subtle);
+  margin: 0;
+  max-width: 340px;
+  line-height: 1.5;
+}
+
+/* ── group header ────────────────────────────────────────── */
+.ws-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  margin-top: 28px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.ws-group-header:first-child {
+  margin-top: 0;
+}
+
+.ws-group-count {
+  font-size: 11px;
+  color: var(--fg-subtle);
+}
+
+/* ── workspace grid ──────────────────────────────────────── */
+.ws-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+/* ── workspace card ──────────────────────────────────────── */
+.ws-card {
+  position: relative;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.12s, box-shadow 0.12s;
+  display: flex;
+  flex-direction: column;
+}
+.ws-card:hover {
+  border-color: var(--line-strong);
+  box-shadow: 0 2px 8px color-mix(in oklab, var(--fg) 6%, transparent);
+}
+.ws-card:hover .ws-card__actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ws-card__bar {
+  height: 3px;
+  width: 100%;
+  flex-shrink: 0;
+}
+
+.ws-card__top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px 10px;
+  flex: 1;
+}
+
+.ws-card__folder-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ws-card__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.ws-card__name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.ws-card__path {
+  font-size: 11px;
+  color: var(--fg-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+/* Action cluster — hidden until card hover */
+.ws-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+  flex-shrink: 0;
+}
+
+.ws-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.ws-icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.ws-icon-btn--warn:hover {
+  background: color-mix(in oklab, var(--warn, #d97706) 14%, transparent);
+  color: var(--warn, #d97706);
+}
+.ws-icon-btn--danger:hover {
+  background: color-mix(in oklab, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+.ws-icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ws-btn-spinner {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: ws-spin 0.6s linear infinite;
+  opacity: 0.6;
+}
+
+/* Bottom row */
+.ws-card__bottom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 10px;
+  min-height: 22px;
+}
+
+.ws-card__agent-label {
+  font-size: 10.5px;
+  color: var(--fg-subtle);
+}
+
+/* ── archived toggle ─────────────────────────────────────── */
+.ws-archived-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.ws-archived-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.ws-archived-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--line);
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
 }
 </style>

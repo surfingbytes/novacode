@@ -29,7 +29,7 @@ const emit = defineEmits<{
 // -------------------------------------------------- Types --------------------------------------------------
 // (none)
 
-// -------------------------------------------------- Data --------------------------------------------------
+// -------------------------------------------------- Refs --------------------------------------------------
 const containerEl = ref<HTMLElement | undefined>(undefined);
 
 const bIsAtBottom = ref<boolean>(true);
@@ -37,7 +37,7 @@ let viewport: HTMLElement | null = null;
 
 let term: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
-let ws: WebSocket | null = null;
+let webSocket: WebSocket | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let inputDisposable: { dispose(): void } | null = null;
 let bIsDestroyed: boolean = false;
@@ -106,7 +106,9 @@ const writeFiltered = (data: string): void => {
       continue;
     }
     if (bInBox) {
-      if (isBoxBottom(plain)) bInBox = false;
+      if (isBoxBottom(plain)) {
+        bInBox = false;
+      }
       continue;
     }
     result += line;
@@ -123,8 +125,8 @@ const flushOutputBuffer = (): void => {
 };
 
 const sendWs = (msg: WsClientMessage): void => {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(msg));
+  if (webSocket && webSocket.readyState === WebSocket.OPEN) {
+    webSocket.send(JSON.stringify(msg));
   }
 };
 
@@ -146,15 +148,15 @@ const connectWs = (): void => {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
-  if (ws) {
-    ws.onclose = null;
-    ws.onerror = null;
-    ws.close();
+  if (webSocket) {
+    webSocket.onclose = null;
+    webSocket.onerror = null;
+    webSocket.close();
   }
 
-  ws = new WebSocket(buildWsUrl(props.sessionId));
+  webSocket = new WebSocket(buildWsUrl(props.sessionId));
 
-  ws.onopen = () => {
+  webSocket.onopen = () => {
     reconnectDelay = 1000;
     fitAddon?.fit();
     const cols = term?.cols ?? 220;
@@ -162,7 +164,7 @@ const connectWs = (): void => {
     sendWs({ type: 'resize', cols, rows });
   };
 
-  ws.onmessage = (event: MessageEvent) => {
+  webSocket.onmessage = (event: MessageEvent) => {
     try {
       const msg = JSON.parse(event.data as string) as WsServerMessage;
       if (msg.type === 'history' || msg.type === 'output') {
@@ -239,9 +241,9 @@ const connectWs = (): void => {
     }
   };
 
-  ws.onerror = () => {};
+  webSocket.onerror = () => {};
 
-  ws.onclose = () => {
+  webSocket.onclose = () => {
     if (bIsDestroyed) return;
     term?.writeln('\r\n\x1b[33m[Disconnected]\x1b[0m');
     scheduleReconnect();
@@ -250,7 +252,11 @@ const connectWs = (): void => {
 
 const handleVisibilityChange = (): void => {
   if (document.visibilityState !== 'visible') return;
-  if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+  if (
+    !webSocket ||
+    webSocket.readyState === WebSocket.CLOSED ||
+    webSocket.readyState === WebSocket.CLOSING
+  ) {
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
@@ -261,7 +267,11 @@ const handleVisibilityChange = (): void => {
 };
 
 const handleOnline = (): void => {
-  if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+  if (
+    !webSocket ||
+    webSocket.readyState === WebSocket.CLOSED ||
+    webSocket.readyState === WebSocket.CLOSING
+  ) {
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
@@ -384,7 +394,7 @@ onUnmounted((): void => {
   window.removeEventListener('online', handleOnline);
   if (viewport) viewport.removeEventListener('scroll', onViewportScroll);
   inputDisposable?.dispose();
-  ws?.close();
+  webSocket?.close();
   resizeObserver?.disconnect();
   term?.dispose();
 });

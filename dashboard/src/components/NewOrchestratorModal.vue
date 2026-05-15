@@ -26,7 +26,7 @@ const emit = defineEmits<{
   create: [payload: { name: string; tags?: string | null; agentType?: AgentType }];
 }>();
 
-// -------------------------------------------------- Data --------------------------------------------------
+// -------------------------------------------------- Refs --------------------------------------------------
 const name = ref('');
 const tags = ref('');
 const defaultName = ref('');

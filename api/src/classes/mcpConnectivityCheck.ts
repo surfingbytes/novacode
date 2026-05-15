@@ -37,9 +37,13 @@ function checkStdio(configDir: string, cfg: McpClientServerConfig): Promise<McpC
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const done = (result: McpCheckResult): void => {
-      if (settled) return;
+      if (settled) {
+        return;
+      }
       settled = true;
-      if (timer !== undefined) clearTimeout(timer);
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
       resolve(result);
     };
 
@@ -61,7 +65,9 @@ function checkStdio(configDir: string, cfg: McpClientServerConfig): Promise<McpC
     });
 
     child.on('exit', (code, signal) => {
-      if (settled) return;
+      if (settled) {
+        return;
+      }
       if (code === 0) {
         done({
           ok: false,
@@ -79,7 +85,9 @@ function checkStdio(configDir: string, cfg: McpClientServerConfig): Promise<McpC
     });
 
     timer = setTimeout(() => {
-      if (settled) return;
+      if (settled) {
+        return;
+      }
       try {
         child.kill('SIGTERM');
       } catch {
@@ -106,22 +114,22 @@ async function checkHttp(cfg: McpClientServerConfig): Promise<McpCheckResult> {
   }
 
   const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), HTTP_TIMEOUT_MS);
+  const timeoutHandle = setTimeout(() => ac.abort(), HTTP_TIMEOUT_MS);
   try {
     const headers = new Headers();
     for (const [k, v] of Object.entries(cfg.headers ?? {})) {
       headers.set(k, v);
     }
-    const res = await fetch(url, {
+    const response = await fetch(url, {
       method: 'GET',
       headers,
       signal: ac.signal,
       redirect: 'follow'
     });
-    clearTimeout(t);
-    return { ok: true, kind: 'http', detail: `HTTP ${res.status}` };
+    clearTimeout(timeoutHandle);
+    return { ok: true, kind: 'http', detail: `HTTP ${response.status}` };
   } catch (e) {
-    clearTimeout(t);
+    clearTimeout(timeoutHandle);
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false, kind: 'http', error: msg };
   }

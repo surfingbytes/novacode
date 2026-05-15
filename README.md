@@ -1,6 +1,6 @@
 <div align="center">
 
-# NovaCode
+# Nova Code
 
 **Self-hosted dashboard for AI coding agents**
 
@@ -31,6 +31,7 @@ Run [Cursor Agent](https://cursor.com), [Claude Code](https://claude.ai/code), a
 
 ## Documentation
 
+- **[Coding conventions](../docs/coding-conventions.md)** — dashboard/API style (imports, Vue script sections, boolean `b` prefix, naming, braces).
 - **[Current functionality](../functionality.md)** — canonical inventory of what is implemented today (API routes, WebSockets, UI, and known limitations). Prefer this over marketing copy when in doubt.
 - **[Feature ideas](../feature-ideas.md)** — consolidated backlog of possible improvements (not a commitment); merges themes from `app/FEATURES.md` and `app/docs/improvement-plan.md`.
 - **[Security audit checklist (2026-03-30)](../docs/security/security-audit-checklist-2026-03-30.md)** — scoped audit map covering auth, authorization, input/output handling, command execution, secrets, dependencies, CI/CD, and monitoring review paths.
@@ -46,9 +47,9 @@ Run [Cursor Agent](https://cursor.com), [Claude Code](https://claude.ai/code), a
 | | |
 |---|---|
 | **Home** | Session overview: busy and idle counts, recently active strip, optional compact list; jump to workspaces from there. |
-| **Workspaces** | Map any directory on your host to a named project. Group, color-code, tag, and archive. |
-| **Sessions** | Start a **Cursor Agent**, **Claude Code**, or **Mistral Vibe** session per workspace. Streaming chat over WebSocket, image attachments, tags, archive, and bulk actions via the sessions list multiselect bar. The in-workspace **Sessions** sidebar shows agent avatars, relative time, and a WhatsApp-style last-message preview (`You: …` for your messages). Session header action buttons use consistent square icon controls (edit/archive/delete). |
-| **Global Search** | Quickly find workspaces, sessions, automations, settings, and rule templates across your entire NovaCode instance. Accessible via the search bar in the top navigation (desktop) or sidebar (mobile). Press `Ctrl+K` to open the search modal from anywhere. Results are grouped by category and include relevant metadata like workspace names for sessions. |
+| **Workspaces** | Map any directory on your host to a named project. Group, color-code, tag, and archive. The workspace grid supports a **right-click** menu (open, edit, archive, delete). |
+| **Sessions** | Start a **Cursor Agent**, **Claude Code**, or **Mistral Vibe** session per workspace. Streaming chat over WebSocket, image attachments, tags, archive, and bulk actions via the sessions list multiselect bar. The in-workspace **Sessions** sidebar shows agent avatars, relative time, and a WhatsApp-style last-message preview (`You: …` for your messages). Session header action buttons use consistent square icon controls (edit/archive/delete). **Right-click** the sidebar, the sessions list, or the grid for open, edit (sessions), archive, and delete. |
+| **Global Search** | Quickly find workspaces, sessions, automations, settings, and rule templates across your entire Nova Code instance. Accessible via the search bar in the top navigation (desktop) or sidebar (mobile). Press `Ctrl+K` to open the search modal from anywhere. Results are grouped by category and include relevant metadata like workspace names for sessions. |
 | **Terminal** | Full PTY-backed terminal output via `node-pty` and xterm.js. |
 | **Orchestrators** | Multi-step task plans: decompose a goal into subtasks, run each step in its own session. The orchestrator detail header matches session controls (sidebar toggle, workspace subtitle, edit/archive/delete actions). Deleting an orchestrator removes its step sessions too. |
 | **Automations** | Schedule recurring agent prompts per workspace (cron-style intervals). |
@@ -57,7 +58,7 @@ Run [Cursor Agent](https://cursor.com), [Claude Code](https://claude.ai/code), a
 | **Workspace rules** | Markdown rule files injected into every agent prompt for that workspace. |
 | **Role templates** | Reusable instruction snippets for bootstrapping new rule files. |
 | **REST API** | JSON API under `/api` with JWT bearer auth only (no separate API-token or API-key table today; see root `feature-ideas.md` for possible future programmatic keys). |
-| **Web Push** | Browser notifications when sessions produce output; VAPID keys are created automatically in the config volume. |
+| **Web Push** | Browser notifications when sessions finish; the body previews the last assistant text or tool result (title still names workspace/session). Notifications include a **Reply** action that opens the PWA directly to that session. VAPID keys are created automatically in the config volume. |
 | **Health endpoint** | `GET /api/health` — unauthenticated, ready for Docker `HEALTHCHECK` and uptime monitors. |
 | **MCP connectivity check** | In **Settings → MCP**, **Test connectivity** dry-runs each registered MCP server (stdio spawn, HTTP GET) on the host before agents use them. |
 
@@ -162,19 +163,23 @@ Copy `.env.example` to `.env` and edit the values below.
 
 ## Agent setup
 
-NovaCode spawns **Cursor Agent** and **Claude Code** as child processes inside the container (both installed in the Docker build). **Mistral Vibe** is optional: the `vibe` binary must be on `PATH` inside the container, and you configure the API key under **Settings → Mistral Vibe** (written to `.vibe/.env` under `/config`). Chat runs use `vibe --prompt "…" --output streaming` (JSONL, same stream shape as Cursor for the UI). The app does not rely on a session id from stdout: after each run it resolves the latest `session_*` folder under `~/.vibe/logs/session` (with `HOME=/config` in the default deployment, that is `/config/.vibe/logs/session`) using the timestamp embedded in the folder name when it matches `session_YYYYMMDD_HHMMSS_*`, otherwise the directory mtime, then persists the suffix after the final underscore as the id for `--resume` on the next turn. Set **`VIBE_HOME`** in the environment (or **`AGENT_ENV_VIBE_HOME`** to forward into agents) if you use a non-default Vibe data directory. After starting the app:
+Nova Code spawns **Cursor Agent** and **Claude Code** as child processes inside the container (both installed in the Docker build). **Mistral Vibe** is optional: the `vibe` binary must be on `PATH` inside the container, and you configure the API key under **Settings → Mistral Vibe** (written to `.vibe/.env` under `/config`). Chat runs use `vibe --prompt "…" --output streaming` (JSONL, same stream shape as Cursor for the UI). The app does not rely on a session id from stdout: after each run it resolves the latest `session_*` folder under `~/.vibe/logs/session` (with `HOME=/config` in the default deployment, that is `/config/.vibe/logs/session`) using the timestamp embedded in the folder name when it matches `session_YYYYMMDD_HHMMSS_*`, otherwise the directory mtime, then persists the suffix after the final underscore as the id for `--resume` on the next turn. Set **`VIBE_HOME`** in the environment (or **`AGENT_ENV_VIBE_HOME`** to forward into agents) if you use a non-default Vibe data directory. After starting the app:
 
 1. Go to **Settings → Agent Auth**
 2. Log in to Cursor and/or Claude — the app opens an interactive terminal session for the auth flow
 3. Credentials are stored under `/config` (by default `~/.novacode/config` on the host via the stock compose file) and persist across restarts
 
-For **Mistral Vibe**, install the `vibe` CLI, set the API key under **Settings → Mistral Vibe**, and ensure the process can write Vibe’s log tree (under `/config` when `HOME` points there). Example of what NovaCode runs for each user message (workspace rules may be prepended inside the prompt string):
+For **Mistral Vibe**, install the `vibe` CLI, set the API key under **Settings → Mistral Vibe**, and ensure the process can write Vibe’s log tree (under `/config` when `HOME` points there). Example of what Nova Code runs for each user message (workspace rules may be prepended inside the prompt string):
 
 ```bash
 vibe --prompt "Your request here" --output streaming
 ```
 
 Follow-up turns add `--resume <id>` once an id has been stored.
+
+### Troubleshooting (Claude Code)
+
+- **Prompt appears to stop with no visible response** — if Claude returns a rate-limit or other ACP request error, Nova Code now surfaces it inline in the chat and stores Claude's reset time (when provided) so auto-continue can resume after reset.
 
 ### How session ids differ by agent
 
@@ -189,6 +194,7 @@ Follow-up turns add `--resume <id>` once an id has been stored.
 - **Agent unavailable in the UI** — `vibe` must pass `vibe --help` on the server `PATH`, and the API key must be saved in Settings (see `GET /api/settings/agent-capabilities` / `mistralVibeAvailable`). Override the binary with **`VIBE_COMMAND`** if needed.
 - **Resume not applied** — if no valid `session_*` directory appears after a run (permissions, wrong `HOME` / **`VIBE_HOME`**), the server logs a warning and the next turn may run **without** `--resume`. Check that `~/.vibe/logs/session` (or `$VIBE_HOME/logs/session`) exists and is writable by the API process.
 - **Wrong session picked** — ensure no other `vibe` runs are racing to create folders in the same log directory; the server picks the latest folder by the rules above.
+- **Assistant text repeated in one bubble** — Vibe may emit the same final assistant chunk more than once or send **cumulative** full-text updates instead of token deltas. The dashboard merges consecutive assistant chunks (skip identical repeats; treat longer strings that extend the previous chunk as replacements) so you should not see doubled sentences like `Task completed.Task completed.`
 
 ---
 
@@ -315,7 +321,8 @@ Pull requests are welcome. For larger changes, please open an issue first to dis
 ### Coding conventions
 
 Refactors and new code should follow the shared conventions in `/data-root/personal/CODING_CONVENTIONS.md` (import grouping, Vue section layout, boolean naming, and explicit control-flow braces).
-Recent UI refactors also standardize modal/component scripts to the section-header layout (`Props`, `Emits`, `Data`, `Computed`, `Methods`, `Lifecycle`) and replace inline control-flow one-liners with explicit `{}` blocks in script logic.
+Recent UI refactors standardize modal and menu scripts to the section-header layout (`Props`, `Emits`, `Store`, `Constants`, `Refs`, `Computed`, `Watchers`, `Methods`, `Lifecycle` as applicable), use the `b` prefix on local boolean refs in views such as **Automations** (`bLoading`, `bShowCreateForm`, …) and context-menu visibility (`bCtxMenuOpen`), merge duplicate `@/classes/api` imports where obvious, and replace inline control-flow one-liners with explicit `{}` blocks in script logic.
+Recent stream-preview utility refactors in `api/src/classes/chatStreamPreviewFromEvents.ts`, `dashboard/src/utils/chatStreamPreviewFromEvents.ts`, and `api/src/classes/chatPreview.ts` also follow the same naming and brace rules while preserving existing behavior.
 
 ---
 

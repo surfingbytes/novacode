@@ -1,5 +1,4 @@
 // node_modules
-import { spawn, type ChildProcess } from 'node:child_process';
 import { join } from 'node:path';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
@@ -8,17 +7,19 @@ import type { Dirent } from 'node:fs';
 import { db } from './database';
 import { config } from './config';
 import { isWorkspaceRuleHiddenFromUi } from './workspaceRules';
-import { parseAgentStream } from './agentStreamParser';
-import { resolveVibeSessionIdFromFilesystemLogs } from './mistralVibe';
+import { runClaudeAcp, cancelClaudeAcp } from './claudeAcp';
+import { runVibeAcp, cancelVibeAcp } from './vibeAcp';
+import { runCursorAcp, cancelCursorAcp } from './cursorAcp';
 import { sendTaskDonePush } from './push';
-import { computeLastListPreview, extractLastAssistantText } from './chatPreview';
+import { computeLastListPreview } from './chatPreview';
+import { extractStreamNotificationPreview } from './chatStreamPreviewFromEvents';
 import { broadcastSessionListUpsert } from './sessionListBroadcast';
 
 // types
 import type { ChatMessage, AgentType } from '../@types/index';
 
 export interface ActiveRun {
-  process: ChildProcess;
+  cancel: () => void;
   workspaceId: string;
   messages: ChatMessage[];
   assistantEvents: string[];
@@ -87,7 +88,7 @@ export function cancelRun(sessionId: string): void {
   if (!run) return;
   try {
     console.log('[chatEngine] cancelling active run for session', sessionId);
-    run.process.kill();
+    run.cancel();
   } catch (err) {
     console.error('[chatEngine] Failed to cancel run:', err);
   }
@@ -99,6 +100,51 @@ export interface DispatchPromptOpts {
   model?: string;
   imagePaths?: string[];
   subscriber: ChatSubscriber;
+}
+
+function parseClaudeRateLimitError(rawError: string): { resetAtIso?: string; resetAtReadable?: string } | null {
+  const text = rawError.trim();
+  if (!/hit your limit/i.test(text) && !/rate limit/i.test(text)) {
+    return null;
+  }
+
+  const resetMatch = text.match(/resets?\s+([0-9]{1,2}:[0-9]{2}\s*[ap]m(?:\s*\(utc\))?)/i);
+  if (!resetMatch) {
+    return {};
+  }
+
+  const resetAtReadable = resetMatch[1].trim();
+  const timeMatch = resetAtReadable.match(/([0-9]{1,2}):([0-9]{2})\s*([ap]m)/i);
+  if (!timeMatch) {
+    return { resetAtReadable };
+  }
+
+  const hour12 = Number.parseInt(timeMatch[1] ?? '0', 10);
+  const minute = Number.parseInt(timeMatch[2] ?? '0', 10);
+  const ampm = (timeMatch[3] ?? '').toLowerCase();
+  if (Number.isNaN(hour12) || Number.isNaN(minute) || hour12 < 1 || hour12 > 12 || minute < 0 || minute > 59) {
+    return { resetAtReadable };
+  }
+
+  let hour24 = hour12 % 12;
+  if (ampm === 'pm') hour24 += 12;
+
+  const now = new Date();
+  const resetDateUtc = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+      hour24,
+      minute,
+      0,
+      0
+    )
+  );
+  if (resetDateUtc.getTime() <= now.getTime()) {
+    resetDateUtc.setUTCDate(resetDateUtc.getUTCDate() + 1);
+  }
+  return { resetAtIso: resetDateUtc.toISOString(), resetAtReadable };
 }
 
 async function buildWorkspaceRulesPrefix(workspacePath: string): Promise<string> {
@@ -137,7 +183,7 @@ async function buildWorkspaceRulesPrefix(workspacePath: string): Promise<string>
       if (!trimmed) continue;
       sections.push(`--- ${filename} ---\n${trimmed}`);
     } catch {
-      // ignore unreadable single files and continue with the rest
+      // ignore unreadable single files
     }
   }
 
@@ -147,12 +193,12 @@ async function buildWorkspaceRulesPrefix(workspacePath: string): Promise<string>
     'Workspace rules (from .cursor/rules) apply to this task.',
     'Follow them as high-priority instructions when generating your response.',
     '',
-    sections.join('\n\n')
+    sections.join('\n\n'),
   ].join('\n');
 }
 
 export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?: string }> {
-  const { sessionId, text, model = 'auto', imagePaths = [], subscriber } = opts;
+  const { sessionId, text, imagePaths = [], subscriber } = opts;
 
   if (activeRuns.has(sessionId)) {
     return { error: 'Agent is busy' };
@@ -163,10 +209,10 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
     return { error: 'Session not found' };
   }
 
-  const agentType: AgentType = (session.agentType as AgentType | null) ?? 'cursor-agent';
+  const agentType: AgentType = (session.agentType as AgentType | null) ?? 'claude';
 
-  if (agentType === 'cursor-agent' && !session.sessionId) {
-    return { error: 'Session not initialized — no cursor session ID' };
+  if (agentType !== 'claude' && agentType !== 'mistral-vibe' && agentType !== 'cursor-agent') {
+    return { error: `Agent type '${agentType}' is not yet supported via ACP. Coming soon.` };
   }
 
   const workspace = await db.getWorkspace(session.workspaceId);
@@ -185,7 +231,7 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
     role: 'user',
     content: text,
     imagePaths: imagePaths.length > 0 ? imagePaths : undefined,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
   };
   currentMessages.push(userMessage);
 
@@ -196,9 +242,9 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
       ...(previewAfterUser
         ? {
             lastPreviewText: previewAfterUser.lastPreviewText,
-            lastPreviewRole: previewAfterUser.lastPreviewRole
+            lastPreviewRole: previewAfterUser.lastPreviewRole,
           }
-        : {})
+        : {}),
     });
     const fresh = await db.getSession(sessionId);
     if (fresh) broadcastSessionListUpsert(fresh.workspaceId, fresh);
@@ -209,198 +255,158 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
   }
 
   const effectiveText = imagePaths.length > 0 ? `${text}\n\n${imagePaths.join('\n')}` : text;
-
   const workspacePath = join('/data-root', workspace.path);
-  // prevent path traversal outside /data-root
   if (!workspacePath.startsWith('/data-root/') && workspacePath !== '/data-root') {
     return { error: 'Invalid workspace path' };
   }
+
   const assistantEvents: string[] = [];
 
-  let proc: ChildProcess;
-  const procAgentLabel =
-    agentType === 'claude' ? 'claude' : agentType === 'mistral-vibe' ? 'vibe' : 'cursor-agent';
+  // Resolve workspace rules prefix
+  const rulesPrefix = await buildWorkspaceRulesPrefix(workspacePath);
+  const agentPrompt = rulesPrefix ? `${rulesPrefix}\n\nUser request:\n${effectiveText}` : effectiveText;
 
-  if (agentType === 'claude') {
-    const rulesPrefix = await buildWorkspaceRulesPrefix(workspacePath);
-    const claudePrompt = rulesPrefix
-      ? `${rulesPrefix}\n\nUser request:\n${effectiveText}`
-      : effectiveText;
-    console.log('[chatEngine] sending message to claude', claudePrompt);
-    const spawnArgs = [
-      '-p',
-      claudePrompt,
-      '--verbose',
-      '--output-format',
-      'stream-json',
-      '--dangerously-skip-permissions'
-    ];
-    if (session.sessionId) {
-      spawnArgs.push('--resume', session.sessionId);
-    }
-    const claudeEnv = config.agentEnv();
-    const user = await db.getFirstUser();
-    const hasToken = !!user?.claudeToken;
-    if (user?.claudeToken) {
-      claudeEnv['CLAUDE_CODE_OAUTH_TOKEN'] = user.claudeToken;
-    }
-    console.log('[chatEngine] claude spawn', {
-      command: config.claudeCommand,
-      args: spawnArgs,
-      cwd: workspacePath,
-      hasToken,
-      HOME: claudeEnv['HOME'],
-      CLAUDE_CONFIG_DIR: claudeEnv['CLAUDE_CONFIG_DIR']
-    });
-    proc = spawn(config.claudeCommand, spawnArgs, {
-      cwd: workspacePath,
-      env: claudeEnv,
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
-  } else if (agentType === 'mistral-vibe') {
-    const rulesPrefix = await buildWorkspaceRulesPrefix(workspacePath);
-    const vibePrompt = rulesPrefix
-      ? `${rulesPrefix}\n\nUser request:\n${effectiveText}`
-      : effectiveText;
-    const spawnArgs: string[] = ['--prompt', vibePrompt, '--output', 'streaming'];
-    if (session.sessionId) {
-      spawnArgs.push('--resume', session.sessionId);
-    }
-    proc = spawn(config.vibeCommand, spawnArgs, {
-      cwd: workspacePath,
-      env: config.agentEnv(),
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
-    console.log('[chatEngine] spawned vibe', config.vibeCommand, spawnArgs.length, 'args');
-  } else {
-    console.log('[chatEngine] sending message to cursor-agent', effectiveText);
+  // Get Claude OAuth token (only needed for claude agent type)
+  const user = await db.getFirstUser();
+  const claudeToken = user?.claudeToken ?? null;
 
-    const spawnArgs: string[] = [
-      '-f',
-      '-p',
-      '--trust',
-      '--approve-mcps',
-      `"${effectiveText}"`,
-      '--resume',
-      session.sessionId ?? '',
-      '--output-format',
-      'stream-json'
-    ];
-    const modelId = model === 'auto' || !model ? 'auto' : model;
-    spawnArgs.push('--model', modelId);
-
-    console.log('[chatEngine] spawnArgs', spawnArgs);
-
-    proc = spawn(config.cursorCommand, spawnArgs, {
-      cwd: workspacePath,
-      env: config.agentEnv()
-    });
-    console.log(
-      '[chatEngine] spawned cursor-agent with command',
-      `${config.cursorCommand} ${spawnArgs.join(' ')}`,
-      { cwd: workspacePath }
-    );
-  }
+  let cancelled = false;
+  let currentAcpSessionId = session.sessionId ?? null;
 
   const run: ActiveRun = {
-    process: proc,
+    cancel: () => {
+      cancelled = true;
+      if (agentType === 'mistral-vibe') {
+        cancelVibeAcp(sessionId);
+      } else if (agentType === 'cursor-agent') {
+        cancelCursorAcp(sessionId);
+      } else if (currentAcpSessionId) {
+        cancelClaudeAcp(currentAcpSessionId);
+      }
+    },
     workspaceId: session.workspaceId,
     messages: currentMessages,
     assistantEvents,
     bufferedLines: [],
-    subscribers: new Set([subscriber])
+    subscribers: new Set([subscriber]),
   };
   activeRuns.set(sessionId, run);
   emitBusy(sessionId, session.workspaceId, true);
 
   const broadcast = (fn: (sub: ChatSubscriber) => void): void => {
-    for (const sub of run.subscribers) {
-      fn(sub);
-    }
+    for (const sub of run.subscribers) fn(sub);
   };
 
-  const onClaudeSessionId =
-    agentType === 'claude' && !session.sessionId
-      ? (claudeSessionId: string) => {
-          console.log(
-            '[chatEngine] saving claude session_id to db:',
-            claudeSessionId,
-            'for session:',
-            sessionId
-          );
-          db.updateSession(sessionId, { sessionId: claudeSessionId })
-            .then(() => console.log('[chatEngine] claude session_id saved successfully'))
-            .catch((err) => console.error('[chatEngine] Failed to save claude session_id:', err));
-        }
-      : undefined;
+  const onEvent = (line: string) => {
+    console.log('[chatEngine] onStream', line);
+    assistantEvents.push(line);
+    run.bufferedLines.push(line);
+    broadcast((sub) => sub.onStream(line));
+  };
 
-  if (proc.stdout) {
-    parseAgentStream(
+  // Run agent via ACP in background (non-blocking)
+  void (async () => {
+    console.log('[chatEngine] dispatching to agent via ACP', {
       agentType,
-      proc.stdout,
-      (line: string) => {
-        console.log('[chatEngine] onStream', line);
-        assistantEvents.push(line);
-        run.bufferedLines.push(line);
-        broadcast((sub) => sub.onStream(line));
-      },
-      onClaudeSessionId
-    );
-  }
+      sessionId,
+      acpSessionId: currentAcpSessionId,
+      cwd: workspacePath,
+    });
 
-  if (proc.stderr) {
-    proc.stderr.on('data', (chunk: Buffer) => {
-      const raw = chunk.toString();
-      console.error('[chatEngine stderr]', raw);
-      if (agentType === 'claude') {
-        // forward stderr to the client so auth/config errors are visible in the UI
-        const stderrEvent = JSON.stringify({ type: 'stderr', text: raw });
-        assistantEvents.push(stderrEvent);
-        run.bufferedLines.push(stderrEvent);
-        broadcast((sub) => sub.onStream(stderrEvent));
+    let result: { acpSessionId: string; stopReason?: string; error?: string };
+
+    if (agentType === 'mistral-vibe') {
+      result = await runVibeAcp(
+        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt },
+        onEvent,
+        sessionId
+      );
+    } else if (agentType === 'cursor-agent') {
+      result = await runCursorAcp(
+        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt },
+        onEvent,
+        sessionId
+      );
+    } else {
+      result = await runClaudeAcp(
+        {
+          acpSessionId: currentAcpSessionId,
+          cwd: workspacePath,
+          promptText: agentPrompt,
+          claudeToken,
+          onSessionId: (id) => { currentAcpSessionId = id; },
+        },
+        onEvent
+      );
+    }
+
+    if (result.error && !cancelled) {
+      console.error('[chatEngine] ACP error:', result.error);
+      const parsedClaudeLimit = agentType === 'claude' ? parseClaudeRateLimitError(result.error) : null;
+      const resetAtIso = parsedClaudeLimit?.resetAtIso ?? null;
+      const resetAtReadable = parsedClaudeLimit?.resetAtReadable;
+      if (parsedClaudeLimit) {
+        try {
+          await db.updateSession(sessionId, { claudeLimitResetAt: resetAtIso } as any);
+          const fresh = await db.getSession(sessionId);
+          if (fresh) broadcastSessionListUpsert(fresh.workspaceId, fresh);
+        } catch (err) {
+          console.error('[chatEngine] Failed to persist Claude limit reset time:', err);
+        }
       }
-    });
-  }
+      const stderrEvent = JSON.stringify({ type: 'stderr', text: result.error });
+      assistantEvents.push(stderrEvent);
+      run.bufferedLines.push(stderrEvent);
+      broadcast((sub) => sub.onStream(stderrEvent));
+      if (parsedClaudeLimit) {
+        const limitEvent = JSON.stringify({
+          type: 'claude_limit_detected',
+          resetTime: resetAtIso ?? undefined,
+          resetTimeReadable: resetAtReadable ?? undefined,
+        });
+        assistantEvents.push(limitEvent);
+        run.bufferedLines.push(limitEvent);
+        broadcast((sub) => sub.onStream(limitEvent));
+      }
+      broadcast((sub) => sub.onError(result.error ?? 'Agent run failed'));
+    }
 
-  proc.on('close', async (code, signal) => {
-    console.log('[chatEngine]', procAgentLabel, 'closed', {
-      code,
-      signal,
-      eventCount: assistantEvents.length
+    console.log('[chatEngine] agent ACP finished', {
+      agentType,
+      stopReason: result.stopReason,
+      eventCount: assistantEvents.length,
     });
+
+    // Track ACP session ID changes (new session on first turn, or if Claude rotates it).
+    // Folded into the same awaited DB write below to avoid a race where the fire-and-forget
+    // save races the messageJson write — the messageJson write would win and clobber the sessionId.
+    const newAcpSessionId =
+      result.acpSessionId && result.acpSessionId !== session.sessionId
+        ? result.acpSessionId
+        : null;
+    if (newAcpSessionId) {
+      currentAcpSessionId = newAcpSessionId;
+    }
+
     const assistantMessage: ChatMessage = {
       role: 'assistant',
       events: assistantEvents,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
     };
     currentMessages.push(assistantMessage);
 
     const previewDone = computeLastListPreview(currentMessages);
     try {
-      let vibeExternalId: string | undefined;
-      if (agentType === 'mistral-vibe') {
-        const vibeId = await resolveVibeSessionIdFromFilesystemLogs(config.agentEnv());
-        if (vibeId) {
-          vibeExternalId = vibeId;
-        } else {
-          console.warn(
-            '[chatEngine] Could not resolve Mistral Vibe session id from log dirs (~/.vibe/logs/session or $VIBE_HOME/logs/session); resume on next turn may not apply.'
-          );
-        }
-      }
-
       await db.updateSession(sessionId, {
         messageJson: JSON.stringify(currentMessages),
-        ...(vibeExternalId && vibeExternalId !== session.sessionId
-          ? { sessionId: vibeExternalId }
-          : {}),
+        ...(newAcpSessionId ? { sessionId: newAcpSessionId } : {}),
         ...(previewDone
-          ? {
-              lastPreviewText: previewDone.lastPreviewText,
-              lastPreviewRole: previewDone.lastPreviewRole
-            }
-          : { lastPreviewText: null, lastPreviewRole: null })
+          ? { lastPreviewText: previewDone.lastPreviewText, lastPreviewRole: previewDone.lastPreviewRole }
+          : { lastPreviewText: null, lastPreviewRole: null }),
       });
+      if (newAcpSessionId) {
+        console.log('[chatEngine] ACP session ID saved:', newAcpSessionId);
+      }
       const fresh = await db.getSession(sessionId);
       if (fresh) broadcastSessionListUpsert(fresh.workspaceId, fresh);
     } catch (err) {
@@ -408,7 +414,7 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
     }
 
     try {
-      const lastAssistantMessage = extractLastAssistantText(assistantEvents);
+      const lastAssistantMessage = extractStreamNotificationPreview(assistantEvents);
       await sendTaskDonePush(session.name, workspace.name, lastAssistantMessage);
     } catch (err) {
       console.error('[chatEngine] Failed to send task completion push:', err);
@@ -417,14 +423,7 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
     activeRuns.delete(sessionId);
     emitBusy(sessionId, session.workspaceId, false);
     broadcast((sub) => sub.onDone(currentMessages));
-  });
-
-  proc.on('error', (err) => {
-    console.error('[chatEngine] Process error:', err);
-    activeRuns.delete(sessionId);
-    emitBusy(sessionId, session.workspaceId, false);
-    broadcast((sub) => sub.onError(String(err)));
-  });
+  })();
 
   return {};
 }
@@ -452,14 +451,14 @@ export function dispatchPromptAndWait(opts: {
         clearTimeout(timeout);
         resolve({ error: message });
       },
-      onHistory: () => {}
+      onHistory: () => {},
     };
 
     dispatchPrompt({
       sessionId: opts.sessionId,
       text: opts.text,
       model: opts.model ?? 'auto',
-      subscriber
+      subscriber,
     }).then((result) => {
       if (result.error) {
         clearTimeout(timeout);
@@ -468,3 +467,57 @@ export function dispatchPromptAndWait(opts: {
     });
   });
 }
+
+// ------------------------------------------ Claude Auto-Continue Scheduler ------------------------------------------
+
+export async function checkClaudeAutoContinue(): Promise<void> {
+  console.log('[chatEngine] Checking for Claude sessions to auto-continue...');
+
+  try {
+    const users = await db.listUsers();
+    const autoContinueUsers = users.filter((user) => user.claudeAutoContinue);
+
+    if (autoContinueUsers.length === 0) {
+      console.log('[chatEngine] No users with auto-continue enabled');
+      return;
+    }
+
+    const now = new Date();
+    const sessions = await db.listSessions();
+
+    for (const session of sessions) {
+      if (!session.claudeLimitResetAt) continue;
+
+      const resetTime = new Date(session.claudeLimitResetAt);
+      const continueTime = new Date(resetTime);
+      continueTime.setMinutes(continueTime.getMinutes() + 1);
+
+      if (now >= continueTime) {
+        console.log('[chatEngine] Auto-continuing session after Claude limit reset:', session.id);
+
+        const mockSubscriber: ChatSubscriber = {
+          onStream: (line) => console.log('[chatEngine] Auto-continue stream:', line),
+          onDone: () => console.log('[chatEngine] Auto-continue completed for session:', session.id),
+          onError: (message) =>
+            console.error('[chatEngine] Auto-continue failed for session', session.id, ':', message),
+          onHistory: () => {},
+        };
+
+        await dispatchPrompt({
+          sessionId: session.id,
+          text: 'continue',
+          model: 'auto',
+          subscriber: mockSubscriber,
+        });
+
+        await db.updateSession(session.id, { claudeLimitResetAt: null } as any);
+      }
+    }
+  } catch (err) {
+    console.error('[chatEngine] Error in auto-continue checker:', err);
+  }
+}
+
+const AUTO_CONTINUE_INTERVAL_MS = 60 * 1000;
+setInterval(checkClaudeAutoContinue, AUTO_CONTINUE_INTERVAL_MS);
+checkClaudeAutoContinue().catch(console.error);

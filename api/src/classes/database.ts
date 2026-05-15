@@ -3,10 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 
-// classes
+// classes/api
 import { ensureDatabaseUrl } from '../env';
 import { PrismaClient, Prisma } from '../generated/client/client';
 import { config } from './config';
+import { computeLastListPreview } from './chatPreview';
 
 ensureDatabaseUrl();
 
@@ -20,7 +21,6 @@ import type { AutomationRunModel as AutomationRun } from '../generated/client/mo
 import type { UserModel } from '../generated/client/models';
 import type { PushSubscriptionModel as PushSubscription } from '../generated/client/models/PushSubscription';
 import type { ChatMessage, ChatQueueItem } from '../@types/index';
-import { computeLastListPreview } from './chatPreview';
 
 /** Session without messageJson */
 export type SessionWithCategory = Omit<Session, 'messageJson'>;
@@ -48,11 +48,17 @@ export function normalizeTagStringList(tags: unknown[]): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const x of tags) {
-    if (typeof x !== 'string') continue;
+    if (typeof x !== 'string') {
+      continue;
+    }
     const t = x.trim();
-    if (!t) continue;
+    if (!t) {
+      continue;
+    }
     const k = t.toLowerCase();
-    if (seen.has(k)) continue;
+    if (seen.has(k)) {
+      continue;
+    }
     seen.add(k);
     out.push(t);
   }
@@ -97,6 +103,10 @@ export const db = {
     return _prisma.user.findFirst({ orderBy: { createdAt: 'asc' } });
   },
 
+  async listUsers(): Promise<UserModel[]> {
+    return _prisma.user.findMany({ orderBy: { createdAt: 'asc' } });
+  },
+
   async createUser(username: string, passwordHash: string): Promise<UserModel> {
     const id = randomUUID();
     const createdAt = new Date().toISOString();
@@ -118,8 +128,10 @@ export const db = {
       claudeToken?: string | null;
     }
   ): Promise<UserModel | undefined> {
-    const existing = await _prisma.user.findUnique({ where: { id } });
-    if (!existing) return undefined;
+    const existingUser = await _prisma.user.findUnique({ where: { id } });
+    if (!existingUser) {
+      return undefined;
+    }
     return _prisma.user.update({ where: { id }, data: patch });
   },
 
@@ -189,8 +201,10 @@ export const db = {
       tags?: string[] | null;
     }
   ): Promise<Workspace | undefined> {
-    const existing = await db.getWorkspace(id);
-    if (!existing) return undefined;
+    const existingWorkspace = await db.getWorkspace(id);
+    if (!existingWorkspace) {
+      return undefined;
+    }
     const tagsArr =
       patch.tags !== undefined
         ? Array.isArray(patch.tags)
@@ -206,13 +220,13 @@ export const db = {
     const row = await _prisma.workspace.update({
       where: { id },
       data: {
-        name: patch.name ?? existing.name,
-        path: patch.path ?? existing.path,
-        group: patch.group !== undefined ? (patch.group?.trim() || null) : existing.group,
-        gitUserName: patch.gitUserName ?? existing.gitUserName,
-        gitUserEmail: patch.gitUserEmail ?? existing.gitUserEmail,
-        color: patch.color ?? existing.color,
-        defaultAgentType: patch.defaultAgentType ?? existing.defaultAgentType,
+        name: patch.name ?? existingWorkspace.name,
+        path: patch.path ?? existingWorkspace.path,
+        group: patch.group !== undefined ? (patch.group?.trim() || null) : existingWorkspace.group,
+        gitUserName: patch.gitUserName ?? existingWorkspace.gitUserName,
+        gitUserEmail: patch.gitUserEmail ?? existingWorkspace.gitUserEmail,
+        color: patch.color ?? existingWorkspace.color,
+        defaultAgentType: patch.defaultAgentType ?? existingWorkspace.defaultAgentType,
         ...(tagsJson !== undefined && { tags: tagsJson })
       }
     });
@@ -228,8 +242,10 @@ export const db = {
   },
 
   async archiveWorkspace(id: string, archived: boolean): Promise<Workspace | undefined> {
-    const existing = await _prisma.workspace.findUnique({ where: { id } });
-    if (!existing) return undefined;
+    const existingWorkspace = await _prisma.workspace.findUnique({ where: { id } });
+    if (!existingWorkspace) {
+      return undefined;
+    }
     return _prisma.workspace.update({ where: { id }, data: { archived } });
   },
 
@@ -258,6 +274,13 @@ export const db = {
     }) as Promise<SessionWithCategory[]>;
   },
 
+  async listSessions(): Promise<SessionWithCategory[]> {
+    return _prisma.session.findMany({
+      omit: { messageJson: true },
+      orderBy: { updatedAt: 'desc' }
+    }) as Promise<SessionWithCategory[]>;
+  },
+
   /**
    * List payloads omit `messageJson`. If `last_preview_*` was never set (older rows),
    * derive from `message_json` and persist so future lists are cheap.
@@ -268,7 +291,9 @@ export const db = {
     const missing = sessions.filter(
       (s) => s.lastPreviewText == null || String(s.lastPreviewText).trim() === ''
     );
-    if (missing.length === 0) return;
+    if (missing.length === 0) {
+      return;
+    }
 
     const rows = await _prisma.session.findMany({
       where: { id: { in: missing.map((m) => m.id) } },
@@ -278,16 +303,22 @@ export const db = {
 
     for (const s of missing) {
       const mj = byId.get(s.id);
-      if (!mj || mj === '[]') continue;
+      if (!mj || mj === '[]') {
+        continue;
+      }
       let messages: ChatMessage[];
       try {
         messages = JSON.parse(mj) as ChatMessage[];
       } catch {
         continue;
       }
-      if (!Array.isArray(messages) || messages.length === 0) continue;
+      if (!Array.isArray(messages) || messages.length === 0) {
+        continue;
+      }
       const p = computeLastListPreview(messages);
-      if (!p) continue;
+      if (!p) {
+        continue;
+      }
       s.lastPreviewText = p.lastPreviewText;
       s.lastPreviewRole = p.lastPreviewRole;
       void _prisma.session
@@ -348,8 +379,10 @@ export const db = {
       archived?: boolean;
     }
   ): Promise<Session | undefined> {
-    const existing = await _prisma.session.findUnique({ where: { id } });
-    if (!existing) return undefined;
+    const existingSession = await _prisma.session.findUnique({ where: { id } });
+    if (!existingSession) {
+      return undefined;
+    }
 
     let tagsJson: Prisma.InputJsonValue | typeof Prisma.JsonNull | undefined;
     if ('tags' in patch) {
@@ -364,13 +397,13 @@ export const db = {
     const row = await _prisma.session.update({
       where: { id },
       data: {
-        sessionId: patch.sessionId ?? existing.sessionId,
-        messageJson: patch.messageJson ?? existing.messageJson,
+        sessionId: patch.sessionId ?? existingSession.sessionId,
+        messageJson: patch.messageJson ?? existingSession.messageJson,
         ...(patch.lastPreviewText !== undefined && { lastPreviewText: patch.lastPreviewText }),
         ...(patch.lastPreviewRole !== undefined && { lastPreviewRole: patch.lastPreviewRole }),
-        name: patch.name ?? existing.name,
+        name: patch.name ?? existingSession.name,
         ...(tagsJson !== undefined && { tags: tagsJson }),
-        archived: patch.archived ?? existing.archived,
+        archived: patch.archived ?? existingSession.archived,
         updatedAt: new Date().toISOString()
       }
     });
@@ -421,7 +454,9 @@ export const db = {
         where: { sessionId },
         orderBy: [{ position: 'asc' }, { createdAt: 'asc' }]
       });
-      if (!row) return undefined;
+      if (!row) {
+        return undefined;
+      }
       await tx.sessionPromptQueue.delete({ where: { id: row.id } });
       return row;
     });
@@ -435,15 +470,17 @@ export const db = {
 
   async moveSessionQueueItemToFront(sessionId: string, id: string): Promise<boolean> {
     const updated = await _prisma.$transaction(async (tx) => {
-      const existing = await tx.sessionPromptQueue.findFirst({ where: { sessionId, id } });
-      if (!existing) return undefined;
+      const existingQueueItem = await tx.sessionPromptQueue.findFirst({ where: { sessionId, id } });
+      if (!existingQueueItem) {
+        return undefined;
+      }
       const min = await tx.sessionPromptQueue.aggregate({
         where: { sessionId },
         _min: { position: true }
       });
       const frontPosition = (min._min.position ?? 0) - 1;
       return tx.sessionPromptQueue.update({
-        where: { id: existing.id },
+        where: { id: existingQueueItem.id },
         data: { position: frontPosition }
       });
     });
@@ -502,7 +539,9 @@ export const db = {
     }
   ): Promise<Orchestrator | undefined> {
     const existing = await _prisma.orchestrator.findUnique({ where: { id } });
-    if (!existing) return undefined;
+    if (!existing) {
+      return undefined;
+    }
     const data = {
       name: patch.name ?? existing.name,
       messageJson: patch.messageJson ?? existing.messageJson,
@@ -631,7 +670,9 @@ export const db = {
 
   async findRoleTemplateByName(name: string): Promise<RoleTemplate | undefined> {
     const trimmed = name?.trim();
-    if (!trimmed) return undefined;
+    if (!trimmed) {
+      return undefined;
+    }
     const row = await _prisma.roleTemplate.findUnique({ where: { name: trimmed } });
     return row ?? undefined;
   },
@@ -663,7 +704,9 @@ export const db = {
     }
   ): Promise<RoleTemplate | undefined> {
     const existing = await _prisma.roleTemplate.findUnique({ where: { id } });
-    if (!existing) return undefined;
+    if (!existing) {
+      return undefined;
+    }
     const data: {
       name?: string;
       description?: string | null;
@@ -750,7 +793,9 @@ export const db = {
     }
   ): Promise<Automation | undefined> {
     const existing = await _prisma.automation.findUnique({ where: { id } });
-    if (!existing) return undefined;
+    if (!existing) {
+      return undefined;
+    }
     return _prisma.automation.update({
       where: { id },
       data: {
@@ -816,7 +861,9 @@ export const db = {
     }
   ): Promise<AutomationRun | undefined> {
     const existing = await _prisma.automationRun.findUnique({ where: { id } });
-    if (!existing) return undefined;
+    if (!existing) {
+      return undefined;
+    }
     return _prisma.automationRun.update({
       where: { id },
       data: {

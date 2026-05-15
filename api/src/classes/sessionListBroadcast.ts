@@ -11,7 +11,9 @@ export function registerSessionListBroadcaster(fn: Broadcaster): void {
 
 /** Push list-shaped session to clients (omit heavy `messageJson`). */
 export function broadcastSessionListUpsert(workspaceId: string, session: { tags?: unknown; messageJson?: string }): void {
-  if (!broadcaster) return;
+  if (!broadcaster) {
+    return;
+  }
   const normalized = normalizeSessionForApi(session);
   const { messageJson: _omit, ...rest } = normalized as typeof normalized & { messageJson?: string };
   broadcaster(workspaceId, rest);

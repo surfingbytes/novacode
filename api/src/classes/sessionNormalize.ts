@@ -9,11 +9,17 @@ export function normalizeSessionForApi<T extends { tags?: unknown }>(
   const seen = new Set<string>();
   const tags: string[] = [];
   for (const x of raw) {
-    if (typeof x !== 'string') continue;
+    if (typeof x !== 'string') {
+      continue;
+    }
     const t = x.trim();
-    if (!t) continue;
+    if (!t) {
+      continue;
+    }
     const k = t.toLowerCase();
-    if (seen.has(k)) continue;
+    if (seen.has(k)) {
+      continue;
+    }
     seen.add(k);
     tags.push(t);
   }

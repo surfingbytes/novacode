@@ -52,15 +52,21 @@ export class PtyProcess {
   }
 
   write(data: string): void {
-    if (!this._exited) this.pty.write(data);
+    if (!this._exited) {
+      this.pty.write(data);
+    }
   }
 
   resize(cols: number, rows: number): void {
-    if (!this._exited) this.pty.resize(cols, rows);
+    if (!this._exited) {
+      this.pty.resize(cols, rows);
+    }
   }
 
   kill(signal = 'SIGTERM'): void {
-    if (!this._exited) this.pty.kill(signal);
+    if (!this._exited) {
+      this.pty.kill(signal);
+    }
   }
 
   subscribe(handler: OutputHandler): void {

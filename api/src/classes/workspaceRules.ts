@@ -93,7 +93,9 @@ export async function listWorkspaceRuleFiles(
   workspaceId: string
 ): Promise<WorkspaceRuleResult<WorkspaceRuleFileSummary[]>> {
   const dirResult = await getWorkspaceRulesDir(workspaceId);
-  if (!dirResult.ok) return dirResult;
+  if (!dirResult.ok) {
+    return dirResult;
+  }
 
   const rulesDir = dirResult.value;
   if (!existsSync(rulesDir)) {
@@ -109,7 +111,9 @@ export async function listWorkspaceRuleFiles(
     const sorted = [...entries].sort((a, b) => a.name.localeCompare(b.name));
     const files: WorkspaceRuleFileSummary[] = [];
     for (const d of sorted) {
-      if (d.isDirectory()) continue;
+      if (d.isDirectory()) {
+        continue;
+      }
       let isRuleFile = d.isFile();
       if (d.isSymbolicLink()) {
         try {
@@ -119,8 +123,12 @@ export async function listWorkspaceRuleFiles(
           isRuleFile = false;
         }
       }
-      if (!isRuleFile) continue;
-      if (isWorkspaceRuleHiddenFromUi(d.name)) continue;
+      if (!isRuleFile) {
+        continue;
+      }
+      if (isWorkspaceRuleHiddenFromUi(d.name)) {
+        continue;
+      }
       files.push({
         filename: d.name,
         label: d.name.replace(/\.(md|mdc)$/i, '')
@@ -138,7 +146,9 @@ export async function readWorkspaceRuleFile(
   filename: string
 ): Promise<WorkspaceRuleResult<WorkspaceRuleFileContent>> {
   const nameResult = sanitizeRuleFilename(filename);
-  if (!nameResult.ok) return nameResult;
+  if (!nameResult.ok) {
+    return nameResult;
+  }
 
   if (isWorkspaceRuleHiddenFromUi(nameResult.value)) {
     return {
@@ -149,7 +159,9 @@ export async function readWorkspaceRuleFile(
   }
 
   const dirResult = await getWorkspaceRulesDir(workspaceId);
-  if (!dirResult.ok) return dirResult;
+  if (!dirResult.ok) {
+    return dirResult;
+  }
 
   const rulesDir = dirResult.value;
   const filePath = resolve(rulesDir, nameResult.value);
@@ -195,7 +207,9 @@ export async function writeWorkspaceRuleFile(
   content: string
 ): Promise<WorkspaceRuleResult<{ filename: string }>> {
   const nameResult = sanitizeRuleFilename(filename);
-  if (!nameResult.ok) return nameResult;
+  if (!nameResult.ok) {
+    return nameResult;
+  }
 
   if (isWorkspaceRuleHiddenFromUi(nameResult.value)) {
     return {
@@ -206,7 +220,9 @@ export async function writeWorkspaceRuleFile(
   }
 
   const dirResult = await getWorkspaceRulesDir(workspaceId);
-  if (!dirResult.ok) return dirResult;
+  if (!dirResult.ok) {
+    return dirResult;
+  }
 
   const rulesDir = dirResult.value;
   const filePath = resolve(rulesDir, nameResult.value);
@@ -236,7 +252,9 @@ export async function deleteWorkspaceRuleFile(
   filename: string
 ): Promise<WorkspaceRuleResult<{ filename: string }>> {
   const nameResult = sanitizeRuleFilename(filename);
-  if (!nameResult.ok) return nameResult;
+  if (!nameResult.ok) {
+    return nameResult;
+  }
 
   if (isWorkspaceRuleHiddenFromUi(nameResult.value)) {
     return {
@@ -247,7 +265,9 @@ export async function deleteWorkspaceRuleFile(
   }
 
   const dirResult = await getWorkspaceRulesDir(workspaceId);
-  if (!dirResult.ok) return dirResult;
+  if (!dirResult.ok) {
+    return dirResult;
+  }
 
   const rulesDir = dirResult.value;
   const filePath = resolve(rulesDir, nameResult.value);
@@ -293,9 +313,13 @@ export async function renameWorkspaceRuleFile(
   newFilename: string
 ): Promise<WorkspaceRuleResult<{ filename: string }>> {
   const oldResult = sanitizeRuleFilename(oldFilename);
-  if (!oldResult.ok) return oldResult;
+  if (!oldResult.ok) {
+    return oldResult;
+  }
   const newResult = sanitizeRuleFilename(newFilename);
-  if (!newResult.ok) return newResult;
+  if (!newResult.ok) {
+    return newResult;
+  }
   if (oldResult.value === newResult.value) {
     return { ok: true, value: { filename: newResult.value } };
   }
@@ -309,7 +333,9 @@ export async function renameWorkspaceRuleFile(
   }
 
   const dirResult = await getWorkspaceRulesDir(workspaceId);
-  if (!dirResult.ok) return dirResult;
+  if (!dirResult.ok) {
+    return dirResult;
+  }
 
   const rulesDir = dirResult.value;
   const oldPath = resolve(rulesDir, oldResult.value);

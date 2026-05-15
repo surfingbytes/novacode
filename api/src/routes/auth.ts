@@ -15,6 +15,7 @@ import {
   jwtPreHandler
 } from '../classes/auth';
 import { db } from '../classes/database';
+import { clearVibeApiKey, config } from '../classes/config';
 
 export async function authRoutes(fastify: FastifyInstance): Promise<void> {
   const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
@@ -54,6 +55,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       }
       const { username, password } = request.body;
       const user = await createAuthUser(username, password);
+      clearVibeApiKey(config.configDir);
       const token = await signToken(user.username, user.id);
       return { token };
     }

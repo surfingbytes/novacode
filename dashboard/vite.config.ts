@@ -16,9 +16,9 @@ export default defineConfig({
       filename: 'sw.ts',
       includeAssets: ['logo.png', 'notification-badge.png'],
       manifest: {
-        name: 'NovaCode',
-        short_name: 'NovaCode',
-        description: 'NovaCode Dashboard',
+        name: 'Nova Code',
+        short_name: 'Nova Code',
+        description: 'Nova Code Dashboard',
         theme_color: '#0a0a0f',
         background_color: '#0a0a0f',
         display: 'standalone',

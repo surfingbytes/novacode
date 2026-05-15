@@ -22,7 +22,7 @@ const emit = defineEmits<{
 // -------------------------------------------------- Types --------------------------------------------------
 // (none)
 
-// -------------------------------------------------- Data --------------------------------------------------
+// -------------------------------------------------- Refs --------------------------------------------------
 const files = ref<GitFile[]>([]);
 const repos = ref<GitRepoStatus[]>([]);
 const bIsLoading = ref<boolean>(false);
@@ -376,18 +376,8 @@ onUnmounted((): void => {
               title="Select all / none"
               @click.stop="toggleAll"
             >
-              <span
-                v-if="allSelected"
-                class="material-symbols-outlined select-none text-white"
-                style="font-size: 12px"
-                >check</span
-              >
-              <span
-                v-else-if="someSelected"
-                class="material-symbols-outlined select-none text-white"
-                style="font-size: 12px"
-                >remove</span
-              >
+              <svg v-if="allSelected" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none text-white"><polyline points="20 6 9 17 4 12"/></svg>
+              <svg v-else-if="someSelected" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none text-white"><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
             <span class="text-xs font-medium text-text-muted truncate">
               Changed files
@@ -404,7 +394,7 @@ onUnmounted((): void => {
             title="Refresh"
             @click="refresh"
           >
-            <span class="material-symbols-outlined select-none" style="font-size: 14px">refresh</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
           </button>
         </div>
         <div v-if="repos.length > 1" class="flex flex-col gap-1">
@@ -487,12 +477,7 @@ onUnmounted((): void => {
             "
             @click.stop="toggleFile(f)"
           >
-            <span
-              v-if="selectedFiles.has(fileKey(f))"
-              class="material-symbols-outlined select-none text-white"
-              style="font-size: 12px"
-              >check</span
-            >
+            <svg v-if="selectedFiles.has(fileKey(f))" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none text-white"><polyline points="20 6 9 17 4 12"/></svg>
           </button>
           <button class="flex items-center gap-2.5 flex-1 min-w-0" @click="openFile(f)">
             <span
@@ -503,11 +488,7 @@ onUnmounted((): void => {
             <span class="text-xs text-text-primary truncate font-mono flex-1 text-left">{{
               f.file
             }}</span>
-            <span
-              class="material-symbols-outlined select-none flex-shrink-0 text-text-muted/50"
-              style="font-size: 14px"
-              >chevron_right</span
-            >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none flex-shrink-0 text-text-muted/50"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
         </div>
       </div>
@@ -539,9 +520,7 @@ onUnmounted((): void => {
                 v-if="committingRepo === repos[0].repo"
                 class="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin"
               ></div>
-              <span class="material-symbols-outlined select-none" v-else style="font-size: 14px"
-                >check</span
-              >
+              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><polyline points="20 6 9 17 4 12"/></svg>
               Commit ({{ selectedFiles.size }})
             </button>
             <button
@@ -553,9 +532,7 @@ onUnmounted((): void => {
                 v-if="pushingRepo === repos[0].repo"
                 class="w-3 h-3 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
               ></div>
-              <span class="material-symbols-outlined select-none" v-else style="font-size: 14px"
-                >cloud_upload</span
-              >
+              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>
               Push<template v-if="repos[0].aheadCount > 0"> ({{ repos[0].aheadCount }})</template>
             </button>
           </div>
@@ -600,9 +577,7 @@ onUnmounted((): void => {
                 v-if="committingRepo === activeRepo.repo"
                 class="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin"
               ></div>
-              <span class="material-symbols-outlined select-none" v-else style="font-size: 14px"
-                >check</span
-              >
+              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><polyline points="20 6 9 17 4 12"/></svg>
               Commit ({{ selectedCountInRepo(activeRepo.repo) }})
             </button>
             <button
@@ -614,9 +589,7 @@ onUnmounted((): void => {
                 v-if="pushingRepo === activeRepo.repo"
                 class="w-3 h-3 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
               ></div>
-              <span class="material-symbols-outlined select-none" v-else style="font-size: 14px"
-                >cloud_upload</span
-              >
+              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>
               Push<template v-if="activeRepo.aheadCount > 0"> ({{ activeRepo.aheadCount }})</template>
             </button>
           </div>
@@ -650,11 +623,7 @@ onUnmounted((): void => {
           class="flex-shrink-0 text-xs text-primary hover:text-primary-hover transition-colors"
           @click="clearSelectedFile"
         >
-          <span
-            class="material-symbols-outlined select-none"
-            style="font-size: 14px; vertical-align: middle"
-            >arrow_back</span
-          >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           Back
         </button>
         <span

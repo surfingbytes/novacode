@@ -5,23 +5,28 @@ import { useRoute, useRouter, RouterLink } from 'vue-router';
 
 // components
 import ConfirmModal from '@/components/ConfirmModal.vue';
+import ContextMenu from '@/components/ContextMenu.vue';
 import SessionEditModal from '@/components/SessionEditModal.vue';
 import NewSessionModal from '@/components/NewSessionModal.vue';
 import NewOrchestratorModal from '@/components/NewOrchestratorModal.vue';
 
-// classes
-import { sessionsApi, orchestratorApi, settingsApi } from '@/classes/api';
-
 // stores
 import { useWorkspacesStore } from '@/stores/workspaces';
 
-// types
-import type { Session, Orchestrator, AgentType, Workspace } from '@/@types/index';
-
-// utils
+// classes
+import { sessionsApi, orchestratorApi, settingsApi } from '@/classes/api';
 import { subtasksFromStoredJson } from '@/utils/orchestratorPayload';
 
-// -------------------------------------------------- Const --------------------------------------------------
+// types
+import type { ContextMenuItem } from '@/components/ContextMenu.vue';
+import type { Session, Orchestrator, AgentType, Workspace } from '@/@types/index';
+
+// -------------------------------------------------- Props --------------------------------------------------
+const props = defineProps<{
+  workspace: Workspace; // required
+}>();
+
+// -------------------------------------------------- Constants --------------------------------------------------
 const AGENT_TYPE_TEXT = {
   claude: 'Claude',
   'cursor-agent': 'Cursor',
@@ -32,43 +37,37 @@ const AGENT_TYPE_COLOR = {
   'cursor-agent': 'bg-violet-500/15! text-violet-400! border-violet-500/20!',
   'mistral-vibe': 'bg-emerald-500/15! text-emerald-400! border-emerald-500/20!'
 };
-// -------------------------------------------------- Data --------------------------------------------------
 
-const props = defineProps<{
-  workspace: Workspace; // required
-}>();
-
-// -------------------------------------------------- Data --------------------------------------------------
+// -------------------------------------------------- Store --------------------------------------------------
 const store = useWorkspacesStore();
 const route = useRoute();
 const router = useRouter();
-const sessions = computed<Session[]>(() => store.activeSessions);
-const archivedSessions = computed<Session[]>(() => store.archivedSessions);
-const sessionsLoading = computed<boolean>(() => store.bSessionsLoading);
+
+// -------------------------------------------------- Refs --------------------------------------------------
 const orchestrators = ref<Orchestrator[]>([]);
-const orchestratorsLoading = ref(false);
+const bOrchestratorsLoading = ref(false);
 /** After first successful fetch; avoids showing step sessions at top level before orchestrator data exists. */
-const orchestratorsInitialFetched = ref(false);
-const showNewSessionModal = ref(false);
-const isSubmittingSession = ref(false);
+const bOrchestratorsInitialFetched = ref(false);
+const bShowNewSessionModal = ref(false);
+const bSubmittingSession = ref(false);
 const sessionToDelete = ref<Session | null>(null);
-const isDeletingSession = ref(false);
+const bDeletingSession = ref(false);
 const sessionToEdit = ref<Session | null>(null);
-const isSavingEdit = ref(false);
-const showNewOrchestratorModal = ref(false);
+const bSavingEdit = ref(false);
+const bShowNewOrchestratorModal = ref(false);
 const viewMode = ref<'list' | 'grid'>(
   (localStorage.getItem('sessionsViewMode') as 'list' | 'grid') ?? 'list'
 );
 const orchestratorsViewMode = ref<'list' | 'grid'>(
   (localStorage.getItem('orchestratorsViewMode') as 'list' | 'grid') ?? 'list'
 );
-const showArchived = ref(false);
+const bShowArchived = ref(false);
 
 // multiselect
 const selectedIds = ref<Set<string>>(new Set());
-const isBulkArchiving = ref(false);
-const showBulkDeleteCombined = ref(false);
-const isBulkDeletingCombined = ref(false);
+const bBulkArchiving = ref(false);
+const bShowBulkDeleteCombined = ref(false);
+const bBulkDeletingCombined = ref(false);
 const orchestratorSelectedIds = ref<Set<string>>(new Set());
 
 // Multiselect bar alignment with list items
@@ -76,58 +75,16 @@ const listViewRef = ref<HTMLElement | null>(null);
 const archivedListViewRef = ref<HTMLElement | null>(null);
 const multiselectLeft = ref<number | null>(null);
 const multiselectWidth = ref<number | null>(null);
-
-function pickMultiselectAnchorEl(): HTMLElement | null {
-  if (viewMode.value !== 'list') return null;
-  if (showArchived.value && archivedListViewRef.value) return archivedListViewRef.value;
-  return listViewRef.value;
-}
-
-function updateMultiselectBarPosition(): void {
-  const anchor = pickMultiselectAnchorEl();
-  if (!anchor) {
-    multiselectLeft.value = null;
-    multiselectWidth.value = null;
-    return;
-  }
-
-  const rect = anchor.getBoundingClientRect();
-  // Position the fixed bar to match the list container geometry.
-  multiselectLeft.value = rect.left;
-  multiselectWidth.value = rect.width;
-}
-
-function scheduleUpdateMultiselectBarPosition(): void {
-  void nextTick(() => updateMultiselectBarPosition());
-}
-
-watch(viewMode, (v) => localStorage.setItem('sessionsViewMode', v));
-watch(orchestratorsViewMode, (v) => localStorage.setItem('orchestratorsViewMode', v));
-
-// -------------------------------------------------- Computed --------------------------------------------------
-const workspaceId = computed((): string => route.params.id as string);
-
-/** ID of the orchestrator currently shown in the detail view (for active border in sidebar). */
-const activeOrchestratorId = computed((): string | null =>
-  route.name === 'orchestrator' ? ((route.params.orchestratorId as string) ?? null) : null
-);
-/** ID of the session currently shown in the detail view (for active border in sidebar). */
-const activeSessionId = computed((): string | null =>
-  route.name === 'session' ? ((route.params.sessionId as string) ?? null) : null
-);
-
-const claudeAvailable = ref(false);
-const cursorAvailable = ref(false);
-const mistralVibeAvailable = ref(false);
-
+const bClaudeAvailable = ref(false);
+const bCursorAvailable = ref(false);
+const bMistralVibeAvailable = ref(false);
 const activeFilter = ref<string | null>(null);
 
-function sessionHasTag(s: Session, tag: string | null): boolean {
-  if (!tag) return true;
-  const list = s.tags;
-  if (!list?.length) return false;
-  return list.some((x) => x.toLowerCase() === tag.toLowerCase());
-}
+// -------------------------------------------------- Computed --------------------------------------------------
+const sessions = computed<Session[]>(() => store.activeSessions);
+const archivedSessions = computed<Session[]>(() => store.archivedSessions);
+const sessionsLoading = computed<boolean>(() => store.bSessionsLoading);
+const workspaceId = computed((): string => route.params.id as string);
 
 /** Unique tags used by sessions (for filter chips and autocomplete). */
 const sessionTags = computed((): string[] => {
@@ -147,8 +104,6 @@ const sessionTags = computed((): string[] => {
   }
   return out.sort((a, b) => a.localeCompare(b));
 });
-
-const orchestratorActiveFilter = ref<string | null>(null);
 
 /**
  * Sessions that were created by orchestrator runs, grouped by orchestrator.
@@ -189,14 +144,6 @@ const sessionsAttachedToOrchestrators = computed<Set<string>>(() => {
   }
   return ids;
 });
-
-/** Helper to get attached sessions for a single orchestrator id. */
-function orchestratorSessionsFor(orchestratorId: string): Session[] {
-  const group = orchestratorSessionsByOrchestrator.value.find(
-    (g) => g.orchestrator.id === orchestratorId
-  );
-  return group?.sessions ?? [];
-}
 
 /** Step sessions under an orchestrator, in subtask order (for nested list UI). */
 function orderedNestedSessions(orch: Orchestrator): Session[] {
@@ -294,26 +241,9 @@ const showDeleteModal = (item: CombinedItem): void => {
   }
 };
 
-const CATEGORY_COLORS = [
-  'bg-blue-500/15 text-blue-400 border-blue-500/20',
-  'bg-purple-500/15 text-purple-400 border-purple-500/20',
-  'bg-green-500/15 text-green-400 border-green-500/20',
-  'bg-orange-500/15 text-orange-400 border-orange-500/20',
-  'bg-pink-500/15 text-pink-400 border-pink-500/20',
-  'bg-cyan-500/15 text-cyan-400 border-cyan-500/20',
-  'bg-yellow-500/15 text-yellow-400 border-yellow-500/20',
-  'bg-red-500/15 text-red-400 border-red-500/20'
-];
-
-function categoryColorClass(name: string): string {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return CATEGORY_COLORS[h % CATEGORY_COLORS.length];
-}
-
 const selectionActive = computed(() => selectedIds.value.size > 0);
 const visibleSelectableSessions = computed<Session[]>(() =>
-  showArchived.value ? [...filteredSessions.value, ...filteredArchivedSessions.value] : filteredSessions.value
+  bShowArchived.value ? [...filteredSessions.value, ...filteredArchivedSessions.value] : filteredSessions.value
 );
 const orchestratorSelectionActive = computed(() => orchestratorSelectedIds.value.size > 0);
 
@@ -365,8 +295,11 @@ const multiselectArchiveShouldUnarchive = computed(() => {
 
 function toggleSelect(id: string): void {
   const next = new Set(selectedIds.value);
-  if (next.has(id)) next.delete(id);
-  else next.add(id);
+  if (next.has(id)) {
+    next.delete(id);
+  } else {
+    next.add(id);
+  }
   selectedIds.value = next;
 }
 
@@ -376,18 +309,18 @@ function clearSelection(): void {
 
 // long-press to enter selection mode
 const longPressTimer = ref<ReturnType<typeof setTimeout> | null>(null);
-const longPressTriggered = ref(false);
+const bLongPressTriggered = ref(false);
 const pointerStart = ref<{ x: number; y: number } | null>(null);
 
 const orchLongPressTimer = ref<ReturnType<typeof setTimeout> | null>(null);
-const orchLongPressTriggered = ref(false);
+const bOrchLongPressTriggered = ref(false);
 const orchPointerStart = ref<{ x: number; y: number } | null>(null);
 
 function onItemPointerDown(session: Session, e: PointerEvent): void {
-  longPressTriggered.value = false;
+  bLongPressTriggered.value = false;
   pointerStart.value = { x: e.clientX, y: e.clientY };
   longPressTimer.value = setTimeout(() => {
-    longPressTriggered.value = true;
+    bLongPressTriggered.value = true;
     if (!selectedIds.value.has(session.id)) {
       toggleSelect(session.id);
     }
@@ -415,16 +348,19 @@ function onItemPointerMove(e: PointerEvent): void {
 
 function toggleSelectOrchestrator(id: string): void {
   const next = new Set(orchestratorSelectedIds.value);
-  if (next.has(id)) next.delete(id);
-  else next.add(id);
+  if (next.has(id)) {
+    next.delete(id);
+  } else {
+    next.add(id);
+  }
   orchestratorSelectedIds.value = next;
 }
 
 function onOrchItemPointerDown(orchestrator: Orchestrator, e: PointerEvent): void {
-  orchLongPressTriggered.value = false;
+  bOrchLongPressTriggered.value = false;
   orchPointerStart.value = { x: e.clientX, y: e.clientY };
   orchLongPressTimer.value = setTimeout(() => {
-    orchLongPressTriggered.value = true;
+    bOrchLongPressTriggered.value = true;
     if (!orchestratorSelectedIds.value.has(orchestrator.id)) {
       toggleSelectOrchestrator(orchestrator.id);
     }
@@ -451,9 +387,9 @@ function onOrchItemPointerMove(e: PointerEvent): void {
 }
 
 function handleOrchestratorClick(orchestrator: Orchestrator, e: Event): void {
-  if (orchLongPressTriggered.value) {
+  if (bOrchLongPressTriggered.value) {
     e.preventDefault();
-    orchLongPressTriggered.value = false;
+    bOrchLongPressTriggered.value = false;
     return;
   }
   if (orchestratorSelectionActive.value) {
@@ -464,9 +400,9 @@ function handleOrchestratorClick(orchestrator: Orchestrator, e: Event): void {
 }
 
 function handleSessionClick(session: Session, e: Event): void {
-  if (longPressTriggered.value) {
+  if (bLongPressTriggered.value) {
     e.preventDefault();
-    longPressTriggered.value = false;
+    bLongPressTriggered.value = false;
     return;
   }
   if (selectionActive.value) {
@@ -477,42 +413,78 @@ function handleSessionClick(session: Session, e: Event): void {
   }
 }
 
-function relativeTime(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const seconds = Math.floor(diff / 1000);
-  if (seconds < 60) return 'just now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(dateStr).toLocaleDateString();
+function pickMultiselectAnchorEl(): HTMLElement | null {
+  if (viewMode.value !== 'list') {
+    return null;
+  }
+  if (bShowArchived.value && archivedListViewRef.value) {
+    return archivedListViewRef.value;
+  }
+  return listViewRef.value;
 }
+
+function updateMultiselectBarPosition(): void {
+  const anchor = pickMultiselectAnchorEl();
+  if (!anchor) {
+    multiselectLeft.value = null;
+    multiselectWidth.value = null;
+    return;
+  }
+
+  const rect = anchor.getBoundingClientRect();
+  // Position the fixed bar to match the list container geometry.
+  multiselectLeft.value = rect.left;
+  multiselectWidth.value = rect.width;
+}
+
+function scheduleUpdateMultiselectBarPosition(): void {
+  void nextTick(() => updateMultiselectBarPosition());
+}
+
+function sessionHasTag(s: Session, tag: string | null): boolean {
+  if (!tag) {
+    return true;
+  }
+  const list = s.tags;
+  if (!list?.length) {
+    return false;
+  }
+  return list.some((x) => x.toLowerCase() === tag.toLowerCase());
+}
+
+// -------------------------------------------------- Watchers --------------------------------------------------
+watch(viewMode, (v) => {
+  localStorage.setItem('sessionsViewMode', v);
+});
+watch(orchestratorsViewMode, (v) => {
+  localStorage.setItem('orchestratorsViewMode', v);
+});
 
 // -------------------------------------------------- Methods --------------------------------------------------
 const ensureData = async (): Promise<void> => {
-  if (store.workspaces.some((w) => w.id === workspaceId.value)) return;
+  if (store.workspaces.some((w) => w.id === workspaceId.value)) {
+    return;
+  }
   await store.fetchAll();
 };
 
 const loadAgentCapabilities = async (): Promise<void> => {
   try {
     const { data } = await settingsApi.getAgentCapabilities();
-    claudeAvailable.value = data.claudeAvailable;
-    cursorAvailable.value = data.cursorAvailable;
-    mistralVibeAvailable.value = data.mistralVibeAvailable;
+    bClaudeAvailable.value = data.claudeAvailable;
+    bCursorAvailable.value = data.cursorAvailable;
+    bMistralVibeAvailable.value = data.mistralVibeAvailable;
   } catch {
-    claudeAvailable.value = false;
-    cursorAvailable.value = false;
-    mistralVibeAvailable.value = false;
+    bClaudeAvailable.value = false;
+    bCursorAvailable.value = false;
+    bMistralVibeAvailable.value = false;
   }
 };
 
 const fetchOrchestrators = async (opts?: { silent?: boolean }): Promise<void> => {
   if (!workspaceId.value) return;
   const silent = opts?.silent === true;
-  if (!silent) orchestratorsLoading.value = true;
+  if (!silent) bOrchestratorsLoading.value = true;
   try {
     const { data } = await orchestratorApi.list(workspaceId.value);
     orchestrators.value = data ?? [];
@@ -520,8 +492,8 @@ const fetchOrchestrators = async (opts?: { silent?: boolean }): Promise<void> =>
     console.error('Failed to fetch orchestrators:', error);
     orchestrators.value = [];
   } finally {
-    if (!silent) orchestratorsLoading.value = false;
-    orchestratorsInitialFetched.value = true;
+    if (!silent) bOrchestratorsLoading.value = false;
+    bOrchestratorsInitialFetched.value = true;
   }
 };
 
@@ -530,11 +502,11 @@ const createSession = async (payload: {
   tags?: string[] | null;
   agentType?: AgentType;
 }): Promise<void> => {
-  if (!props.workspace || isSubmittingSession.value) return;
-  isSubmittingSession.value = true;
+  if (!props.workspace || bSubmittingSession.value) return;
+  bSubmittingSession.value = true;
   try {
     const { data: newSession } = await sessionsApi.create(props.workspace.id, payload);
-    showNewSessionModal.value = false;
+    bShowNewSessionModal.value = false;
     await router.push({
       name: 'session',
       params: { id: props.workspace.id, sessionId: newSession.id }
@@ -542,22 +514,22 @@ const createSession = async (payload: {
   } catch (error) {
     console.error('Failed to create session:', error);
   } finally {
-    isSubmittingSession.value = false;
+    bSubmittingSession.value = false;
   }
 };
 
-const isCreatingOrchestrator = ref(false);
+const bCreatingOrchestrator = ref(false);
 const createOrchestrator = async (payload: {
   name: string;
   tags?: string | null;
   agentType?: AgentType;
 }): Promise<void> => {
-  if (!props.workspace || isCreatingOrchestrator.value) return;
-  isCreatingOrchestrator.value = true;
+  if (!props.workspace || bCreatingOrchestrator.value) return;
+  bCreatingOrchestrator.value = true;
   try {
     const { data: newOrchestrator } = await orchestratorApi.create(props.workspace.id, payload);
     orchestrators.value = [newOrchestrator, ...orchestrators.value];
-    showNewOrchestratorModal.value = false;
+    bShowNewOrchestratorModal.value = false;
     await router.push({
       name: 'orchestrator',
       params: { id: props.workspace.id, orchestratorId: newOrchestrator.id }
@@ -565,35 +537,29 @@ const createOrchestrator = async (payload: {
   } catch (error) {
     console.error('Failed to create orchestrator:', error);
   } finally {
-    isCreatingOrchestrator.value = false;
+    bCreatingOrchestrator.value = false;
   }
 };
 
-function isAgentDisabled(type: AgentType): boolean {
-  if (type === 'claude') return !claudeAvailable.value;
-  if (type === 'mistral-vibe') return !mistralVibeAvailable.value;
-  return !cursorAvailable.value;
-}
-
 const deleteSession = async (): Promise<void> => {
   if (!sessionToDelete.value || !props.workspace) return;
-  isDeletingSession.value = true;
+  bDeletingSession.value = true;
   try {
     await sessionsApi.remove(props.workspace.id, sessionToDelete.value.id);
     sessionToDelete.value = null;
   } catch (error) {
     console.error('Failed to delete session:', error);
   } finally {
-    isDeletingSession.value = false;
+    bDeletingSession.value = false;
   }
 };
 
 const orchestratorToDelete = ref<Orchestrator | null>(null);
-const isDeletingOrchestrator = ref(false);
+const bDeletingOrchestrator = ref(false);
 
 const deleteOrchestrator = async (): Promise<void> => {
   if (!orchestratorToDelete.value || !props.workspace) return;
-  isDeletingOrchestrator.value = true;
+  bDeletingOrchestrator.value = true;
   try {
     await orchestratorApi.remove(props.workspace.id, orchestratorToDelete.value.id);
     orchestrators.value = orchestrators.value.filter(
@@ -603,7 +569,7 @@ const deleteOrchestrator = async (): Promise<void> => {
   } catch (error) {
     console.error('Failed to delete orchestrator:', error);
   } finally {
-    isDeletingOrchestrator.value = false;
+    bDeletingOrchestrator.value = false;
   }
 };
 
@@ -624,7 +590,7 @@ const bulkDeleteCombined = async (): Promise<void> => {
   const sessionIds = [...selectedIds.value];
   const orchIds = [...orchestratorSelectedIds.value];
   if (sessionIds.length === 0 && orchIds.length === 0) return;
-  isBulkDeletingCombined.value = true;
+  bBulkDeletingCombined.value = true;
   try {
     if (sessionIds.length > 0) {
       await sessionsApi.bulkDelete(props.workspace.id, sessionIds);
@@ -636,17 +602,17 @@ const bulkDeleteCombined = async (): Promise<void> => {
       orchestrators.value = orchestrators.value.filter((o) => !orchSet.has(o.id));
       orchestratorSelectedIds.value = new Set();
     }
-    showBulkDeleteCombined.value = false;
+    bShowBulkDeleteCombined.value = false;
   } catch (error) {
     console.error('Failed to delete selection:', error);
   } finally {
-    isBulkDeletingCombined.value = false;
+    bBulkDeletingCombined.value = false;
   }
 };
 
 const saveEditSession = async (payload: { name: string; tags?: string[] | null }): Promise<void> => {
   if (!sessionToEdit.value || !props.workspace) return;
-  isSavingEdit.value = true;
+  bSavingEdit.value = true;
   try {
     await sessionsApi.update(
       props.workspace.id,
@@ -657,7 +623,7 @@ const saveEditSession = async (payload: { name: string; tags?: string[] | null }
   } catch (error) {
     console.error('Failed to update session:', error);
   } finally {
-    isSavingEdit.value = false;
+    bSavingEdit.value = false;
   }
 };
 
@@ -693,7 +659,7 @@ const onMultiselectArchive = async (): Promise<void> => {
   const sessionIds = [...selectedIds.value];
   const orchIds = [...orchestratorSelectedIds.value];
   if (sessionIds.length === 0 && orchIds.length === 0) return;
-  isBulkArchiving.value = true;
+  bBulkArchiving.value = true;
   try {
     if (sessionIds.length > 0) {
       await sessionsApi.bulkArchive(props.workspace.id, sessionIds, wantArchived);
@@ -714,9 +680,97 @@ const onMultiselectArchive = async (): Promise<void> => {
   } catch (error) {
     console.error('Failed to archive selection:', error);
   } finally {
-    isBulkArchiving.value = false;
+    bBulkArchiving.value = false;
   }
 };
+
+// -------------------------------------------------- Context menu --------------------------------------------------
+const bCtxMenuOpen = ref(false);
+const ctxMenuX = ref(0);
+const ctxMenuY = ref(0);
+const ctxMenuItems = ref<ContextMenuItem[]>([]);
+let ctxPickHandler: ((key: string) => void) | null = null;
+
+function openContextMenu(
+  e: MouseEvent,
+  items: ContextMenuItem[],
+  onPick: (key: string) => void
+): void {
+  e.preventDefault();
+  e.stopPropagation();
+  ctxMenuItems.value = items;
+  ctxPickHandler = onPick;
+  ctxMenuX.value = e.clientX;
+  ctxMenuY.value = e.clientY;
+  bCtxMenuOpen.value = true;
+}
+
+function onContextMenuPick(key: string): void {
+  const fn = ctxPickHandler;
+  ctxPickHandler = null;
+  fn?.(key);
+}
+
+function contextItemsForSession(session: Session): ContextMenuItem[] {
+  const arch = session.archived;
+  return [
+    { key: 'open', label: 'Open', icon: 'open_in_new' },
+    { key: 'edit', label: 'Edit…', icon: 'edit' },
+    { key: 'archive', label: arch ? 'Unarchive' : 'Archive', icon: arch ? 'unarchive' : 'inventory_2' },
+    { key: 'delete', label: 'Delete…', icon: 'delete', danger: true }
+  ];
+}
+
+function contextItemsForOrchestrator(orchestrator: Orchestrator): ContextMenuItem[] {
+  const arch = orchestrator.archived === true;
+  return [
+    { key: 'open', label: 'Open', icon: 'open_in_new' },
+    { key: 'archive', label: arch ? 'Unarchive' : 'Archive', icon: arch ? 'unarchive' : 'inventory_2' },
+    { key: 'delete', label: 'Delete…', icon: 'delete', danger: true }
+  ];
+}
+
+function onSessionContextMenu(e: MouseEvent, session: Session): void {
+  openContextMenu(e, contextItemsForSession(session), (key) => {
+    const wid = workspaceId.value;
+    if (key === 'open') {
+      router.push({ name: 'session', params: { id: wid, sessionId: session.id } });
+      return;
+    }
+    if (key === 'edit') {
+      sessionToEdit.value = session;
+      return;
+    }
+    if (key === 'archive') {
+      void toggleArchive(session);
+      return;
+    }
+    if (key === 'delete') {
+      showDeleteModal({ kind: 'session', session });
+    }
+  });
+}
+
+function onOrchestratorContextMenu(e: MouseEvent, orchestrator: Orchestrator): void {
+  openContextMenu(e, contextItemsForOrchestrator(orchestrator), (key) => {
+    const wid = workspaceId.value;
+    if (key === 'open') {
+      router.push({ name: 'orchestrator', params: { id: wid, orchestratorId: orchestrator.id } });
+      return;
+    }
+    if (key === 'archive') {
+      void toggleArchiveOrchestrator(orchestrator);
+      return;
+    }
+    if (key === 'delete') {
+      showDeleteModal({
+        kind: 'orchestrator',
+        orchestrator,
+        nestedSessions: orderedNestedSessions(orchestrator)
+      });
+    }
+  });
+}
 
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 onMounted(() => {
@@ -735,11 +789,11 @@ onBeforeUnmount(() => {
 });
 watch(workspaceId, (id) => {
   if (!id) return;
-  orchestratorsInitialFetched.value = false;
+  bOrchestratorsInitialFetched.value = false;
   ensureData();
   fetchOrchestrators();
 });
-watch(showArchived, () => {
+watch(bShowArchived, () => {
   clearSelection();
   scheduleUpdateMultiselectBarPosition();
 });
@@ -817,34 +871,34 @@ onBeforeUnmount(() => {
         :class="{ 'is-active': viewMode === 'list' }"
         @click="viewMode = 'list'"
       >
-        <span class="material-symbols-outlined">view_list</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
       </button>
       <button
         class="button is-icon"
         :class="{ 'is-active': viewMode === 'grid' }"
         @click="viewMode = 'grid'"
       >
-        <span class="material-symbols-outlined">grid_view</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
       </button>
     </div>
     <div class="flex flex-wrap items-center gap-2 shrink-0">
       <button
         type="button"
         class="button"
-        @click="showNewOrchestratorModal = true"
+        @click="bShowNewOrchestratorModal = true"
       >
-        <span class="material-symbols-outlined">account_tree</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M21 3H15v4h6V3zM9 3H3v4h6V3zM15 17H9v4h6v-4z"/><path d="M12 7v4M6 7v6h12V7"/></svg>
         New orchestrator
       </button>
-      <button type="button" @click="showNewSessionModal = true" class="button is-primary">
-        <span class="material-symbols-outlined">add</span>
+      <button type="button" @click="bShowNewSessionModal = true" class="button is-primary">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         New Session
       </button>
     </div>
   </div>
 
   <div
-    v-if="sessionsLoading || !orchestratorsInitialFetched"
+    v-if="sessionsLoading || !bOrchestratorsInitialFetched"
     class="flex flex-col items-center justify-center py-14 gap-4"
   >
     <div class="w-8 h-8 border-2 border-surface border-t-primary rounded-full animate-spin"></div>
@@ -867,10 +921,15 @@ onBeforeUnmount(() => {
               orchestratorId: item.kind === 'orchestrator' ? item.orchestrator.id : undefined
             }
           }"
+          @contextmenu.prevent.stop="
+            item.kind === 'session'
+              ? onSessionContextMenu($event, item.session)
+              : onOrchestratorContextMenu($event, item.orchestrator)
+          "
         >
           <div class="top">
             <div class="icon">
-              <span class="material-symbols-outlined"> chat </span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
             </div>
             <div class="info">
               <p class="title flex items-center gap-2">
@@ -916,7 +975,7 @@ onBeforeUnmount(() => {
                 class="button is-icon"
                 @click.prevent.stop="item.kind === 'session' && (sessionToEdit = item.session)"
               >
-                <span class="material-symbols-outlined">edit</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
               </button>
               <button
                 class="button is-icon hover:bg-warning/10! hover:border-warning!"
@@ -926,21 +985,14 @@ onBeforeUnmount(() => {
                     : toggleArchiveOrchestrator(item.orchestrator)
                 "
               >
-                <span class="material-symbols-outlined text-warning">{{
-                  item.kind === 'session'
-                    ? item.session.archived
-                      ? 'unarchive'
-                      : 'inventory_2'
-                    : item.orchestrator.archived
-                      ? 'unarchive'
-                      : 'inventory_2'
-                }}</span>
+                <svg v-if="(item.kind === 'session' ? item.session.archived : item.orchestrator.archived)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-warning" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"/></svg>
+                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-warning" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"/></svg>
               </button>
               <button
                 class="button is-icon hover:bg-destructive/10! hover:border-destructive!"
                 @click.prevent.stop="showDeleteModal(item)"
               >
-                <span class="material-symbols-outlined text-destructive">delete</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-destructive" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
               </button>
             </div>
           </div>
@@ -972,6 +1024,7 @@ onBeforeUnmount(() => {
             @pointercancel="onItemPointerUp"
             @pointermove="onItemPointerMove"
             @click="handleSessionClick(item.session, $event)"
+            @contextmenu.prevent.stop="onSessionContextMenu($event, item.session)"
           >
             <div class="cell !flex-none pr-0">
               <button
@@ -980,11 +1033,10 @@ onBeforeUnmount(() => {
                 @click.prevent.stop="toggleSelect(item.session.id)"
                 :aria-label="selectedIds.has(item.session.id) ? 'Deselect session' : 'Select session'"
               >
-                <span
+                <svg
                   v-if="selectedIds.has(item.session.id)"
-                  class="material-symbols-outlined text-[16px] leading-none"
-                  >check</span
-                >
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"
+                ><polyline points="20 6 9 17 4 12"/></svg>
               </button>
             </div>
             <div class="cell flex-1 min-w-0">
@@ -1019,21 +1071,20 @@ onBeforeUnmount(() => {
                 class="button is-icon"
                 @click.prevent.stop="sessionToEdit = item.session"
               >
-                <span class="material-symbols-outlined">edit</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
               </button>
               <button
                 class="button is-icon hover:bg-warning/10! hover:border-warning!"
                 @click.prevent.stop="toggleArchive(item.session)"
               >
-                <span class="material-symbols-outlined text-warning">{{
-                  item.session.archived ? 'unarchive' : 'inventory_2'
-                }}</span>
+                <svg v-if="item.session.archived" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-warning" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"/></svg>
+                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-warning" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"/></svg>
               </button>
               <button
                 class="button is-icon hover:bg-destructive/10! hover:border-destructive!"
                 @click.prevent.stop="showDeleteModal(item)"
               >
-                <span class="material-symbols-outlined text-destructive">delete</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-destructive" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
               </button>
             </div>
           </RouterLink>
@@ -1051,6 +1102,7 @@ onBeforeUnmount(() => {
               @pointercancel="onOrchItemPointerUp"
               @pointermove="onOrchItemPointerMove"
               @click="handleOrchestratorClick(item.orchestrator, $event)"
+              @contextmenu.prevent.stop="onOrchestratorContextMenu($event, item.orchestrator)"
             >
               <div class="cell !flex-none pr-0">
                 <button
@@ -1063,18 +1115,15 @@ onBeforeUnmount(() => {
                       : 'Select orchestrator'
                   "
                 >
-                  <span
+                  <svg
                     v-if="orchestratorSelectedIds.has(item.orchestrator.id)"
-                    class="material-symbols-outlined text-[16px] leading-none"
-                    >check</span
-                  >
+                    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"
+                  ><polyline points="20 6 9 17 4 12"/></svg>
                 </button>
               </div>
               <div class="cell flex-1 min-w-0">
                 <p class="title flex items-center gap-2">
-                  <span class="material-symbols-outlined text-text-muted shrink-0 text-[18px]"
-                    >account_tree</span
-                  >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="text-text-muted shrink-0" aria-hidden="true"><path d="M21 3H15v4h6V3zM9 3H3v4h6V3zM15 17H9v4h6v-4z"/><path d="M12 7v4M6 7v6h12V7"/></svg>
                   <span>{{ item.orchestrator.name }}</span>
                   <span
                     v-if="item.orchestrator.runStatus === 'running'"
@@ -1093,19 +1142,19 @@ onBeforeUnmount(() => {
               </div>
               <div class="cell buttons">
                 <button class="button is-icon" @click.prevent.stop>
-                  <span class="material-symbols-outlined">edit</span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
                 </button>
                 <button
                   class="button is-icon hover:bg-warning/10! hover:border-warning!"
                   @click.prevent.stop="toggleArchiveOrchestrator(item.orchestrator)"
                 >
-                  <span class="material-symbols-outlined text-warning">inventory_2</span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-warning" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"/></svg>
                 </button>
                 <button
                   class="button is-icon hover:bg-destructive/10! hover:border-destructive!"
                   @click.prevent.stop="showDeleteModal(item)"
                 >
-                  <span class="material-symbols-outlined text-destructive">delete</span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-destructive" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
                 </button>
               </div>
             </RouterLink>
@@ -1118,11 +1167,10 @@ onBeforeUnmount(() => {
                 name: 'session',
                 params: { id: workspaceId, sessionId: child.id }
               }"
+              @contextmenu.prevent.stop="onSessionContextMenu($event, child)"
             >
               <div class="cell flex-1 min-w-0 flex items-start gap-2">
-                <span class="material-symbols-outlined text-text-muted shrink-0 text-[16px] mt-0.5"
-                  >subdirectory_arrow_right</span
-                >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-text-muted shrink-0 mt-0.5" aria-hidden="true"><path d="M3 9l9 9 9-9"/></svg>
                 <div class="min-w-0 flex-1">
                   <p class="title flex items-center gap-2 flex-wrap">
                     <span>{{ child.name }}</span>
@@ -1162,14 +1210,14 @@ onBeforeUnmount(() => {
       <button
         class="flex items-center gap-2 text-sm text-text-muted hover:text-text-primary transition-colors font-medium select-none"
         :disabled="sessionsLoading"
-        @click="showArchived = !showArchived"
+        @click="bShowArchived = !bShowArchived"
       >
-        <span
-          class="material-symbols-outlined transition-transform duration-200"
-          :class="showArchived ? 'rotate-90' : ''"
-          style="font-size: 18px"
-          >chevron_right</span
-        >
+        <svg
+          viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"
+          class="transition-transform duration-200"
+          :class="bShowArchived ? 'rotate-90' : ''"
+          aria-hidden="true"
+        ><polyline points="9 18 15 12 9 6"/></svg>
         Archived
         <span class="text-xs bg-fg/[0.07] border border-fg/[0.1] rounded-full px-2 py-0.5">{{
           archivedCount
@@ -1177,7 +1225,7 @@ onBeforeUnmount(() => {
       </button>
 
       <Transition name="fade">
-        <div v-if="showArchived" class="mt-4">
+        <div v-if="bShowArchived" class="mt-4">
           <div class="grid-view" v-if="viewMode === 'grid'">
             <TransitionGroup name="list-stagger" tag="div" class="grid-view-items">
               <RouterLink
@@ -1189,10 +1237,11 @@ onBeforeUnmount(() => {
                   name: 'session',
                   params: { id: workspaceId, sessionId: session.id }
                 }"
+                @contextmenu.prevent.stop="onSessionContextMenu($event, session)"
               >
                 <div class="top">
                   <div class="icon">
-                    <span class="material-symbols-outlined"> chat </span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
                   </div>
                   <div class="info">
                     <p class="title flex items-center gap-2">
@@ -1228,13 +1277,13 @@ onBeforeUnmount(() => {
                       @click.prevent.stop="toggleArchive(session)"
                       title="Unarchive"
                     >
-                      <span class="material-symbols-outlined text-primary">unarchive</span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-primary" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"/></svg>
                     </button>
                     <button
                       class="button is-icon hover:bg-destructive/10! hover:border-destructive!"
                       @click.prevent.stop="showDeleteModal({ kind: 'session', session })"
                     >
-                      <span class="material-symbols-outlined text-destructive">delete</span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-destructive" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
                     </button>
                   </div>
                 </div>
@@ -1258,10 +1307,11 @@ onBeforeUnmount(() => {
                     name: 'orchestrator',
                     params: { id: workspaceId, orchestratorId: orch.id }
                   }"
+                  @contextmenu.prevent.stop="onOrchestratorContextMenu($event, orch)"
                 >
                   <div class="top">
                     <div class="icon">
-                      <span class="material-symbols-outlined">account_tree</span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M21 3H15v4h6V3zM9 3H3v4h6V3zM15 17H9v4h6v-4z"/><path d="M12 7v4M6 7v6h12V7"/></svg>
                     </div>
                     <div class="info">
                       <p class="title flex items-center gap-2">
@@ -1285,7 +1335,7 @@ onBeforeUnmount(() => {
                         @click.prevent.stop="toggleArchiveOrchestrator(orch)"
                         title="Unarchive"
                       >
-                        <span class="material-symbols-outlined text-primary">unarchive</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-primary" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"/></svg>
                       </button>
                       <button
                         class="button is-icon hover:bg-destructive/10! hover:border-destructive!"
@@ -1297,7 +1347,7 @@ onBeforeUnmount(() => {
                           })
                         "
                       >
-                        <span class="material-symbols-outlined text-destructive">delete</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-destructive" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
                       </button>
                     </div>
                   </div>
@@ -1317,6 +1367,7 @@ onBeforeUnmount(() => {
                   name: 'session',
                   params: { id: workspaceId, sessionId: session.id }
                 }"
+                @contextmenu.prevent.stop="onSessionContextMenu($event, session)"
               >
                 <div class="cell !flex-none pr-0">
                   <button
@@ -1325,11 +1376,10 @@ onBeforeUnmount(() => {
                     @click.prevent.stop="toggleSelect(session.id)"
                     :aria-label="selectedIds.has(session.id) ? 'Deselect session' : 'Select session'"
                   >
-                    <span
+                    <svg
                       v-if="selectedIds.has(session.id)"
-                      class="material-symbols-outlined text-[16px] leading-none"
-                      >check</span
-                    >
+                      viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"
+                    ><polyline points="20 6 9 17 4 12"/></svg>
                   </button>
                 </div>
                 <div class="cell flex-1 min-w-0">
@@ -1364,13 +1414,13 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="cell buttons">
                   <button class="button is-icon" @click.prevent.stop="toggleArchive(session)">
-                    <span class="material-symbols-outlined text-primary">unarchive</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-primary" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"/></svg>
                   </button>
                   <button
                     class="button is-icon hover:bg-destructive/10! hover:border-destructive!"
                     @click.prevent.stop="showDeleteModal({ kind: 'session', session })"
                   >
-                    <span class="material-symbols-outlined text-destructive">delete</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-destructive" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
                   </button>
                 </div>
               </RouterLink>
@@ -1396,6 +1446,7 @@ onBeforeUnmount(() => {
                       name: 'orchestrator',
                       params: { id: workspaceId, orchestratorId: orch.id }
                     }"
+                    @contextmenu.prevent.stop="onOrchestratorContextMenu($event, orch)"
                   >
                     <div class="cell !flex-none pr-0">
                       <button
@@ -1408,18 +1459,15 @@ onBeforeUnmount(() => {
                             : 'Select orchestrator'
                         "
                       >
-                        <span
+                        <svg
                           v-if="orchestratorSelectedIds.has(orch.id)"
-                          class="material-symbols-outlined text-[16px] leading-none"
-                          >check</span
-                        >
+                          viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"
+                        ><polyline points="20 6 9 17 4 12"/></svg>
                       </button>
                     </div>
                     <div class="cell flex-1 min-w-0">
                       <p class="title flex items-center gap-2">
-                        <span class="material-symbols-outlined text-text-muted shrink-0 text-[18px]"
-                          >account_tree</span
-                        >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="text-text-muted shrink-0" aria-hidden="true"><path d="M21 3H15v4h6V3zM9 3H3v4h6V3zM15 17H9v4h6v-4z"/><path d="M12 7v4M6 7v6h12V7"/></svg>
                         <span>{{ orch.name }}</span>
                         <span
                           v-if="orch.runStatus === 'running'"
@@ -1442,7 +1490,7 @@ onBeforeUnmount(() => {
                         @click.prevent.stop="toggleArchiveOrchestrator(orch)"
                         title="Unarchive"
                       >
-                        <span class="material-symbols-outlined text-primary">unarchive</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-primary" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"/></svg>
                       </button>
                       <button
                         class="button is-icon hover:bg-destructive/10! hover:border-destructive!"
@@ -1454,7 +1502,7 @@ onBeforeUnmount(() => {
                           })
                         "
                       >
-                        <span class="material-symbols-outlined text-destructive">delete</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-destructive" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
                       </button>
                     </div>
                   </RouterLink>
@@ -1467,11 +1515,10 @@ onBeforeUnmount(() => {
                       name: 'session',
                       params: { id: workspaceId, sessionId: child.id }
                     }"
+                    @contextmenu.prevent.stop="onSessionContextMenu($event, child)"
                   >
                     <div class="cell flex-1 min-w-0 flex items-start gap-2">
-                      <span class="material-symbols-outlined text-text-muted shrink-0 text-[16px] mt-0.5"
-                        >subdirectory_arrow_right</span
-                      >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-text-muted shrink-0 mt-0.5" aria-hidden="true"><path d="M3 9l9 9 9-9"/></svg>
                       <div class="min-w-0 flex-1">
                         <p class="title flex items-center gap-2 flex-wrap">
                           <span>{{ child.name }}</span>
@@ -1539,26 +1586,25 @@ onBeforeUnmount(() => {
             v-if="selectedIds.size > 0 || orchestratorSelectedIds.size > 0"
             type="button"
             class="button is-icon hover:bg-warning/10! hover:border-warning!"
-            :disabled="isBulkArchiving"
+            :disabled="bBulkArchiving"
             @click="onMultiselectArchive"
             :aria-label="
               multiselectArchiveShouldUnarchive ? 'Unarchive selected' : 'Archive selected'
             "
             :title="multiselectArchiveShouldUnarchive ? 'Unarchive selected' : 'Archive selected'"
           >
-            <span class="material-symbols-outlined text-warning">{{
-              multiselectArchiveShouldUnarchive ? 'unarchive' : 'archive'
-            }}</span>
+            <svg v-if="multiselectArchiveShouldUnarchive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-warning" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"/></svg>
+            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-warning" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"/></svg>
           </button>
           <button
             v-if="selectedIds.size > 0 || orchestratorSelectedIds.size > 0"
             type="button"
             class="button is-icon is-primary"
-            @click="showBulkDeleteCombined = true"
+            @click="bShowBulkDeleteCombined = true"
             aria-label="Delete selected"
             title="Delete selected"
           >
-            <span class="material-symbols-outlined">delete</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
           </button>
         </div>
       </div>
@@ -1570,7 +1616,7 @@ onBeforeUnmount(() => {
     title="Delete session"
     :description="`Delete '${sessionToDelete?.name}'? This cannot be undone.`"
     confirm-label="Delete"
-    :loading="isDeletingSession"
+    :loading="bDeletingSession"
     @update:model-value="
       (v) => {
         if (!v) sessionToDelete = null;
@@ -1580,14 +1626,14 @@ onBeforeUnmount(() => {
   />
 
   <ConfirmModal
-    :model-value="showBulkDeleteCombined"
+    :model-value="bShowBulkDeleteCombined"
     title="Delete selected"
     :description="bulkDeleteCombinedDescription"
     confirm-label="Delete all"
-    :loading="isBulkDeletingCombined"
+    :loading="bBulkDeletingCombined"
     @update:model-value="
       (v: boolean) => {
-        if (!v) showBulkDeleteCombined = false;
+        if (!v) bShowBulkDeleteCombined = false;
       }
     "
     @confirm="bulkDeleteCombined"
@@ -1598,7 +1644,7 @@ onBeforeUnmount(() => {
     title="Delete orchestrator"
     :description="`Delete '${orchestratorToDelete?.name}'? Step sessions created for this plan will be removed too. This cannot be undone.`"
     confirm-label="Delete"
-    :loading="isDeletingOrchestrator"
+    :loading="bDeletingOrchestrator"
     @update:model-value="
       (v) => {
         if (!v) orchestratorToDelete = null;
@@ -1610,7 +1656,7 @@ onBeforeUnmount(() => {
   <SessionEditModal
     :model-value="sessionToEdit !== null"
     :session="sessionToEdit"
-    :loading="isSavingEdit"
+    :loading="bSavingEdit"
     :existing-tags="sessionTags"
     @update:model-value="
       (v) => {
@@ -1621,24 +1667,32 @@ onBeforeUnmount(() => {
   />
 
   <NewSessionModal
-    v-model="showNewSessionModal"
-    :loading="isSubmittingSession"
+    v-model="bShowNewSessionModal"
+    :loading="bSubmittingSession"
     :default-agent-type="(workspace && workspace.defaultAgentType) || null"
-    :claude-available="claudeAvailable"
-    :cursor-available="cursorAvailable"
-    :mistral-vibe-available="mistralVibeAvailable"
+    :claude-available="bClaudeAvailable"
+    :cursor-available="bCursorAvailable"
+    :mistral-vibe-available="bMistralVibeAvailable"
     :existing-tags="sessionTags"
     @create="createSession"
   />
 
   <NewOrchestratorModal
-    v-model="showNewOrchestratorModal"
-    :loading="isCreatingOrchestrator"
+    v-model="bShowNewOrchestratorModal"
+    :loading="bCreatingOrchestrator"
     :default-agent-type="(workspace && workspace.defaultAgentType) || null"
-    :claude-available="claudeAvailable"
-    :cursor-available="cursorAvailable"
-    :mistral-vibe-available="mistralVibeAvailable"
+    :claude-available="bClaudeAvailable"
+    :cursor-available="bCursorAvailable"
+    :mistral-vibe-available="bMistralVibeAvailable"
     @create="createOrchestrator"
+  />
+
+  <ContextMenu
+    v-model="bCtxMenuOpen"
+    :x="ctxMenuX"
+    :y="ctxMenuY"
+    :items="ctxMenuItems"
+    @pick="onContextMenuPick"
   />
 </template>
 

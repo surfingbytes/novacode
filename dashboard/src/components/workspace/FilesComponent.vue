@@ -6,8 +6,11 @@ import { MdEditor } from 'md-editor-v3';
 import 'md-editor-v3/lib/style.css';
 
 // classes
-import { filesApi, type FileEntry } from '@/classes/api';
-import { DEFAULT_THEME_ID, themes } from '@/lib/themes';
+import { filesApi } from '@/classes/api';
+import { DEFAULT_THEME_ID, resolveStoredThemeId, themes } from '@/lib/themes';
+
+// types
+import type { FileEntry } from '@/classes/api';
 
 const monacoModule = shallowRef<typeof Monaco | null>(null);
 async function getMonaco(): Promise<typeof Monaco> {
@@ -23,7 +26,7 @@ const props = defineProps<{
   active: boolean;
 }>();
 
-// -------------------------------------------------- Data --------------------------------------------------
+// -------------------------------------------------- Refs --------------------------------------------------
 const entriesByPath = ref<Record<string, FileEntry[]>>({});
 const expandedPaths = ref<Set<string>>(new Set());
 const selectedPath = ref<string | null>(null);
@@ -37,6 +40,10 @@ const editorContainerRef = ref<HTMLDivElement | null>(null);
 const bSaving = ref<boolean>(false);
 const saveResult = ref<'success' | 'error' | null>(null);
 const bFullscreen = ref<boolean>(false);
+const bCreatingFile = ref<boolean>(false);
+const bCreatingFileLoading = ref<boolean>(false);
+const newFilePath = ref<string>('');
+const createFileError = ref<string | null>(null);
 let editor: Monaco.editor.IStandaloneCodeEditor | null = null;
 
 // Extension to Monaco language id
@@ -61,8 +68,8 @@ const EXT_LANG: Record<string, string> = {
 };
 
 function languageForPath(path: string): string {
-  const ext = path.split('.').pop()?.toLowerCase() ?? '';
-  return EXT_LANG[ext] ?? 'plaintext';
+  const extension = path.split('.').pop()?.toLowerCase() ?? '';
+  return EXT_LANG[extension] ?? 'plaintext';
 }
 
 // -------------------------------------------------- Computed --------------------------------------------------
@@ -72,11 +79,13 @@ const rootEntries = computed((): FileEntry[] => entriesByPath.value[''] ?? []);
 const visibleEntries = computed((): { entry: FileEntry; depth: number }[] => {
   const result: { entry: FileEntry; depth: number }[] = [];
   function add(entries: FileEntry[], depth: number): void {
-    for (const e of entries) {
-      result.push({ entry: e, depth });
-      if (e.isDirectory && expandedPaths.value.has(e.path)) {
-        const childList = entriesByPath.value[e.path];
-        if (childList) add(childList, depth + 1);
+    for (const entry of entries) {
+      result.push({ entry, depth });
+      if (entry.isDirectory && expandedPaths.value.has(entry.path)) {
+        const childList = entriesByPath.value[entry.path];
+        if (childList) {
+          add(childList, depth + 1);
+        }
       }
     }
   }
@@ -90,22 +99,29 @@ const selectedPathFileName = computed((): string => {
 const bIsMarkdownFile = computed((): boolean => {
   return selectedPath.value?.toLowerCase().endsWith('.md') ?? false;
 });
+const bIsDarkTheme = computed((): boolean => {
+  const themeId = resolveStoredThemeId(localStorage.getItem('theme') ?? DEFAULT_THEME_ID);
+  const theme = themes.find((themeOption) => themeOption.id === themeId);
+  return theme?.dark ?? false;
+});
 
 // -------------------------------------------------- Methods --------------------------------------------------
 const loadList = async (path: string): Promise<void> => {
   const key = path || '';
-  if (entriesByPath.value[key]) return;
+  if (entriesByPath.value[key]) {
+    return;
+  }
   bListLoading.value = true;
   loadingPath.value = path || '';
   listError.value = null;
   try {
     const response = await filesApi.list(props.workspaceId, path || undefined);
-    const next = { ...entriesByPath.value };
-    next[key] = response.data.entries;
-    entriesByPath.value = next;
-  } catch (e: unknown) {
-    const msg = e as { response?: { data?: { error?: string } }; message?: string };
-    listError.value = msg?.response?.data?.error ?? msg?.message ?? 'Failed to list';
+    const nextEntriesByPath = { ...entriesByPath.value };
+    nextEntriesByPath[key] = response.data.entries;
+    entriesByPath.value = nextEntriesByPath;
+  } catch (error: unknown) {
+    const errorWithMessage = error as { response?: { data?: { error?: string } }; message?: string };
+    listError.value = errorWithMessage?.response?.data?.error ?? errorWithMessage?.message ?? 'Failed to list';
   } finally {
     bListLoading.value = false;
     loadingPath.value = null;
@@ -113,47 +129,54 @@ const loadList = async (path: string): Promise<void> => {
 };
 
 const toggleExpand = (entry: FileEntry): void => {
-  if (!entry.isDirectory) return;
-  const next = new Set(expandedPaths.value);
-  if (next.has(entry.path)) next.delete(entry.path);
-  else next.add(entry.path);
-  expandedPaths.value = next;
+  if (!entry.isDirectory) {
+    return;
+  }
+  const nextExpandedPaths = new Set(expandedPaths.value);
+  if (nextExpandedPaths.has(entry.path)) {
+    nextExpandedPaths.delete(entry.path);
+  } else {
+    nextExpandedPaths.add(entry.path);
+  }
+  expandedPaths.value = nextExpandedPaths;
   loadList(entry.path);
 };
 
-const selectFile = async (entry: FileEntry): Promise<void> => {
-  if (entry.isDirectory) return;
-  selectedPath.value = entry.path;
+const readFilePath = async (path: string): Promise<void> => {
+  selectedPath.value = path;
   readError.value = null;
   bReadLoading.value = true;
   fileContent.value = '';
   try {
-    const response = await filesApi.read(props.workspaceId, entry.path);
+    const response = await filesApi.read(props.workspaceId, path);
     fileContent.value = response.data.content;
-  } catch (e: unknown) {
-    const msg = e as { response?: { data?: { error?: string } }; message?: string };
-    readError.value = msg?.response?.data?.error ?? msg?.message ?? 'Failed to read file';
+  } catch (error: unknown) {
+    const errorWithMessage = error as { response?: { data?: { error?: string } }; message?: string };
+    readError.value = errorWithMessage?.response?.data?.error ?? errorWithMessage?.message ?? 'Failed to read file';
   } finally {
     bReadLoading.value = false;
   }
 };
 
+const selectFile = async (entry: FileEntry): Promise<void> => {
+  if (entry.isDirectory) {
+    return;
+  }
+  await readFilePath(entry.path);
+};
+
 const isExpanded = (path: string): boolean => expandedPaths.value.has(path);
 
-const bIsDarkTheme = computed((): boolean => {
-  const themeId = localStorage.getItem('theme') ?? DEFAULT_THEME_ID;
-
-  const theme = themes.find((t) => t.id === themeId);
-
-  return theme?.dark ?? false;
-});
-
 async function initEditor(): Promise<void> {
-  if (!editorContainerRef.value || !props.active || bIsMarkdownFile.value) return;
-  const m = await getMonaco();
+  if (!editorContainerRef.value || !props.active || bIsMarkdownFile.value) {
+    return;
+  }
+  const monaco = await getMonaco();
   // Another initEditor() call may have finished while we awaited getMonaco(); only one instance per container.
-  if (editor || bIsMarkdownFile.value || !editorContainerRef.value) return;
-  editor = m.editor.create(editorContainerRef.value, {
+  if (editor || bIsMarkdownFile.value || !editorContainerRef.value) {
+    return;
+  }
+  editor = monaco.editor.create(editorContainerRef.value, {
     value: fileContent.value,
     language: selectedPath.value ? languageForPath(selectedPath.value) : 'plaintext',
     readOnly: false,
@@ -173,22 +196,26 @@ function disposeEditor(): void {
 }
 
 async function updateEditorContent(): Promise<void> {
-  if (!editor || bIsMarkdownFile.value) return;
-  const m = await getMonaco();
+  if (!editor || bIsMarkdownFile.value) {
+    return;
+  }
+  const monaco = await getMonaco();
   const model = editor.getModel();
   if (model) {
     model.setValue(fileContent.value);
-    m.editor.setModelLanguage(model, languageForPath(selectedPath.value ?? ''));
+    monaco.editor.setModelLanguage(model, languageForPath(selectedPath.value ?? ''));
   } else {
     const lang = selectedPath.value ? languageForPath(selectedPath.value) : 'plaintext';
-    editor.setModel(m.editor.createModel(fileContent.value, lang));
+    editor.setModel(monaco.editor.createModel(fileContent.value, lang));
   }
   await nextTick();
   editor.layout();
 }
 
 const saveFile = async (): Promise<void> => {
-  if (!selectedPath.value) return;
+  if (!selectedPath.value) {
+    return;
+  }
   const content = bIsMarkdownFile.value ? fileContent.value : (editor?.getModel()?.getValue() ?? '');
   bSaving.value = true;
   saveResult.value = null;
@@ -205,25 +232,90 @@ const saveFile = async (): Promise<void> => {
   }
 };
 
-// -------------------------------------------------- Lifecycle --------------------------------------------------
-onMounted(async (): Promise<void> => {
-  await loadList('');
-});
+function parentPath(path: string): string {
+  const slashIndex = path.lastIndexOf('/');
+  return slashIndex >= 0 ? path.slice(0, slashIndex) : '';
+}
 
-onUnmounted((): void => {
-  disposeEditor();
-});
+function normalizeNewFilePath(path: string): string {
+  return path.trim().replace(/^\/+/, '').replace(/\/+/g, '/');
+}
 
+const openCreateFile = (): void => {
+  const selectedParent = selectedPath.value ? parentPath(selectedPath.value) : '';
+  newFilePath.value = selectedParent ? `${selectedParent}/new-file.txt` : 'new-file.txt';
+  createFileError.value = null;
+  bCreatingFile.value = true;
+};
+
+const closeCreateFile = (): void => {
+  bCreatingFile.value = false;
+  bCreatingFileLoading.value = false;
+  createFileError.value = null;
+  newFilePath.value = '';
+};
+
+const createFile = async (): Promise<void> => {
+  const normalizedPath = normalizeNewFilePath(newFilePath.value);
+  if (!normalizedPath || normalizedPath.endsWith('/')) {
+    createFileError.value = 'Enter a valid file path, for example src/new-file.ts.';
+    return;
+  }
+  const pathSegments = normalizedPath.split('/');
+  if (pathSegments.some((segment) => segment === '..' || segment === '.')) {
+    createFileError.value = 'Path cannot include . or .. segments.';
+    return;
+  }
+
+  bCreatingFileLoading.value = true;
+  createFileError.value = null;
+  try {
+    await filesApi.write(props.workspaceId, normalizedPath, '');
+
+    const ancestors = normalizedPath.includes('/')
+      ? normalizedPath
+          .split('/')
+          .slice(0, -1)
+          .reduce<string[]>((result, _, index, all) => {
+            result.push(all.slice(0, index + 1).join('/'));
+            return result;
+          }, [])
+      : [];
+    expandedPaths.value = new Set([...expandedPaths.value, ...ancestors]);
+    entriesByPath.value = {};
+    await loadList('');
+    for (const directoryPath of ancestors) {
+      await loadList(directoryPath);
+    }
+
+    await readFilePath(normalizedPath);
+    closeCreateFile();
+  } catch (error: unknown) {
+    const errorWithMessage = error as { response?: { data?: { error?: string } }; message?: string };
+    createFileError.value =
+      errorWithMessage?.response?.data?.error ?? errorWithMessage?.message ?? 'Failed to create file';
+  } finally {
+    bCreatingFileLoading.value = false;
+  }
+};
+
+// -------------------------------------------------- Watchers --------------------------------------------------
 watch(
   () => props.active,
   (active: boolean) => {
-    if (active && editorContainerRef.value && !editor) initEditor();
-    if (!active) disposeEditor();
+    if (active && editorContainerRef.value && !editor) {
+      initEditor();
+    }
+    if (!active) {
+      disposeEditor();
+    }
   }
 );
 
 watch([fileContent, selectedPath], () => {
-  if (editor) updateEditorContent();
+  if (editor) {
+    updateEditorContent();
+  }
 });
 
 watch(
@@ -251,6 +343,15 @@ watch(
     loadList('');
   }
 );
+
+// -------------------------------------------------- Lifecycle --------------------------------------------------
+onMounted(async (): Promise<void> => {
+  await loadList('');
+});
+
+onUnmounted((): void => {
+  disposeEditor();
+});
 </script>
 
 <template>
@@ -268,16 +369,54 @@ watch(
       >
         Files
 
-        <!-- fullscreen button -->
-        <button
-          type="button"
-          class="button is-icon is-transparent h-8!"
-          @click="bFullscreen = !bFullscreen"
-        >
-          <span class="material-symbols-outlined">
-            {{ bFullscreen ? 'fullscreen_exit' : 'fullscreen' }}
-          </span>
-        </button>
+        <div class="flex items-center gap-1">
+          <button type="button" class="button is-icon is-transparent h-8!" @click="openCreateFile">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+
+          <!-- fullscreen button -->
+          <button
+            type="button"
+            class="button is-icon is-transparent h-8!"
+            @click="bFullscreen = !bFullscreen"
+          >
+            <svg v-if="bFullscreen" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3"/></svg>
+            <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg>
+          </button>
+        </div>
+      </div>
+      <div v-if="bCreatingFile" class="border-b border-border px-2 py-2 flex flex-col gap-2">
+        <input
+          v-model="newFilePath"
+          type="text"
+          class="input w-full"
+          placeholder="src/new-file.ts"
+          :disabled="bCreatingFileLoading"
+          @keydown.enter.prevent="createFile"
+          @keydown.esc.prevent="closeCreateFile"
+        />
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="button is-primary h-8!"
+            :disabled="bCreatingFileLoading"
+            @click="createFile"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+            <span> Create </span>
+          </button>
+          <button
+            type="button"
+            class="button is-transparent h-8!"
+            :disabled="bCreatingFileLoading"
+            @click="closeCreateFile"
+          >
+            Cancel
+          </button>
+        </div>
+        <p v-if="createFileError" class="text-xs text-destructive">
+          {{ createFileError }}
+        </p>
       </div>
       <div class="flex-1 overflow-y-auto py-1">
         <div v-if="listError" class="px-3 py-2 text-xs text-destructive">
@@ -297,14 +436,15 @@ watch(
             :style="{ paddingLeft: 8 + depth * 12 + 'px' }"
             @click="entry.isDirectory ? toggleExpand(entry) : selectFile(entry)"
           >
-            <span
-              class="material-symbols-outlined select-none shrink-0 w-4 h-4 flex items-center justify-center"
-              style="font-size: 16px"
-            >
+            <span class="select-none shrink-0 w-4 h-4 flex items-center justify-center">
               <template v-if="entry.isDirectory">
-                {{ isExpanded(entry.path) ? 'keyboard_arrow_down' : 'chevron_right' }}
+                <!-- keyboard_arrow_down when expanded, chevron_right when collapsed -->
+                <svg v-if="isExpanded(entry.path)" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+                <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
               </template>
-              <template v-else> description </template>
+              <template v-else>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+              </template>
             </span>
 
             <span class="truncate">{{ entry.name }}</span>
@@ -335,7 +475,7 @@ watch(
             aria-label="Back to file list"
             @click="selectedPath = null"
           >
-            <span class="material-symbols-outlined" style="font-size: 20px">arrow_back</span>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           </button>
           <span
             class="text-xs text-text-text-primary font-mono mt-1 truncate min-w-0 hidden md:block"
@@ -355,7 +495,7 @@ watch(
           :disabled="bSaving"
           @click="saveFile"
         >
-          <span class="material-symbols-outlined"> save </span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
           <span> Save </span>
         </button>
       </div>

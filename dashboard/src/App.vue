@@ -16,13 +16,25 @@ import { settingsApi } from '@/classes/api';
 import {
   applyTheme,
   DEFAULT_THEME_ID,
+  migrateLegacyThemeLocalStorage,
   resolveAutoTheme,
   startAutoThemeWatcher,
   stopAutoThemeWatcher
 } from '@/lib/themes';
 import { isNotificationsEnabled, syncPushSubscription } from '@/lib/notifications';
 
-// -------------------------------------------------- PWA update handling --------------------------------------------------
+// -------------------------------------------------- Store --------------------------------------------------
+const auth = useAuthStore();
+const apiHealth = useApiHealthStore();
+const route = useRoute();
+
+// -------------------------------------------------- Refs --------------------------------------------------
+let healthPollId: ReturnType<typeof setInterval> | null = null;
+
+// -------------------------------------------------- Computed --------------------------------------------------
+const bShowNavBar = computed(() => !route.meta.public);
+
+// -------------------------------------------------- Methods --------------------------------------------------
 function setupVisibilityCheck(): void {
   if (document.visibilityState === 'visible') {
     navigator.serviceWorker?.getRegistration()?.then((reg) => {
@@ -33,21 +45,15 @@ function setupVisibilityCheck(): void {
   }
 }
 
-// -------------------------------------------------- Data --------------------------------------------------
-const auth = useAuthStore();
-const apiHealth = useApiHealthStore();
-const route = useRoute();
-
-let healthPollId: ReturnType<typeof setInterval> | null = null;
-
-const bShowNavBar = computed(() => !route.meta.public);
-
-// -------------------------------------------------- Methods --------------------------------------------------
 async function syncSettingsFromDb(): Promise<void> {
   try {
     const { data } = await settingsApi.get();
-    if (data.darkTheme) localStorage.setItem('darkTheme', data.darkTheme);
-    if (data.lightTheme) localStorage.setItem('lightTheme', data.lightTheme);
+    if (data.darkTheme) {
+      localStorage.setItem('darkTheme', data.darkTheme);
+    }
+    if (data.lightTheme) {
+      localStorage.setItem('lightTheme', data.lightTheme);
+    }
     if (typeof data.autoTheme === 'boolean') {
       // If the user never touched auto-theme, default to following OS/browser.
       // Respect an explicit localStorage choice when it already exists.
@@ -68,6 +74,7 @@ async function syncSettingsFromDb(): Promise<void> {
 }
 
 function applyActiveTheme(): void {
+  migrateLegacyThemeLocalStorage();
   const autoThemeSetting = localStorage.getItem('autoTheme');
   const autoTheme = autoThemeSetting === null ? true : autoThemeSetting === 'true';
   if (autoTheme) {
@@ -83,7 +90,7 @@ function scheduleHealthPolling(): void {
   if (healthPollId !== null) {
     clearInterval(healthPollId);
   }
-  const intervalMs = apiHealth.apiReachable ? 45000 : 8000;
+  const intervalMs = apiHealth.bApiReachable ? 45000 : 8000;
   healthPollId = window.setInterval(() => {
     void apiHealth.ping();
   }, intervalMs);
@@ -96,8 +103,9 @@ function onDocumentVisibilityChange(): void {
   }
 }
 
+// -------------------------------------------------- Watchers --------------------------------------------------
 watch(
-  () => apiHealth.apiReachable,
+  () => apiHealth.bApiReachable,
   () => {
     scheduleHealthPolling();
   }
@@ -110,10 +118,10 @@ onMounted(async (): Promise<void> => {
   void apiHealth.ping();
   scheduleHealthPolling();
   document.addEventListener('visibilitychange', onDocumentVisibilityChange);
-  if (auth.token && !auth.validated) {
+  if (auth.token && !auth.bValidated) {
     await auth.validate();
   }
-  if (auth.validated) {
+  if (auth.bValidated) {
     await syncSettingsFromDb();
   }
   if (isNotificationsEnabled()) {

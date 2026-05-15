@@ -6,13 +6,13 @@ import { computed } from 'vue';
 import type { AgentType } from '@/@types/index';
 
 /** Served from `public/icons/` (bundled at build; not external URLs). */
-function iconUrl(name: 'cursor' | 'claude'): string {
+function iconUrl(name: 'cursor' | 'claude' | 'vibe'): string {
   return `${import.meta.env.BASE_URL}icons/${name}.svg`;
 }
 
 const CURSOR_ICON = iconUrl('cursor');
 const CLAUDE_ICON = iconUrl('claude');
-const VIBE_ICON = 'https://console.mistral.ai/_next/static/media/vibe-logo.64fbadbe.svg';
+const VIBE_ICON = iconUrl('vibe');
 
 const props = defineProps<{
   agentType: AgentType;

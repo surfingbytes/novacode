@@ -35,6 +35,11 @@ type AppSettingsUser = {
   modelSelection: string | null;
 };
 
+/** Legacy dashboard theme id `rust` was replaced by OLED. */
+function normalizeThemeId(theme: string): string {
+  return theme === 'rust' ? 'oled' : theme;
+}
+
 type AppSettings = {
   gitUserName: string | null;
   gitUserEmail: string | null;
@@ -71,10 +76,10 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     return {
       gitUserName: user?.gitUserName ?? null,
       gitUserEmail: user?.gitUserEmail ?? null,
-      theme: user?.theme ?? 'infrared',
+      theme: normalizeThemeId(user?.theme ?? 'infrared'),
       autoTheme: user?.autoTheme ?? false,
-      darkTheme: user?.darkTheme ?? 'deep-space',
-      lightTheme: user?.lightTheme ?? 'cloud',
+      darkTheme: normalizeThemeId(user?.darkTheme ?? 'deep-space'),
+      lightTheme: normalizeThemeId(user?.lightTheme ?? 'cloud'),
       modelSelection: user?.modelSelection ?? 'auto',
       sshPublicKey: ssh.sshPublicKey,
       sshPrivateKey: ssh.sshPrivateKey
@@ -127,10 +132,16 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
 
       const gitUserName = body.gitUserName !== undefined ? body.gitUserName : existing.gitUserName ?? null;
       const gitUserEmail = body.gitUserEmail !== undefined ? body.gitUserEmail : existing.gitUserEmail ?? null;
-      const theme = body.theme !== undefined ? body.theme : existing.theme ?? 'infrared';
+      const theme = normalizeThemeId(
+        body.theme !== undefined ? body.theme : existing.theme ?? 'infrared'
+      );
       const autoTheme = body.autoTheme !== undefined ? body.autoTheme : existing.autoTheme ?? false;
-      const darkTheme = body.darkTheme !== undefined ? body.darkTheme : existing.darkTheme ?? 'deep-space';
-      const lightTheme = body.lightTheme !== undefined ? body.lightTheme : existing.lightTheme ?? 'cloud';
+      const darkTheme = normalizeThemeId(
+        body.darkTheme !== undefined ? body.darkTheme : existing.darkTheme ?? 'deep-space'
+      );
+      const lightTheme = normalizeThemeId(
+        body.lightTheme !== undefined ? body.lightTheme : existing.lightTheme ?? 'cloud'
+      );
       const modelSelection = body.modelSelection !== undefined ? body.modelSelection : existing.modelSelection ?? 'auto';
 
       if (body.gitUserName !== undefined || body.gitUserEmail !== undefined) {
@@ -247,14 +258,15 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request) => {
       const user = await db.getUserById(request.jwtUser!.id);
+      // Claude is available via ACP when a token is stored; the ACP package is always present
+      const claudeAvailable = isClaudeAvailable(config.configDir) && !!user?.claudeToken;
+      // Cursor and Mistral UI remains but underlying backend is not yet implemented via ACP
       const cursorAvailable = cursorAuthenticated();
-      const claudeCliAvailable = isClaudeAvailable(config.configDir);
-      const claudeConfigured = !!user?.claudeToken;
-      const vibeCliOk = isVibeCliAvailable(config.configDir);
       const vibeKeyOk = getVibeApiKeyStatus(config.configDir).configured;
+      const vibeCliOk = isVibeCliAvailable(config.configDir);
       return {
         cursorAvailable,
-        claudeAvailable: claudeCliAvailable && claudeConfigured,
+        claudeAvailable,
         mistralVibeAvailable: vibeCliOk && vibeKeyOk
       };
     }

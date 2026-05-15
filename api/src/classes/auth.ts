@@ -41,7 +41,9 @@ function safeEqual(a: string, b: string): boolean {
   try {
     const ba = Buffer.from(a);
     const bb = Buffer.from(b);
-    if (ba.length !== bb.length) return false;
+    if (ba.length !== bb.length) {
+      return false;
+    }
     return timingSafeEqual(ba, bb);
   } catch {
     return false;
@@ -56,7 +58,9 @@ function hashPassword(password: string): string {
 
 function verifyPassword(password: string, stored: string): boolean {
   const [saltHex, hashHex] = stored.split(':');
-  if (!saltHex || !hashHex) return false;
+  if (!saltHex || !hashHex) {
+    return false;
+  }
   const salt = Buffer.from(saltHex, 'hex');
   const hash = scryptSync(password, salt, 64);
   return timingSafeEqual(hash, Buffer.from(hashHex, 'hex'));
@@ -67,9 +71,15 @@ export async function checkCredentials(
   password: string
 ): Promise<UserModel | null> {
   const user = await db.getUserByUsername(username);
-  if (!user) return null;
-  if (!safeEqual(username, user.username)) return null;
-  if (!verifyPassword(password, user.passwordHash)) return null;
+  if (!user) {
+    return null;
+  }
+  if (!safeEqual(username, user.username)) {
+    return null;
+  }
+  if (!verifyPassword(password, user.passwordHash)) {
+    return null;
+  }
   return user;
 }
 
@@ -84,7 +94,9 @@ export async function changePassword(
   newPassword: string
 ): Promise<boolean> {
   const user = await db.getUserById(userId);
-  if (!user || !verifyPassword(currentPassword, user.passwordHash)) return false;
+  if (!user || !verifyPassword(currentPassword, user.passwordHash)) {
+    return false;
+  }
   const passwordHash = hashPassword(newPassword);
   const updated = await db.updateUser(userId, { passwordHash });
   return !!updated;
@@ -95,19 +107,29 @@ export async function changeUsername(
   newUsername: string
 ): Promise<UserModel | null> {
   const user = await db.getUserById(userId);
-  if (!user) return null;
+  if (!user) {
+    return null;
+  }
   const trimmed = newUsername.trim();
-  if (!trimmed) return null;
+  if (!trimmed) {
+    return null;
+  }
   const existing = await db.getUserByUsername(trimmed);
-  if (existing && existing.id !== userId) return null;
+  if (existing && existing.id !== userId) {
+    return null;
+  }
   const updated = await db.updateUser(userId, { username: trimmed });
-  if (!updated) return null;
+  if (!updated) {
+    return null;
+  }
   return updated;
 }
 
 export function extractBearerToken(request: FastifyRequest): string | null {
   const header = request.headers['authorization'];
-  if (!header || !header.startsWith('Bearer ')) return null;
+  if (!header || !header.startsWith('Bearer ')) {
+    return null;
+  }
   return header.slice(7);
 }
 

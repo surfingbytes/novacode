@@ -16,10 +16,14 @@ const execFileAsync = promisify(execFile);
 // --------------------------------------------- Helpers ---------------------------------------------
 
 function extractAssistantText(messages: ChatMessage[] | undefined): string {
-  if (!messages?.length) return '';
+  if (!messages?.length) {
+    return '';
+  }
   let text = '';
   for (const msg of messages) {
-    if (msg.role !== 'assistant') continue;
+    if (msg.role !== 'assistant') {
+      continue;
+    }
     if (msg.content) {
       text += msg.content;
     }
@@ -32,7 +36,9 @@ function extractAssistantText(messages: ChatMessage[] | undefined): string {
           };
           if (event.type === 'assistant' && Array.isArray(event.message?.content)) {
             for (const block of event.message.content) {
-              if (block.type === 'text' && typeof block.text === 'string') text += block.text;
+              if (block.type === 'text' && typeof block.text === 'string') {
+                text += block.text;
+              }
             }
           }
         } catch {
@@ -56,10 +62,14 @@ async function getGitStatus(
     });
     const files: Array<{ status: string; file: string }> = [];
     for (const line of stdout.split('\n')) {
-      if (!line.trim()) continue;
+      if (!line.trim()) {
+        continue;
+      }
       const statusCode = line.slice(0, 2).trim();
       const file = line.slice(3).trim();
-      if (file) files.push({ status: statusCode, file });
+      if (file) {
+        files.push({ status: statusCode, file });
+      }
     }
     return files;
   } catch {
@@ -71,7 +81,9 @@ async function getGitStatus(
 
 async function runAutomation(automationId: string): Promise<void> {
   const automation = await db.getAutomation(automationId);
-  if (!automation) return;
+  if (!automation) {
+    return;
+  }
 
   const workspace = await db.getWorkspace(automation.workspaceId);
   if (!workspace) {
@@ -122,12 +134,16 @@ async function runAutomation(automationId: string): Promise<void> {
     });
     // also include new files not in before
     for (const f of afterFiles) {
-      if (!beforeSet.has(f.file)) changedFiles.push(f);
+      if (!beforeSet.has(f.file)) {
+        changedFiles.push(f);
+      }
     }
     // deduplicate
     const seen = new Set<string>();
     const uniqueChanged = changedFiles.filter((f) => {
-      if (seen.has(f.file)) return false;
+      if (seen.has(f.file)) {
+        return false;
+      }
       seen.add(f.file);
       return true;
     });
@@ -169,7 +185,9 @@ async function runAutomation(automationId: string): Promise<void> {
 let intervalHandle: ReturnType<typeof setInterval> | null = null;
 
 export function startAutomationScheduler(): void {
-  if (intervalHandle) return;
+  if (intervalHandle) {
+    return;
+  }
 
   const tick = async (): Promise<void> => {
     try {

@@ -1,4 +1,4 @@
-# NovaCode — Improvement Plan
+# Nova Code — Improvement Plan
 
 This document outlines a detailed plan for **new features**, **UI improvements**, **current problem areas**, and **general improvements** based on a review of the application (Fastify API + Vue 3 dashboard, workspaces, sessions, orchestrators, themes, etc.).
 
@@ -136,7 +136,7 @@ This document outlines a detailed plan for **new features**, **UI improvements**
 ### 2.7 Visual polish
 
 - **Themes**
-  - Already strong (Deep Space, Carbon, Terminal Green, etc.). Consider a “Custom” theme where users can override primary/surface colors via settings.
+  - Already strong (Deep Space, Carbon, Terminal Green, OLED, etc.). Consider a “Custom” theme where users can override primary/surface colors via settings.
 - **Icons**
   - The app uses Material Icons. Consider a single icon set (or a small set) and use it consistently; ensure all actions have an icon where it helps.
 - **Tooltips**

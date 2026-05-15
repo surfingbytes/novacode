@@ -1,14 +1,15 @@
-# NovaCode — implemented functionality
+# Nova Code — implemented functionality
 
 This document describes what the application **does today** (backend API, dashboard, and supporting services). It reflects the codebase as of the last review, not a roadmap.
 
 **Canonical detail:** prefer the repository root [`functionality.md`](../../functionality.md) for route names, WebSocket paths, and known limitations; update this file when you need a shorter in-tree summary.
+**Refactor convention:** when touching API/Vue code, follow `/data-root/personal/CODING_CONVENTIONS.md` (import groups, no truncated names, `b` prefix for local boolean refs in the dashboard, explicit control-flow braces, and standard Vue script section headers). Examples: `AutomationsView.vue`, `ContextMenu.vue`, and context-menu parents (`bCtxMenuOpen`).
 
 ---
 
 ## 1. Product overview
 
-NovaCode is a **self-hosted web application** for managing **AI coding agent** workflows: **Cursor Agent**, **Claude Code**, and optionally **Mistral Vibe** (`mistral-vibe` agent type). You organize work in **workspaces** (directories on disk), open **sessions** tied to a workspace and agent, and interact through a **chat UI** (with streaming), **terminal output** where applicable, and supporting tools for **Git**, **files**, and **workspace rules**.
+Nova Code is a **self-hosted web application** for managing **AI coding agent** workflows: **Claude** (via ACP), with **Cursor Agent** and **Mistral Vibe** UIs available for future ACP integration. You organize work in **workspaces** (directories on disk), open **sessions** tied to a workspace and agent, and interact through a **chat UI** (with streaming), **terminal output** where applicable, and supporting tools for **Git**, **files**, and **workspace rules**.
 
 Optional features include **scheduled automations**, **role templates**, and **browser push notifications**.
 
@@ -20,6 +21,8 @@ Optional features include **scheduled automations**, **role templates**, and **b
 - **Login**: Password-based login returns a **JWT** used for API and WebSocket connections.
 - **Account**: Password change, username change, and related account endpoints (see `auth` routes).
 - **REST auth**: Programmatic access uses the same **JWT** as the dashboard (`Authorization: Bearer`). There is **no** separate API-token table in the current schema (removed in migration `20260329120000_remove_api_tokens`).
+- **Claude token setup**: `POST /api/agent-auth/claude/login` spawns a `claude setup-token` PTY session; the terminal overlay auto-detects the token and saves it via `POST /api/agent-auth/claude/token`. `GET /api/agent-auth/claude/status` and `DELETE /api/agent-auth/claude/logout` complete the flow.
+- **Mistral Vibe key setup**: Stored via `PUT /api/settings/vibe-api-key`; status checked with `GET /api/settings/vibe-api-key`; cleared with `DELETE /api/settings/vibe-api-key`.
 
 ---
 
@@ -36,19 +39,18 @@ Optional features include **scheduled automations**, **role templates**, and **b
 
 ## 4. Sessions
 
-- **Create session**: `POST` to create a session in a workspace with a name, optional **tags**, and **agent type** (defaults from workspace or `cursor-agent`).
-- **Cursor Agent**: On creation, the server may run `cursor-agent -f create-chat` in the workspace directory to obtain an external session id stored on the session.
-- **Claude** / **Mistral Vibe**: Sessions are created without the Cursor `create-chat` PTY bootstrap.
-- **Claude**: The first prompt run captures `session_id` from Claude’s `stream-json` output and stores it for `--resume` on later turns.
-- **Mistral Vibe**: Prompts run as `vibe --prompt … --output streaming` (newline-delimited JSON, parsed like Cursor). Example: `vibe --prompt "task" --output streaming`. The CLI does **not** return a session id in stdout; after each run the server reads `~/.vibe/logs/session` (prefer that path; else `$VIBE_HOME/logs/session`), picks the latest `session_*` directory deterministically (embedded `YYYYMMDD_HHMMSS` in the folder name when present, otherwise filesystem mtime), and stores the suffix after the final underscore as the external session id for `vibe --resume` on later turns.
+- **Create session**: `POST` to create a session in a workspace with a name, optional **tags**, and **agent type** (defaults from workspace or `claude`).
+- **Claude (ACP)**: Sessions are created without a PTY bootstrap. The first prompt call issues `agent.newSession({ cwd })` via `@agentclientprotocol/claude-agent-acp` and the returned ACP session ID is stored for `resumeSession` on later turns.
+- **Mistral Vibe (ACP)**: Each prompt turn spawns a `vibe-acp` subprocess. The first turn calls `newSession()`; subsequent turns call `loadSession()` (Vibe's disk-based session files under `VIBE_HOME`). The subprocess is killed after `prompt()` returns. The Vibe session ID is stored in the DB for continuity across turns.
+- **Cursor Agent**: UI available; backend ACP integration pending.
 
 **Session id summary**
 
 | Agent | External session id |
 |-------|---------------------|
-| Cursor | From `create-chat` at session creation |
-| Claude | From stream JSON on first prompt |
-| Mistral Vibe | From log folder names after each run (`session_*` under `~/.vibe/logs/session` or `$VIBE_HOME/logs/session`) |
+| Claude (ACP) | UUID returned by `ClaudeAcpAgent.newSession()` on first prompt |
+| Mistral Vibe (ACP) | UUID returned by `vibe-acp newSession()`, stored for `loadSession()` on later turns |
+| Cursor | Pending ACP integration |
 - **List / get / patch / delete**: Sessions support **rename**, **tags**, **archive**, and can be listed globally or per workspace (including archived where applicable).
 - **Chat history**: Messages are stored in the database (`messageJson` on the session). Session **list** responses omit `messageJson` for size; denormalized **`lastPreviewText`** / **`lastPreviewRole`** (`user` \| `assistant`) are updated when chat is persisted so sidebars can show a last-message snippet without loading full history. On **list** and **global WebSocket snapshot**, sessions missing those fields are **backfilled once** from `message_json` (then persisted) so older threads still show a preview.
 - **Real-time**: WebSocket endpoints for **session** streams and **chat**; separate channels for workspace-level session list updates (create/update/delete, “busy” state for active chat runs).
@@ -60,8 +62,10 @@ Optional features include **scheduled automations**, **role templates**, and **b
 
 - **Streaming chat**: WebSocket connection at `/api/ws/chat/:id` (with token) for streaming agent output and chat events.
 - **Chat engine**: Coordinates **active runs**, subscribers, **prompt dispatch**, cancellation, and persistence of **message history** (including streaming JSON lines from agents).
-- **Workspace rules injection**: When building prompts, the server can prepend content from **workspace rule files** (see §7) for **Claude** and **Mistral Vibe** (Cursor Agent uses its own flags).
-- **Mistral Vibe**: Uses the same Cursor-style stream line handling as **Cursor Agent** for UI aggregation (`agentStreamParser`); the dashboard renderer also normalizes nested stream envelopes, direct `role/content` assistant chunks, and `role: "tool"` outputs so Vibe messages render as chat/tool cards rather than raw JSON. Session folders under the Vibe log path are best-effort — if none are found after a run, a warning is logged and the next turn may run without `--resume`.
+- **Claude ACP integration**: Prompts are dispatched to `ClaudeAcpAgent` from `@agentclientprotocol/claude-agent-acp` (in-process, no subprocess). ACP `SessionNotification` objects (`{ sessionId, update }`) are serialised as-is and forwarded to the dashboard; **no conversion to a legacy format is performed**. The frontend detects ACP events by `typeof event.sessionId === 'string' && event.update` and handles `agent_message_chunk`, `tool_call`, and `tool_call_update` natively. Legacy cursor-style events stored in older sessions are still parsed for backward compatibility. All tool permissions are auto-approved by the embedded ACP client proxy.
+- **Mistral Vibe ACP integration** (`vibeAcp.ts`): Uses `ClientSideConnection` + `ndJsonStream` from `@agentclientprotocol/sdk` to talk to a per-prompt `vibe-acp` subprocess over stdio. Emits the same `SessionNotification` shape as Claude — the frontend handles both agents identically. History replay events from `loadSession()` are silently discarded by a null handler so only the current turn's events reach the dashboard. `cancelVibeAcp()` kills the subprocess. Adding a future ACP agent (e.g. another provider) follows the same `vibeAcp.ts` pattern.
+- **Agent availability**: `claudeAvailable` requires the ACP package and a stored OAuth token. `mistralVibeAvailable` requires both `vibe-acp --version` succeeding and a Mistral API key in `VIBE_HOME/.env`.
+- **Workspace rules injection**: When building prompts, the server prepends content from **workspace rule files** (see §7) for all agents.
 
 ---
 
@@ -145,7 +149,7 @@ Optional features include **scheduled automations**, **role templates**, and **b
 
 ## 16. Dashboard (Vue)
 
-- **Views**: Home (workspace list), workspace detail (sessions list, **Files**, **Git**, **Rules**), **Session** (chat), **Automations**, **Role templates**, **Settings**, **Account**, **Login**, **Setup**.
+- **Views**: Home (workspace list), workspace detail (sessions list, **Files**, **Git**, **Rules**), **Session** (chat), **Automations**, **Role templates**, **Settings**, **Account**, **Login**, **Setup** (4-step wizard: Profile → AI Agents [Claude + Mistral Vibe] → Git → Finalize).
 - **PWA**: Service worker (`sw.ts`) and Vite PWA plugin for installable/offline-capable behavior where configured.
 - **Terminal**: **xterm.js** for terminal rendering in the session experience.
 
@@ -157,7 +161,7 @@ Optional features include **scheduled automations**, **role templates**, and **b
 |-------------|------------|
 | API         | Fastify, TypeScript, Prisma, PostgreSQL |
 | Real-time   | `@fastify/websocket`, WebSocket |
-| Agents      | Cursor Agent CLI, Claude Code CLI, Mistral Vibe CLI (`vibe`), `node-pty` |
+| Agents      | Claude Code (ACP in-process), Mistral Vibe (`vibe-acp` subprocess, ACP over stdio), Cursor Agent CLI (pending ACP), `node-pty` |
 | Dashboard   | Vue 3, Pinia, Vue Router, Tailwind CSS |
 
 ---

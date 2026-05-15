@@ -5,73 +5,69 @@ import { ref, computed, onMounted } from 'vue';
 // components
 import ConfirmModal from '@/components/ConfirmModal.vue';
 
-// api
+// classes
 import { workspaceRulesApi, roleTemplatesApi } from '@/classes/api';
 
 // types
 import type { WorkspaceRuleFileSummary, RoleTemplate, Workspace } from '@/@types/index';
 
+// -------------------------------------------------- Props --------------------------------------------------
+
 const props = defineProps<{
   workspace: Workspace;
 }>();
 
-const workspaceId = computed(() => props.workspace.id);
+// -------------------------------------------------- Refs --------------------------------------------------
 
 const files = ref<WorkspaceRuleFileSummary[]>([]);
-const listLoading = ref(true);
+const bListLoading = ref(true);
 const listError = ref<string | null>(null);
-const rulesDirMissing = ref(false);
-
+const bRulesDirMissing = ref(false);
 const selectedFilename = ref<string | null>(null);
+const bContentLoading = ref(false);
+const content = ref('');
+const originalContent = ref('');
+const bSaving = ref(false);
+const saveError = ref<string | null>(null);
+const successMessage = ref<string | null>(null);
+const ruleTemplates = ref<RoleTemplate[]>([]);
+const bRuleTemplatesLoading = ref(false);
+const ruleTemplatesError = ref<string | null>(null);
+const bShowTemplateModal = ref(false);
+const newTemplateName = ref('');
+const newTemplateDescription = ref('');
+const newTemplateContent = ref('');
+const bCreatingTemplate = ref(false);
+const createTemplateError = ref<string | null>(null);
+const fileToDelete = ref<string | null>(null);
+const bDeleting = ref(false);
+const deleteError = ref<string | null>(null);
+const fileToRename = ref<string | null>(null);
+const renameNewFilename = ref('');
+const bRenaming = ref(false);
+const renameError = ref<string | null>(null);
+const bShowNewRuleModal = ref(false);
+const newRuleMode = ref<'blank' | 'template'>('blank');
+const newRuleFilename = ref('');
+const selectedTemplateId = ref<string | null>(null);
+const bCreatingRule = ref(false);
+const createRuleError = ref<string | null>(null);
+
+// -------------------------------------------------- Computed --------------------------------------------------
+
+const workspaceId = computed(() => props.workspace.id);
 const fileLabel = computed(() => {
   const file = files.value.find((f) => f.filename === selectedFilename.value);
   return file?.label ?? selectedFilename.value ?? '';
 });
-
-const contentLoading = ref(false);
-const content = ref('');
-const originalContent = ref('');
-
-const isSaving = ref(false);
-const saveError = ref<string | null>(null);
-const successMessage = ref<string | null>(null);
-
 const hasUnsavedChanges = computed(
   () => selectedFilename.value !== null && content.value !== originalContent.value
 );
-
-// Templates (from /settings → Templates)
-const ruleTemplates = ref<RoleTemplate[]>([]);
-const ruleTemplatesLoading = ref(false);
-const ruleTemplatesError = ref<string | null>(null);
-const showTemplateModal = ref(false);
-const newTemplateName = ref('');
-const newTemplateDescription = ref('');
-const newTemplateContent = ref('');
-const isCreatingTemplate = ref(false);
-const createTemplateError = ref<string | null>(null);
-
-// Delete file
-const fileToDelete = ref<string | null>(null);
-const isDeleting = ref(false);
-const deleteError = ref<string | null>(null);
 const deleteDescription = computed(() =>
   fileToDelete.value ? `Delete "${fileToDelete.value}"? This cannot be undone.` : ''
 );
 
-// Rename file
-const fileToRename = ref<string | null>(null);
-const renameNewFilename = ref('');
-const isRenaming = ref(false);
-const renameError = ref<string | null>(null);
-
-// New rule file
-const showNewRuleModal = ref(false);
-const newRuleMode = ref<'blank' | 'template'>('blank');
-const newRuleFilename = ref('');
-const selectedTemplateId = ref<string | null>(null);
-const isCreatingRule = ref(false);
-const createRuleError = ref<string | null>(null);
+// -------------------------------------------------- Methods --------------------------------------------------
 
 function showSuccess(msg: string): void {
   successMessage.value = msg;
@@ -83,10 +79,12 @@ function showSuccess(msg: string): void {
 }
 
 async function fetchFiles(): Promise<void> {
-  if (!workspaceId.value) return;
-  listLoading.value = true;
+  if (!workspaceId.value) {
+    return;
+  }
+  bListLoading.value = true;
   listError.value = null;
-  rulesDirMissing.value = false;
+  bRulesDirMissing.value = false;
   try {
     const { data } = await workspaceRulesApi.list(workspaceId.value);
     files.value = data ?? [];
@@ -106,7 +104,7 @@ async function fetchFiles(): Promise<void> {
     };
     const code = caughtError.response?.data?.code;
     if (code === 'RULES_DIR_NOT_FOUND') {
-      rulesDirMissing.value = true;
+      bRulesDirMissing.value = true;
       files.value = [];
       selectedFilename.value = null;
       content.value = '';
@@ -118,13 +116,15 @@ async function fetchFiles(): Promise<void> {
       listError.value = caughtError.response?.data?.error ?? 'Failed to load rules';
     }
   } finally {
-    listLoading.value = false;
+    bListLoading.value = false;
   }
 }
 
 async function loadFile(filename: string): Promise<void> {
-  if (!workspaceId.value) return;
-  contentLoading.value = true;
+  if (!workspaceId.value) {
+    return;
+  }
+  bContentLoading.value = true;
   saveError.value = null;
   try {
     const { data } = await workspaceRulesApi.read(workspaceId.value, filename);
@@ -139,7 +139,7 @@ async function loadFile(filename: string): Promise<void> {
     if (code === 'FILE_NOT_FOUND') {
       saveError.value = 'Rule file not found. It may have been deleted.';
     } else if (code === 'RULES_DIR_NOT_FOUND') {
-      rulesDirMissing.value = true;
+      bRulesDirMissing.value = true;
       saveError.value = 'Rules directory not found for this workspace.';
     } else {
       saveError.value = caughtError.response?.data?.error ?? 'Failed to load rule file';
@@ -147,23 +147,29 @@ async function loadFile(filename: string): Promise<void> {
     content.value = '';
     originalContent.value = '';
   } finally {
-    contentLoading.value = false;
+    bContentLoading.value = false;
   }
 }
 
 async function selectFile(filename: string): Promise<void> {
-  if (filename === selectedFilename.value) return;
+  if (filename === selectedFilename.value) {
+    return;
+  }
   if (hasUnsavedChanges.value) {
     const discard = window.confirm('Discard unsaved changes to the current rule file?');
-    if (!discard) return;
+    if (!discard) {
+      return;
+    }
   }
   selectedFilename.value = filename;
   await loadFile(filename);
 }
 
 async function saveCurrent(): Promise<void> {
-  if (!workspaceId.value || !selectedFilename.value || !hasUnsavedChanges.value) return;
-  isSaving.value = true;
+  if (!workspaceId.value || !selectedFilename.value || !hasUnsavedChanges.value) {
+    return;
+  }
+  bSaving.value = true;
   saveError.value = null;
   try {
     await workspaceRulesApi.update(workspaceId.value, selectedFilename.value, content.value);
@@ -176,13 +182,15 @@ async function saveCurrent(): Promise<void> {
     };
     saveError.value = caughtError.response?.data?.error ?? caughtError.message ?? 'Failed to save rule file';
   } finally {
-    isSaving.value = false;
+    bSaving.value = false;
   }
 }
 
 async function fetchRuleTemplates(): Promise<void> {
-  if (!workspaceId.value) return;
-  ruleTemplatesLoading.value = true;
+  if (!workspaceId.value) {
+    return;
+  }
+  bRuleTemplatesLoading.value = true;
   ruleTemplatesError.value = null;
   try {
     const { data } = await roleTemplatesApi.list();
@@ -192,12 +200,12 @@ async function fetchRuleTemplates(): Promise<void> {
     ruleTemplates.value = [];
     ruleTemplatesError.value = 'Failed to load templates from settings';
   } finally {
-    ruleTemplatesLoading.value = false;
+    bRuleTemplatesLoading.value = false;
   }
 }
 
 function openTemplateModal(): void {
-  showTemplateModal.value = true;
+  bShowTemplateModal.value = true;
   createTemplateError.value = null;
   newTemplateName.value = '';
   newTemplateDescription.value = '';
@@ -205,8 +213,10 @@ function openTemplateModal(): void {
 }
 
 function closeTemplateModal(): void {
-  if (isCreatingTemplate.value) return;
-  showTemplateModal.value = false;
+  if (bCreatingTemplate.value) {
+    return;
+  }
+  bShowTemplateModal.value = false;
   createTemplateError.value = null;
 }
 
@@ -227,7 +237,7 @@ async function createTemplate(): Promise<void> {
     return;
   }
 
-  isCreatingTemplate.value = true;
+  bCreatingTemplate.value = true;
   try {
     const { data } = await roleTemplatesApi.create({
       name,
@@ -244,13 +254,15 @@ async function createTemplate(): Promise<void> {
     createTemplateError.value =
       caughtError.response?.data?.error ?? caughtError.message ?? 'Failed to create template';
   } finally {
-    isCreatingTemplate.value = false;
+    bCreatingTemplate.value = false;
   }
 }
 
 async function deleteFile(): Promise<void> {
-  if (!workspaceId.value || !fileToDelete.value) return;
-  isDeleting.value = true;
+  if (!workspaceId.value || !fileToDelete.value) {
+    return;
+  }
+  bDeleting.value = true;
   deleteError.value = null;
   try {
     await workspaceRulesApi.remove(workspaceId.value, fileToDelete.value);
@@ -269,12 +281,12 @@ async function deleteFile(): Promise<void> {
     };
     deleteError.value = caughtError.response?.data?.error ?? caughtError.message ?? 'Failed to delete rule file';
   } finally {
-    isDeleting.value = false;
+    bDeleting.value = false;
   }
 }
 
 function openNewRuleModal(): void {
-  showNewRuleModal.value = true;
+  bShowNewRuleModal.value = true;
   newRuleMode.value = 'blank';
   newRuleFilename.value = '';
   selectedTemplateId.value = null;
@@ -282,12 +294,14 @@ function openNewRuleModal(): void {
 }
 
 function closeNewRuleModal(): void {
-  showNewRuleModal.value = false;
+  bShowNewRuleModal.value = false;
   createRuleError.value = null;
 }
 
 async function createRule(): Promise<void> {
-  if (!workspaceId.value) return;
+  if (!workspaceId.value) {
+    return;
+  }
   const filename = newRuleFilename.value.trim();
   createRuleError.value = null;
 
@@ -316,7 +330,7 @@ async function createRule(): Promise<void> {
     initialContent = '# Workspace rules\n\nDescribe your workspace rules here.';
   }
 
-  isCreatingRule.value = true;
+  bCreatingRule.value = true;
   try {
     await workspaceRulesApi.update(workspaceId.value, filename, initialContent);
     closeNewRuleModal();
@@ -332,7 +346,7 @@ async function createRule(): Promise<void> {
     createRuleError.value =
       caughtError.response?.data?.error ?? caughtError.message ?? 'Failed to create rule file';
   } finally {
-    isCreatingRule.value = false;
+    bCreatingRule.value = false;
   }
 }
 
@@ -349,7 +363,9 @@ function cancelRename(): void {
 }
 
 async function submitRename(): Promise<void> {
-  if (!workspaceId.value || !fileToRename.value) return;
+  if (!workspaceId.value || !fileToRename.value) {
+    return;
+  }
   const newName = renameNewFilename.value.trim();
   if (!newName || newName === fileToRename.value) {
     cancelRename();
@@ -359,12 +375,11 @@ async function submitRename(): Promise<void> {
     renameError.value = 'A file with that name already exists';
     return;
   }
-  isRenaming.value = true;
+  bRenaming.value = true;
   renameError.value = null;
   try {
     await workspaceRulesApi.rename(workspaceId.value, fileToRename.value, newName);
     const wasSelected = selectedFilename.value === fileToRename.value;
-    const oldName = fileToRename.value;
     cancelRename();
     await fetchFiles();
     if (wasSelected) {
@@ -379,9 +394,11 @@ async function submitRename(): Promise<void> {
     };
     renameError.value = caughtError.response?.data?.error ?? caughtError.message ?? 'Failed to rename rule file';
   } finally {
-    isRenaming.value = false;
+    bRenaming.value = false;
   }
 }
+
+// -------------------------------------------------- Lifecycle --------------------------------------------------
 
 onMounted(async () => {
   await Promise.all([fetchFiles(), fetchRuleTemplates()]);
@@ -393,9 +410,7 @@ onMounted(async () => {
   <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
     <div>
       <h1 class="text-xl font-semibold text-text-primary flex items-center gap-2">
-        <span class="material-symbols-outlined select-none" style="font-size: 22px">
-          rule
-        </span>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="12" y2="16"/></svg>
         Cursor rules
       </h1>
       <p class="text-sm text-text-muted mt-1">
@@ -410,7 +425,7 @@ onMounted(async () => {
         class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
         @click="openNewRuleModal"
       >
-        <span class="material-symbols-outlined select-none" style="font-size: 16px">add</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M12 5v14M5 12h14"/></svg>
         New rule
       </button>
     </div>
@@ -431,7 +446,7 @@ onMounted(async () => {
   </div>
 
   <!-- Loading -->
-  <div v-if="listLoading" class="flex items-center gap-2 py-8 text-text-muted text-sm">
+  <div v-if="bListLoading" class="flex items-center gap-2 py-8 text-text-muted text-sm">
     <div class="w-5 h-5 border-2 border-surface border-t-primary rounded-full animate-spin" />
     Loading workspace rules…
   </div>
@@ -441,7 +456,7 @@ onMounted(async () => {
     v-else-if="files.length === 0"
     class="rounded-lg border border-fg/10 bg-fg/[0.02] py-10 px-4 text-center text-text-muted text-sm"
   >
-    <p v-if="rulesDirMissing">
+    <p v-if="bRulesDirMissing">
       No <span class="font-mono text-xs">.cursor/rules</span> directory was found for this
       workspace.
     </p>
@@ -477,9 +492,7 @@ onMounted(async () => {
                 "
                 @click="selectFile(file.filename)"
               >
-                <span class="material-symbols-outlined select-none text-base shrink-0">
-                  description
-                </span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none shrink-0"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                 <span class="flex-1 min-w-0 truncate">
                   {{ file.label || file.filename }}
                 </span>
@@ -491,9 +504,7 @@ onMounted(async () => {
                   title="Rename file"
                   @click.stop="startRename(file.filename)"
                 >
-                  <span class="material-symbols-outlined select-none" style="font-size: 16px"
-                    >edit</span
-                  >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
                 </button>
                 <button
                   type="button"
@@ -501,9 +512,7 @@ onMounted(async () => {
                   title="Delete file"
                   @click.stop="fileToDelete = file.filename"
                 >
-                  <span class="material-symbols-outlined select-none" style="font-size: 16px"
-                    >delete</span
-                  >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
                 </button>
               </div>
             </li>
@@ -530,16 +539,14 @@ onMounted(async () => {
               <button
                 type="button"
                 class="px-3 py-1.5 text-xs font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
-                :disabled="!hasUnsavedChanges || isSaving || !selectedFilename"
+                :disabled="!hasUnsavedChanges || bSaving || !selectedFilename"
                 @click="saveCurrent"
               >
                 <span
-                  v-if="isSaving"
+                  v-if="bSaving"
                   class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"
                 />
-                <span v-else class="material-symbols-outlined select-none" style="font-size: 16px">
-                  save
-                </span>
+                <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
                 Save
               </button>
             </div>
@@ -548,14 +555,14 @@ onMounted(async () => {
           <div class="relative flex-1 min-h-[180px]">
             <textarea
               v-model="content"
-              :disabled="contentLoading || !selectedFilename"
+              :disabled="bContentLoading || !selectedFilename"
               rows="12"
               class="w-full h-full min-h-[180px] font-mono text-xs md:text-sm bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all resize-y"
               placeholder="Select a rule file from the list to view and edit its contents."
             />
 
             <div
-              v-if="contentLoading"
+              v-if="bContentLoading"
               class="absolute inset-0 bg-bg/40 flex items-center justify-center rounded-lg"
             >
               <div
@@ -577,7 +584,7 @@ onMounted(async () => {
       :description="deleteDescription"
       confirm-label="Delete"
       variant="danger"
-      :loading="isDeleting"
+      :loading="bDeleting"
       @update:model-value="
         (v: boolean) => {
           if (!v) {
@@ -620,7 +627,7 @@ onMounted(async () => {
           <button
             type="button"
             class="px-3 py-1.5 text-sm text-text-muted hover:text-text-primary hover:bg-fg/[0.06] rounded-lg transition-colors"
-            :disabled="isRenaming"
+            :disabled="bRenaming"
             @click="cancelRename"
           >
             Cancel
@@ -629,12 +636,12 @@ onMounted(async () => {
             type="button"
             class="px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
             :disabled="
-              isRenaming || !renameNewFilename.trim() || renameNewFilename.trim() === fileToRename
+              bRenaming || !renameNewFilename.trim() || renameNewFilename.trim() === fileToRename
             "
             @click="submitRename"
           >
             <span
-              v-if="isRenaming"
+              v-if="bRenaming"
               class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"
             />
             Rename
@@ -645,7 +652,7 @@ onMounted(async () => {
 
     <!-- New rule file modal -->
     <div
-      v-if="showNewRuleModal"
+      v-if="bShowNewRuleModal"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       @click.self="closeNewRuleModal"
     >
@@ -704,7 +711,7 @@ onMounted(async () => {
         <!-- Template selection -->
         <div v-if="newRuleMode === 'template'" class="mb-3 space-y-2">
           <label class="block text-xs font-medium text-text-muted"> Template </label>
-          <div v-if="ruleTemplatesLoading" class="text-xs text-text-muted">Loading templates…</div>
+          <div v-if="bRuleTemplatesLoading" class="text-xs text-text-muted">Loading templates…</div>
           <div v-else-if="ruleTemplatesError" class="text-xs text-destructive">
             {{ ruleTemplatesError }}
           </div>
@@ -717,12 +724,12 @@ onMounted(async () => {
               class="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-text-muted border border-fg/20 rounded-lg hover:text-text-primary hover:border-fg/35 hover:bg-fg/[0.04] transition-colors"
               @click="openTemplateModal"
             >
-              <span class="material-symbols-outlined select-none" style="font-size: 15px">add</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M12 5v14M5 12h14"/></svg>
               New template
             </button>
           </div>
           <select
-            v-if="!ruleTemplatesLoading && !ruleTemplatesError && ruleTemplates.length > 0"
+            v-if="!bRuleTemplatesLoading && !ruleTemplatesError && ruleTemplates.length > 0"
             v-model="selectedTemplateId"
             class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10"
           >
@@ -741,7 +748,7 @@ onMounted(async () => {
           <button
             type="button"
             class="px-3 py-1.5 text-sm text-text-muted hover:text-text-primary hover:bg-fg/[0.06] rounded-lg transition-colors"
-            :disabled="isCreatingRule"
+            :disabled="bCreatingRule"
             @click="closeNewRuleModal"
           >
             Cancel
@@ -750,14 +757,14 @@ onMounted(async () => {
             type="button"
             class="px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
             :disabled="
-              isCreatingRule ||
+              bCreatingRule ||
               !newRuleFilename.trim() ||
               (newRuleMode === 'template' && !selectedTemplateId)
             "
             @click="createRule"
           >
             <span
-              v-if="isCreatingRule"
+              v-if="bCreatingRule"
               class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"
             />
             Create
@@ -768,7 +775,7 @@ onMounted(async () => {
 
     <!-- New template modal -->
     <div
-      v-if="showTemplateModal"
+      v-if="bShowTemplateModal"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       @click.self="closeTemplateModal"
     >
@@ -792,7 +799,7 @@ onMounted(async () => {
               type="text"
               class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10"
               placeholder="e.g. TypeScript guardrails"
-              :disabled="isCreatingTemplate"
+              :disabled="bCreatingTemplate"
               @keydown.enter.prevent="createTemplate"
             />
           </div>
@@ -805,7 +812,7 @@ onMounted(async () => {
               type="text"
               class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10"
               placeholder="Short summary"
-              :disabled="isCreatingTemplate"
+              :disabled="bCreatingTemplate"
             />
           </div>
           <div>
@@ -815,7 +822,7 @@ onMounted(async () => {
               rows="7"
               class="w-full font-mono bg-surface border border-fg/15 rounded-lg px-3 py-2 text-xs md:text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 resize-y"
               placeholder="Template content to prefill the new rule file."
-              :disabled="isCreatingTemplate"
+              :disabled="bCreatingTemplate"
             />
           </div>
         </div>
@@ -828,7 +835,7 @@ onMounted(async () => {
           <button
             type="button"
             class="px-3 py-1.5 text-sm text-text-muted hover:text-text-primary hover:bg-fg/[0.06] rounded-lg transition-colors"
-            :disabled="isCreatingTemplate"
+            :disabled="bCreatingTemplate"
             @click="closeTemplateModal"
           >
             Cancel
@@ -836,11 +843,11 @@ onMounted(async () => {
           <button
             type="button"
             class="px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
-            :disabled="isCreatingTemplate || !newTemplateName.trim() || !newTemplateContent.trim()"
+            :disabled="bCreatingTemplate || !newTemplateName.trim() || !newTemplateContent.trim()"
             @click="createTemplate"
           >
             <span
-              v-if="isCreatingTemplate"
+              v-if="bCreatingTemplate"
               class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"
             />
             Create template

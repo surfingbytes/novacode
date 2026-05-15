@@ -29,35 +29,47 @@ const HISTORY_PAGE_SIZE = 50;
 const chatSessionClients = new Map<string, Set<WebSocket>>();
 const queueWorkers = new Set<string>();
 
-function send(socket: WebSocket, msg: ChatWsServerMessage): void {
-  if (socket.readyState === 1) socket.send(JSON.stringify(msg));
+// ---------------------------------- Socket Helpers ----------------------------------
+function send(socket: WebSocket, message: ChatWsServerMessage): void {
+  if (socket.readyState === 1) {
+    socket.send(JSON.stringify(message));
+  }
 }
 
 function registerChatSocket(sessionId: string, socket: WebSocket): void {
-  let set = chatSessionClients.get(sessionId);
-  if (!set) {
-    set = new Set<WebSocket>();
-    chatSessionClients.set(sessionId, set);
+  let socketSet = chatSessionClients.get(sessionId);
+  if (!socketSet) {
+    socketSet = new Set<WebSocket>();
+    chatSessionClients.set(sessionId, socketSet);
   }
-  set.add(socket);
+  socketSet.add(socket);
 }
 
 function unregisterChatSocket(sessionId: string, socket: WebSocket): void {
-  const set = chatSessionClients.get(sessionId);
-  if (!set) return;
-  set.delete(socket);
-  if (set.size === 0) chatSessionClients.delete(sessionId);
-}
-
-function broadcastChat(sessionId: string, msg: ChatWsServerMessage): void {
-  const set = chatSessionClients.get(sessionId);
-  if (!set) return;
-  const payload = JSON.stringify(msg);
-  for (const socket of set) {
-    if (socket.readyState === 1) socket.send(payload);
+  const socketSet = chatSessionClients.get(sessionId);
+  if (!socketSet) {
+    return;
+  }
+  socketSet.delete(socket);
+  if (socketSet.size === 0) {
+    chatSessionClients.delete(sessionId);
   }
 }
 
+function broadcastChat(sessionId: string, message: ChatWsServerMessage): void {
+  const socketSet = chatSessionClients.get(sessionId);
+  if (!socketSet) {
+    return;
+  }
+  const payload = JSON.stringify(message);
+  for (const socket of socketSet) {
+    if (socket.readyState === 1) {
+      socket.send(payload);
+    }
+  }
+}
+
+// ---------------------------------- Queue Helpers ----------------------------------
 async function loadQueue(sessionId: string): Promise<ChatQueueItem[]> {
   return db.listSessionQueue(sessionId);
 }
@@ -68,10 +80,14 @@ async function broadcastQueueUpdate(sessionId: string): Promise<void> {
 }
 
 async function tryProcessQueue(sessionId: string): Promise<void> {
-  if (queueWorkers.has(sessionId)) return;
+  if (queueWorkers.has(sessionId)) {
+    return;
+  }
   queueWorkers.add(sessionId);
   try {
-    if (getActiveRun(sessionId)) return;
+    if (getActiveRun(sessionId)) {
+      return;
+    }
     const next = await db.dequeueNextSessionQueueItem(sessionId);
     if (!next) {
       await broadcastQueueUpdate(sessionId);
@@ -129,9 +145,13 @@ function paginateMessages(allMessages: ChatMessage[], offset: number): { message
 
 async function loadSessionMessages(sessionId: string): Promise<ChatMessage[]> {
   const run = getActiveRun(sessionId);
-  if (run) return run.messages;
+  if (run) {
+    return run.messages;
+  }
   const session = await db.getSession(sessionId);
-  if (!session) return [];
+  if (!session) {
+    return [];
+  }
   try {
     return JSON.parse(session.messageJson ?? '[]');
   } catch {
@@ -139,6 +159,7 @@ async function loadSessionMessages(sessionId: string): Promise<ChatMessage[]> {
   }
 }
 
+// ---------------------------------- Routes ----------------------------------
 export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get('/api/ws/chat/:id', { websocket: true }, async (socket: WebSocket, request) => {
     const query = request.query as Record<string, string>;
@@ -194,46 +215,56 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
 
     socket.on('message', async (raw: Buffer) => {
       try {
-        const msg = JSON.parse(raw.toString()) as ChatWsClientMessage;
+        const clientMessage = JSON.parse(raw.toString()) as ChatWsClientMessage;
 
-        if (msg.type === 'cancel') {
+        if (clientMessage.type === 'cancel') {
           cancelRun(id);
           return;
         }
 
-        if (msg.type === 'load-more') {
-          const offset = msg.offset ?? 0;
+        if (clientMessage.type === 'load-more') {
+          const offset = clientMessage.offset ?? 0;
           const allMessages = await loadSessionMessages(id);
           const { messages: page, hasMore } = paginateMessages(allMessages, offset);
           send(socket, { type: 'history-page', messages: page, hasMore });
           return;
         }
 
-        if (msg.type === 'queue-delete') {
-          if (!msg.queueItemId) return;
-          await db.deleteSessionQueueItem(id, msg.queueItemId);
+        if (clientMessage.type === 'queue-delete') {
+          if (!clientMessage.queueItemId) {
+            return;
+          }
+          await db.deleteSessionQueueItem(id, clientMessage.queueItemId);
           await broadcastQueueUpdate(id);
           return;
         }
 
-        if (msg.type === 'queue-push') {
-          if (!msg.queueItemId) return;
-          const moved = await db.moveSessionQueueItemToFront(id, msg.queueItemId);
-          if (moved) cancelRun(id);
+        if (clientMessage.type === 'queue-push') {
+          if (!clientMessage.queueItemId) {
+            return;
+          }
+          const moved = await db.moveSessionQueueItemToFront(id, clientMessage.queueItemId);
+          if (moved) {
+            cancelRun(id);
+          }
           await broadcastQueueUpdate(id);
           await tryProcessQueue(id);
           return;
         }
 
-        if (msg.type !== 'prompt') return;
-        const text = (msg.text ?? '').trim();
-        const imagePaths = msg.imagePaths ?? [];
-        if (!text && imagePaths.length === 0) return;
+        if (clientMessage.type !== 'prompt') {
+          return;
+        }
+        const text = (clientMessage.text ?? '').trim();
+        const imagePaths = clientMessage.imagePaths ?? [];
+        if (!text && imagePaths.length === 0) {
+          return;
+        }
 
         await db.enqueueSessionQueueItem({
           sessionId: id,
           text,
-          model: msg.model ?? 'auto',
+          model: clientMessage.model ?? 'auto',
           imagePaths
         });
         await broadcastQueueUpdate(id);

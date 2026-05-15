@@ -20,6 +20,7 @@ model User {
   lightTheme          String?            @map("light_theme")
   modelSelection      String             @default("auto") @map("model_selection")
   claudeToken         String?            @map("claude_token")
+  claudeAutoContinue  Boolean            @default(false) @map("claude_auto_continue")
   pushSubscriptions   PushSubscription[]
   
   @@map("users")
@@ -73,6 +74,7 @@ model Session {
   createdAt   String    @map("created_at")
   updatedAt   String    @default(dbgenerated("CURRENT_TIMESTAMP")) @map("updated_at")
   archived    Boolean   @default(false)
+  claudeLimitResetAt String? @map("claude_limit_reset_at")
 
   @@map("sessions")
 }

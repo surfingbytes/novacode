@@ -11,7 +11,7 @@ import PageShell from '@/components/layout/PageShell.vue';
 // classes
 import { authApi } from '@/classes/api';
 
-// -------------------------------------------------- Data --------------------------------------------------
+// -------------------------------------------------- Refs --------------------------------------------------
 const authStore = useAuthStore();
 const accountNewUsername = ref<string>('');
 const accountCurrentPassword = ref<string>('');
@@ -21,13 +21,13 @@ const bChangingUsername = ref<boolean>(false);
 const bChangingPassword = ref<boolean>(false);
 const accountUsernameError = ref<string>('');
 const accountPasswordError = ref<string>('');
-const accountUsernameSuccess = ref<boolean>(false);
-const accountPasswordSuccess = ref<boolean>(false);
+const bAccountUsernameSuccess = ref<boolean>(false);
+const bAccountPasswordSuccess = ref<boolean>(false);
 
 // -------------------------------------------------- Methods --------------------------------------------------
 const changeUsername = async (): Promise<void> => {
   accountUsernameError.value = '';
-  accountUsernameSuccess.value = false;
+  bAccountUsernameSuccess.value = false;
   const newUsername = accountNewUsername.value.trim();
   if (!newUsername) {
     accountUsernameError.value = 'Enter a new username and your current password.';
@@ -42,9 +42,9 @@ const changeUsername = async (): Promise<void> => {
     const response = await authApi.changeUsername(newUsername);
     authStore.setToken(response.data.token, newUsername);
     accountNewUsername.value = '';
-    accountUsernameSuccess.value = true;
+    bAccountUsernameSuccess.value = true;
     setTimeout(() => {
-      accountUsernameSuccess.value = false;
+      bAccountUsernameSuccess.value = false;
     }, 3000);
   } catch (err: unknown) {
     const msg =
@@ -59,7 +59,7 @@ const changeUsername = async (): Promise<void> => {
 
 const changePassword = async (): Promise<void> => {
   accountPasswordError.value = '';
-  accountPasswordSuccess.value = false;
+  bAccountPasswordSuccess.value = false;
   const current = accountCurrentPassword.value;
   const newP = accountNewPassword.value;
   const confirm = accountConfirmPassword.value;
@@ -81,9 +81,9 @@ const changePassword = async (): Promise<void> => {
     accountCurrentPassword.value = '';
     accountNewPassword.value = '';
     accountConfirmPassword.value = '';
-    accountPasswordSuccess.value = true;
+    bAccountPasswordSuccess.value = true;
     setTimeout(() => {
-      accountPasswordSuccess.value = false;
+      bAccountPasswordSuccess.value = false;
     }, 3000);
   } catch (err: unknown) {
     const msg =
@@ -116,7 +116,7 @@ const changePassword = async (): Promise<void> => {
           <div class="label">New username</div>
           <div class="input-wrap">
             <span class="icon">
-              <span class="material-symbols-outlined">person</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             </span>
             <input
               v-model="accountNewUsername"
@@ -139,7 +139,7 @@ const changePassword = async (): Promise<void> => {
             Update username
           </button>
         </div>
-        <p v-if="accountUsernameSuccess" class="message is-success mt-2">Username updated.</p>
+        <p v-if="bAccountUsernameSuccess" class="message is-success mt-2">Username updated.</p>
       </div>
 
       <!-- Change password -->
@@ -150,7 +150,7 @@ const changePassword = async (): Promise<void> => {
           <div class="label">Current password</div>
           <div class="input-wrap">
             <span class="icon">
-              <span class="material-symbols-outlined">lock</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
             </span>
             <input
               v-model="accountCurrentPassword"
@@ -164,7 +164,7 @@ const changePassword = async (): Promise<void> => {
           <div class="label">New password</div>
           <div class="input-wrap">
             <span class="icon">
-              <span class="material-symbols-outlined">lock</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
             </span>
             <input
               v-model="accountNewPassword"
@@ -178,7 +178,7 @@ const changePassword = async (): Promise<void> => {
           <div class="label">New password</div>
           <div class="input-wrap">
             <span class="icon">
-              <span class="material-symbols-outlined">lock</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
             </span>
             <input
               v-model="accountConfirmPassword"
@@ -192,7 +192,7 @@ const changePassword = async (): Promise<void> => {
           </p>
         </div>
 
-        <div v-if="accountPasswordSuccess" class="message is-success">Password updated.</div>
+        <div v-if="bAccountPasswordSuccess" class="message is-success">Password updated.</div>
 
         <div class="flex justify-end mt-4">
           <button
@@ -213,3 +213,5 @@ const changePassword = async (): Promise<void> => {
     </div>
   </PageShell>
 </template>
+
+

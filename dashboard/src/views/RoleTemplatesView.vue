@@ -7,49 +7,55 @@ import ConfirmModal from '@/components/ConfirmModal.vue';
 import PageShell from '@/components/layout/PageShell.vue';
 import PageHeader from '@/components/layout/PageHeader.vue';
 
-// api
+// classes
 import { roleTemplatesApi } from '@/classes/api';
 
 // types
 import type { RoleTemplate } from '@/@types/index';
 
+// -------------------------------------------------- Refs --------------------------------------------------
+
 const templates = ref<RoleTemplate[]>([]);
-const loading = ref(true);
+const bLoading = ref(true);
 const errorMessage = ref<string | null>(null);
 const successMessage = ref<string | null>(null);
 
 const viewMode = ref<'list' | 'grid'>(
-  (localStorage.getItem('ruleTemplatesViewMode') as 'list' | 'grid') ?? 'list'
+  (localStorage.getItem('ruleTemplatesViewMode') as 'list' | 'grid') ?? 'list',
 );
 
 // Create modal
-const showCreateModal = ref(false);
+const bShowCreateModal = ref(false);
 const newName = ref('');
 const newDescription = ref('');
 const newContent = ref('');
-const isCreating = ref(false);
+const bCreating = ref(false);
 const createError = ref<string | null>(null);
 
 // Edit modal
-const showEditModal = ref(false);
+const bShowEditModal = ref(false);
 const editingId = ref<string | null>(null);
 const editName = ref('');
 const editDescription = ref('');
 const editContent = ref('');
-const isSavingEdit = ref(false);
+const bSavingEdit = ref(false);
 const editError = ref<string | null>(null);
 
 // Delete
 const templateToDelete = ref<RoleTemplate | null>(null);
-const isDeleting = ref(false);
+const bDeleting = ref(false);
 const deleteError = ref<string | null>(null);
 
+// -------------------------------------------------- Computed --------------------------------------------------
+
 const deleteConfirmDescription = computed(() =>
-  templateToDelete.value ? `Delete "${templateToDelete.value.name}"? This cannot be undone.` : ''
+  templateToDelete.value ? `Delete "${templateToDelete.value.name}"? This cannot be undone.` : '',
 );
 
+// -------------------------------------------------- Methods --------------------------------------------------
+
 async function fetchTemplates(): Promise<void> {
-  loading.value = true;
+  bLoading.value = true;
   errorMessage.value = null;
   try {
     const { data } = await roleTemplatesApi.list();
@@ -59,7 +65,7 @@ async function fetchTemplates(): Promise<void> {
     errorMessage.value = 'Failed to load rule templates';
     templates.value = [];
   } finally {
-    loading.value = false;
+    bLoading.value = false;
   }
 }
 
@@ -77,7 +83,7 @@ function setViewMode(mode: 'list' | 'grid'): void {
 
 // --- Create ---
 function openCreateModal(): void {
-  showCreateModal.value = true;
+  bShowCreateModal.value = true;
   createError.value = null;
   newName.value = '';
   newDescription.value = '';
@@ -85,8 +91,10 @@ function openCreateModal(): void {
 }
 
 function closeCreateModal(): void {
-  if (isCreating.value) return;
-  showCreateModal.value = false;
+  if (bCreating.value) {
+    return;
+  }
+  bShowCreateModal.value = false;
   createError.value = null;
 }
 
@@ -110,14 +118,16 @@ function validateNewTemplate(): boolean {
 }
 
 async function createTemplate(): Promise<void> {
-  if (!validateNewTemplate()) return;
-  isCreating.value = true;
+  if (!validateNewTemplate()) {
+    return;
+  }
+  bCreating.value = true;
   createError.value = null;
   try {
     await roleTemplatesApi.create({
       name: newName.value.trim(),
       description: newDescription.value.trim() || null,
-      content: newContent.value
+      content: newContent.value,
     });
     await fetchTemplates();
     closeCreateModal();
@@ -127,13 +137,13 @@ async function createTemplate(): Promise<void> {
     createError.value =
       caughtError.response?.data?.error ?? caughtError.message ?? 'Failed to create template';
   } finally {
-    isCreating.value = false;
+    bCreating.value = false;
   }
 }
 
 // --- Edit ---
 function startEdit(t: RoleTemplate): void {
-  showEditModal.value = true;
+  bShowEditModal.value = true;
   editingId.value = t.id;
   editName.value = t.name;
   editDescription.value = t.description ?? '';
@@ -142,8 +152,10 @@ function startEdit(t: RoleTemplate): void {
 }
 
 function cancelEdit(): void {
-  if (isSavingEdit.value) return;
-  showEditModal.value = false;
+  if (bSavingEdit.value) {
+    return;
+  }
+  bShowEditModal.value = false;
   editingId.value = null;
   editName.value = '';
   editDescription.value = '';
@@ -174,14 +186,16 @@ function validateEdit(): boolean {
 }
 
 async function saveEdit(): Promise<void> {
-  if (!editingId.value || !validateEdit()) return;
-  isSavingEdit.value = true;
+  if (!editingId.value || !validateEdit()) {
+    return;
+  }
+  bSavingEdit.value = true;
   editError.value = null;
   try {
     await roleTemplatesApi.update(editingId.value, {
       name: editName.value.trim(),
       description: editDescription.value.trim() || null,
-      content: editContent.value
+      content: editContent.value,
     });
     await fetchTemplates();
     cancelEdit();
@@ -191,7 +205,7 @@ async function saveEdit(): Promise<void> {
     editError.value =
       caughtError.response?.data?.error ?? caughtError.message ?? 'Failed to update template';
   } finally {
-    isSavingEdit.value = false;
+    bSavingEdit.value = false;
   }
 }
 
@@ -207,8 +221,10 @@ function cancelDelete(): void {
 }
 
 async function doDelete(): Promise<void> {
-  if (!templateToDelete.value) return;
-  isDeleting.value = true;
+  if (!templateToDelete.value) {
+    return;
+  }
+  bDeleting.value = true;
   deleteError.value = null;
   try {
     await roleTemplatesApi.remove(templateToDelete.value.id);
@@ -220,7 +236,7 @@ async function doDelete(): Promise<void> {
     deleteError.value =
       caughtError.response?.data?.error ?? caughtError.message ?? 'Failed to delete template';
   } finally {
-    isDeleting.value = false;
+    bDeleting.value = false;
   }
 }
 
@@ -231,6 +247,8 @@ function formatDate(iso: string): string {
     return iso;
   }
 }
+
+// -------------------------------------------------- Lifecycle --------------------------------------------------
 
 onMounted(() => {
   fetchTemplates();
@@ -253,18 +271,18 @@ onMounted(() => {
           :class="{ 'is-active': viewMode === 'list' }"
           @click="setViewMode('list')"
         >
-          <span class="material-symbols-outlined">view_list</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
         </button>
         <button
           class="button is-icon"
           :class="{ 'is-active': viewMode === 'grid' }"
           @click="setViewMode('grid')"
         >
-          <span class="material-symbols-outlined">grid_view</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
         </button>
       </div>
       <button type="button" class="button is-primary" @click="openCreateModal">
-        <span class="material-symbols-outlined select-none">add</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M12 5v14M5 12h14"/></svg>
         New template
       </button>
     </div>
@@ -284,7 +302,7 @@ onMounted(() => {
     </div>
 
     <!-- Loading -->
-    <div v-if="loading" class="flex items-center gap-2 py-8 text-text-muted text-sm">
+    <div v-if="bLoading" class="flex items-center gap-2 py-8 text-text-muted text-sm">
       <div class="w-5 h-5 border-2 border-surface border-t-primary rounded-full animate-spin" />
       Loading rule templates…
     </div>
@@ -303,7 +321,7 @@ onMounted(() => {
         <article v-for="template in templates" :key="template.id" class="group grid-item">
           <div class="top">
             <div class="icon">
-              <span class="material-symbols-outlined">text_fields</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>
             </div>
             <div class="info min-w-0">
               <p class="title truncate">{{ template.name }}</p>
@@ -319,13 +337,13 @@ onMounted(() => {
                 class="button is-icon is-transparent"
                 @click.prevent.stop="startEdit(template)"
               >
-                <span class="material-symbols-outlined">edit</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
               </button>
               <button
                 class="button is-icon is-transparent is-delete"
                 @click.prevent.stop="confirmDelete(template)"
               >
-                <span class="material-symbols-outlined">delete</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
               </button>
             </div>
           </div>
@@ -346,13 +364,13 @@ onMounted(() => {
           </div>
           <div class="cell buttons">
             <button class="button is-icon" @click.prevent.stop="startEdit(template)">
-              <span class="material-symbols-outlined">edit</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
             </button>
             <button
               class="button is-icon hover:bg-destructive/10! hover:border-destructive!"
               @click.prevent.stop="confirmDelete(template)"
             >
-              <span class="material-symbols-outlined text-destructive">delete</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="text-destructive"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
             </button>
           </div>
         </article>
@@ -361,7 +379,7 @@ onMounted(() => {
 
     <!-- Create modal -->
     <div
-      v-if="showCreateModal"
+      v-if="bShowCreateModal"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       @click.self="closeCreateModal"
     >
@@ -381,7 +399,7 @@ onMounted(() => {
               type="text"
               placeholder="e.g. Senior TypeScript engineer"
               class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
-              :disabled="isCreating"
+              :disabled="bCreating"
               @keydown.enter.prevent="createTemplate"
             />
           </div>
@@ -394,7 +412,7 @@ onMounted(() => {
               rows="2"
               placeholder="Short summary of this rule template"
               class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all resize-y"
-              :disabled="isCreating"
+              :disabled="bCreating"
             />
           </div>
           <div>
@@ -404,7 +422,7 @@ onMounted(() => {
               rows="6"
               placeholder="System prompt text to apply when this rule template is used."
               class="w-full font-mono bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-xs md:text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all resize-y"
-              :disabled="isCreating"
+              :disabled="bCreating"
             />
           </div>
         </div>
@@ -413,7 +431,7 @@ onMounted(() => {
           <button
             type="button"
             class="px-3 py-1.5 text-sm text-text-muted hover:text-text-primary hover:bg-fg/[0.06] rounded-lg transition-colors"
-            :disabled="isCreating"
+            :disabled="bCreating"
             @click="closeCreateModal"
           >
             Cancel
@@ -421,11 +439,11 @@ onMounted(() => {
           <button
             type="button"
             class="px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
-            :disabled="isCreating || !newName.trim() || !newContent.trim()"
+            :disabled="bCreating || !newName.trim() || !newContent.trim()"
             @click="createTemplate"
           >
             <span
-              v-if="isCreating"
+              v-if="bCreating"
               class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"
             />
             Create
@@ -436,7 +454,7 @@ onMounted(() => {
 
     <!-- Edit modal -->
     <div
-      v-if="showEditModal"
+      v-if="bShowEditModal"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       @click.self="cancelEdit"
     >
@@ -455,7 +473,7 @@ onMounted(() => {
               v-model="editName"
               type="text"
               class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
-              :disabled="isSavingEdit"
+              :disabled="bSavingEdit"
             />
           </div>
           <div>
@@ -466,7 +484,7 @@ onMounted(() => {
               v-model="editDescription"
               rows="2"
               class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all resize-y"
-              :disabled="isSavingEdit"
+              :disabled="bSavingEdit"
             />
           </div>
           <div>
@@ -475,7 +493,7 @@ onMounted(() => {
               v-model="editContent"
               rows="6"
               class="w-full font-mono bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-xs md:text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all resize-y"
-              :disabled="isSavingEdit"
+              :disabled="bSavingEdit"
             />
           </div>
         </div>
@@ -484,7 +502,7 @@ onMounted(() => {
           <button
             type="button"
             class="px-3 py-1.5 text-sm text-text-muted hover:text-text-primary hover:bg-fg/[0.06] rounded-lg transition-colors"
-            :disabled="isSavingEdit"
+            :disabled="bSavingEdit"
             @click="cancelEdit"
           >
             Cancel
@@ -492,11 +510,11 @@ onMounted(() => {
           <button
             type="button"
             class="px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
-            :disabled="isSavingEdit || !editName.trim() || !editContent.trim()"
+            :disabled="bSavingEdit || !editName.trim() || !editContent.trim()"
             @click="saveEdit"
           >
             <span
-              v-if="isSavingEdit"
+              v-if="bSavingEdit"
               class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"
             />
             Save
@@ -512,10 +530,12 @@ onMounted(() => {
       :description="deleteConfirmDescription"
       confirm-label="Delete"
       variant="danger"
-      :loading="isDeleting"
+      :loading="bDeleting"
       @update:model-value="
         (v: boolean) => {
-          if (!v) cancelDelete();
+          if (!v) {
+            cancelDelete();
+          }
         }
       "
       @confirm="doDelete"

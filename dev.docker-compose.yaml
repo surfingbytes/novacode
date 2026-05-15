@@ -1,5 +1,6 @@
 # API runs via entrypoint: chowns /config to your uid/gid, then runs app as that user.
 # Set in .env or export: UID=$(id -u) GID=$(id -g)
+name: nova-code-dev
 services:
   api:
     build:
@@ -41,8 +42,6 @@ services:
     restart: unless-stopped
   postgres:
     image: postgres:17
-    ports:
-      - "5432:5432"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

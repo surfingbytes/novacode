@@ -8,14 +8,14 @@ function healthUrl(): string {
 }
 
 export const useApiHealthStore = defineStore('apiHealth', () => {
-  const apiReachable = ref(true);
+  const bApiReachable = ref(true);
 
   function markUnreachable(): void {
-    apiReachable.value = false;
+    bApiReachable.value = false;
   }
 
   function markReachable(): void {
-    apiReachable.value = true;
+    bApiReachable.value = true;
   }
 
   async function ping(): Promise<void> {
@@ -40,7 +40,7 @@ export const useApiHealthStore = defineStore('apiHealth', () => {
   }
 
   return {
-    apiReachable,
+    bApiReachable,
     markUnreachable,
     markReachable,
     ping

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# NovaCode one-line installer / updater (install vs update is detected automatically).
+# Nova Code one-line installer / updater (install vs update is detected automatically).
 #
 #   curl -fsSL https://raw.githubusercontent.com/JonahFintzDev/novacode/main/scripts/install.sh | bash
 #
@@ -303,7 +303,7 @@ cmd_run() {
     return
   fi
 
-  echo "Installing NovaCode under ${NOVACODE_DIR}..."
+  echo "Installing Nova Code under ${NOVACODE_DIR}..."
   write_compose
   # Best-effort: store current upstream .env.example hash for future updates.
   write_env_file "$(fetch_env_example_md5 || true)"
@@ -313,7 +313,7 @@ cmd_run() {
   compose_cmd pull
   compose_cmd up -d --remove-orphans
   echo
-  echo "NovaCode is starting under ${NOVACODE_DIR}"
+  echo "Nova Code is starting under ${NOVACODE_DIR}"
   echo "  Config:  ${NOVACODE_CONFIG}"
   echo "  Postgres data: ${NOVACODE_POSTGRES_DATA}"
   echo "  Open:    http://localhost:${PORT:-3030}"

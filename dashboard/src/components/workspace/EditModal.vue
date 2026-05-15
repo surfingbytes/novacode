@@ -55,7 +55,7 @@ const AGENT_OPTIONS: { value: AgentType; label: string }[] = [
   { value: 'claude', label: 'Claude' }
 ];
 
-// -------------------------------------------------- Data --------------------------------------------------
+// -------------------------------------------------- Refs --------------------------------------------------
 const form = ref<FormState>({
   name: '',
   path: '',
@@ -254,7 +254,7 @@ watch(
               {{ workspace ? 'Edit Workspace' : 'Add Workspace' }}
             </div>
             <button class="close-button" @click="close">
-              <span class="material-symbols-outlined select-none">close</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M18 6L6 18M6 6l12 12"/></svg>
             </button>
           </div>
 
@@ -275,7 +275,7 @@ watch(
                 Group
 
                 <button @click="bNewGroupAddActive = true" v-if="!bNewGroupAddActive">
-                  <span class="material-symbols-outlined">add</span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
                   New Group
                 </button>
               </div>
@@ -291,7 +291,7 @@ watch(
                 </select>
                 <input v-else v-model="groupNameInput" type="text" placeholder="New group name" />
                 <button class="button is-primary" @click="createNewGroup" v-if="bNewGroupAddActive">
-                  <span class="material-symbols-outlined">create</span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
                   Create
                 </button>
                 <button
@@ -299,7 +299,7 @@ watch(
                   @click="bNewGroupAddActive = false"
                   v-if="bNewGroupAddActive"
                 >
-                  <span class="material-symbols-outlined">close</span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
               </div>
               <p class="hint is-error" v-if="newGroupError">Name is required</p>
@@ -326,7 +326,7 @@ watch(
                       @click="removeTag(index)"
                       aria-label="Remove tag"
                     >
-                      <span class="material-symbols-outlined text-sm">close</span>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
                   </span>
                   <input
@@ -361,7 +361,7 @@ watch(
               <div class="input-wrap">
                 <input v-model="form.path" type="text" placeholder="/my-project" />
                 <div class="icon is-small">
-                  <span class="material-symbols-outlined">folder</span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
                 </div>
                 <button class="button" @click="bShowDirPicker = true">Browse...</button>
               </div>
@@ -429,7 +429,7 @@ watch(
 
             <button class="button is-primary" :disabled="bSaving" @click="submit">
               <div v-if="bSaving" class="loading-spinner"></div>
-              <span class="material-symbols-outlined">save</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
               {{ workspace ? 'Save Workspace' : 'Create Workspace' }}
             </button>
           </div>

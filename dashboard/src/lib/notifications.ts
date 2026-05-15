@@ -5,6 +5,13 @@ const STORAGE_KEY = 'notificationsEnabled';
 const DEFAULT_ICON = '/favicon.ico';
 /** Android status bar / collapsed notification — should be white-on-transparent, ~96×96 */
 const DEFAULT_BADGE = '/notification-badge.png';
+const REPLY_ACTION_ID = 'reply';
+
+type ExtendedNotificationOptions = NotificationOptions & {
+  data?: { url?: string };
+  actions?: Array<{ action: string; title: string; icon?: string }>;
+  requireInteraction?: boolean;
+};
 
 export function isNotificationsEnabled(): boolean {
   return localStorage.getItem(STORAGE_KEY) === 'true';
@@ -84,7 +91,7 @@ export async function syncPushSubscription(enabled: boolean): Promise<void> {
   await pushApi.subscribe({ endpoint: subscription.endpoint, keys });
 }
 
-async function showNotification(title: string, options: NotificationOptions): Promise<void> {
+async function showNotification(title: string, options: ExtendedNotificationOptions): Promise<void> {
   if (!isNotificationsEnabled()) return;
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
 
@@ -95,7 +102,7 @@ async function showNotification(title: string, options: NotificationOptions): Pr
       await registration.showNotification(title, {
         ...options,
         badge: options.badge ?? DEFAULT_BADGE
-      });
+      } as NotificationOptions);
       return;
     } catch {
       // Fall through to window notifications when SW is not ready.
@@ -105,8 +112,12 @@ async function showNotification(title: string, options: NotificationOptions): Pr
   const notification = new Notification(title, {
     ...options,
     badge: options.badge ?? DEFAULT_BADGE
-  });
+  } as NotificationOptions);
   notification.onclick = () => {
+    const targetUrl = typeof options.data === 'object' ? (options.data as { url?: string }).url : undefined;
+    if (targetUrl) {
+      window.location.href = targetUrl;
+    }
     window.focus();
     notification.close();
   };
@@ -133,14 +144,20 @@ function compactText(input: string, maxLen = 280): string {
 export function notifyTaskDone(
   sessionName: string,
   workspaceName: string | undefined,
-  agentLastMessage: string
+  agentLastMessage: string,
+  workspaceId: string,
+  sessionId: string
 ): void {
   const context = [workspaceName, sessionName || 'Session'].filter(Boolean).join(' • ');
   const body = compactText(agentLastMessage || context || 'Task finished');
+  const sessionUrl = `/workspace/${encodeURIComponent(workspaceId)}/session/${encodeURIComponent(sessionId)}`;
   void showNotification(`Task finished: ${context}`, {
     body,
     icon: DEFAULT_ICON,
     tag: 'task-done',
+    data: { url: sessionUrl },
+    actions: [{ action: REPLY_ACTION_ID, title: 'Reply' }],
+    requireInteraction: true
   });
 }
 

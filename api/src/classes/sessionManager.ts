@@ -38,7 +38,9 @@ class SessionManager {
 
     pty.onExit((exitCode) => {
       const live = this.sessions.get(id);
-      if (!live) return;
+      if (!live) {
+        return;
+      }
       // exit code 0 = stopped normally; non-zero = failed
       live.meta.status = exitCode === 0 || exitCode === undefined ? 'stopped' : 'failed';
       for (const sub of live.statusSubscribers) {

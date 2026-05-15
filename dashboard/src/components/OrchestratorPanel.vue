@@ -4,15 +4,15 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 
 // classes
 import { orchestratorApi } from '@/classes/api';
-
-// types
-import type { Orchestrator, SubTask } from '@/@types/index';
-
-// utils
 import {
   parseOrchestratorSubtasksJson,
   serializeOrchestratorSubtasksPayload
 } from '@/utils/orchestratorPayload';
+
+// types
+import type { Orchestrator, SubTask } from '@/@types/index';
+
+// -------------------------------------------------- Props --------------------------------------------------
 
 const props = defineProps<{
   workspaceId: string;
@@ -20,9 +20,13 @@ const props = defineProps<{
   orchestrator: Orchestrator | null;
 }>();
 
+// -------------------------------------------------- Emits --------------------------------------------------
+
 const emit = defineEmits<{
   'update:orchestrator': [Orchestrator];
 }>();
+
+// -------------------------------------------------- Constants --------------------------------------------------
 
 const CATEGORY_COLORS = [
   'bg-blue-500/15 text-blue-400 border-blue-500/20',
@@ -35,18 +39,14 @@ const CATEGORY_COLORS = [
   'bg-red-500/15 text-red-400 border-red-500/20'
 ];
 
-function categoryColorClass(name: string): string {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return CATEGORY_COLORS[h % CATEGORY_COLORS.length];
-}
+// -------------------------------------------------- Refs --------------------------------------------------
 
 const userInput = ref('');
 const promptStorageKey = `orchestratorPrompt:${props.workspaceId}:${props.orchestratorId}`;
-const isDecomposing = ref(false);
-const isStartingRun = ref(false);
-const isStopping = ref(false);
-const isSavingSubtasks = ref(false);
+const bDecomposing = ref(false);
+const bStartingRun = ref(false);
+const bStopping = ref(false);
+const bSavingSubtasks = ref(false);
 const decomposeError = ref<string | null>(null);
 const decomposeLastAssistantContent = ref<string>('');
 const decomposeExpectedSchema = ref<string>('');
@@ -54,6 +54,12 @@ const decomposeThinking = ref('');
 const decomposeThinkingEl = ref<HTMLElement | null>(null);
 const runError = ref<string | null>(null);
 const pollIntervalId = ref<ReturnType<typeof setInterval> | null>(null);
+const editedSubtasks = ref<SubTask[]>([]);
+const bShowEditModal = ref(false);
+const editingTaskIndex = ref<number | null>(null);
+const editDraft = ref<SubTask>({ name: '', prompt: '', category: null });
+
+// -------------------------------------------------- Computed --------------------------------------------------
 
 const isRunning = computed(() => props.orchestrator?.runStatus === 'running');
 const hasRunOnce = computed(
@@ -63,13 +69,23 @@ const canEdit = computed(() => !isRunning.value && !hasRunOnce.value);
 
 const runProgress = computed(() => {
   const o = props.orchestrator;
-  if (!o?.runStatus) return null;
+  if (!o?.runStatus) {
+    return null;
+  }
   const total = o.runTotalSteps ?? 0;
   const current = o.runCurrentStep ?? 0;
-  if (o.runStatus === 'running') return { status: 'running' as const, completed: current, total };
-  if (o.runStatus === 'completed') return { status: 'completed' as const, completed: total, total };
-  if (o.runStatus === 'failed') return { status: 'failed' as const, completed: current, total };
-  if (o.runStatus === 'stopped') return { status: 'stopped' as const, completed: current, total };
+  if (o.runStatus === 'running') {
+    return { status: 'running' as const, completed: current, total };
+  }
+  if (o.runStatus === 'completed') {
+    return { status: 'completed' as const, completed: total, total };
+  }
+  if (o.runStatus === 'failed') {
+    return { status: 'failed' as const, completed: current, total };
+  }
+  if (o.runStatus === 'stopped') {
+    return { status: 'stopped' as const, completed: current, total };
+  }
   return null;
 });
 
@@ -80,8 +96,8 @@ const subtasks = computed<SubTask[]>(() => planPayload.value?.subtasks ?? []);
 const sharedContextDisplay = computed(() => planPayload.value?.sharedContext?.trim() ?? '');
 const handoffLogDisplay = computed(() => planPayload.value?.handoffLog?.trim() ?? '');
 
-// Editable copy for inline edit; sync from orchestrator when orchestrator changes
-const editedSubtasks = ref<SubTask[]>([]);
+// -------------------------------------------------- Watchers --------------------------------------------------
+
 watch(
   () => props.orchestrator?.subtasksJson,
   (json) => {
@@ -100,16 +116,22 @@ watch(
 const hasEdits = computed(() => {
   const a = editedSubtasks.value;
   const b = subtasks.value;
-  if (a.length !== b.length) return true;
+  if (a.length !== b.length) {
+    return true;
+  }
   return a.some(
     (t, i) => t.name !== b[i]?.name || t.prompt !== b[i]?.prompt || t.category !== b[i]?.category
   );
 });
 
+// -------------------------------------------------- Methods --------------------------------------------------
+
 function taskStatus(index: number): 'idle' | 'active' | 'done' {
   const o = props.orchestrator;
   const total = subtasks.value.length;
-  if (!o || total === 0) return 'idle';
+  if (!o || total === 0) {
+    return 'idle';
+  }
   const completedCount = o.runCurrentStep ?? 0;
 
   if (o.runStatus === 'completed') {
@@ -124,12 +146,24 @@ function taskStatus(index: number): 'idle' | 'active' | 'done' {
     const clampedTotal = o.runTotalSteps ?? total;
     const clampedCompleted = Math.min(completedCount, clampedTotal);
     const activeIndex = clampedCompleted >= clampedTotal ? clampedTotal - 1 : clampedCompleted;
-    if (index < clampedCompleted) return 'done';
-    if (index === activeIndex) return 'active';
+    if (index < clampedCompleted) {
+      return 'done';
+    }
+    if (index === activeIndex) {
+      return 'active';
+    }
     return 'idle';
   }
 
   return 'idle';
+}
+
+function categoryColorClass(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) {
+    h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  }
+  return CATEGORY_COLORS[h % CATEGORY_COLORS.length];
 }
 
 function startPolling() {
@@ -137,7 +171,9 @@ function startPolling() {
   pollIntervalId.value = setInterval(async () => {
     try {
       const { data } = await orchestratorApi.get(props.workspaceId, props.orchestratorId);
-      if (data) emit('update:orchestrator', data);
+      if (data) {
+        emit('update:orchestrator', data);
+      }
     } catch {
       // ignore
     }
@@ -154,19 +190,14 @@ function stopPolling() {
 watch(
   () => props.orchestrator?.runStatus,
   (status) => {
-    if (status === 'running') startPolling();
-    else stopPolling();
+    if (status === 'running') {
+      startPolling();
+    } else {
+      stopPolling();
+    }
   },
   { immediate: true }
 );
-
-onMounted(() => {
-  const savedPrompt = localStorage.getItem(promptStorageKey);
-  if (savedPrompt != null) userInput.value = savedPrompt;
-  // polling is managed by the runStatus watcher with { immediate: true }
-});
-
-onBeforeUnmount(stopPolling);
 
 watch(userInput, (val) => {
   if (!val) {
@@ -176,20 +207,18 @@ watch(userInput, (val) => {
   }
 });
 
-const showEditModal = ref(false);
-const editingTaskIndex = ref<number | null>(null);
-const editDraft = ref<SubTask>({ name: '', prompt: '', category: null });
-
 function openEditModal(index: number) {
   const task = editedSubtasks.value[index];
-  if (!task) return;
+  if (!task) {
+    return;
+  }
   editingTaskIndex.value = index;
   editDraft.value = { name: task.name, prompt: task.prompt, category: task.category ?? null };
-  showEditModal.value = true;
+  bShowEditModal.value = true;
 }
 
 function closeEditModal() {
-  showEditModal.value = false;
+  bShowEditModal.value = false;
   editingTaskIndex.value = null;
 }
 
@@ -215,8 +244,10 @@ function saveEditFromModal() {
 
 async function generateTasks() {
   const msg = userInput.value.trim();
-  if (!msg || isDecomposing.value) return;
-  isDecomposing.value = true;
+  if (!msg || bDecomposing.value) {
+    return;
+  }
+  bDecomposing.value = true;
   decomposeError.value = null;
   decomposeLastAssistantContent.value = '';
   decomposeExpectedSchema.value = '';
@@ -238,7 +269,9 @@ async function generateTasks() {
         }
       }
     );
-    if (data) emit('update:orchestrator', data);
+    if (data) {
+      emit('update:orchestrator', data);
+    }
     userInput.value = '';
   } catch (e: unknown) {
     const caughtError = e as Error & { lastAssistantContent?: string; expectedSchema?: string };
@@ -246,13 +279,15 @@ async function generateTasks() {
     decomposeLastAssistantContent.value = caughtError.lastAssistantContent ?? '';
     decomposeExpectedSchema.value = caughtError.expectedSchema ?? '';
   } finally {
-    isDecomposing.value = false;
+    bDecomposing.value = false;
   }
 }
 
 async function saveSubtasks() {
-  if (!hasEdits.value || !props.orchestrator) return;
-  isSavingSubtasks.value = true;
+  if (!hasEdits.value || !props.orchestrator) {
+    return;
+  }
+  bSavingSubtasks.value = true;
   try {
     const prev = parseOrchestratorSubtasksJson(props.orchestrator.subtasksJson);
     const nextPayload = {
@@ -263,58 +298,72 @@ async function saveSubtasks() {
     const { data } = await orchestratorApi.update(props.workspaceId, props.orchestratorId, {
       subtasksJson: serializeOrchestratorSubtasksPayload(nextPayload)
     });
-    if (data) emit('update:orchestrator', data);
+    if (data) {
+      emit('update:orchestrator', data);
+    }
   } catch {
     // ignore
   } finally {
-    isSavingSubtasks.value = false;
+    bSavingSubtasks.value = false;
   }
 }
 
 async function startTasks() {
-  if (subtasks.value.length === 0 || isRunning.value) return;
+  if (subtasks.value.length === 0 || isRunning.value) {
+    return;
+  }
   runError.value = null;
-  isStartingRun.value = true;
+  bStartingRun.value = true;
   try {
     const { data } = await orchestratorApi.run(props.workspaceId, props.orchestratorId, {
       startIndex: 0
     });
-    if (data) emit('update:orchestrator', data);
+    if (data) {
+      emit('update:orchestrator', data);
+    }
   } catch (e: unknown) {
     const caughtError = e as { response?: { data?: { error?: string }; status?: number } };
     runError.value = caughtError.response?.data?.error ?? (e instanceof Error ? e.message : 'Run failed');
   } finally {
-    isStartingRun.value = false;
+    bStartingRun.value = false;
   }
 }
 
 async function stopTasks() {
-  if (!isRunning.value) return;
+  if (!isRunning.value) {
+    return;
+  }
   runError.value = null;
-  isStopping.value = true;
+  bStopping.value = true;
   try {
     const { data } = await orchestratorApi.stop(props.workspaceId, props.orchestratorId);
-    if (data) emit('update:orchestrator', data);
+    if (data) {
+      emit('update:orchestrator', data);
+    }
   } catch (e: unknown) {
     const caughtError = e as { response?: { data?: { error?: string }; status?: number } };
     runError.value =
       caughtError.response?.data?.error ?? (e instanceof Error ? e.message : 'Failed to stop run');
   } finally {
-    isStopping.value = false;
+    bStopping.value = false;
   }
-}
-
-function updateEditedTask(index: number, field: keyof SubTask, value: string | null) {
-  const list = [...editedSubtasks.value];
-  if (!list[index]) return;
-  list[index] = { ...list[index], [field]: value ?? undefined };
-  editedSubtasks.value = list;
 }
 
 function removeTask(index: number) {
   const list = editedSubtasks.value.filter((_, i) => i !== index);
   editedSubtasks.value = list;
 }
+
+// -------------------------------------------------- Lifecycle --------------------------------------------------
+
+onMounted(() => {
+  const savedPrompt = localStorage.getItem(promptStorageKey);
+  if (savedPrompt != null) {
+    userInput.value = savedPrompt;
+  }
+});
+
+onBeforeUnmount(stopPolling);
 </script>
 
 <template>
@@ -333,17 +382,17 @@ function removeTask(index: number) {
             placeholder="e.g. Add a login page with email/password and run the test suite"
             rows="3"
             class="w-full text-sm px-3 py-2 rounded-xl border border-fg/10 bg-fg/[0.04] text-text-primary placeholder-text-muted focus:outline-none focus:border-primary/50 resize-none"
-            :disabled="isDecomposing"
+            :disabled="bDecomposing"
           />
           <div class="flex items-center gap-2">
             <button
               type="button"
               @click="generateTasks"
-              :disabled="!userInput.trim() || isDecomposing"
+              :disabled="!userInput.trim() || bDecomposing"
               class="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center gap-2"
             >
               <span
-                v-if="isDecomposing"
+                v-if="bDecomposing"
                 class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"
               />
               {{ subtasks.length ? 'Update tasks' : 'Generate tasks' }}
@@ -378,12 +427,12 @@ function removeTask(index: number) {
 
       <!-- Live thinking output during decompose (thinking only, no tool calls) -->
       <div
-        v-if="decomposeThinking.length > 0 || isDecomposing"
+        v-if="decomposeThinking.length > 0 || bDecomposing"
         class="rounded-xl border border-fg/15 bg-fg/[0.04] overflow-hidden"
       >
         <div class="px-3 py-2 border-b border-fg/10 flex items-center gap-2">
           <span
-            v-if="isDecomposing"
+            v-if="bDecomposing"
             class="w-3.5 h-3.5 border-2 border-primary/40 border-t-primary rounded-full animate-spin shrink-0"
           />
           <span class="text-sm font-medium text-text-primary">Thinking</span>
@@ -392,7 +441,7 @@ function removeTask(index: number) {
           class="px-3 py-2 text-sm text-text-muted max-h-48 overflow-y-auto whitespace-pre-wrap break-words font-mono"
           ref="decomposeThinkingEl"
         >
-          {{ decomposeThinking || (isDecomposing ? '…' : '') }}
+          {{ decomposeThinking || (bDecomposing ? '…' : '') }}
         </div>
       </div>
 
@@ -470,9 +519,7 @@ function removeTask(index: number) {
                     title="Edit step"
                     @click="openEditModal(i)"
                   >
-                    <span class="material-symbols-outlined select-none" style="font-size: 18px"
-                      >edit</span
-                    >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" class="select-none" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
                   </button>
                   <button
                     type="button"
@@ -480,9 +527,7 @@ function removeTask(index: number) {
                     title="Delete step"
                     @click="removeTask(i)"
                   >
-                    <span class="material-symbols-outlined select-none" style="font-size: 18px"
-                      >delete_outline</span
-                    >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" class="select-none" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
                   </button>
                 </template>
               </div>
@@ -495,9 +540,7 @@ function removeTask(index: number) {
               class="flex justify-center py-1 text-text-muted"
               aria-hidden="true"
             >
-              <span class="material-symbols-outlined select-none" style="font-size: 24px"
-                >arrow_downward</span
-              >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" class="select-none" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
             </div>
           </template>
         </div>
@@ -505,14 +548,14 @@ function removeTask(index: number) {
           <button
             type="button"
             @click="saveSubtasks"
-            :disabled="isSavingSubtasks"
+            :disabled="bSavingSubtasks"
             class="px-3 py-1.5 text-sm font-medium border border-fg/20 text-text-primary rounded-lg hover:bg-fg/[0.06] transition-colors flex items-center gap-2 disabled:opacity-60"
           >
             <span
-              v-if="isSavingSubtasks"
+              v-if="bSavingSubtasks"
               class="w-3.5 h-3.5 border-2 border-fg/30 border-t-primary rounded-full animate-spin shrink-0"
             />
-            {{ isSavingSubtasks ? 'Saving…' : 'Save changes' }}
+            {{ bSavingSubtasks ? 'Saving…' : 'Save changes' }}
           </button>
         </div>
       </div>
@@ -521,7 +564,7 @@ function removeTask(index: number) {
       <Teleport to="body">
         <Transition name="modal-fade">
           <div
-            v-if="showEditModal"
+            v-if="bShowEditModal"
             class="fixed inset-0 z-50 flex items-center justify-center p-4"
             role="dialog"
             aria-modal="true"
@@ -631,30 +674,28 @@ function removeTask(index: number) {
         v-if="isRunning"
         type="button"
         @click="stopTasks"
-        :disabled="isStopping"
+        :disabled="bStopping"
         class="px-4 py-2.5 text-sm font-medium bg-destructive/80 text-white rounded-lg hover:bg-destructive transition-colors flex items-center gap-2 disabled:opacity-60"
       >
         <span
-          v-if="isStopping"
+          v-if="bStopping"
           class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0"
         />
-        <span v-else class="material-symbols-outlined select-none" style="font-size: 18px"
-          >stop_circle</span
-        >
-        {{ isStopping ? 'Stopping…' : 'Stop run' }}
+        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" class="select-none shrink-0" aria-hidden="true"><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6"/></svg>
+        {{ bStopping ? 'Stopping…' : 'Stop run' }}
       </button>
       <button
         v-else
         type="button"
         @click="startTasks"
-        :disabled="subtasks.length === 0 || isStartingRun"
+        :disabled="subtasks.length === 0 || bStartingRun"
         class="px-4 py-2.5 text-sm font-medium bg-primary text-white rounded-lg hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center gap-2"
       >
         <span
-          v-if="isStartingRun"
+          v-if="bStartingRun"
           class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0"
         />
-        {{ isStartingRun ? 'Starting…' : 'Start tasks' }}
+        {{ bStartingRun ? 'Starting…' : 'Start tasks' }}
       </button>
     </div>
   </div>

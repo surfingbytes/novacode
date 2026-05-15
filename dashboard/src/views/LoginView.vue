@@ -13,7 +13,7 @@ import { authApi } from '@/classes/api';
 const auth = useAuthStore();
 const router = useRouter();
 
-// -------------------------------------------------- Data --------------------------------------------------
+// -------------------------------------------------- Refs --------------------------------------------------
 const bSetupLoading = ref<boolean>(true);
 
 const username = ref<string>('');
@@ -52,10 +52,8 @@ onMounted(async (): Promise<void> => {
   try {
     const response = await authApi.needsSetup();
 
-    console.log(response.data);
-
     if (response.data.needsSetup) {
-      router.push('/setup');
+      await router.push('/setup');
     }
   } finally {
     bSetupLoading.value = false;
@@ -87,7 +85,7 @@ onMounted(async (): Promise<void> => {
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
             role="img"
-            aria-label="NovaCode"
+            aria-label="Nova Code"
             class="w-24 h-24 ms-auto me-auto text-primary"
           >
             <path
@@ -111,7 +109,7 @@ onMounted(async (): Promise<void> => {
           </svg>
 
           <!-- Welcome text -->
-          <h1 class="text-xl font-semibold text-center mb-2">Welcome to NovaCode</h1>
+          <h1 class="text-xl font-semibold text-center mb-2">Welcome to Nova Code</h1>
           <p class="text-sm text-text-muted text-center mb-8">
             {{ 'Sign in to continue' }}
           </p>
@@ -134,7 +132,7 @@ onMounted(async (): Promise<void> => {
                   autofocus
                 />
                 <span class="icon">
-                  <span class="material-symbols-outlined">person</span>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                 </span>
               </div>
             </div>
@@ -148,7 +146,7 @@ onMounted(async (): Promise<void> => {
                   placeholder="••••••••"
                 />
                 <span class="icon">
-                  <span class="material-symbols-outlined text-sm">lock</span>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
                 </span>
               </div>
             </div>

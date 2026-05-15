@@ -1,5 +1,6 @@
 <script setup lang="ts">
 // -------------------------------------------------- Props --------------------------------------------------
+
 const props = withDefaults(
   defineProps<{
     modelValue: boolean;
@@ -14,21 +15,29 @@ const props = withDefaults(
     confirmLabel: 'Delete',
     cancelLabel: 'Cancel',
     variant: 'danger',
-    loading: false
+    loading: false,
   }
 );
+
+// -------------------------------------------------- Emits --------------------------------------------------
 
 const emit = defineEmits<{
   'update:modelValue': [value: boolean];
   confirm: [];
 }>();
 
+// -------------------------------------------------- Methods --------------------------------------------------
+
 const close = (): void => {
-  if (!props.loading) emit('update:modelValue', false);
+  if (!props.loading) {
+    emit('update:modelValue', false);
+  }
 };
 
 const onConfirm = (): void => {
-  if (props.loading) return;
+  if (props.loading) {
+    return;
+  }
   emit('confirm');
 };
 </script>
@@ -59,31 +68,31 @@ const onConfirm = (): void => {
             <p class="text-sm text-text-muted mb-4">{{ description }}</p>
           </div>
           <div class="flex flex-shrink-0 items-center justify-end gap-2 px-6 pb-5">
-              <button
-                type="button"
-                class="px-4 py-2.5 text-sm text-text-muted hover:text-text-primary bg-fg/[0.04] hover:bg-fg/[0.08] border border-fg/[0.08] rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                :disabled="loading"
-                @click="close"
-              >
-                {{ cancelLabel }}
-              </button>
-              <button
-                type="button"
-                class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                :class="
-                  variant === 'danger'
-                    ? 'bg-destructive hover:bg-destructive/80 text-white shadow-lg shadow-destructive/20'
-                    : 'bg-primary hover:bg-primary-hover text-white shadow-lg shadow-primary/20'
-                "
-                :disabled="loading"
-                @click="onConfirm"
-              >
-                <div
-                  v-if="loading"
-                  class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"
-                ></div>
-                {{ confirmLabel }}
-              </button>
+            <button
+              type="button"
+              class="px-4 py-2.5 text-sm text-text-muted hover:text-text-primary bg-fg/[0.04] hover:bg-fg/[0.08] border border-fg/[0.08] rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              :disabled="loading"
+              @click="close"
+            >
+              {{ cancelLabel }}
+            </button>
+            <button
+              type="button"
+              class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              :class="
+                variant === 'danger'
+                  ? 'bg-destructive hover:bg-destructive/80 text-white shadow-lg shadow-destructive/20'
+                  : 'bg-primary hover:bg-primary-hover text-white shadow-lg shadow-primary/20'
+              "
+              :disabled="loading"
+              @click="onConfirm"
+            >
+              <div
+                v-if="loading"
+                class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"
+              ></div>
+              {{ confirmLabel }}
+            </button>
           </div>
         </div>
       </div>

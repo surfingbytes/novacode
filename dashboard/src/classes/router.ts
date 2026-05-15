@@ -106,11 +106,17 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore();
-  if (to.meta.public) return true;
-  if (!auth.token) return { name: 'login' };
-  if (!auth.validated) {
+  if (to.meta.public) {
+    return true;
+  }
+  if (!auth.token) {
+    return { name: 'login' };
+  }
+  if (!auth.bValidated) {
     const ok = await auth.validate();
-    if (!ok) return { name: 'login' };
+    if (!ok) {
+      return { name: 'login' };
+    }
   }
   return true;
 });

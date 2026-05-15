@@ -111,7 +111,9 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
     // Send full history immediately
     if (live.pty) {
       const history = live.pty.history;
-      if (history) send({ type: 'history', data: history });
+      if (history) {
+        send({ type: 'history', data: history });
+      }
     }
 
     // Send current status

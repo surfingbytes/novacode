@@ -35,15 +35,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Claude Code CLI globally so "Login to Claude" works in the app
 RUN npm install -g @anthropic-ai/claude-code
 
+# Ensure user-local and global bin dirs are on PATH before any CLI installs
+ENV PATH="/root/.local/bin:/usr/local/bin:${PATH}"
+
 # Install Cursor agent CLI
 RUN curl https://cursor.com/install -fsS | bash
+
+# Install Cursor ACP adapter
+RUN npm install -g @blowmage/cursor-agent-acp
 
 # Install Mistral Vibe CLI
 RUN curl -LsSf https://mistral.ai/vibe/install.sh | bash
 
-# Ensure global npm bin and Cursor CLI are on PATH (matches api/Dockerfile.dev)
-ENV PATH="/usr/local/bin:${PATH}"
-ENV PATH="/root/.local/bin:${PATH}"
 
 WORKDIR /app
 

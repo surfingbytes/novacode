@@ -1,212 +1,346 @@
 <script setup lang="ts">
-// node_modules
-import { onBeforeUnmount, onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
-
-// stores
+import { ref } from 'vue';
 import { useAuthStore } from '@/stores/auth';
+import {
+  applyTheme,
+  resolveStoredThemeId,
+  DEFAULT_DARK_THEME_ID,
+  DEFAULT_LIGHT_THEME_ID,
+  stopAutoThemeWatcher
+} from '@/lib/themes';
 
 defineProps<{
   sidebarOpen: boolean;
+  sidebarCollapsed: boolean;
   onMenuClick: () => void;
   onSearchClick: () => void;
 }>();
 
-// -------------------------------------------------- Store --------------------------------------------------
+defineEmits<{
+  (e: 'toggleCollapsed'): void;
+}>();
+
 const auth = useAuthStore();
-const router = useRouter();
 
-// -------------------------------------------------- Data --------------------------------------------------
-const bUserMenuOpen = ref(false);
-const userMenuRef = ref<HTMLElement | null>(null);
+const currentMode = ref<'dark' | 'light'>(
+  (document.documentElement.getAttribute('data-theme') as 'dark' | 'light') ?? 'dark'
+);
 
-// -------------------------------------------------- Computed --------------------------------------------------
-// (none)
-
-// -------------------------------------------------- Methods --------------------------------------------------
-function toggleUserMenu(): void {
-  bUserMenuOpen.value = !bUserMenuOpen.value;
+function userInitial(): string {
+  const name = auth.username ?? '';
+  return name.charAt(0).toUpperCase() || 'U';
 }
 
-function closeUserMenu(): void {
-  bUserMenuOpen.value = false;
-}
-
-function handleDocumentClick(event: MouseEvent): void {
-  if (!bUserMenuOpen.value || !userMenuRef.value) {
-    return;
-  }
-  if (!userMenuRef.value.contains(event.target as Node)) {
-    closeUserMenu();
-  }
-}
-
-function handleDocumentKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape') {
-    closeUserMenu();
+function toggleTheme(): void {
+  const isDark = currentMode.value === 'dark';
+  if (isDark) {
+    const lightId = resolveStoredThemeId(localStorage.getItem('lightTheme') ?? DEFAULT_LIGHT_THEME_ID);
+    applyTheme(lightId);
+    localStorage.setItem('theme', lightId);
+    localStorage.setItem('autoTheme', 'false');
+    stopAutoThemeWatcher();
+    currentMode.value = 'light';
+  } else {
+    const darkId = resolveStoredThemeId(localStorage.getItem('darkTheme') ?? DEFAULT_DARK_THEME_ID);
+    applyTheme(darkId);
+    localStorage.setItem('theme', darkId);
+    localStorage.setItem('autoTheme', 'false');
+    stopAutoThemeWatcher();
+    currentMode.value = 'dark';
   }
 }
-
-function handleLogout(): void {
-  auth.logout();
-  router.push('/login');
-  closeUserMenu();
-}
-
-// -------------------------------------------------- Lifecycle --------------------------------------------------
-onMounted(() => {
-  document.addEventListener('click', handleDocumentClick);
-  document.addEventListener('keydown', handleDocumentKeydown);
-});
-
-onBeforeUnmount(() => {
-  document.removeEventListener('click', handleDocumentClick);
-  document.removeEventListener('keydown', handleDocumentKeydown);
-});
-
-router.afterEach(() => {
-  closeUserMenu();
-});
 </script>
 
 <template>
-  <header
-    class="top-0 z-40 flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border bg-surface px-4"
-  >
-    <!-- Left: menu button (hidden on desktop) -->
+  <header class="topbar">
+    <!-- Sidebar toggle -->
     <button
       type="button"
-      class="lg:hidden cursor-pointer p-3 flex items-center justify-center -ml-2 text-text-muted hover:text-text-primary hover:bg-fg/[0.06] rounded-lg transition-colors"
+      class="topbar__toggle"
+      :aria-label="sidebarOpen || !sidebarCollapsed ? 'Collapse sidebar' : 'Expand sidebar'"
+      @click="$emit('toggleCollapsed')"
+    >
+      <svg
+        width="15"
+        height="15"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <path d="M9 3v18" />
+      </svg>
+    </button>
+
+    <!-- Mobile menu toggle (shows on small screens only, separate from collapse) -->
+    <button
+      type="button"
+      class="topbar__mobile-menu lg:hidden!"
       aria-label="Toggle navigation menu"
       :aria-expanded="sidebarOpen"
       @click="onMenuClick"
     >
-      <span class="material-symbols-outlined select-none">menu</span>
-    </button>
-
-    <!-- Center: brand (hidden on desktop) -->
-    <RouterLink
-      to="/"
-      class="lg:hidden flex items-center gap-2 font-semibold text-text-primary hover:text-primary transition-colors"
-    >
       <svg
+        width="15"
+        height="15"
         viewBox="0 0 24 24"
         fill="none"
-        xmlns="http://www.w3.org/2000/svg"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
         aria-hidden="true"
-        class="w-6 h-6 text-primary"
       >
-        <path
-          d="M17 7.82959L18.6965 9.35641C20.239 10.7447 21.0103 11.4389 21.0103 12.3296C21.0103 13.2203 20.239 13.9145 18.6965 15.3028L17 16.8296"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-        />
-        <path
-          d="M13.9868 5L12.9934 8.70743M11.8432 13L10.0132 19.8297"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-        />
-        <path
-          d="M7.00005 7.82959L5.30358 9.35641C3.76102 10.7447 2.98975 11.4389 2.98975 12.3296C2.98975 13.2203 3.76102 13.9145 5.30358 15.3028L7.00005 16.8296"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-        />
+        <path d="M3 6h18 M3 12h18 M3 18h18" />
       </svg>
-      <span class="text-base tracking-tight text-primary!">NovaCode</span>
-    </RouterLink>
-    
-    <!-- Center: search bar (visible on desktop) -->
-    <div class="hidden lg:flex flex-1 min-w-0 max-w-md mx-4">
-      <button
-        @click="onSearchClick"
-        class="w-full flex items-center gap-2 px-3 py-1.5 bg-input border border-transparent rounded-lg hover:bg-fg/[0.06] transition-colors text-text-muted hover:text-text-primary"
-        aria-label="Search"
-      >
-        <span class="material-symbols-outlined select-none">search</span>
-        <span class="truncate text-sm">Search...</span>
-        <kbd class="ml-auto text-xs text-text-muted/70 hidden sm:inline">Ctrl K</kbd>
-      </button>
-    </div>
-    
-    <div class="flex-1 min-w-0" aria-hidden="true" />
+    </button>
 
-    <!-- Right: user menu -->
-    <div
-      ref="userMenuRef"
-      class="relative group flex items-center hover:text-primary hover:bg-primary/10 ps-3 rounded-lg transition-colors cursor-pointer"
-      aria-label="User menu"
-      aria-haspopup="true"
-      :aria-expanded="bUserMenuOpen"
-      @click.stop="toggleUserMenu"
+    <!-- Search -->
+    <button class="topbar__search" aria-label="Search" @click="onSearchClick">
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <circle cx="11" cy="11" r="7" />
+        <path d="M16.5 16.5L21 21" />
+      </svg>
+      <span class="topbar__search-placeholder">Search sessions, files, workspaces…</span>
+      <kbd class="topbar__kbd">⌘K</kbd>
+    </button>
+
+    <div class="topbar__spacer" aria-hidden="true" />
+
+    <!-- Theme toggle -->
+    <button
+      type="button"
+      class="topbar__theme-toggle"
+      :aria-label="currentMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
+      :title="currentMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
+      @click="toggleTheme"
     >
-      <span
-        class="hidden group-hover:text-text-primary sm:block text-sm text-text-muted truncate font-semibold max-w-[120px] mr-2"
+      <!-- Sun icon (shown in dark mode to switch to light) -->
+      <svg
+        v-if="currentMode === 'dark'"
+        width="15"
+        height="15"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
       >
-        {{ auth.username }}
-      </span>
-      <button
-        type="button"
-        class="p-2 group-hover:bg-transparent flex items-center justify-center bg-input text-text-muted cursor-pointer rounded-full transition-colors"
+        <path d="M12 2v2 M12 20v2 M4.9 4.9l1.4 1.4 M17.7 17.7l1.4 1.4 M2 12h2 M20 12h2 M4.9 19.1l1.4-1.4 M17.7 6.3l1.4-1.4 M12 7a5 5 0 100 10 5 5 0 000-10z" />
+      </svg>
+      <!-- Moon icon (shown in light mode to switch to dark) -->
+      <svg
+        v-else
+        width="15"
+        height="15"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
       >
-        <span class="material-symbols-outlined select-none text-xl">person</span>
-      </button>
-      <Transition name="nav-drop">
-        <div
-          v-if="bUserMenuOpen"
-          class="absolute right-0 top-full mt-1 p-1 min-w-[140px] bg-surface border border-border rounded-lg shadow-lg z-50"
-          role="menu"
-          @click.stop
-        >
-          <RouterLink
-            to="/account"
-            role="menuitem"
-            class="block w-full text-left px-4 py-2.5 text-sm text-text-primary hover:bg-fg/[0.06] rounded-t-lg transition-colors"
-            @click="closeUserMenu"
-          >
-            Account
-          </RouterLink>
-          <RouterLink
-            to="/settings"
-            role="menuitem"
-            class="block w-full text-left px-4 py-2.5 text-sm text-text-primary hover:bg-fg/[0.06] transition-colors"
-            @click="closeUserMenu"
-          >
-            Settings
-          </RouterLink>
-          <button
-            role="menuitem"
-            class="w-full text-left px-4 py-2.5 text-sm text-destructive hover:bg-destructive/[0.08] rounded-b-lg transition-colors"
-            @click="handleLogout"
-          >
-            Logout
-          </button>
-        </div>
-      </Transition>
+        <path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z" />
+      </svg>
+    </button>
+
+    <div class="topbar__divider" aria-hidden="true" />
+
+    <!-- User -->
+    <div class="topbar__user" :title="auth.username ?? ''">
+      <div class="topbar__avatar" aria-hidden="true">{{ userInitial() }}</div>
+      <span class="topbar__username">{{ auth.username }}</span>
     </div>
   </header>
 </template>
 
 <style scoped>
-.nav-drop-enter-active,
-.nav-drop-leave-active {
+.topbar {
+  height: 52px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.topbar__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
   transition:
-    opacity 0.18s ease,
-    transform 0.18s ease;
-  transform-origin: top right;
+    background 0.1s,
+    color 0.1s;
+  flex-shrink: 0;
+}
+.topbar__toggle:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
 }
 
-.nav-drop-enter-from,
-.nav-drop-leave-to {
-  opacity: 0;
-  transform: translateY(-6px) scale(0.98);
+.topbar__mobile-menu {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition:
+    background 0.1s,
+    color 0.1s;
+  flex-shrink: 0;
+}
+.topbar__mobile-menu:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
 }
 
-.nav-drop-enter-to,
-.nav-drop-leave-from {
-  opacity: 1;
-  transform: translateY(0) scale(1);
+.topbar__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 10px;
+  background: var(--bg-elev);
+  border-radius: 6px;
+  border: 1px solid transparent;
+  color: var(--fg-subtle);
+  cursor: text;
+  font-size: 13px;
+  font-family: inherit;
+  flex: 1;
+  max-width: 520px;
+  transition: border-color 0.12s;
+  text-align: left;
+}
+.topbar__search:hover {
+  border-color: var(--line-strong);
+}
+
+.topbar__search-placeholder {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.topbar__kbd {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 5px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.topbar__spacer {
+  flex: 1;
+}
+
+.topbar__theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+  flex-shrink: 0;
+}
+.topbar__theme-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.topbar__divider {
+  width: 1px;
+  height: 16px;
+  background: var(--line);
+  flex-shrink: 0;
+}
+
+.topbar__user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 4px;
+  flex-shrink: 0;
+}
+
+.topbar__avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11.5px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.topbar__username {
+  font-size: 13px;
+  color: var(--fg-muted);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1023px) {
+  .topbar__search {
+    display: none;
+  }
+  .topbar__username {
+    display: none;
+  }
+  /* Hide desktop toggle on mobile, show hamburger instead */
+  .topbar__toggle {
+    display: none;
+  }
 }
 </style>

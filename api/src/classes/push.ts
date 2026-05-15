@@ -30,7 +30,9 @@ function markdownToPlainText(input: string): string {
 
 function compactText(input: string, maxLen = 280): string {
   const normalized = markdownToPlainText(input);
-  if (normalized.length <= maxLen) return normalized;
+  if (normalized.length <= maxLen) {
+    return normalized;
+  }
   return `${normalized.slice(0, maxLen - 1)}…`;
 }
 
@@ -45,7 +47,9 @@ let vapidKeys: { publicKey: string; privateKey: string } | null = null;
  * on first use. Idempotent; safe to call from startup and lazily from getters.
  */
 export function ensureVapidKeys(): void {
-  if (vapidKeys) return;
+  if (vapidKeys) {
+    return;
+  }
 
   const filePath = join(config.configDir, VAPID_KEYS_FILE);
 
@@ -71,16 +75,22 @@ export function ensureVapidKeys(): void {
 }
 
 function getVapidKeys(): { publicKey: string; privateKey: string } | null {
-  if (!vapidKeys) ensureVapidKeys();
+  if (!vapidKeys) {
+    ensureVapidKeys();
+  }
   return vapidKeys;
 }
 
 let configured = false;
 
 function ensureConfigured(): boolean {
-  if (configured) return true;
+  if (configured) {
+    return true;
+  }
   const keys = getVapidKeys();
-  if (!keys) return false;
+  if (!keys) {
+    return false;
+  }
   webpush.setVapidDetails(VAPID_SUBJECT, keys.publicKey, keys.privateKey);
   configured = true;
   return true;
@@ -91,9 +101,13 @@ export function getVapidPublicKey(): string | null {
 }
 
 export async function sendPushToAll(payload: PushPayload): Promise<void> {
-  if (!ensureConfigured()) return;
+  if (!ensureConfigured()) {
+    return;
+  }
   const subscriptions = await db.listPushSubscriptions();
-  if (subscriptions.length === 0) return;
+  if (subscriptions.length === 0) {
+    return;
+  }
 
   const message = JSON.stringify({
     title: payload.title,

@@ -7,19 +7,19 @@ import { ref } from 'vue';
 import { authApi } from '@/classes/api';
 
 export const useAuthStore = defineStore('auth', () => {
-  // -------------------------------------------------- Data --------------------------------------------------
+  // -------------------------------------------------- Refs --------------------------------------------------
   const token = ref<string | null>(localStorage.getItem('token'));
   const username = ref<string | null>(null);
-  const validated = ref<boolean>(false);
+  const bValidated = ref<boolean>(false);
 
   // -------------------------------------------------- Methods --------------------------------------------------
-  const login = async (u: string, p: string): Promise<boolean> => {
+  const login = async (usernameInput: string, passwordInput: string): Promise<boolean> => {
     try {
-      const response = await authApi.login(u, p);
+      const response = await authApi.login(usernameInput, passwordInput);
       token.value = response.data.token;
       localStorage.setItem('token', response.data.token);
-      validated.value = true;
-      username.value = u;
+      bValidated.value = true;
+      username.value = usernameInput;
       return true;
     } catch {
       return false;
@@ -27,11 +27,14 @@ export const useAuthStore = defineStore('auth', () => {
   };
 
   const validate = async (): Promise<boolean> => {
-    if (!token.value) return false;
+    if (!token.value) {
+      return false;
+    }
+
     try {
       const response = await authApi.validate();
       if (response.data.valid) {
-        validated.value = true;
+        bValidated.value = true;
         username.value = response.data.username;
         return true;
       }
@@ -55,14 +58,14 @@ export const useAuthStore = defineStore('auth', () => {
   const setToken = (newToken: string, newUsername: string): void => {
     token.value = newToken;
     username.value = newUsername;
-    validated.value = true;
+    bValidated.value = true;
     localStorage.setItem('token', newToken);
   };
 
   const logout = (): void => {
     token.value = null;
     username.value = null;
-    validated.value = false;
+    bValidated.value = false;
     localStorage.removeItem('token');
   };
 
@@ -71,7 +74,7 @@ export const useAuthStore = defineStore('auth', () => {
     // data
     token,
     username,
-    validated,
+    bValidated,
     // methods
     login,
     validate,

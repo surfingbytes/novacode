@@ -8,17 +8,28 @@ import PageShell from '@/components/layout/PageShell.vue';
 import PageHeader from '@/components/layout/PageHeader.vue';
 
 // api
-import { automationsApi } from '@/classes/api';
-import { workspaceApi } from '@/classes/api';
+import { automationsApi, workspaceApi } from '@/classes/api';
 
 // types
 import type { Automation, AutomationRun, Workspace, AgentType } from '@/@types/index';
 
-// -------------------------------------------------- Data --------------------------------------------------
+// -------------------------------------------------- Constants --------------------------------------------------
+
+const intervalPresets = [
+  { label: '15 minutes', value: 15 },
+  { label: '30 minutes', value: 30 },
+  { label: '1 hour', value: 60 },
+  { label: '6 hours', value: 360 },
+  { label: '12 hours', value: 720 },
+  { label: '24 hours (daily)', value: 1440 },
+  { label: '7 days (weekly)', value: 10080 },
+];
+
+// -------------------------------------------------- Refs --------------------------------------------------
 
 const workspaces = ref<Workspace[]>([]);
 const automations = ref<Automation[]>([]);
-const loading = ref(true);
+const bLoading = ref(true);
 const errorMessage = ref<string | null>(null);
 const successMessage = ref<string | null>(null);
 const viewMode = ref<'list' | 'grid'>(
@@ -28,34 +39,34 @@ const viewMode = ref<'list' | 'grid'>(
 // selected automation for run report panel
 const selectedAutomation = ref<Automation | null>(null);
 const runs = ref<AutomationRun[]>([]);
-const runsLoading = ref(false);
+const bRunsLoading = ref(false);
 const selectedRun = ref<AutomationRun | null>(null);
 
 // create modal
-const showCreateForm = ref(false);
+const bShowCreateForm = ref(false);
 const newName = ref('');
 const newWorkspaceId = ref('');
 const newAgentType = ref<AgentType>('cursor-agent');
 const newPrompt = ref('');
 const newIntervalMinutes = ref(60);
-const newEnabled = ref(true);
-const isCreating = ref(false);
+const bNewEnabled = ref(true);
+const bCreating = ref(false);
 const createError = ref<string | null>(null);
 
 // edit modal
-const showEditModal = ref(false);
+const bShowEditModal = ref(false);
 const editingId = ref<string | null>(null);
 const editName = ref('');
 const editAgentType = ref<AgentType>('cursor-agent');
 const editPrompt = ref('');
 const editIntervalMinutes = ref(60);
-const editEnabled = ref(true);
-const isSavingEdit = ref(false);
+const bEditEnabled = ref(true);
+const bSavingEdit = ref(false);
 const editError = ref<string | null>(null);
 
 // delete
 const automationToDelete = ref<Automation | null>(null);
-const isDeleting = ref(false);
+const bDeleting = ref(false);
 
 // triggering
 const triggeringId = ref<string | null>(null);
@@ -70,16 +81,6 @@ const deleteConfirmDescription = computed(() =>
     ? `Delete "${automationToDelete.value.name}"? All run history will also be deleted.`
     : ''
 );
-
-const intervalPresets = [
-  { label: '15 minutes', value: 15 },
-  { label: '30 minutes', value: 30 },
-  { label: '1 hour', value: 60 },
-  { label: '6 hours', value: 360 },
-  { label: '12 hours', value: 720 },
-  { label: '24 hours (daily)', value: 1440 },
-  { label: '7 days (weekly)', value: 10080 }
-];
 
 // -------------------------------------------------- Methods --------------------------------------------------
 
@@ -96,7 +97,9 @@ function setViewMode(mode: 'list' | 'grid'): void {
 }
 
 function formatDate(iso: string | null): string {
-  if (!iso) return '—';
+  if (!iso) {
+    return '—';
+  }
   try {
     return new Date(iso).toLocaleString();
   } catch {
@@ -105,34 +108,54 @@ function formatDate(iso: string | null): string {
 }
 
 function formatInterval(minutes: number): string {
-  if (minutes < 60) return `${minutes}m`;
-  if (minutes < 1440) return `${minutes / 60}h`;
-  if (minutes < 10080) return `${minutes / 1440}d`;
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  if (minutes < 1440) {
+    return `${minutes / 60}h`;
+  }
+  if (minutes < 10080) {
+    return `${minutes / 1440}d`;
+  }
   return `${minutes / 10080}w`;
 }
 
 function agentTypeLabel(t: AgentType): string {
-  if (t === 'claude') return 'Claude';
-  if (t === 'mistral-vibe') return 'Mistral Vibe';
+  if (t === 'claude') {
+    return 'Claude';
+  }
+  if (t === 'mistral-vibe') {
+    return 'Mistral Vibe';
+  }
   return 'Cursor';
 }
 
 function formatNextRun(automation: Automation): string {
-  if (!automation.enabled) return 'Disabled';
-  if (!automation.nextRunAt) return '—';
+  if (!automation.enabled) {
+    return 'Disabled';
+  }
+  if (!automation.nextRunAt) {
+    return '—';
+  }
   const next = new Date(automation.nextRunAt);
   const now = new Date();
   const diff = next.getTime() - now.getTime();
-  if (diff <= 0) return 'Running soon…';
+  if (diff <= 0) {
+    return 'Running soon…';
+  }
   const mins = Math.floor(diff / 60_000);
-  if (mins < 60) return `in ${mins}m`;
+  if (mins < 60) {
+    return `in ${mins}m`;
+  }
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `in ${hrs}h ${mins % 60}m`;
+  if (hrs < 24) {
+    return `in ${hrs}h ${mins % 60}m`;
+  }
   return `in ${Math.floor(hrs / 24)}d`;
 }
 
 async function fetchAll(): Promise<void> {
-  loading.value = true;
+  bLoading.value = true;
   errorMessage.value = null;
   try {
     const [automationsResponse, workspacesResponse] = await Promise.all([
@@ -144,7 +167,7 @@ async function fetchAll(): Promise<void> {
   } catch {
     errorMessage.value = 'Failed to load automations';
   } finally {
-    loading.value = false;
+    bLoading.value = false;
   }
 }
 
@@ -159,14 +182,14 @@ async function selectAutomation(a: Automation): Promise<void> {
 }
 
 async function fetchRuns(automationId: string): Promise<void> {
-  runsLoading.value = true;
+  bRunsLoading.value = true;
   try {
     const response = await automationsApi.listRuns(automationId, 50);
     runs.value = response.data ?? [];
   } catch {
     // ignore
   } finally {
-    runsLoading.value = false;
+    bRunsLoading.value = false;
   }
 }
 
@@ -197,19 +220,21 @@ function startPoll(): void {
 
 // --- create ---
 function openCreateForm(): void {
-  showCreateForm.value = true;
+  bShowCreateForm.value = true;
   newName.value = '';
   newWorkspaceId.value = workspaces.value[0]?.id ?? '';
   newAgentType.value = 'cursor-agent';
   newPrompt.value = '';
   newIntervalMinutes.value = 60;
-  newEnabled.value = true;
+  bNewEnabled.value = true;
   createError.value = null;
 }
 
 function cancelCreate(): void {
-  if (isCreating.value) return;
-  showCreateForm.value = false;
+  if (bCreating.value) {
+    return;
+  }
+  bShowCreateForm.value = false;
   createError.value = null;
 }
 
@@ -232,7 +257,7 @@ async function createAutomation(): Promise<void> {
     return;
   }
 
-  isCreating.value = true;
+  bCreating.value = true;
   try {
     await automationsApi.create({
       name: newName.value.trim(),
@@ -240,7 +265,7 @@ async function createAutomation(): Promise<void> {
       agentType: newAgentType.value,
       prompt: newPrompt.value.trim(),
       intervalMinutes: newIntervalMinutes.value,
-      enabled: newEnabled.value
+      enabled: bNewEnabled.value
     });
     await fetchAll();
     cancelCreate();
@@ -249,31 +274,35 @@ async function createAutomation(): Promise<void> {
     const caughtError = e as { response?: { data?: { error?: string } }; message?: string };
     createError.value = caughtError.response?.data?.error ?? caughtError.message ?? 'Failed to create';
   } finally {
-    isCreating.value = false;
+    bCreating.value = false;
   }
 }
 
 // --- edit ---
 function startEdit(a: Automation): void {
-  showEditModal.value = true;
+  bShowEditModal.value = true;
   editingId.value = a.id;
   editName.value = a.name;
   editAgentType.value = a.agentType;
   editPrompt.value = a.prompt;
   editIntervalMinutes.value = a.intervalMinutes;
-  editEnabled.value = a.enabled;
+  bEditEnabled.value = a.enabled;
   editError.value = null;
 }
 
 function cancelEdit(): void {
-  if (isSavingEdit.value) return;
-  showEditModal.value = false;
+  if (bSavingEdit.value) {
+    return;
+  }
+  bShowEditModal.value = false;
   editingId.value = null;
   editError.value = null;
 }
 
 async function saveEdit(): Promise<void> {
-  if (!editingId.value) return;
+  if (!editingId.value) {
+    return;
+  }
   editError.value = null;
   if (!editName.value.trim()) {
     editError.value = 'Name is required';
@@ -288,20 +317,22 @@ async function saveEdit(): Promise<void> {
     return;
   }
 
-  isSavingEdit.value = true;
+  bSavingEdit.value = true;
   try {
     await automationsApi.update(editingId.value, {
       name: editName.value.trim(),
       agentType: editAgentType.value,
       prompt: editPrompt.value.trim(),
       intervalMinutes: editIntervalMinutes.value,
-      enabled: editEnabled.value
+      enabled: bEditEnabled.value
     });
     await fetchAll();
     // refresh selected if it's the one we edited
     if (selectedAutomation.value?.id === editingId.value) {
       const updated = automations.value.find((a) => a.id === editingId.value);
-      if (updated) selectedAutomation.value = updated;
+      if (updated) {
+        selectedAutomation.value = updated;
+      }
     }
     cancelEdit();
     showSuccess('Automation updated');
@@ -309,7 +340,7 @@ async function saveEdit(): Promise<void> {
     const caughtError = e as { response?: { data?: { error?: string } }; message?: string };
     editError.value = caughtError.response?.data?.error ?? caughtError.message ?? 'Failed to save';
   } finally {
-    isSavingEdit.value = false;
+    bSavingEdit.value = false;
   }
 }
 
@@ -329,8 +360,10 @@ function confirmDelete(a: Automation): void {
 }
 
 async function doDelete(): Promise<void> {
-  if (!automationToDelete.value) return;
-  isDeleting.value = true;
+  if (!automationToDelete.value) {
+    return;
+  }
+  bDeleting.value = true;
   try {
     await automationsApi.remove(automationToDelete.value.id);
     if (selectedAutomation.value?.id === automationToDelete.value.id) {
@@ -343,7 +376,7 @@ async function doDelete(): Promise<void> {
   } catch {
     errorMessage.value = 'Failed to delete automation';
   } finally {
-    isDeleting.value = false;
+    bDeleting.value = false;
   }
 }
 
@@ -367,7 +400,9 @@ async function triggerNow(a: Automation): Promise<void> {
 }
 
 function changedFilesList(run: AutomationRun): Array<{ status: string; file: string }> {
-  if (!run.changedFiles) return [];
+  if (!run.changedFiles) {
+    return [];
+  }
   try {
     return JSON.parse(run.changedFiles) as Array<{ status: string; file: string }>;
   } catch {
@@ -376,14 +411,22 @@ function changedFilesList(run: AutomationRun): Array<{ status: string; file: str
 }
 
 function statusColor(status: string): string {
-  if (status === 'completed') return 'text-green-400';
-  if (status === 'failed') return 'text-destructive';
+  if (status === 'completed') {
+    return 'text-green-400';
+  }
+  if (status === 'failed') {
+    return 'text-destructive';
+  }
   return 'text-yellow-400';
 }
 
 function statusIcon(status: string): string {
-  if (status === 'completed') return 'check_circle';
-  if (status === 'failed') return 'error';
+  if (status === 'completed') {
+    return 'check_circle';
+  }
+  if (status === 'failed') {
+    return 'error';
+  }
   return 'hourglass_empty';
 }
 
@@ -395,7 +438,9 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-  if (pollHandle) clearInterval(pollHandle);
+  if (pollHandle) {
+    clearInterval(pollHandle);
+  }
 });
 </script>
 
@@ -413,7 +458,7 @@ onUnmounted(() => {
           class="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-1 self-start"
           @click="openCreateForm"
         >
-          <span class="material-symbols-outlined select-none" style="font-size: 16px">add</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
           New automation
         </button>
       </template>
@@ -426,14 +471,14 @@ onUnmounted(() => {
           :class="{ 'is-active': viewMode === 'list' }"
           @click="setViewMode('list')"
         >
-          <span class="material-symbols-outlined">view_list</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
         </button>
         <button
           class="button is-icon"
           :class="{ 'is-active': viewMode === 'grid' }"
           @click="setViewMode('grid')"
         >
-          <span class="material-symbols-outlined">grid_view</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
         </button>
       </div>
     </div>
@@ -453,7 +498,7 @@ onUnmounted(() => {
     </div>
 
       <!-- Loading -->
-      <div v-if="loading" class="flex items-center gap-2 py-8 text-text-muted text-sm">
+      <div v-if="bLoading" class="flex items-center gap-2 py-8 text-text-muted text-sm">
         <div class="w-5 h-5 border-2 border-surface border-t-primary rounded-full animate-spin" />
         Loading automations…
       </div>
@@ -463,9 +508,7 @@ onUnmounted(() => {
         v-else-if="automations.length === 0"
         class="rounded-lg border border-fg/10 bg-fg/[0.02] py-16 px-4 text-center"
       >
-        <span class="material-symbols-outlined select-none text-text-muted text-4xl mb-3 block"
-          >schedule</span
-        >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="40" height="40" class="text-text-muted mb-3 block mx-auto" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
         <p class="text-text-muted text-sm">No automations yet.</p>
         <p class="text-text-muted text-xs mt-1">
           Create one to schedule an agent to run automatically.
@@ -473,7 +516,7 @@ onUnmounted(() => {
       </div>
 
       <!-- Main layout: list + report panel -->
-      <div v-else-if="!loading" class="flex flex-col lg:flex-row gap-6 min-h-[500px]">
+      <div v-else-if="!bLoading" class="flex flex-col lg:flex-row gap-6 min-h-[500px]">
         <!-- Left: automation list -->
         <div class="w-full lg:flex-1 min-w-0 space-y-4">
           <!-- Automation list -->
@@ -528,9 +571,8 @@ onUnmounted(() => {
                     class="p-1.5 text-text-muted hover:text-text-primary hover:bg-fg/[0.06] rounded-lg transition-colors"
                     @click="toggleEnabled(a)"
                   >
-                    <span class="material-symbols-outlined select-none" style="font-size: 18px">
-                      {{ a.enabled ? 'pause' : 'play_arrow' }}
-                    </span>
+                    <svg v-if="a.enabled" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                    <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                   </button>
                   <!-- trigger now -->
                   <button
@@ -544,12 +586,7 @@ onUnmounted(() => {
                       v-if="triggeringId === a.id"
                       class="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin block"
                     />
-                    <span
-                      v-else
-                      class="material-symbols-outlined select-none"
-                      style="font-size: 18px"
-                      >bolt</span
-                    >
+                    <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                   </button>
                   <!-- edit -->
                   <button
@@ -558,9 +595,7 @@ onUnmounted(() => {
                     class="p-1.5 text-text-muted hover:text-text-primary hover:bg-fg/[0.06] rounded-lg transition-colors"
                     @click="startEdit(a)"
                   >
-                    <span class="material-symbols-outlined select-none" style="font-size: 18px"
-                      >edit</span
-                    >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
                   </button>
                   <!-- delete -->
                   <button
@@ -569,9 +604,7 @@ onUnmounted(() => {
                     class="p-1.5 text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
                     @click="confirmDelete(a)"
                   >
-                    <span class="material-symbols-outlined select-none" style="font-size: 18px"
-                      >delete</span
-                    >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
                   </button>
                 </div>
               </div>
@@ -592,7 +625,7 @@ onUnmounted(() => {
               >
                 <div class="top">
                   <div class="icon">
-                    <span class="material-symbols-outlined">schedule</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                   </div>
                   <div class="info min-w-0">
                     <p class="title truncate">{{ a.name }}</p>
@@ -621,7 +654,8 @@ onUnmounted(() => {
                       :title="a.enabled ? 'Disable' : 'Enable'"
                       @click="toggleEnabled(a)"
                     >
-                      <span class="material-symbols-outlined">{{ a.enabled ? 'pause' : 'play_arrow' }}</span>
+                      <svg v-if="a.enabled" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                      <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                     </button>
                     <button
                       class="button is-icon is-transparent"
@@ -633,13 +667,13 @@ onUnmounted(() => {
                         v-if="triggeringId === a.id"
                         class="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin block"
                       />
-                      <span v-else class="material-symbols-outlined">bolt</span>
+                      <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                     </button>
                     <button class="button is-icon is-transparent" title="Edit" @click="startEdit(a)">
-                      <span class="material-symbols-outlined">edit</span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
                     </button>
                     <button class="button is-icon is-transparent is-delete" title="Delete" @click="confirmDelete(a)">
-                      <span class="material-symbols-outlined">delete</span>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
                     </button>
                   </div>
                 </div>
@@ -663,7 +697,7 @@ onUnmounted(() => {
 
             <!-- runs loading -->
             <div
-              v-if="runsLoading"
+              v-if="bRunsLoading"
               class="flex items-center gap-2 px-4 py-6 text-text-muted text-sm"
             >
               <div
@@ -689,13 +723,9 @@ onUnmounted(() => {
                 :class="{ 'bg-fg/[0.06]': selectedRun?.id === run.id }"
                 @click="selectedRun = selectedRun?.id === run.id ? null : run"
               >
-                <span
-                  class="material-symbols-outlined select-none text-base shrink-0"
-                  :class="statusColor(run.status)"
-                  style="font-size: 18px"
-                >
-                  {{ statusIcon(run.status) }}
-                </span>
+                <svg v-if="run.status === 'completed'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="shrink-0 text-green-400" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                <svg v-else-if="run.status === 'failed'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="shrink-0 text-destructive" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="shrink-0 text-yellow-400" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                 <div class="min-w-0 flex-1">
                   <p class="text-xs text-text-primary">{{ formatDate(run.startedAt) }}</p>
                   <p class="text-[11px] text-text-muted">
@@ -717,12 +747,8 @@ onUnmounted(() => {
                     </span>
                   </p>
                 </div>
-                <span
-                  class="material-symbols-outlined select-none text-text-muted"
-                  style="font-size: 14px"
-                >
-                  {{ selectedRun?.id === run.id ? 'expand_less' : 'expand_more' }}
-                </span>
+                <svg v-if="selectedRun?.id === run.id" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-text-muted" aria-hidden="true"><polyline points="18 15 12 9 6 15"/></svg>
+                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-text-muted" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
               </li>
             </ul>
           </div>
@@ -733,13 +759,9 @@ onUnmounted(() => {
             class="rounded-lg border border-fg/10 bg-fg/[0.02] overflow-hidden"
           >
             <div class="px-4 py-3 border-b border-fg/10 flex items-center gap-2">
-              <span
-                class="material-symbols-outlined select-none"
-                :class="statusColor(selectedRun.status)"
-                style="font-size: 18px"
-              >
-                {{ statusIcon(selectedRun.status) }}
-              </span>
+              <svg v-if="selectedRun.status === 'completed'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="text-green-400" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+              <svg v-else-if="selectedRun.status === 'failed'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="text-destructive" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="text-yellow-400" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
               <span class="text-sm font-medium text-text-primary capitalize">{{
                 selectedRun.status
               }}</span>
@@ -752,9 +774,7 @@ onUnmounted(() => {
               <!-- Changed files -->
               <div v-if="changedFilesList(selectedRun).length > 0">
                 <p class="text-xs font-medium text-text-muted mb-2 flex items-center gap-1">
-                  <span class="material-symbols-outlined select-none" style="font-size: 14px"
-                    >folder_open</span
-                  >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
                   Changed files ({{ changedFilesList(selectedRun).length }})
                 </p>
                 <ul class="space-y-1">
@@ -777,9 +797,7 @@ onUnmounted(() => {
               <!-- Error -->
               <div v-if="selectedRun.error">
                 <p class="text-xs font-medium text-destructive mb-1 flex items-center gap-1">
-                  <span class="material-symbols-outlined select-none" style="font-size: 14px"
-                    >error_outline</span
-                  >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                   Error
                 </p>
                 <pre
@@ -791,9 +809,7 @@ onUnmounted(() => {
               <!-- Agent response -->
               <div v-if="selectedRun.agentResponse">
                 <p class="text-xs font-medium text-text-muted mb-2 flex items-center gap-1">
-                  <span class="material-symbols-outlined select-none" style="font-size: 14px"
-                    >smart_toy</span
-                  >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2M8 11h.01M16 11h.01M9 16h6"/></svg>
                   Agent response
                 </p>
                 <div
@@ -812,9 +828,7 @@ onUnmounted(() => {
           class="w-full lg:w-[420px] lg:shrink-0 rounded-lg border border-fg/10 bg-fg/[0.02] flex items-center justify-center text-text-muted text-sm py-16 text-center px-6 mt-4 lg:mt-0"
         >
           <div>
-            <span class="material-symbols-outlined select-none text-3xl mb-2 block opacity-40"
-              >bar_chart</span
-            >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="32" height="32" class="mb-2 block mx-auto opacity-40" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
             <p>Select an automation to view run reports</p>
           </div>
         </div>
@@ -822,7 +836,7 @@ onUnmounted(() => {
 
     <!-- Create modal -->
     <div
-      v-if="showCreateForm"
+      v-if="bShowCreateForm"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       @click.self="cancelCreate"
     >
@@ -836,7 +850,7 @@ onUnmounted(() => {
               type="text"
               placeholder="e.g. Daily security audit"
               class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
-              :disabled="isCreating"
+              :disabled="bCreating"
             />
           </div>
           <div>
@@ -844,7 +858,7 @@ onUnmounted(() => {
             <select
               v-model="newWorkspaceId"
               class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
-              :disabled="isCreating"
+              :disabled="bCreating"
             >
               <option v-for="w in workspaces" :key="w.id" :value="w.id">{{ w.name }}</option>
             </select>
@@ -854,7 +868,7 @@ onUnmounted(() => {
             <select
               v-model="newAgentType"
               class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
-              :disabled="isCreating"
+              :disabled="bCreating"
             >
               <option value="cursor-agent">Cursor</option>
               <option value="mistral-vibe">Mistral Vibe</option>
@@ -866,7 +880,7 @@ onUnmounted(() => {
             <select
               v-model="newIntervalMinutes"
               class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
-              :disabled="isCreating"
+              :disabled="bCreating"
             >
               <option v-for="p in intervalPresets" :key="p.value" :value="p.value">
                 {{ p.label }}
@@ -880,20 +894,20 @@ onUnmounted(() => {
               rows="4"
               placeholder="Describe what the agent should do each time it runs…"
               class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all resize-y"
-              :disabled="isCreating"
+              :disabled="bCreating"
             />
           </div>
         </div>
         <p v-if="createError" class="text-sm text-destructive mt-2">{{ createError }}</p>
         <div class="flex items-center justify-end gap-2 mt-4">
           <label class="flex items-center gap-2 cursor-pointer mr-auto">
-            <input v-model="newEnabled" type="checkbox" class="accent-primary w-4 h-4" :disabled="isCreating" />
+            <input v-model="bNewEnabled" type="checkbox" class="accent-primary w-4 h-4" :disabled="bCreating" />
             <span class="text-sm text-text-muted">Enabled</span>
           </label>
           <button
             type="button"
             class="px-3 py-1.5 text-sm text-text-muted hover:text-text-primary hover:bg-fg/[0.06] rounded-lg transition-colors"
-            :disabled="isCreating"
+            :disabled="bCreating"
             @click="cancelCreate"
           >
             Cancel
@@ -901,11 +915,11 @@ onUnmounted(() => {
           <button
             type="button"
             class="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
-            :disabled="isCreating || !newName.trim() || !newPrompt.trim() || !newWorkspaceId"
+            :disabled="bCreating || !newName.trim() || !newPrompt.trim() || !newWorkspaceId"
             @click="createAutomation"
           >
             <span
-              v-if="isCreating"
+              v-if="bCreating"
               class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"
             />
             Create
@@ -916,7 +930,7 @@ onUnmounted(() => {
 
     <!-- Edit modal -->
     <div
-      v-if="showEditModal"
+      v-if="bShowEditModal"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       @click.self="cancelEdit"
     >
@@ -929,7 +943,7 @@ onUnmounted(() => {
               v-model="editName"
               type="text"
               class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
-              :disabled="isSavingEdit"
+              :disabled="bSavingEdit"
             />
           </div>
           <div>
@@ -937,7 +951,7 @@ onUnmounted(() => {
             <select
               v-model="editAgentType"
               class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
-              :disabled="isSavingEdit"
+              :disabled="bSavingEdit"
             >
               <option value="cursor-agent">Cursor</option>
               <option value="mistral-vibe">Mistral Vibe</option>
@@ -949,7 +963,7 @@ onUnmounted(() => {
             <select
               v-model="editIntervalMinutes"
               class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
-              :disabled="isSavingEdit"
+              :disabled="bSavingEdit"
             >
               <option v-for="p in intervalPresets" :key="p.value" :value="p.value">
                 {{ p.label }}
@@ -958,7 +972,7 @@ onUnmounted(() => {
           </div>
           <div class="flex items-end pb-0.5">
             <label class="flex items-center gap-2 cursor-pointer">
-              <input v-model="editEnabled" type="checkbox" class="accent-primary w-4 h-4" :disabled="isSavingEdit" />
+              <input v-model="bEditEnabled" type="checkbox" class="accent-primary w-4 h-4" :disabled="bSavingEdit" />
               <span class="text-sm text-text-muted">Enabled</span>
             </label>
           </div>
@@ -968,7 +982,7 @@ onUnmounted(() => {
               v-model="editPrompt"
               rows="4"
               class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all resize-y"
-              :disabled="isSavingEdit"
+              :disabled="bSavingEdit"
             />
           </div>
         </div>
@@ -977,7 +991,7 @@ onUnmounted(() => {
           <button
             type="button"
             class="px-3 py-1.5 text-sm text-text-muted hover:text-text-primary hover:bg-fg/[0.06] rounded-lg transition-colors"
-            :disabled="isSavingEdit"
+            :disabled="bSavingEdit"
             @click="cancelEdit"
           >
             Cancel
@@ -985,11 +999,11 @@ onUnmounted(() => {
           <button
             type="button"
             class="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
-            :disabled="isSavingEdit || !editName.trim() || !editPrompt.trim()"
+            :disabled="bSavingEdit || !editName.trim() || !editPrompt.trim()"
             @click="saveEdit"
           >
             <span
-              v-if="isSavingEdit"
+              v-if="bSavingEdit"
               class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"
             />
             Save
@@ -1005,10 +1019,12 @@ onUnmounted(() => {
       :description="deleteConfirmDescription"
       confirm-label="Delete"
       variant="danger"
-      :loading="isDeleting"
+      :loading="bDeleting"
       @update:model-value="
         (v: boolean) => {
-          if (!v) automationToDelete = null;
+          if (!v) {
+            automationToDelete = null;
+          }
         }
       "
       @confirm="doDelete"
