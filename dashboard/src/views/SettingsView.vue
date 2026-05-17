@@ -39,17 +39,24 @@ const activeTab = ref<'general' | 'git' | 'integrations' | 'mcp'>('general');
 const bCursorAuthenticated = ref<boolean>(false);
 const bClaudeAuthenticated = ref<boolean>(false);
 const bOpenCodeAuthenticated = ref<boolean>(false);
+const bCodexAuthenticated = ref<boolean>(false);
 const bOpenCodeAvailable = ref<boolean>(false);
 const bStartingCursorLogin = ref<boolean>(false);
 const bStartingClaudeLogin = ref<boolean>(false);
 const bLoggingOutCursor = ref<boolean>(false);
 const bLoggingOutClaude = ref<boolean>(false);
 const bLoggingOutOpenCode = ref<boolean>(false);
+const bLoggingOutCodex = ref<boolean>(false);
 const bShowOpenCodeApiKeyModal = ref<boolean>(false);
+const bShowCodexApiKeyModal = ref<boolean>(false);
 const openCodeApiKeyInput = ref<string>('');
+const codexApiKeyInput = ref<string>('');
 const bSavingOpenCodeApiKey = ref<boolean>(false);
+const bSavingCodexApiKey = ref<boolean>(false);
 const openCodeApiKeyError = ref<string>('');
+const codexApiKeyError = ref<string>('');
 const bOpenCodeAuthSuccess = ref<boolean>(false);
+const bCodexAuthSuccess = ref<boolean>(false);
 const authSessionId = ref<string | null>(null);
 const authCode = ref<string>('');
 const authUrl = ref<string | null>(null);
@@ -158,6 +165,12 @@ const refreshAuthStatus = async (): Promise<void> => {
   try {
     const openCodeResponse = await agentAuthApi.openCodeStatus();
     bOpenCodeAuthenticated.value = openCodeResponse.data.authenticated;
+  } catch {
+    // ignore
+  }
+  try {
+    const codexResponse = await agentAuthApi.codexStatus();
+    bCodexAuthenticated.value = codexResponse.data.authenticated;
   } catch {
     // ignore
   }
@@ -456,6 +469,54 @@ const logoutOpenCode = async (): Promise<void> => {
     // ignore
   } finally {
     bLoggingOutOpenCode.value = false;
+  }
+};
+
+const openCodexApiKeyModal = (): void => {
+  codexApiKeyInput.value = '';
+  codexApiKeyError.value = '';
+  bShowCodexApiKeyModal.value = true;
+};
+
+const closeCodexApiKeyModal = (): void => {
+  bShowCodexApiKeyModal.value = false;
+  codexApiKeyError.value = '';
+  refreshAuthStatus();
+};
+
+const saveCodexApiKey = async (): Promise<void> => {
+  const key = codexApiKeyInput.value.trim();
+  codexApiKeyError.value = '';
+  if (!key) {
+    codexApiKeyError.value = 'Enter your Codex API key.';
+    return;
+  }
+  bSavingCodexApiKey.value = true;
+  try {
+    const response = await agentAuthApi.codexLogin(key);
+    if (response.data?.ok) {
+      bCodexAuthSuccess.value = true;
+      closeCodexApiKeyModal();
+      setTimeout(() => { bCodexAuthSuccess.value = false; }, 3000);
+    } else {
+      codexApiKeyError.value = 'Authentication failed. Check your API key and try again.';
+    }
+  } catch {
+    codexApiKeyError.value = 'Failed to authenticate. Try again.';
+  } finally {
+    bSavingCodexApiKey.value = false;
+  }
+};
+
+const logoutCodex = async (): Promise<void> => {
+  bLoggingOutCodex.value = true;
+  try {
+    await agentAuthApi.codexLogout();
+    await refreshAuthStatus();
+  } catch {
+    // ignore
+  } finally {
+    bLoggingOutCodex.value = false;
   }
 };
 
@@ -1047,6 +1108,22 @@ onMounted((): void => {
             </div>
             <p v-if="bOpenCodeAuthSuccess" class="settings-auth-card__success">OpenCode API key saved.</p>
           </div>
+          <div class="settings-auth-card">
+            <div class="settings-auth-card__top">
+              <div class="settings-auth-card__info">
+                <div class="settings-auth-card__name">OpenAI Codex ACP</div>
+                <div class="settings-auth-card__desc">API key for Codex ACP. Stored in <code class="settings-mono-chip">~/.codex/auth.json</code>.</div>
+              </div>
+              <span class="nc-chip" :class="bCodexAuthenticated ? 'success' : ''">{{ bCodexAuthenticated ? 'Configured' : 'Not configured' }}</span>
+            </div>
+            <div class="settings-auth-card__actions">
+              <button class="settings-btn-accent" @click="openCodexApiKeyModal">{{ bCodexAuthenticated ? 'Update API key' : 'Set API key' }}</button>
+              <button v-if="bCodexAuthenticated" class="settings-btn" :disabled="bLoggingOutCodex" @click="logoutCodex">
+                <span v-if="bLoggingOutCodex" class="settings-spinner" />Logout
+              </button>
+            </div>
+            <p v-if="bCodexAuthSuccess" class="settings-auth-card__success">Codex API key saved.</p>
+          </div>
         </div>
       </div>
 
@@ -1334,6 +1411,59 @@ onMounted((): void => {
                 @click="saveMcpClient"
               >
                 {{ bSavingMcpClients ? 'Saving…' : 'Save' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- Codex API key modal -->
+    <Teleport to="body">
+      <Transition name="modal-fade">
+        <div
+          v-if="bShowCodexApiKeyModal"
+          class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          @click.self="closeCodexApiKeyModal"
+        >
+          <div
+            class="modal-panel w-full max-w-md flex flex-col bg-fg/[0.04] border border-fg/[0.12] rounded-xl shadow-2xl"
+            @click.stop
+          >
+            <div class="flex flex-shrink-0 items-center justify-between px-4 py-3 border-b border-fg/[0.08]">
+              <p class="text-sm font-medium text-text-primary">Codex API key</p>
+              <button
+                class="text-sm px-3 py-2 text-text-muted hover:text-text-primary hover:bg-fg/[0.08] rounded-lg transition-all"
+                @click="closeCodexApiKeyModal"
+              >
+                Cancel
+              </button>
+            </div>
+            <div class="flex-1 min-h-0 p-4 space-y-4">
+              <p class="text-sm text-text-muted">
+                Enter your OpenAI API key for Codex ACP authentication.
+              </p>
+              <div>
+                <label class="block text-sm font-medium text-text-primary mb-1.5">API key</label>
+                <input
+                  v-model="codexApiKeyInput"
+                  type="password"
+                  placeholder="Your OpenAI API key"
+                  class="w-full bg-fg/[0.05] border border-fg/[0.1] rounded-lg px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
+                  :disabled="bSavingCodexApiKey"
+                  autocomplete="off"
+                  @keydown.enter="saveCodexApiKey"
+                />
+              </div>
+              <p v-if="codexApiKeyError" class="text-xs text-destructive">{{ codexApiKeyError }}</p>
+            </div>
+            <div class="flex flex-shrink-0 gap-2 p-4 pt-0">
+              <button
+                class="flex-1 bg-primary hover:bg-primary-hover disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg transition-all"
+                :disabled="!codexApiKeyInput.trim() || bSavingCodexApiKey"
+                @click="saveCodexApiKey"
+              >
+                {{ bSavingCodexApiKey ? 'Saving…' : 'Save' }}
               </button>
             </div>
           </div>
