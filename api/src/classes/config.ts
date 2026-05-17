@@ -17,7 +17,7 @@ export const config = {
   port: parseInt(optional('PORT', '3000'), 10),
   cursorCommand: '/root/.local/bin/cursor-agent',
   claudeCommand: 'claude',
-  openCodeCommand: 'open-code',
+  openCodeCommand: 'opencode',
   /** Cursor ACP server entrypoint. Spawned per prompt turn for ACP communication. */
   get cursorAcpCommand(): string {
     const override = process.env['CURSOR_ACP_COMMAND'];
@@ -40,7 +40,7 @@ export const config = {
   get openCodeAcpCommand(): string {
     const override = process.env['OPENCODE_ACP_COMMAND'];
     if (override) return override;
-    return existsSync('/root/.local/bin/open-code-acp') ? '/root/.local/bin/open-code-acp' : 'open-code-acp';
+    return config.openCodeCommand;
   },
   configDir: '/config',
   /** Root directory on the host; workspace paths are relative to this. */
@@ -78,7 +78,7 @@ export const config = {
     env['TERM'] = env['TERM'] || 'xterm-256color';
 
     // ensure user-local bin dirs are always on PATH so tools installed post-startup (e.g. vibe) are found
-    const localBins = ['/root/.local/bin', '/usr/local/bin'];
+    const localBins = ['/root/.local/bin', '/root/.opencode/bin', '/usr/local/bin'];
     const currentPath = env['PATH'] || '';
     const pathParts = currentPath.split(':').filter(Boolean);
     for (const bin of localBins) {

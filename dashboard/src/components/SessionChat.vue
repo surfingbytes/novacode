@@ -150,6 +150,7 @@ function readHideThinkingFromLs(): boolean {
 
 const hideThinkingOutput = ref(readHideThinkingFromLs());
 const availableModels = ref<CursorModelOption[]>([]);
+const openCodeModels = ref<CursorModelOption[]>([]);
 const bModelsLoading = ref(false);
 const queuedPrompts = ref<ChatQueueItem[]>([]);
 const promptStorageKey = computed(() => `sessionPrompt:${props.workspaceId}:${props.sessionId}`);
@@ -252,6 +253,22 @@ function onFileChange(e: Event) {
 }
 
 async function loadAvailableModels() {
+  if (session.value?.agentType === 'open-code') {
+    if (openCodeModels.value.length > 0) return;
+    bModelsLoading.value = true;
+    try {
+      const { data } = await settingsApi.getOpenCodeModels();
+      openCodeModels.value = data.models;
+      if (data.models.length > 0 && !data.models.some((m) => m.id === modelSelection.value)) {
+        modelSelection.value = data.models[0].id;
+      }
+    } catch {
+      openCodeModels.value = [{ id: 'opencode/big-pickle', label: 'opencode/big-pickle' }];
+    } finally {
+      bModelsLoading.value = false;
+    }
+    return;
+  }
   if (availableModels.value.length > 0) return;
   bModelsLoading.value = true;
   try {
@@ -2150,7 +2167,7 @@ onUnmounted(() => {
               </p>
             </div>
             <div class="px-6 pb-5 space-y-4">
-              <div v-if="session?.agentType !== 'claude'">
+              <div v-if="session?.agentType === 'cursor-agent' || session?.agentType === 'open-code'">
                 <label
                   for="model-select-modal"
                   class="block text-xs font-medium text-text-muted mb-1.5"
@@ -2163,7 +2180,7 @@ onUnmounted(() => {
                   :disabled="bIsStreaming || bModelsLoading"
                   class="w-full text-sm px-3 py-3 rounded-lg border border-fg/[0.12] bg-fg/[0.04] text-text-primary focus:outline-none focus:border-primary/50 transition-colors disabled:opacity-50"
                 >
-                  <option v-for="m in availableModels" :key="m.id" :value="m.id">
+                  <option v-for="m in (session?.agentType === 'open-code' ? openCodeModels : availableModels)" :key="m.id" :value="m.id">
                     {{ m.label }}
                   </option>
                 </select>

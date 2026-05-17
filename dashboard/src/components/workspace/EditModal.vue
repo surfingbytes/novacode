@@ -149,7 +149,7 @@ const submit = async (): Promise<void> => {
       color: form.value.color.trim() || null,
       defaultAgentType:
         form.value.defaultAgentType &&
-        AGENT_OPTIONS.some((o) => o.value === form.value.defaultAgentType)
+        AGENT_OPTIONS.value.some((o) => o.value === form.value.defaultAgentType)
           ? (form.value.defaultAgentType as AgentType)
           : null,
       tags: tagsClean.length > 0 ? tagsClean : null

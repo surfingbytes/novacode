@@ -152,6 +152,9 @@ export const settingsApi = {
     typeof http.get<{ models: CursorModelOption[]; fromCache: boolean }>
   > => http.get<{ models: CursorModelOption[]; fromCache: boolean }>('/settings/cursor-models'),
 
+  getOpenCodeModels: (): ReturnType<typeof http.get<{ models: { id: string; label: string }[]; fromCache: boolean }>> =>
+    http.get<{ models: { id: string; label: string }[]; fromCache: boolean }>('/settings/opencode-models'),
+
   getAgentCapabilities: (): ReturnType<
     typeof http.get<{
       cursorAvailable: boolean;
@@ -206,7 +209,7 @@ export const pushApi = {
     http.post<{ ok: boolean }>('/push/unsubscribe', { endpoint })
 };
 
-// ---------------------------------- Agent Auth (Cursor & Claude) ----------------------------------
+// ---------------------------------- Agent Auth (Cursor, Claude & OpenCode) ----------------------------------
 export const agentAuthApi = {
   cursorStatus: (): ReturnType<typeof http.get<{ authenticated: boolean }>> =>
     http.get<{ authenticated: boolean }>('/agent-auth/cursor/status'),
@@ -220,7 +223,13 @@ export const agentAuthApi = {
     http.post<{ sessionId: string }>('/agent-auth/claude/login'),
   claudeLogout: (): ReturnType<typeof http.delete> => http.delete('/agent-auth/claude/logout'),
   claudeSaveToken: (token: string): ReturnType<typeof http.post<{ ok: boolean }>> =>
-    http.post<{ ok: boolean }>('/agent-auth/claude/token', { token })
+    http.post<{ ok: boolean }>('/agent-auth/claude/token', { token }),
+
+  openCodeStatus: (): ReturnType<typeof http.get<{ authenticated: boolean }>> =>
+    http.get<{ authenticated: boolean }>('/agent-auth/opencode/status'),
+  openCodeLogin: (apiKey: string): ReturnType<typeof http.post<{ ok: boolean }>> =>
+    http.post<{ ok: boolean }>('/agent-auth/opencode/login', { apiKey }),
+  openCodeLogout: (): ReturnType<typeof http.delete> => http.delete('/agent-auth/opencode/logout')
 };
 
 // ---------------------------------- Git (workspace-scoped) ----------------------------------

@@ -120,7 +120,7 @@ docker compose up --build -d
 > On first launch the app shows a **setup screen** — create your admin account there. No pre-seeding required.
 
 > [!NOTE]
-> The `novacode` container includes the Cursor Agent and Claude Code CLIs (Docker build). Log in to each from **Settings → Agent Auth**. For **Mistral Vibe**, install the `vibe` CLI on the image/host if you use it, and set the API key under **Settings** (stored as `~/.vibe/.env` on the config volume).
+> The `novacode` container includes the Cursor Agent and Claude Code CLIs (Docker build). Log in to each from **Settings → Integrations → Agent Authentication**. For **Mistral Vibe**, install the `vibe` CLI on the image/host if you use it, and set the API key under **Settings → Integrations** (stored as `~/.vibe/.env` on the config volume).
 
 ---
 
@@ -165,7 +165,7 @@ Copy `.env.example` to `.env` and edit the values below.
 
 Nova Code spawns **Cursor Agent** and **Claude Code** as child processes inside the container (both installed in the Docker build). **Mistral Vibe** is optional: the `vibe` binary must be on `PATH` inside the container, and you configure the API key under **Settings → Mistral Vibe** (written to `.vibe/.env` under `/config`). Chat runs use `vibe --prompt "…" --output streaming` (JSONL, same stream shape as Cursor for the UI). The app does not rely on a session id from stdout: after each run it resolves the latest `session_*` folder under `~/.vibe/logs/session` (with `HOME=/config` in the default deployment, that is `/config/.vibe/logs/session`) using the timestamp embedded in the folder name when it matches `session_YYYYMMDD_HHMMSS_*`, otherwise the directory mtime, then persists the suffix after the final underscore as the id for `--resume` on the next turn. Set **`VIBE_HOME`** in the environment (or **`AGENT_ENV_VIBE_HOME`** to forward into agents) if you use a non-default Vibe data directory. After starting the app:
 
-1. Go to **Settings → Agent Auth**
+1. Go to **Settings → Integrations → Agent Authentication**
 2. Log in to Cursor and/or Claude — the app opens an interactive terminal session for the auth flow
 3. Credentials are stored under `/config` (by default `~/.novacode/config` on the host via the stock compose file) and persist across restarts
 

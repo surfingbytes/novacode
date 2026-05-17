@@ -13,14 +13,14 @@ import {
   writeGlobalGitConfig,
   isClaudeAvailable,
   isVibeCliAvailable,
-  isOpenCodeAcpAvailable,
   readMcpClients,
   writeMcpClients
 } from '../classes/config';
 import { checkMcpClients } from '../classes/mcpConnectivityCheck';
 import { getCursorModels } from '../classes/cursorModels';
+import { getOpenCodeModels, clearOpenCodeModelsCache } from '../classes/openCodeModels';
 import { readSshKeyMaterial } from '../classes/sshKey';
-import { cursorAuthenticated } from './agentAuth';
+import { cursorAuthenticated, openCodeAuthenticated } from './agentAuth';
 
 // types
 import type { FastifyInstance } from 'fastify';
@@ -190,6 +190,26 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
+  // GET /api/settings/opencode-models - list available opencode models
+  fastifyInstance.get(
+    '/api/settings/opencode-models',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        response: {
+          200: Type.Object({
+            models: Type.Array(Type.Object({ id: Type.String(), label: Type.String() })),
+            fromCache: Type.Boolean(),
+          }),
+        },
+      },
+    },
+    async (request) => {
+      if ((request.query as Record<string, string>)['bust']) clearOpenCodeModelsCache();
+      return getOpenCodeModels();
+    }
+  );
+
   // GET /api/settings/vibe-api-key - get vibe API key status
   fastifyInstance.get(
     '/api/settings/vibe-api-key',
@@ -266,7 +286,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       const cursorAvailable = cursorAuthenticated();
       const vibeKeyOk = getVibeApiKeyStatus(config.configDir).configured;
       const vibeCliOk = isVibeCliAvailable(config.configDir);
-      const openCodeAvailable = isOpenCodeAcpAvailable(config.configDir);
+      const openCodeAvailable = openCodeAuthenticated();
       return {
         cursorAvailable,
         claudeAvailable,

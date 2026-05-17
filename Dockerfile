@@ -36,7 +36,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN npm install -g @anthropic-ai/claude-code
 
 # Ensure user-local and global bin dirs are on PATH before any CLI installs
-ENV PATH="/root/.local/bin:/usr/local/bin:${PATH}"
+ENV PATH="/root/.local/bin:/root/.opencode/bin:/usr/local/bin:${PATH}"
 
 # Install Cursor agent CLI
 RUN curl https://cursor.com/install -fsS | bash
@@ -47,6 +47,8 @@ RUN npm install -g @blowmage/cursor-agent-acp
 # Install Mistral Vibe CLI
 RUN curl -LsSf https://mistral.ai/vibe/install.sh | bash
 
+# Install OpenCode CLI
+RUN curl -fsSL https://opencode.ai/install | bash
 
 WORKDIR /app
 

@@ -199,7 +199,7 @@ async function buildWorkspaceRulesPrefix(workspacePath: string): Promise<string>
 }
 
 export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?: string }> {
-  const { sessionId, text, imagePaths = [], subscriber } = opts;
+  const { sessionId, text, model, imagePaths = [], subscriber } = opts;
 
   if (activeRuns.has(sessionId)) {
     return { error: 'Agent is busy' };
@@ -332,7 +332,7 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
       );
     } else if (agentType === 'open-code') {
       result = await runOpenCodeAcp(
-        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt },
+        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt, model },
         onEvent,
         sessionId
       );

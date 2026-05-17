@@ -38,10 +38,18 @@ import type { McpClientServer, McpConnectivityCheckResult } from '@/@types/index
 const activeTab = ref<'general' | 'git' | 'integrations' | 'mcp'>('general');
 const bCursorAuthenticated = ref<boolean>(false);
 const bClaudeAuthenticated = ref<boolean>(false);
+const bOpenCodeAuthenticated = ref<boolean>(false);
+const bOpenCodeAvailable = ref<boolean>(false);
 const bStartingCursorLogin = ref<boolean>(false);
 const bStartingClaudeLogin = ref<boolean>(false);
 const bLoggingOutCursor = ref<boolean>(false);
 const bLoggingOutClaude = ref<boolean>(false);
+const bLoggingOutOpenCode = ref<boolean>(false);
+const bShowOpenCodeApiKeyModal = ref<boolean>(false);
+const openCodeApiKeyInput = ref<string>('');
+const bSavingOpenCodeApiKey = ref<boolean>(false);
+const openCodeApiKeyError = ref<string>('');
+const bOpenCodeAuthSuccess = ref<boolean>(false);
 const authSessionId = ref<string | null>(null);
 const authCode = ref<string>('');
 const authUrl = ref<string | null>(null);
@@ -143,6 +151,20 @@ const refreshAuthStatus = async (): Promise<void> => {
   try {
     const claudeResponse = await agentAuthApi.claudeStatus();
     bClaudeAuthenticated.value = claudeResponse.data.authenticated;
+  } catch {
+    // ignore
+  }
+
+  try {
+    const openCodeResponse = await agentAuthApi.openCodeStatus();
+    bOpenCodeAuthenticated.value = openCodeResponse.data.authenticated;
+  } catch {
+    // ignore
+  }
+
+  try {
+    const capsResponse = await settingsApi.getAgentCapabilities();
+    bOpenCodeAvailable.value = capsResponse.data.openCodeAvailable;
   } catch {
     // ignore
   }
@@ -386,6 +408,54 @@ const logoutClaude = async (): Promise<void> => {
     // ignore
   } finally {
     bLoggingOutClaude.value = false;
+  }
+};
+
+const openOpenCodeApiKeyModal = (): void => {
+  openCodeApiKeyInput.value = '';
+  openCodeApiKeyError.value = '';
+  bShowOpenCodeApiKeyModal.value = true;
+};
+
+const closeOpenCodeApiKeyModal = (): void => {
+  bShowOpenCodeApiKeyModal.value = false;
+  openCodeApiKeyError.value = '';
+  refreshAuthStatus();
+};
+
+const saveOpenCodeApiKey = async (): Promise<void> => {
+  const key = openCodeApiKeyInput.value.trim();
+  openCodeApiKeyError.value = '';
+  if (!key) {
+    openCodeApiKeyError.value = 'Enter your OpenCode API key.';
+    return;
+  }
+  bSavingOpenCodeApiKey.value = true;
+  try {
+    const response = await agentAuthApi.openCodeLogin(key);
+    if (response.data?.ok) {
+      bOpenCodeAuthSuccess.value = true;
+      closeOpenCodeApiKeyModal();
+      setTimeout(() => { bOpenCodeAuthSuccess.value = false; }, 3000);
+    } else {
+      openCodeApiKeyError.value = 'Authentication failed. Check your API key and try again.';
+    }
+  } catch {
+    openCodeApiKeyError.value = 'Failed to authenticate. Try again.';
+  } finally {
+    bSavingOpenCodeApiKey.value = false;
+  }
+};
+
+const logoutOpenCode = async (): Promise<void> => {
+  bLoggingOutOpenCode.value = true;
+  try {
+    await agentAuthApi.openCodeLogout();
+    await refreshAuthStatus();
+  } catch {
+    // ignore
+  } finally {
+    bLoggingOutOpenCode.value = false;
   }
 };
 
@@ -666,7 +736,7 @@ onMounted((): void => {
     <PageHeader
       eyebrow="// settings"
       title="Settings"
-      subtitle="Configure agent authentication, appearance, and preferences."
+      subtitle="Configure appearance and preferences."
     />
 
       <!-- Tab bar -->
@@ -799,90 +869,6 @@ onMounted((): void => {
           </div>
         </template>
 
-        <!-- Agent Authentication -->
-        <div class="settings-section-label nc-eyebrow" style="margin-top: 36px;">Agent Authentication</div>
-        <p class="settings-section-desc">Log in to AI services. Credentials are stored in the config volume and persist across restarts.</p>
-        <div class="settings-auth-list">
-
-          <!-- Cursor -->
-          <div class="settings-auth-card">
-            <div class="settings-auth-card__top">
-              <div class="settings-auth-card__info">
-                <div class="settings-auth-card__name">Cursor</div>
-                <div class="settings-auth-card__desc">
-                  Uses <code class="settings-mono-chip">cursor-agent login</code> — sign in with your Cursor account
-                </div>
-              </div>
-              <span class="nc-chip" :class="bCursorAuthenticated ? 'success' : ''">
-                {{ bCursorAuthenticated ? 'Authenticated' : 'Not authenticated' }}
-              </span>
-            </div>
-            <div class="settings-auth-card__actions">
-              <button v-if="!bCursorAuthenticated" class="settings-btn-primary" :disabled="bStartingCursorLogin" @click="startCursorLogin">
-                <span v-if="bStartingCursorLogin" class="settings-spinner" />
-                Login to Cursor
-              </button>
-              <button v-else class="settings-btn" :disabled="bLoggingOutCursor" @click="logoutCursor">
-                <span v-if="bLoggingOutCursor" class="settings-spinner" />
-                Logout
-              </button>
-              <a href="https://cursor.com/dashboard?tab=spending" target="_blank" rel="noopener noreferrer" class="settings-auth-link">View account &amp; usage →</a>
-            </div>
-            <p v-if="!bCursorAuthenticated" class="settings-auth-card__hint">A terminal will appear in an overlay. Complete the login flow in the terminal.</p>
-          </div>
-
-          <!-- Claude Code -->
-          <div class="settings-auth-card">
-            <div class="settings-auth-card__top">
-              <div class="settings-auth-card__info">
-                <div class="settings-auth-card__name">Claude Code</div>
-                <div class="settings-auth-card__desc">
-                  Uses <code class="settings-mono-chip">claude setup-token</code> — sign in with your Claude account and paste the issued token into the terminal overlay.
-                </div>
-              </div>
-              <span class="nc-chip" :class="bClaudeAuthenticated ? 'success' : ''">
-                {{ bClaudeAuthenticated ? 'Configured' : 'Not configured' }}
-              </span>
-            </div>
-            <div class="settings-auth-card__actions">
-              <button v-if="!bClaudeAuthenticated" class="settings-btn-primary" :disabled="bStartingClaudeLogin" @click="startClaudeLogin">
-                <span v-if="bStartingClaudeLogin" class="settings-spinner" />
-                Login to Claude
-              </button>
-              <button v-else class="settings-btn" :disabled="bLoggingOutClaude" @click="logoutClaude">
-                <span v-if="bLoggingOutClaude" class="settings-spinner" />
-                Logout
-              </button>
-              <a href="https://claude.ai" target="_blank" rel="noopener noreferrer" class="settings-auth-link">Manage account &amp; usage →</a>
-            </div>
-            <p v-if="!bClaudeAuthenticated" class="settings-auth-card__hint">A terminal will appear in an overlay. Paste the token from your browser into the field below the terminal and press Enter.</p>
-            <p v-if="bClaudeAuthSuccess" class="settings-auth-card__success">Claude token saved. You're ready to use Claude Code.</p>
-            <p v-if="claudeAuthError" class="settings-auth-card__error">{{ claudeAuthError }}</p>
-          </div>
-
-          <!-- Mistral Vibe -->
-          <div class="settings-auth-card">
-            <div class="settings-auth-card__top">
-              <div class="settings-auth-card__info">
-                <div class="settings-auth-card__name">Mistral Vibe</div>
-                <div class="settings-auth-card__desc">
-                  API key for the Vibe CLI. Stored in <code class="settings-mono-chip">~/.vibe/.env</code> and used when running Vibe as an agent tool.
-                </div>
-              </div>
-              <span class="nc-chip" :class="bVibeConfigured ? 'success' : ''">
-                {{ bLoadingVibeStatus ? '…' : bVibeConfigured ? 'Configured' : 'Not configured' }}
-              </span>
-            </div>
-            <div class="settings-auth-card__actions">
-              <button class="settings-btn-accent" :disabled="bLoadingVibeStatus" @click="openVibeApiKeyModal">
-                {{ bVibeConfigured ? 'Update API key' : 'Set API key' }}
-              </button>
-            </div>
-            <p class="settings-auth-card__hint">Get your key from <a href="https://console.mistral.ai/codestral/vibe" target="_blank" rel="noopener noreferrer" class="settings-auth-link">Mistral Console</a>.</p>
-          </div>
-
-        </div>
-
       </div>
 
       <!-- Tab panel: Git -->
@@ -990,13 +976,10 @@ onMounted((): void => {
         </div>
       </div>
 
-      <!-- Tab panel: Integrations (redirects to General for agent auth) -->
+      <!-- Tab panel: Integrations -->
       <div v-show="activeTab === 'integrations'" role="tabpanel">
         <div class="settings-section-label nc-eyebrow">Agent Authentication</div>
-        <p class="settings-section-desc">
-          Agent authentication is now managed in the
-          <button class="settings-inline-link" @click="(activeTab as any) = 'general'">General tab</button>.
-        </p>
+        <p class="settings-section-desc">Log in to AI services. Credentials are stored in the config volume and persist across restarts.</p>
         <div class="settings-auth-list">
           <div class="settings-auth-card">
             <div class="settings-auth-card__top">
@@ -1047,6 +1030,22 @@ onMounted((): void => {
             <div class="settings-auth-card__actions">
               <button class="settings-btn-accent" :disabled="bLoadingVibeStatus" @click="openVibeApiKeyModal">{{ bVibeConfigured ? 'Update API key' : 'Set API key' }}</button>
             </div>
+          </div>
+          <div class="settings-auth-card">
+            <div class="settings-auth-card__top">
+              <div class="settings-auth-card__info">
+                <div class="settings-auth-card__name">OpenCode</div>
+                <div class="settings-auth-card__desc">Open-source AI coding assistant. API key stored via <code class="settings-mono-chip">opencode auth login -p opencode</code>.</div>
+              </div>
+              <span class="nc-chip" :class="bOpenCodeAuthenticated ? 'success' : ''">{{ bOpenCodeAuthenticated ? 'Configured' : 'Not configured' }}</span>
+            </div>
+            <div class="settings-auth-card__actions">
+              <button class="settings-btn-accent" @click="openOpenCodeApiKeyModal">{{ bOpenCodeAuthenticated ? 'Update API key' : 'Set API key' }}</button>
+              <button v-if="bOpenCodeAuthenticated" class="settings-btn" :disabled="bLoggingOutOpenCode" @click="logoutOpenCode">
+                <span v-if="bLoggingOutOpenCode" class="settings-spinner" />Logout
+              </button>
+            </div>
+            <p v-if="bOpenCodeAuthSuccess" class="settings-auth-card__success">OpenCode API key saved.</p>
           </div>
         </div>
       </div>
@@ -1400,6 +1399,60 @@ onMounted((): void => {
                 @click="deleteVibeApiKey"
               >
                 {{ bDeletingVibeApiKey ? 'Removing…' : 'Remove key' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- OpenCode API key modal -->
+    <Teleport to="body">
+      <Transition name="modal-fade">
+        <div
+          v-if="bShowOpenCodeApiKeyModal"
+          class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          @click.self="closeOpenCodeApiKeyModal"
+        >
+          <div
+            class="modal-panel w-full max-w-md flex flex-col bg-fg/[0.04] border border-fg/[0.12] rounded-xl shadow-2xl"
+            @click.stop
+          >
+            <div class="flex flex-shrink-0 items-center justify-between px-4 py-3 border-b border-fg/[0.08]">
+              <p class="text-sm font-medium text-text-primary">OpenCode API key</p>
+              <button
+                class="text-sm px-3 py-2 text-text-muted hover:text-text-primary hover:bg-fg/[0.08] rounded-lg transition-all"
+                @click="closeOpenCodeApiKeyModal"
+              >
+                Cancel
+              </button>
+            </div>
+            <div class="flex-1 min-h-0 p-4 space-y-4">
+              <p class="text-sm text-text-muted">
+                Enter your OpenCode API key. It will be stored via
+                <code class="bg-fg/[0.06] px-1 py-0.5 rounded text-[11px]">opencode auth login -p opencode</code>.
+              </p>
+              <div>
+                <label class="block text-sm font-medium text-text-primary mb-1.5">API key</label>
+                <input
+                  v-model="openCodeApiKeyInput"
+                  type="password"
+                  placeholder="Your OpenCode API key"
+                  class="w-full bg-fg/[0.05] border border-fg/[0.1] rounded-lg px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
+                  :disabled="bSavingOpenCodeApiKey"
+                  autocomplete="off"
+                  @keydown.enter="saveOpenCodeApiKey"
+                />
+              </div>
+              <p v-if="openCodeApiKeyError" class="text-xs text-destructive">{{ openCodeApiKeyError }}</p>
+            </div>
+            <div class="flex flex-shrink-0 gap-2 p-4 pt-0">
+              <button
+                class="flex-1 bg-primary hover:bg-primary-hover disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg transition-all"
+                :disabled="!openCodeApiKeyInput.trim() || bSavingOpenCodeApiKey"
+                @click="saveOpenCodeApiKey"
+              >
+                {{ bSavingOpenCodeApiKey ? 'Saving…' : 'Save' }}
               </button>
             </div>
           </div>

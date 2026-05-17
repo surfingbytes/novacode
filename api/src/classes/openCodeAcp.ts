@@ -90,7 +90,7 @@ async function spawnOpenCodeConnection(cwd: string): Promise<{
   proc: ChildProcess;
 }> {
   const env = { ...process.env, ...config.agentEnv() };
-  const proc = spawn(config.openCodeAcpCommand, [], {
+  const proc = spawn(config.openCodeAcpCommand, ['acp'], {
     cwd,
     stdio: ['pipe', 'pipe', 'pipe'],
     env,
@@ -132,6 +132,7 @@ export interface RunOpenCodeAcpParams {
   acpSessionId: string | null;
   cwd: string;
   promptText: string;
+  model?: string;
 }
 
 export interface RunOpenCodeAcpResult {
@@ -182,6 +183,14 @@ export async function runOpenCodeAcp(
         resolvedSessionId = resp.sessionId;
       }
       activeHandlers.delete(acpSessionId);
+    }
+
+    if (params.model) {
+      try {
+        await (conn as any).unstable_setSessionModel({ sessionId: resolvedSessionId, modelId: params.model });
+      } catch (err) {
+        console.warn('[openCodeAcp] unstable_setSessionModel failed (non-fatal):', err);
+      }
     }
 
     activeHandlers.set(resolvedSessionId, onEvent);

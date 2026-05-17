@@ -2,7 +2,7 @@
 import type { FastifyInstance } from 'fastify';
 import { Type } from '@sinclair/typebox';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -13,6 +13,9 @@ import { db } from '../classes/database';
 import { sessionManager } from '../classes/sessionManager';
 
 const CURSOR_AUTH_FILE = '.config/cursor/auth.json';
+// OPENCODE_HOME is set to configDir + '/.opencode' in agentEnv(), so opencode
+// reads auth from $OPENCODE_HOME/auth.json, not the XDG default.
+const OPENCODE_AUTH_FILE = '.opencode/auth.json';
 
 export const cursorAuthenticated = (): boolean => {
   const authPath = join(config.configDir, CURSOR_AUTH_FILE);
@@ -32,6 +35,19 @@ export const cursorAuthenticated = (): boolean => {
   if (lower.includes('not authenticated') || lower.includes('not logged in')) return false;
   if (out.trim() === '') return false;
   return true;
+};
+
+export const openCodeAuthenticated = (): boolean => {
+  const authPath = join(config.configDir, OPENCODE_AUTH_FILE);
+  if (!existsSync(authPath)) return false;
+  try {
+    const data = JSON.parse(readFileSync(authPath, 'utf8'));
+    return (
+      typeof data?.['opencode-go']?.key === 'string' && data['opencode-go']?.key.trim().length > 0
+    );
+  } catch {
+    return false;
+  }
 };
 
 export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
@@ -121,6 +137,58 @@ export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: jwtPreHandler, schema: { response: { 204: Type.Null() } } },
     async (request, reply) => {
       await db.updateUser(request.jwtUser!.id, { claudeToken: null });
+      return reply.code(204).send(null);
+    }
+  );
+
+  // ─── OpenCode auth (file-based config in OPENCODE_HOME) ──────────────────────
+
+  fastifyInstance.get(
+    '/api/agent-auth/opencode/status',
+    {
+      preHandler: jwtPreHandler,
+      schema: { response: { 200: Type.Object({ authenticated: Type.Boolean() }) } }
+    },
+    async () => ({ authenticated: openCodeAuthenticated() })
+  );
+
+  fastifyInstance.post(
+    '/api/agent-auth/opencode/login',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        body: Type.Object({ apiKey: Type.String() }),
+        response: { 200: Type.Object({ ok: Type.Boolean() }) }
+      }
+    },
+    async (request, reply) => {
+      const { apiKey } = request.body as { apiKey: string };
+      const trimmed = apiKey.trim();
+      if (!trimmed) return reply.send({ ok: false });
+      const authPath = join(config.configDir, OPENCODE_AUTH_FILE);
+      const authDir = join(config.configDir, '.opencode');
+      try {
+        if (!existsSync(authDir)) mkdirSync(authDir, { recursive: true });
+        writeFileSync(
+          authPath,
+          JSON.stringify({ 'opencode-go': { key: trimmed, type: 'api' } }, null, 2),
+          'utf8'
+        );
+      } catch (err) {
+        console.error('[opencode-login] write error:', err);
+        return reply.send({ ok: false });
+      }
+      const ok = openCodeAuthenticated();
+      return reply.send({ ok });
+    }
+  );
+
+  fastifyInstance.delete(
+    '/api/agent-auth/opencode/logout',
+    { preHandler: jwtPreHandler, schema: { response: { 204: Type.Null() } } },
+    async (_request, reply) => {
+      const authPath = join(config.configDir, OPENCODE_AUTH_FILE);
+      if (existsSync(authPath)) rmSync(authPath, { force: true });
       return reply.code(204).send(null);
     }
   );
