@@ -231,7 +231,13 @@ export const agentAuthApi = {
     http.get<{ authenticated: boolean }>('/agent-auth/opencode/status'),
   openCodeLogin: (apiKey: string): ReturnType<typeof http.post<{ ok: boolean }>> =>
     http.post<{ ok: boolean }>('/agent-auth/opencode/login', { apiKey }),
-  openCodeLogout: (): ReturnType<typeof http.delete> => http.delete('/agent-auth/opencode/logout')
+  openCodeLogout: (): ReturnType<typeof http.delete> => http.delete('/agent-auth/opencode/logout'),
+
+  codexStatus: (): ReturnType<typeof http.get<{ authenticated: boolean }>> =>
+    http.get<{ authenticated: boolean }>('/agent-auth/codex/status'),
+  codexLogin: (apiKey: string): ReturnType<typeof http.post<{ ok: boolean }>> =>
+    http.post<{ ok: boolean }>('/agent-auth/codex/login', { apiKey }),
+  codexLogout: (): ReturnType<typeof http.delete> => http.delete('/agent-auth/codex/logout')
 };
 
 // ---------------------------------- Git (workspace-scoped) ----------------------------------

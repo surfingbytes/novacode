@@ -21,7 +21,7 @@ import { checkMcpClients } from '../classes/mcpConnectivityCheck';
 import { getCursorModels } from '../classes/cursorModels';
 import { getOpenCodeModels, clearOpenCodeModelsCache } from '../classes/openCodeModels';
 import { readSshKeyMaterial } from '../classes/sshKey';
-import { cursorAuthenticated, openCodeAuthenticated } from './agentAuth';
+import { cursorAuthenticated, openCodeAuthenticated, codexAuthenticated } from './agentAuth';
 
 // types
 import type { FastifyInstance } from 'fastify';
