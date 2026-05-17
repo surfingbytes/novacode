@@ -1,4 +1,4 @@
-export type AgentType = 'cursor-agent' | 'claude' | 'mistral-vibe' | 'open-code';
+export type AgentType = 'cursor-agent' | 'claude' | 'mistral-vibe' | 'open-code' | 'codex';
 
 export interface SubTask {
   name: string;

@@ -8,7 +8,13 @@ import TagChipsInput from '@/components/input/TagChipsInput.vue';
 // types
 import type { AgentType } from '@/@types/index';
 
-const AGENT_FALLBACK_ORDER: AgentType[] = ['cursor-agent', 'mistral-vibe', 'claude', 'open-code'];
+const AGENT_FALLBACK_ORDER: AgentType[] = [
+  'cursor-agent',
+  'mistral-vibe',
+  'claude',
+  'open-code',
+  'codex'
+];
 
 // -------------------------------------------------- Props --------------------------------------------------
 const props = defineProps<{
@@ -22,6 +28,7 @@ const props = defineProps<{
   /** Whether Mistral Vibe can be used (CLI on PATH and API key in `~/.vibe/.env`). */
   mistralVibeAvailable?: boolean;
   /** Whether OpenCode can be used (CLI on PATH and ACP server available). */
+  codexAvailable?: boolean;
   openCodeAvailable?: boolean;
   /** Tag suggestions from existing sessions in the workspace. */
   existingTags?: string[];
@@ -52,6 +59,7 @@ const availableAgents = computed(() => {
   if (props.mistralVibeAvailable !== false) agents.push('mistral-vibe');
   if (props.claudeAvailable !== false) agents.push('claude');
   if (props.openCodeAvailable !== false) agents.push('open-code');
+  if (props.codexAvailable !== false) agents.push('codex');
   return agents;
 });
 
@@ -70,6 +78,9 @@ function isAgentAvailable(agent: AgentType): boolean {
   }
   if (agent === 'open-code') {
     return props.openCodeAvailable !== false;
+  }
+  if (agent === 'codex') {
+    return props.codexAvailable !== false;
   }
   return false;
 }
@@ -194,10 +205,30 @@ watch(
                   type="button"
                   class="text-xs px-2 py-1.5 rounded-md transition-colors text-text-muted hover:text-text-primary hover:bg-fg/[0.06]"
                   :class="{ 'bg-primary text-white': agentType === agent }"
-                  :title="agent === 'cursor-agent' ? 'Cursor Agent' : agent === 'mistral-vibe' ? 'Mistral Vibe' : agent === 'claude' ? 'Claude Code' : 'OpenCode'"
+                  :title="
+                    agent === 'cursor-agent'
+                      ? 'Cursor Agent'
+                      : agent === 'mistral-vibe'
+                        ? 'Mistral Vibe'
+                        : agent === 'claude'
+                          ? 'Claude Code'
+                          : agent === 'codex'
+                            ? 'Codex'
+                            : 'OpenCode'
+                  "
                   @click="selectAgentType(agent)"
                 >
-                  {{ agent === 'cursor-agent' ? 'Cursor' : agent === 'mistral-vibe' ? 'Vibe' : agent === 'claude' ? 'Claude' : 'OpenCode' }}
+                  {{
+                    agent === 'cursor-agent'
+                      ? 'Cursor'
+                      : agent === 'mistral-vibe'
+                        ? 'Vibe'
+                        : agent === 'claude'
+                          ? 'Claude'
+                          : agent === 'codex'
+                            ? 'Codex'
+                            : 'OpenCode'
+                  }}
                 </button>
               </div>
               <p v-if="availableAgents.length === 0" class="text-[11px] text-warning">

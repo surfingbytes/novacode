@@ -31,13 +31,15 @@ const AGENT_TYPE_TEXT = {
   claude: 'Claude',
   'cursor-agent': 'Cursor',
   'mistral-vibe': 'Mistral Vibe',
-  'open-code': 'OpenCode'
+  'open-code': 'OpenCode',
+  codex: 'Codex'
 };
 const AGENT_TYPE_COLOR = {
   claude: 'bg-orange-500/15! text-orange-400! border-orange-500/20!',
   'cursor-agent': 'bg-violet-500/15! text-violet-400! border-violet-500/20!',
   'mistral-vibe': 'bg-emerald-500/15! text-emerald-400! border-emerald-500/20!',
-  'open-code': 'bg-cyan-500/15! text-cyan-400! border-cyan-500/20!'
+  'open-code': 'bg-cyan-500/15! text-cyan-400! border-cyan-500/20!',
+  codex: 'bg-sky-500/15! text-sky-400! border-sky-500/20!'
 };
 
 // -------------------------------------------------- Store --------------------------------------------------
@@ -80,6 +82,8 @@ const multiselectWidth = ref<number | null>(null);
 const bClaudeAvailable = ref(false);
 const bCursorAvailable = ref(false);
 const bMistralVibeAvailable = ref(false);
+const bOpenCodeAvailable = ref(false);
+const bCodexAvailable = ref(false);
 const activeFilter = ref<string | null>(null);
 
 // -------------------------------------------------- Computed --------------------------------------------------
@@ -201,8 +205,7 @@ const filteredSessions = computed(() => {
 });
 
 const archivedCount = computed(
-  () =>
-    archivedSessions.value.length + orchestrators.value.filter((o) => o.archived).length
+  () => archivedSessions.value.length + orchestrators.value.filter((o) => o.archived).length
 );
 
 const filteredArchivedSessions = computed(() => {
@@ -210,7 +213,9 @@ const filteredArchivedSessions = computed(() => {
   if (activeFilter.value) {
     list = list.filter((s) => sessionHasTag(s, activeFilter.value));
   }
-  return [...list].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  return [...list].sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+  );
 });
 
 type CombinedItem =
@@ -245,7 +250,9 @@ const showDeleteModal = (item: CombinedItem): void => {
 
 const selectionActive = computed(() => selectedIds.value.size > 0);
 const visibleSelectableSessions = computed<Session[]>(() =>
-  bShowArchived.value ? [...filteredSessions.value, ...filteredArchivedSessions.value] : filteredSessions.value
+  bShowArchived.value
+    ? [...filteredSessions.value, ...filteredArchivedSessions.value]
+    : filteredSessions.value
 );
 const orchestratorSelectionActive = computed(() => orchestratorSelectedIds.value.size > 0);
 
@@ -288,10 +295,8 @@ const multiselectArchiveShouldUnarchive = computed(() => {
   const sessions = selectedVisibleSessions.value;
   const orchs = selectedVisibleOrchestrators.value;
   if (sessions.length === 0 && orchs.length === 0) return false;
-  const sessionsAllArchived =
-    sessions.length === 0 || sessions.every((s) => s.archived);
-  const orchAllArchived =
-    orchs.length === 0 || orchs.every((o) => o.archived ?? false);
+  const sessionsAllArchived = sessions.length === 0 || sessions.every((s) => s.archived);
+  const orchAllArchived = orchs.length === 0 || orchs.every((o) => o.archived ?? false);
   return sessionsAllArchived && orchAllArchived;
 });
 
@@ -470,8 +475,6 @@ const ensureData = async (): Promise<void> => {
   await store.fetchAll();
 };
 
-const bOpenCodeAvailable = ref(false);
-
 const loadAgentCapabilities = async (): Promise<void> => {
   try {
     const { data } = await settingsApi.getAgentCapabilities();
@@ -479,11 +482,13 @@ const loadAgentCapabilities = async (): Promise<void> => {
     bCursorAvailable.value = data.cursorAvailable;
     bMistralVibeAvailable.value = data.mistralVibeAvailable;
     bOpenCodeAvailable.value = data.openCodeAvailable;
+    bCodexAvailable.value = data.codexAvailable;
   } catch {
     bClaudeAvailable.value = false;
     bCursorAvailable.value = false;
     bMistralVibeAvailable.value = false;
     bOpenCodeAvailable.value = false;
+    bCodexAvailable.value = false;
   }
 };
 
@@ -616,15 +621,14 @@ const bulkDeleteCombined = async (): Promise<void> => {
   }
 };
 
-const saveEditSession = async (payload: { name: string; tags?: string[] | null }): Promise<void> => {
+const saveEditSession = async (payload: {
+  name: string;
+  tags?: string[] | null;
+}): Promise<void> => {
   if (!sessionToEdit.value || !props.workspace) return;
   bSavingEdit.value = true;
   try {
-    await sessionsApi.update(
-      props.workspace.id,
-      sessionToEdit.value.id,
-      payload
-    );
+    await sessionsApi.update(props.workspace.id, sessionToEdit.value.id, payload);
     sessionToEdit.value = null;
   } catch (error) {
     console.error('Failed to update session:', error);
@@ -722,7 +726,11 @@ function contextItemsForSession(session: Session): ContextMenuItem[] {
   return [
     { key: 'open', label: 'Open', icon: 'open_in_new' },
     { key: 'edit', label: 'Edit…', icon: 'edit' },
-    { key: 'archive', label: arch ? 'Unarchive' : 'Archive', icon: arch ? 'unarchive' : 'inventory_2' },
+    {
+      key: 'archive',
+      label: arch ? 'Unarchive' : 'Archive',
+      icon: arch ? 'unarchive' : 'inventory_2'
+    },
     { key: 'delete', label: 'Delete…', icon: 'delete', danger: true }
   ];
 }
@@ -731,7 +739,11 @@ function contextItemsForOrchestrator(orchestrator: Orchestrator): ContextMenuIte
   const arch = orchestrator.archived === true;
   return [
     { key: 'open', label: 'Open', icon: 'open_in_new' },
-    { key: 'archive', label: arch ? 'Unarchive' : 'Archive', icon: arch ? 'unarchive' : 'inventory_2' },
+    {
+      key: 'archive',
+      label: arch ? 'Unarchive' : 'Archive',
+      icon: arch ? 'unarchive' : 'inventory_2'
+    },
     { key: 'delete', label: 'Delete…', icon: 'delete', danger: true }
   ];
 }
@@ -836,10 +848,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div
-    v-if="sessionTags.length > 0"
-    class="flex flex-wrap items-center gap-2 mb-3"
-  >
+  <div v-if="sessionTags.length > 0" class="flex flex-wrap items-center gap-2 mb-3">
     <span class="text-xs text-text-muted shrink-0">Tags</span>
     <button
       type="button"
@@ -877,27 +886,80 @@ onBeforeUnmount(() => {
         :class="{ 'is-active': viewMode === 'list' }"
         @click="viewMode = 'list'"
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          width="16"
+          height="16"
+          aria-hidden="true"
+        >
+          <line x1="8" y1="6" x2="21" y2="6" />
+          <line x1="8" y1="12" x2="21" y2="12" />
+          <line x1="8" y1="18" x2="21" y2="18" />
+          <line x1="3" y1="6" x2="3.01" y2="6" />
+          <line x1="3" y1="12" x2="3.01" y2="12" />
+          <line x1="3" y1="18" x2="3.01" y2="18" />
+        </svg>
       </button>
       <button
         class="button is-icon"
         :class="{ 'is-active': viewMode === 'grid' }"
         @click="viewMode = 'grid'"
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          width="16"
+          height="16"
+          aria-hidden="true"
+        >
+          <rect x="3" y="3" width="7" height="7" />
+          <rect x="14" y="3" width="7" height="7" />
+          <rect x="3" y="14" width="7" height="7" />
+          <rect x="14" y="14" width="7" height="7" />
+        </svg>
       </button>
     </div>
     <div class="flex flex-wrap items-center gap-2 shrink-0">
-      <button
-        type="button"
-        class="button"
-        @click="bShowNewOrchestratorModal = true"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M21 3H15v4h6V3zM9 3H3v4h6V3zM15 17H9v4h6v-4z"/><path d="M12 7v4M6 7v6h12V7"/></svg>
+      <button type="button" class="button" @click="bShowNewOrchestratorModal = true">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          width="16"
+          height="16"
+          aria-hidden="true"
+        >
+          <path d="M21 3H15v4h6V3zM9 3H3v4h6V3zM15 17H9v4h6v-4z" />
+          <path d="M12 7v4M6 7v6h12V7" />
+        </svg>
         New orchestrator
       </button>
       <button type="button" @click="bShowNewSessionModal = true" class="button is-primary">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          width="16"
+          height="16"
+          aria-hidden="true"
+        >
+          <path d="M12 5v14M5 12h14" />
+        </svg>
         New Session
       </button>
     </div>
@@ -935,11 +997,25 @@ onBeforeUnmount(() => {
         >
           <div class="top">
             <div class="icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                width="16"
+                height="16"
+                aria-hidden="true"
+              >
+                <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+              </svg>
             </div>
             <div class="info">
               <p class="title flex items-center gap-2">
-                <span>{{ item.kind === 'session' ? item.session.name : item.orchestrator.name }}</span>
+                <span>{{
+                  item.kind === 'session' ? item.session.name : item.orchestrator.name
+                }}</span>
                 <span
                   v-if="item.kind === 'session' && item.session.busy"
                   class="busy-badge text-[11px] px-2 py-0.5 rounded-full inline-flex items-center gap-1"
@@ -981,7 +1057,20 @@ onBeforeUnmount(() => {
                 class="button is-icon"
                 @click.prevent.stop="item.kind === 'session' && (sessionToEdit = item.session)"
               >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  width="14"
+                  height="14"
+                  aria-hidden="true"
+                >
+                  <path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6" />
+                  <path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z" />
+                </svg>
               </button>
               <button
                 class="button is-icon hover:bg-warning/10! hover:border-warning!"
@@ -991,25 +1080,70 @@ onBeforeUnmount(() => {
                     : toggleArchiveOrchestrator(item.orchestrator)
                 "
               >
-                <svg v-if="(item.kind === 'session' ? item.session.archived : item.orchestrator.archived)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-warning" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"/></svg>
-                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-warning" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"/></svg>
+                <svg
+                  v-if="
+                    item.kind === 'session' ? item.session.archived : item.orchestrator.archived
+                  "
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  width="14"
+                  height="14"
+                  class="text-warning"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"
+                  />
+                </svg>
+                <svg
+                  v-else
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  width="14"
+                  height="14"
+                  class="text-warning"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"
+                  />
+                </svg>
               </button>
               <button
                 class="button is-icon hover:bg-destructive/10! hover:border-destructive!"
                 @click.prevent.stop="showDeleteModal(item)"
               >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-destructive" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  width="14"
+                  height="14"
+                  class="text-destructive"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"
+                  />
+                </svg>
               </button>
             </div>
           </div>
         </RouterLink>
       </TransitionGroup>
     </div>
-    <div
-      v-else-if="viewMode === 'list'"
-      ref="listViewRef"
-      class="list-view"
-    >
+    <div v-else-if="viewMode === 'list'" ref="listViewRef" class="list-view">
       <TransitionGroup name="list-stagger" tag="div" class="list-view-items">
         <div
           v-for="(item, index) in combinedItems"
@@ -1037,12 +1171,24 @@ onBeforeUnmount(() => {
                 type="button"
                 class="w-6 h-6 rounded border border-border bg-bg/90 text-primary flex items-center justify-center"
                 @click.prevent.stop="toggleSelect(item.session.id)"
-                :aria-label="selectedIds.has(item.session.id) ? 'Deselect session' : 'Select session'"
+                :aria-label="
+                  selectedIds.has(item.session.id) ? 'Deselect session' : 'Select session'
+                "
               >
                 <svg
                   v-if="selectedIds.has(item.session.id)"
-                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"
-                ><polyline points="20 6 9 17 4 12"/></svg>
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  width="14"
+                  height="14"
+                  aria-hidden="true"
+                >
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
               </button>
             </div>
             <div class="cell flex-1 min-w-0">
@@ -1073,24 +1219,81 @@ onBeforeUnmount(() => {
               </p>
             </div>
             <div class="cell buttons">
-              <button
-                class="button is-icon"
-                @click.prevent.stop="sessionToEdit = item.session"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
+              <button class="button is-icon" @click.prevent.stop="sessionToEdit = item.session">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  width="14"
+                  height="14"
+                  aria-hidden="true"
+                >
+                  <path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6" />
+                  <path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z" />
+                </svg>
               </button>
               <button
                 class="button is-icon hover:bg-warning/10! hover:border-warning!"
                 @click.prevent.stop="toggleArchive(item.session)"
               >
-                <svg v-if="item.session.archived" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-warning" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"/></svg>
-                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-warning" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"/></svg>
+                <svg
+                  v-if="item.session.archived"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  width="14"
+                  height="14"
+                  class="text-warning"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"
+                  />
+                </svg>
+                <svg
+                  v-else
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  width="14"
+                  height="14"
+                  class="text-warning"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"
+                  />
+                </svg>
               </button>
               <button
                 class="button is-icon hover:bg-destructive/10! hover:border-destructive!"
                 @click.prevent.stop="showDeleteModal(item)"
               >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-destructive" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  width="14"
+                  height="14"
+                  class="text-destructive"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"
+                  />
+                </svg>
               </button>
             </div>
           </RouterLink>
@@ -1123,13 +1326,37 @@ onBeforeUnmount(() => {
                 >
                   <svg
                     v-if="orchestratorSelectedIds.has(item.orchestrator.id)"
-                    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"
-                  ><polyline points="20 6 9 17 4 12"/></svg>
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    width="14"
+                    height="14"
+                    aria-hidden="true"
+                  >
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
                 </button>
               </div>
               <div class="cell flex-1 min-w-0">
                 <p class="title flex items-center gap-2">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="text-text-muted shrink-0" aria-hidden="true"><path d="M21 3H15v4h6V3zM9 3H3v4h6V3zM15 17H9v4h6v-4z"/><path d="M12 7v4M6 7v6h12V7"/></svg>
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    width="16"
+                    height="16"
+                    class="text-text-muted shrink-0"
+                    aria-hidden="true"
+                  >
+                    <path d="M21 3H15v4h6V3zM9 3H3v4h6V3zM15 17H9v4h6v-4z" />
+                    <path d="M12 7v4M6 7v6h12V7" />
+                  </svg>
                   <span>{{ item.orchestrator.name }}</span>
                   <span
                     v-if="item.orchestrator.runStatus === 'running'"
@@ -1148,19 +1375,62 @@ onBeforeUnmount(() => {
               </div>
               <div class="cell buttons">
                 <button class="button is-icon" @click.prevent.stop>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    width="14"
+                    height="14"
+                    aria-hidden="true"
+                  >
+                    <path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6" />
+                    <path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z" />
+                  </svg>
                 </button>
                 <button
                   class="button is-icon hover:bg-warning/10! hover:border-warning!"
                   @click.prevent.stop="toggleArchiveOrchestrator(item.orchestrator)"
                 >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-warning" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"/></svg>
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    width="14"
+                    height="14"
+                    class="text-warning"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"
+                    />
+                  </svg>
                 </button>
                 <button
                   class="button is-icon hover:bg-destructive/10! hover:border-destructive!"
                   @click.prevent.stop="showDeleteModal(item)"
                 >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-destructive" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    width="14"
+                    height="14"
+                    class="text-destructive"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"
+                    />
+                  </svg>
                 </button>
               </div>
             </RouterLink>
@@ -1176,7 +1446,20 @@ onBeforeUnmount(() => {
               @contextmenu.prevent.stop="onSessionContextMenu($event, child)"
             >
               <div class="cell flex-1 min-w-0 flex items-start gap-2">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-text-muted shrink-0 mt-0.5" aria-hidden="true"><path d="M3 9l9 9 9-9"/></svg>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  width="14"
+                  height="14"
+                  class="text-text-muted shrink-0 mt-0.5"
+                  aria-hidden="true"
+                >
+                  <path d="M3 9l9 9 9-9" />
+                </svg>
                 <div class="min-w-0 flex-1">
                   <p class="title flex items-center gap-2 flex-wrap">
                     <span>{{ child.name }}</span>
@@ -1219,11 +1502,20 @@ onBeforeUnmount(() => {
         @click="bShowArchived = !bShowArchived"
       >
         <svg
-          viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          width="16"
+          height="16"
           class="transition-transform duration-200"
           :class="bShowArchived ? 'rotate-90' : ''"
           aria-hidden="true"
-        ><polyline points="9 18 15 12 9 6"/></svg>
+        >
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
         Archived
         <span class="text-xs bg-fg/[0.07] border border-fg/[0.1] rounded-full px-2 py-0.5">{{
           archivedCount
@@ -1247,7 +1539,19 @@ onBeforeUnmount(() => {
               >
                 <div class="top">
                   <div class="icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.6"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      width="16"
+                      height="16"
+                      aria-hidden="true"
+                    >
+                      <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+                    </svg>
                   </div>
                   <div class="info">
                     <p class="title flex items-center gap-2">
@@ -1264,10 +1568,7 @@ onBeforeUnmount(() => {
                     <p class="tag" :class="AGENT_TYPE_COLOR[session.agentType]">
                       {{ AGENT_TYPE_TEXT[session.agentType] }}
                     </p>
-                    <div
-                      v-if="session.tags?.length"
-                      class="flex flex-wrap gap-1 mt-2"
-                    >
+                    <div v-if="session.tags?.length" class="flex flex-wrap gap-1 mt-2">
                       <span
                         v-for="tag in session.tags"
                         :key="tag"
@@ -1283,13 +1584,43 @@ onBeforeUnmount(() => {
                       @click.prevent.stop="toggleArchive(session)"
                       title="Unarchive"
                     >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-primary" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"/></svg>
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        width="14"
+                        height="14"
+                        class="text-primary"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"
+                        />
+                      </svg>
                     </button>
                     <button
                       class="button is-icon hover:bg-destructive/10! hover:border-destructive!"
                       @click.prevent.stop="showDeleteModal({ kind: 'session', session })"
                     >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-destructive" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        width="14"
+                        height="14"
+                        class="text-destructive"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"
+                        />
+                      </svg>
                     </button>
                   </div>
                 </div>
@@ -1317,7 +1648,20 @@ onBeforeUnmount(() => {
                 >
                   <div class="top">
                     <div class="icon">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M21 3H15v4h6V3zM9 3H3v4h6V3zM15 17H9v4h6v-4z"/><path d="M12 7v4M6 7v6h12V7"/></svg>
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        width="16"
+                        height="16"
+                        aria-hidden="true"
+                      >
+                        <path d="M21 3H15v4h6V3zM9 3H3v4h6V3zM15 17H9v4h6v-4z" />
+                        <path d="M12 7v4M6 7v6h12V7" />
+                      </svg>
                     </div>
                     <div class="info">
                       <p class="title flex items-center gap-2">
@@ -1341,7 +1685,22 @@ onBeforeUnmount(() => {
                         @click.prevent.stop="toggleArchiveOrchestrator(orch)"
                         title="Unarchive"
                       >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-primary" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"/></svg>
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.6"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          width="14"
+                          height="14"
+                          class="text-primary"
+                          aria-hidden="true"
+                        >
+                          <path
+                            d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"
+                          />
+                        </svg>
                       </button>
                       <button
                         class="button is-icon hover:bg-destructive/10! hover:border-destructive!"
@@ -1353,7 +1712,22 @@ onBeforeUnmount(() => {
                           })
                         "
                       >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-destructive" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.6"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          width="14"
+                          height="14"
+                          class="text-destructive"
+                          aria-hidden="true"
+                        >
+                          <path
+                            d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"
+                          />
+                        </svg>
                       </button>
                     </div>
                   </div>
@@ -1362,7 +1736,7 @@ onBeforeUnmount(() => {
             </template>
           </div>
 
-            <div v-else class="list-view" ref="archivedListViewRef">
+          <div v-else class="list-view" ref="archivedListViewRef">
             <TransitionGroup name="list-stagger" tag="div" class="list-view-items">
               <RouterLink
                 v-for="(session, index) in filteredArchivedSessions"
@@ -1380,12 +1754,24 @@ onBeforeUnmount(() => {
                     type="button"
                     class="w-6 h-6 rounded border border-border bg-bg/90 text-primary flex items-center justify-center"
                     @click.prevent.stop="toggleSelect(session.id)"
-                    :aria-label="selectedIds.has(session.id) ? 'Deselect session' : 'Select session'"
+                    :aria-label="
+                      selectedIds.has(session.id) ? 'Deselect session' : 'Select session'
+                    "
                   >
                     <svg
                       v-if="selectedIds.has(session.id)"
-                      viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"
-                    ><polyline points="20 6 9 17 4 12"/></svg>
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.6"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      width="14"
+                      height="14"
+                      aria-hidden="true"
+                    >
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
                   </button>
                 </div>
                 <div class="cell flex-1 min-w-0">
@@ -1400,10 +1786,7 @@ onBeforeUnmount(() => {
                       Busy
                     </span>
                   </p>
-                  <div
-                    v-if="session.tags?.length"
-                    class="flex flex-wrap gap-1 mt-1"
-                  >
+                  <div v-if="session.tags?.length" class="flex flex-wrap gap-1 mt-1">
                     <span
                       v-for="tag in session.tags"
                       :key="tag"
@@ -1420,13 +1803,43 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="cell buttons">
                   <button class="button is-icon" @click.prevent.stop="toggleArchive(session)">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-primary" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"/></svg>
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.6"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      width="14"
+                      height="14"
+                      class="text-primary"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"
+                      />
+                    </svg>
                   </button>
                   <button
                     class="button is-icon hover:bg-destructive/10! hover:border-destructive!"
                     @click.prevent.stop="showDeleteModal({ kind: 'session', session })"
                   >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-destructive" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.6"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      width="14"
+                      height="14"
+                      class="text-destructive"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"
+                      />
+                    </svg>
                   </button>
                 </div>
               </RouterLink>
@@ -1467,13 +1880,37 @@ onBeforeUnmount(() => {
                       >
                         <svg
                           v-if="orchestratorSelectedIds.has(orch.id)"
-                          viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"
-                        ><polyline points="20 6 9 17 4 12"/></svg>
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.6"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          width="14"
+                          height="14"
+                          aria-hidden="true"
+                        >
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
                       </button>
                     </div>
                     <div class="cell flex-1 min-w-0">
                       <p class="title flex items-center gap-2">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="text-text-muted shrink-0" aria-hidden="true"><path d="M21 3H15v4h6V3zM9 3H3v4h6V3zM15 17H9v4h6v-4z"/><path d="M12 7v4M6 7v6h12V7"/></svg>
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.6"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          width="16"
+                          height="16"
+                          class="text-text-muted shrink-0"
+                          aria-hidden="true"
+                        >
+                          <path d="M21 3H15v4h6V3zM9 3H3v4h6V3zM15 17H9v4h6v-4z" />
+                          <path d="M12 7v4M6 7v6h12V7" />
+                        </svg>
                         <span>{{ orch.name }}</span>
                         <span
                           v-if="orch.runStatus === 'running'"
@@ -1496,7 +1933,22 @@ onBeforeUnmount(() => {
                         @click.prevent.stop="toggleArchiveOrchestrator(orch)"
                         title="Unarchive"
                       >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-primary" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"/></svg>
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.6"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          width="14"
+                          height="14"
+                          class="text-primary"
+                          aria-hidden="true"
+                        >
+                          <path
+                            d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"
+                          />
+                        </svg>
                       </button>
                       <button
                         class="button is-icon hover:bg-destructive/10! hover:border-destructive!"
@@ -1508,7 +1960,22 @@ onBeforeUnmount(() => {
                           })
                         "
                       >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-destructive" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.6"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          width="14"
+                          height="14"
+                          class="text-destructive"
+                          aria-hidden="true"
+                        >
+                          <path
+                            d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"
+                          />
+                        </svg>
                       </button>
                     </div>
                   </RouterLink>
@@ -1524,7 +1991,20 @@ onBeforeUnmount(() => {
                     @contextmenu.prevent.stop="onSessionContextMenu($event, child)"
                   >
                     <div class="cell flex-1 min-w-0 flex items-start gap-2">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-text-muted shrink-0 mt-0.5" aria-hidden="true"><path d="M3 9l9 9 9-9"/></svg>
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        width="14"
+                        height="14"
+                        class="text-text-muted shrink-0 mt-0.5"
+                        aria-hidden="true"
+                      >
+                        <path d="M3 9l9 9 9-9" />
+                      </svg>
                       <div class="min-w-0 flex-1">
                         <p class="title flex items-center gap-2 flex-wrap">
                           <span>{{ child.name }}</span>
@@ -1567,7 +2047,9 @@ onBeforeUnmount(() => {
     <div
       v-if="selectionActive || orchestratorSelectionActive"
       class="fixed bottom-4 z-40 bg-surface border border-border rounded-xl px-3 py-2 shadow-xl"
-      :class="multiselectLeft === null ? 'left-1/2 -translate-x-1/2 w-[min(960px,calc(100%-1rem))]' : ''"
+      :class="
+        multiselectLeft === null ? 'left-1/2 -translate-x-1/2 w-[min(960px,calc(100%-1rem))]' : ''
+      "
       :style="
         multiselectLeft === null
           ? undefined
@@ -1599,8 +2081,40 @@ onBeforeUnmount(() => {
             "
             :title="multiselectArchiveShouldUnarchive ? 'Unarchive selected' : 'Archive selected'"
           >
-            <svg v-if="multiselectArchiveShouldUnarchive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-warning" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"/></svg>
-            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-warning" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"/></svg>
+            <svg
+              v-if="multiselectArchiveShouldUnarchive"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              width="14"
+              height="14"
+              class="text-warning"
+              aria-hidden="true"
+            >
+              <path
+                d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"
+              />
+            </svg>
+            <svg
+              v-else
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              width="14"
+              height="14"
+              class="text-warning"
+              aria-hidden="true"
+            >
+              <path
+                d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"
+              />
+            </svg>
           </button>
           <button
             v-if="selectedIds.size > 0 || orchestratorSelectedIds.size > 0"
@@ -1610,7 +2124,21 @@ onBeforeUnmount(() => {
             aria-label="Delete selected"
             title="Delete selected"
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              width="14"
+              height="14"
+              aria-hidden="true"
+            >
+              <path
+                d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"
+              />
+            </svg>
           </button>
         </div>
       </div>
@@ -1680,6 +2208,7 @@ onBeforeUnmount(() => {
     :cursor-available="bCursorAvailable"
     :mistral-vibe-available="bMistralVibeAvailable"
     :open-code-available="bOpenCodeAvailable"
+    :codex-available="bCodexAvailable"
     :existing-tags="sessionTags"
     @create="createSession"
   />
@@ -1692,6 +2221,7 @@ onBeforeUnmount(() => {
     :cursor-available="bCursorAvailable"
     :mistral-vibe-available="bMistralVibeAvailable"
     :open-code-available="bOpenCodeAvailable"
+    :codex-available="bCodexAvailable"
     @create="createOrchestrator"
   />
 

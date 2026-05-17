@@ -41,6 +41,7 @@ const cursorAvailable = ref<boolean>(false);
 const claudeAvailable = ref<boolean>(false);
 const mistralVibeAvailable = ref<boolean>(false);
 const openCodeAvailable = ref<boolean>(false);
+const codexAvailable = ref<boolean>(false);
 const newGroupNames = ref<string[]>([]);
 const bShowWorkspaceDeleteModal = ref<boolean>(false);
 const deletingWorkspace = ref<Workspace | undefined>(undefined);
@@ -447,6 +448,7 @@ onMounted((): void => {
     :claude-available="claudeAvailable"
     :mistral-vibe-available="mistralVibeAvailable"
     :open-code-available="openCodeAvailable"
+    :codex-available="codexAvailable"
     @create-group="handleCreateGroup"
     @save="handleSaveWorkspace"
   />

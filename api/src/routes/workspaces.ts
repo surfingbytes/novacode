@@ -92,7 +92,7 @@ function normalizeWorkspaceResponse<T extends { tags?: unknown }>(w: T): Omit<T,
   return { ...w, tags: tags.length > 0 ? tags : null };
 }
 
-const WORKSPACE_AGENT_TYPES = new Set(['cursor-agent', 'claude', 'mistral-vibe']);
+const WORKSPACE_AGENT_TYPES = new Set(['cursor-agent', 'claude', 'mistral-vibe', 'open-code', 'codex']);
 
 /** Persist only known agent ids; invalid strings become null. */
 function normalizeDefaultAgentTypeForWrite(

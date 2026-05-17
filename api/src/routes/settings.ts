@@ -13,6 +13,7 @@ import {
   writeGlobalGitConfig,
   isClaudeAvailable,
   isVibeCliAvailable,
+  isCodexAcpAvailable,
   readMcpClients,
   writeMcpClients
 } from '../classes/config';
@@ -20,7 +21,7 @@ import { checkMcpClients } from '../classes/mcpConnectivityCheck';
 import { getCursorModels } from '../classes/cursorModels';
 import { getOpenCodeModels, clearOpenCodeModelsCache } from '../classes/openCodeModels';
 import { readSshKeyMaterial } from '../classes/sshKey';
-import { cursorAuthenticated, openCodeAuthenticated } from './agentAuth';
+import { cursorAuthenticated, openCodeAuthenticated, codexAuthenticated } from './agentAuth';
 
 // types
 import type { FastifyInstance } from 'fastify';
@@ -273,7 +274,8 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
             cursorAvailable: Type.Boolean(),
             claudeAvailable: Type.Boolean(),
             mistralVibeAvailable: Type.Boolean(),
-            openCodeAvailable: Type.Boolean()
+            openCodeAvailable: Type.Boolean(),
+            codexAvailable: Type.Boolean()
           })
         }
       }
@@ -287,11 +289,13 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       const vibeKeyOk = getVibeApiKeyStatus(config.configDir).configured;
       const vibeCliOk = isVibeCliAvailable(config.configDir);
       const openCodeAvailable = openCodeAuthenticated();
+      const codexAvailable = isCodexAcpAvailable(config.configDir) && codexAuthenticated();
       return {
         cursorAvailable,
         claudeAvailable,
         mistralVibeAvailable: vibeCliOk && vibeKeyOk,
-        openCodeAvailable
+        openCodeAvailable,
+        codexAvailable
       };
     }
   );

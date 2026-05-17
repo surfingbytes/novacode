@@ -50,6 +50,9 @@ RUN curl -LsSf https://mistral.ai/vibe/install.sh | bash
 # Install OpenCode CLI
 RUN curl -fsSL https://opencode.ai/install | bash
 
+# Install Codex + Codex ACP adapter
+RUN npm install -g @openai/codex @zed-industries/codex-acp
+
 WORKDIR /app
 
 # Copy compiled API
@@ -78,3 +81,4 @@ ENV HOME=/config
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["node", "build/src/index.js"]
+

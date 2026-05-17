@@ -24,6 +24,7 @@ const props = defineProps<{
   /** Whether Mistral Vibe can be used (CLI on PATH and API key configured). */
   mistralVibeAvailable?: boolean;
   /** Whether OpenCode can be used (CLI on PATH and ACP server available). */
+  codexAvailable?: boolean;
   openCodeAvailable?: boolean;
 }>();
 
@@ -71,6 +72,9 @@ const AGENT_OPTIONS = computed(() => {
   }
   if (props.openCodeAvailable !== false) {
     options.push({ value: 'open-code', label: 'OpenCode' });
+  }
+  if (props.codexAvailable !== false) {
+    options.push({ value: 'codex', label: 'Codex' });
   }
   return options;
 });

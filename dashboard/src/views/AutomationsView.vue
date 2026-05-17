@@ -22,7 +22,7 @@ const intervalPresets = [
   { label: '6 hours', value: 360 },
   { label: '12 hours', value: 720 },
   { label: '24 hours (daily)', value: 1440 },
-  { label: '7 days (weekly)', value: 10080 },
+  { label: '7 days (weekly)', value: 10080 }
 ];
 
 // -------------------------------------------------- Refs --------------------------------------------------
@@ -275,7 +275,8 @@ async function createAutomation(): Promise<void> {
     showSuccess('Automation created');
   } catch (e: unknown) {
     const caughtError = e as { response?: { data?: { error?: string } }; message?: string };
-    createError.value = caughtError.response?.data?.error ?? caughtError.message ?? 'Failed to create';
+    createError.value =
+      caughtError.response?.data?.error ?? caughtError.message ?? 'Failed to create';
   } finally {
     bCreating.value = false;
   }
@@ -413,26 +414,6 @@ function changedFilesList(run: AutomationRun): Array<{ status: string; file: str
   }
 }
 
-function statusColor(status: string): string {
-  if (status === 'completed') {
-    return 'text-green-400';
-  }
-  if (status === 'failed') {
-    return 'text-destructive';
-  }
-  return 'text-yellow-400';
-}
-
-function statusIcon(status: string): string {
-  if (status === 'completed') {
-    return 'check_circle';
-  }
-  if (status === 'failed') {
-    return 'error';
-  }
-  return 'hourglass_empty';
-}
-
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 
 onMounted(async () => {
@@ -461,7 +442,19 @@ onUnmounted(() => {
           class="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-1 self-start"
           @click="openCreateForm"
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            width="16"
+            height="16"
+            aria-hidden="true"
+          >
+            <path d="M12 5v14M5 12h14" />
+          </svg>
           New automation
         </button>
       </template>
@@ -474,14 +467,46 @@ onUnmounted(() => {
           :class="{ 'is-active': viewMode === 'list' }"
           @click="setViewMode('list')"
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            width="16"
+            height="16"
+            aria-hidden="true"
+          >
+            <line x1="8" y1="6" x2="21" y2="6" />
+            <line x1="8" y1="12" x2="21" y2="12" />
+            <line x1="8" y1="18" x2="21" y2="18" />
+            <line x1="3" y1="6" x2="3.01" y2="6" />
+            <line x1="3" y1="12" x2="3.01" y2="12" />
+            <line x1="3" y1="18" x2="3.01" y2="18" />
+          </svg>
         </button>
         <button
           class="button is-icon"
           :class="{ 'is-active': viewMode === 'grid' }"
           @click="setViewMode('grid')"
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            width="16"
+            height="16"
+            aria-hidden="true"
+          >
+            <rect x="3" y="3" width="7" height="7" />
+            <rect x="14" y="3" width="7" height="7" />
+            <rect x="3" y="14" width="7" height="7" />
+            <rect x="14" y="14" width="7" height="7" />
+          </svg>
         </button>
       </div>
     </div>
@@ -500,48 +525,239 @@ onUnmounted(() => {
       {{ successMessage }}
     </div>
 
-      <!-- Loading -->
-      <div v-if="bLoading" class="flex items-center gap-2 py-8 text-text-muted text-sm">
-        <div class="w-5 h-5 border-2 border-surface border-t-primary rounded-full animate-spin" />
-        Loading automations…
-      </div>
+    <!-- Loading -->
+    <div v-if="bLoading" class="flex items-center gap-2 py-8 text-text-muted text-sm">
+      <div class="w-5 h-5 border-2 border-surface border-t-primary rounded-full animate-spin" />
+      Loading automations…
+    </div>
 
-      <!-- Empty -->
-      <div
-        v-else-if="automations.length === 0"
-        class="rounded-lg border border-fg/10 bg-fg/[0.02] py-16 px-4 text-center"
+    <!-- Empty -->
+    <div
+      v-else-if="automations.length === 0"
+      class="rounded-lg border border-fg/10 bg-fg/[0.02] py-16 px-4 text-center"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        width="40"
+        height="40"
+        class="text-text-muted mb-3 block mx-auto"
+        aria-hidden="true"
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="40" height="40" class="text-text-muted mb-3 block mx-auto" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        <p class="text-text-muted text-sm">No automations yet.</p>
-        <p class="text-text-muted text-xs mt-1">
-          Create one to schedule an agent to run automatically.
-        </p>
-      </div>
+        <circle cx="12" cy="12" r="10" />
+        <polyline points="12 6 12 12 16 14" />
+      </svg>
+      <p class="text-text-muted text-sm">No automations yet.</p>
+      <p class="text-text-muted text-xs mt-1">
+        Create one to schedule an agent to run automatically.
+      </p>
+    </div>
 
-      <!-- Main layout: list + report panel -->
-      <div v-else-if="!bLoading" class="flex flex-col lg:flex-row gap-6 min-h-[500px]">
-        <!-- Left: automation list -->
-        <div class="w-full lg:flex-1 min-w-0 space-y-4">
-          <!-- Automation list -->
-          <ul
-            v-if="viewMode === 'list'"
-            class="rounded-lg border border-fg/10 bg-fg/[0.02] divide-y divide-fg/10 overflow-hidden"
+    <!-- Main layout: list + report panel -->
+    <div v-else-if="!bLoading" class="flex flex-col lg:flex-row gap-6 min-h-[500px]">
+      <!-- Left: automation list -->
+      <div class="w-full lg:flex-1 min-w-0 space-y-4">
+        <!-- Automation list -->
+        <ul
+          v-if="viewMode === 'list'"
+          class="rounded-lg border border-fg/10 bg-fg/[0.02] divide-y divide-fg/10 overflow-hidden"
+        >
+          <li
+            v-for="a in automations"
+            :key="a.id"
+            class="px-4 py-3 hover:bg-fg/[0.03] transition-colors cursor-pointer"
+            :class="{
+              'ring-1 ring-inset ring-primary/30 bg-primary/[0.02]': selectedAutomation?.id === a.id
+            }"
+            @click="selectAutomation(a)"
           >
-            <li
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <p class="text-sm font-medium text-text-primary truncate">{{ a.name }}</p>
+                  <!-- enabled badge -->
+                  <span
+                    class="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                    :class="
+                      a.enabled ? 'bg-green-500/15 text-green-400' : 'bg-fg/10 text-text-muted'
+                    "
+                  >
+                    {{ a.enabled ? 'active' : 'disabled' }}
+                  </span>
+                  <!-- agent badge -->
+                  <span
+                    class="text-[10px] px-1.5 py-0.5 rounded bg-fg/10 text-text-muted font-medium"
+                  >
+                    {{ agentTypeLabel(a.agentType) }}
+                  </span>
+                </div>
+                <div class="flex items-center gap-3 mt-1 text-xs text-text-muted flex-wrap">
+                  <span>{{ workspaceName(a.workspaceId) }}</span>
+                  <span>every {{ formatInterval(a.intervalMinutes) }}</span>
+                  <span>next: {{ formatNextRun(a) }}</span>
+                  <span v-if="a.lastRunAt">last: {{ formatDate(a.lastRunAt) }}</span>
+                </div>
+                <p class="text-xs text-text-muted mt-1 truncate opacity-70">{{ a.prompt }}</p>
+              </div>
+              <!-- Actions -->
+              <div class="flex items-center gap-1 shrink-0" @click.stop>
+                <!-- toggle -->
+                <button
+                  type="button"
+                  :title="a.enabled ? 'Disable' : 'Enable'"
+                  class="p-1.5 text-text-muted hover:text-text-primary hover:bg-fg/[0.06] rounded-lg transition-colors"
+                  @click="toggleEnabled(a)"
+                >
+                  <svg
+                    v-if="a.enabled"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    width="16"
+                    height="16"
+                    aria-hidden="true"
+                  >
+                    <rect x="6" y="4" width="4" height="16" />
+                    <rect x="14" y="4" width="4" height="16" />
+                  </svg>
+                  <svg
+                    v-else
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    width="16"
+                    height="16"
+                    aria-hidden="true"
+                  >
+                    <polygon points="5 3 19 12 5 21 5 3" />
+                  </svg>
+                </button>
+                <!-- trigger now -->
+                <button
+                  type="button"
+                  title="Run now"
+                  class="p-1.5 text-text-muted hover:text-primary hover:bg-primary/[0.06] rounded-lg transition-colors"
+                  :disabled="triggeringId === a.id"
+                  @click="triggerNow(a)"
+                >
+                  <span
+                    v-if="triggeringId === a.id"
+                    class="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin block"
+                  />
+                  <svg
+                    v-else
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    width="16"
+                    height="16"
+                    aria-hidden="true"
+                  >
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                  </svg>
+                </button>
+                <!-- edit -->
+                <button
+                  type="button"
+                  title="Edit"
+                  class="p-1.5 text-text-muted hover:text-text-primary hover:bg-fg/[0.06] rounded-lg transition-colors"
+                  @click="startEdit(a)"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    width="16"
+                    height="16"
+                    aria-hidden="true"
+                  >
+                    <path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6" />
+                    <path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z" />
+                  </svg>
+                </button>
+                <!-- delete -->
+                <button
+                  type="button"
+                  title="Delete"
+                  class="p-1.5 text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
+                  @click="confirmDelete(a)"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    width="16"
+                    height="16"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </li>
+        </ul>
+
+        <!-- Automation grid -->
+        <div v-else class="grid-view">
+          <div class="grid-view-items">
+            <article
               v-for="a in automations"
               :key="a.id"
-              class="px-4 py-3 hover:bg-fg/[0.03] transition-colors cursor-pointer"
+              class="group grid-item cursor-pointer"
               :class="{
                 'ring-1 ring-inset ring-primary/30 bg-primary/[0.02]':
                   selectedAutomation?.id === a.id
               }"
               @click="selectAutomation(a)"
             >
-              <div class="flex items-start justify-between gap-3">
-                <div class="min-w-0 flex-1">
-                  <div class="flex items-center gap-2 flex-wrap">
-                    <p class="text-sm font-medium text-text-primary truncate">{{ a.name }}</p>
-                    <!-- enabled badge -->
+              <div class="top">
+                <div class="icon">
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    width="16"
+                    height="16"
+                    aria-hidden="true"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
+                </div>
+                <div class="info min-w-0">
+                  <p class="title truncate">{{ a.name }}</p>
+                  <p class="text-xs text-text-muted mt-1">
+                    {{ workspaceName(a.workspaceId) }} · every
+                    {{ formatInterval(a.intervalMinutes) }}
+                  </p>
+                  <p class="text-xs text-text-muted mt-1">next: {{ formatNextRun(a) }}</p>
+                  <p class="text-xs text-text-muted mt-1 truncate opacity-70">{{ a.prompt }}</p>
+                  <div class="flex items-center gap-2 mt-2">
                     <span
                       class="text-[10px] px-1.5 py-0.5 rounded font-medium"
                       :class="
@@ -550,38 +766,52 @@ onUnmounted(() => {
                     >
                       {{ a.enabled ? 'active' : 'disabled' }}
                     </span>
-                    <!-- agent badge -->
                     <span
                       class="text-[10px] px-1.5 py-0.5 rounded bg-fg/10 text-text-muted font-medium"
                     >
                       {{ agentTypeLabel(a.agentType) }}
                     </span>
                   </div>
-                  <div class="flex items-center gap-3 mt-1 text-xs text-text-muted flex-wrap">
-                    <span>{{ workspaceName(a.workspaceId) }}</span>
-                    <span>every {{ formatInterval(a.intervalMinutes) }}</span>
-                    <span>next: {{ formatNextRun(a) }}</span>
-                    <span v-if="a.lastRunAt">last: {{ formatDate(a.lastRunAt) }}</span>
-                  </div>
-                  <p class="text-xs text-text-muted mt-1 truncate opacity-70">{{ a.prompt }}</p>
                 </div>
-                <!-- Actions -->
-                <div class="flex items-center gap-1 shrink-0" @click.stop>
-                  <!-- toggle -->
+                <div class="buttons" @click.stop>
                   <button
-                    type="button"
+                    class="button is-icon is-transparent"
                     :title="a.enabled ? 'Disable' : 'Enable'"
-                    class="p-1.5 text-text-muted hover:text-text-primary hover:bg-fg/[0.06] rounded-lg transition-colors"
                     @click="toggleEnabled(a)"
                   >
-                    <svg v-if="a.enabled" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-                    <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    <svg
+                      v-if="a.enabled"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.6"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      width="14"
+                      height="14"
+                      aria-hidden="true"
+                    >
+                      <rect x="6" y="4" width="4" height="16" />
+                      <rect x="14" y="4" width="4" height="16" />
+                    </svg>
+                    <svg
+                      v-else
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.6"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      width="14"
+                      height="14"
+                      aria-hidden="true"
+                    >
+                      <polygon points="5 3 19 12 5 21 5 3" />
+                    </svg>
                   </button>
-                  <!-- trigger now -->
                   <button
-                    type="button"
+                    class="button is-icon is-transparent"
                     title="Run now"
-                    class="p-1.5 text-text-muted hover:text-primary hover:bg-primary/[0.06] rounded-lg transition-colors"
                     :disabled="triggeringId === a.id"
                     @click="triggerNow(a)"
                   >
@@ -589,253 +819,383 @@ onUnmounted(() => {
                       v-if="triggeringId === a.id"
                       class="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin block"
                     />
-                    <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                    <svg
+                      v-else
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.6"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      width="14"
+                      height="14"
+                      aria-hidden="true"
+                    >
+                      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                    </svg>
                   </button>
-                  <!-- edit -->
-                  <button
-                    type="button"
-                    title="Edit"
-                    class="p-1.5 text-text-muted hover:text-text-primary hover:bg-fg/[0.06] rounded-lg transition-colors"
-                    @click="startEdit(a)"
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
+                  <button class="button is-icon is-transparent" title="Edit" @click="startEdit(a)">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.6"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      width="14"
+                      height="14"
+                      aria-hidden="true"
+                    >
+                      <path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6" />
+                      <path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z" />
+                    </svg>
                   </button>
-                  <!-- delete -->
                   <button
-                    type="button"
+                    class="button is-icon is-transparent is-delete"
                     title="Delete"
-                    class="p-1.5 text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
                     @click="confirmDelete(a)"
                   >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.6"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      width="14"
+                      height="14"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"
+                      />
+                    </svg>
                   </button>
                 </div>
               </div>
-            </li>
-          </ul>
-
-          <!-- Automation grid -->
-          <div v-else class="grid-view">
-            <div class="grid-view-items">
-              <article
-                v-for="a in automations"
-                :key="a.id"
-                class="group grid-item cursor-pointer"
-                :class="{
-                  'ring-1 ring-inset ring-primary/30 bg-primary/[0.02]': selectedAutomation?.id === a.id
-                }"
-                @click="selectAutomation(a)"
-              >
-                <div class="top">
-                  <div class="icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                  </div>
-                  <div class="info min-w-0">
-                    <p class="title truncate">{{ a.name }}</p>
-                    <p class="text-xs text-text-muted mt-1">
-                      {{ workspaceName(a.workspaceId) }} · every {{ formatInterval(a.intervalMinutes) }}
-                    </p>
-                    <p class="text-xs text-text-muted mt-1">
-                      next: {{ formatNextRun(a) }}
-                    </p>
-                    <p class="text-xs text-text-muted mt-1 truncate opacity-70">{{ a.prompt }}</p>
-                    <div class="flex items-center gap-2 mt-2">
-                      <span
-                        class="text-[10px] px-1.5 py-0.5 rounded font-medium"
-                        :class="a.enabled ? 'bg-green-500/15 text-green-400' : 'bg-fg/10 text-text-muted'"
-                      >
-                        {{ a.enabled ? 'active' : 'disabled' }}
-                      </span>
-                      <span class="text-[10px] px-1.5 py-0.5 rounded bg-fg/10 text-text-muted font-medium">
-                        {{ agentTypeLabel(a.agentType) }}
-                      </span>
-                    </div>
-                  </div>
-                  <div class="buttons" @click.stop>
-                    <button
-                      class="button is-icon is-transparent"
-                      :title="a.enabled ? 'Disable' : 'Enable'"
-                      @click="toggleEnabled(a)"
-                    >
-                      <svg v-if="a.enabled" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-                      <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                    </button>
-                    <button
-                      class="button is-icon is-transparent"
-                      title="Run now"
-                      :disabled="triggeringId === a.id"
-                      @click="triggerNow(a)"
-                    >
-                      <span
-                        v-if="triggeringId === a.id"
-                        class="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin block"
-                      />
-                      <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                    </button>
-                    <button class="button is-icon is-transparent" title="Edit" @click="startEdit(a)">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
-                    </button>
-                    <button class="button is-icon is-transparent is-delete" title="Delete" @click="confirmDelete(a)">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
-                    </button>
-                  </div>
-                </div>
-              </article>
-            </div>
-          </div>
-        </div>
-
-        <!-- Right: run report panel -->
-        <div
-          v-if="selectedAutomation"
-          class="w-full lg:w-[420px] lg:shrink-0 flex flex-col gap-3 mt-4 lg:mt-0"
-        >
-          <div class="rounded-lg border border-fg/10 bg-fg/[0.02] overflow-hidden flex flex-col">
-            <div class="px-4 py-3 border-b border-fg/10 flex items-center justify-between">
-              <h2 class="text-sm font-medium text-text-primary truncate">
-                {{ selectedAutomation.name }} — Runs
-              </h2>
-              <span class="text-xs text-text-muted">{{ runs.length }} runs</span>
-            </div>
-
-            <!-- runs loading -->
-            <div
-              v-if="bRunsLoading"
-              class="flex items-center gap-2 px-4 py-6 text-text-muted text-sm"
-            >
-              <div
-                class="w-4 h-4 border-2 border-surface border-t-primary rounded-full animate-spin"
-              />
-              Loading runs…
-            </div>
-
-            <!-- no runs -->
-            <div
-              v-else-if="runs.length === 0"
-              class="px-4 py-10 text-center text-text-muted text-sm"
-            >
-              No runs yet. Trigger one or wait for the schedule.
-            </div>
-
-            <!-- run list -->
-            <ul v-else class="divide-y divide-fg/10 max-h-[280px] overflow-y-auto">
-              <li
-                v-for="run in runs"
-                :key="run.id"
-                class="px-4 py-2.5 hover:bg-fg/[0.04] cursor-pointer transition-colors flex items-center gap-3"
-                :class="{ 'bg-fg/[0.06]': selectedRun?.id === run.id }"
-                @click="selectedRun = selectedRun?.id === run.id ? null : run"
-              >
-                <svg v-if="run.status === 'completed'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="shrink-0 text-green-400" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-                <svg v-else-if="run.status === 'failed'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="shrink-0 text-destructive" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="shrink-0 text-yellow-400" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                <div class="min-w-0 flex-1">
-                  <p class="text-xs text-text-primary">{{ formatDate(run.startedAt) }}</p>
-                  <p class="text-[11px] text-text-muted">
-                    {{ run.status }}
-                    <span v-if="run.finishedAt">
-                      ·
-                      {{
-                        Math.round(
-                          (new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime()) /
-                            1000
-                        )
-                      }}s
-                    </span>
-                    <span v-if="changedFilesList(run).length > 0">
-                      · {{ changedFilesList(run).length }} file{{
-                        changedFilesList(run).length !== 1 ? 's' : ''
-                      }}
-                      changed
-                    </span>
-                  </p>
-                </div>
-                <svg v-if="selectedRun?.id === run.id" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-text-muted" aria-hidden="true"><polyline points="18 15 12 9 6 15"/></svg>
-                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" class="text-text-muted" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
-              </li>
-            </ul>
-          </div>
-
-          <!-- Run detail -->
-          <div
-            v-if="selectedRun"
-            class="rounded-lg border border-fg/10 bg-fg/[0.02] overflow-hidden"
-          >
-            <div class="px-4 py-3 border-b border-fg/10 flex items-center gap-2">
-              <svg v-if="selectedRun.status === 'completed'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="text-green-400" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-              <svg v-else-if="selectedRun.status === 'failed'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="text-destructive" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="text-yellow-400" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-              <span class="text-sm font-medium text-text-primary capitalize">{{
-                selectedRun.status
-              }}</span>
-              <span class="text-xs text-text-muted ml-auto">{{
-                formatDate(selectedRun.startedAt)
-              }}</span>
-            </div>
-
-            <div class="p-4 space-y-4 max-h-[420px] overflow-y-auto">
-              <!-- Changed files -->
-              <div v-if="changedFilesList(selectedRun).length > 0">
-                <p class="text-xs font-medium text-text-muted mb-2 flex items-center gap-1">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-                  Changed files ({{ changedFilesList(selectedRun).length }})
-                </p>
-                <ul class="space-y-1">
-                  <li
-                    v-for="f in changedFilesList(selectedRun)"
-                    :key="f.file"
-                    class="flex items-center gap-2 text-xs"
-                  >
-                    <span class="font-mono text-yellow-400 w-5 shrink-0 text-center">{{
-                      f.status
-                    }}</span>
-                    <span class="text-text-muted font-mono truncate">{{ f.file }}</span>
-                  </li>
-                </ul>
-              </div>
-              <div v-else-if="selectedRun.status === 'completed'" class="text-xs text-text-muted">
-                No files changed.
-              </div>
-
-              <!-- Error -->
-              <div v-if="selectedRun.error">
-                <p class="text-xs font-medium text-destructive mb-1 flex items-center gap-1">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                  Error
-                </p>
-                <pre
-                  class="text-xs text-destructive/80 bg-destructive/5 rounded p-2 whitespace-pre-wrap break-all font-mono"
-                  >{{ selectedRun.error }}</pre
-                >
-              </div>
-
-              <!-- Agent response -->
-              <div v-if="selectedRun.agentResponse">
-                <p class="text-xs font-medium text-text-muted mb-2 flex items-center gap-1">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2M8 11h.01M16 11h.01M9 16h6"/></svg>
-                  Agent response
-                </p>
-                <div
-                  class="text-xs text-text-primary bg-surface rounded p-3 whitespace-pre-wrap break-words max-h-64 overflow-y-auto"
-                >
-                  {{ selectedRun.agentResponse }}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Placeholder when nothing selected -->
-        <div
-          v-else-if="automations.length > 0"
-          class="w-full lg:w-[420px] lg:shrink-0 rounded-lg border border-fg/10 bg-fg/[0.02] flex items-center justify-center text-text-muted text-sm py-16 text-center px-6 mt-4 lg:mt-0"
-        >
-          <div>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="32" height="32" class="mb-2 block mx-auto opacity-40" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-            <p>Select an automation to view run reports</p>
+            </article>
           </div>
         </div>
       </div>
+
+      <!-- Right: run report panel -->
+      <div
+        v-if="selectedAutomation"
+        class="w-full lg:w-[420px] lg:shrink-0 flex flex-col gap-3 mt-4 lg:mt-0"
+      >
+        <div class="rounded-lg border border-fg/10 bg-fg/[0.02] overflow-hidden flex flex-col">
+          <div class="px-4 py-3 border-b border-fg/10 flex items-center justify-between">
+            <h2 class="text-sm font-medium text-text-primary truncate">
+              {{ selectedAutomation.name }} — Runs
+            </h2>
+            <span class="text-xs text-text-muted">{{ runs.length }} runs</span>
+          </div>
+
+          <!-- runs loading -->
+          <div
+            v-if="bRunsLoading"
+            class="flex items-center gap-2 px-4 py-6 text-text-muted text-sm"
+          >
+            <div
+              class="w-4 h-4 border-2 border-surface border-t-primary rounded-full animate-spin"
+            />
+            Loading runs…
+          </div>
+
+          <!-- no runs -->
+          <div v-else-if="runs.length === 0" class="px-4 py-10 text-center text-text-muted text-sm">
+            No runs yet. Trigger one or wait for the schedule.
+          </div>
+
+          <!-- run list -->
+          <ul v-else class="divide-y divide-fg/10 max-h-[280px] overflow-y-auto">
+            <li
+              v-for="run in runs"
+              :key="run.id"
+              class="px-4 py-2.5 hover:bg-fg/[0.04] cursor-pointer transition-colors flex items-center gap-3"
+              :class="{ 'bg-fg/[0.06]': selectedRun?.id === run.id }"
+              @click="selectedRun = selectedRun?.id === run.id ? null : run"
+            >
+              <svg
+                v-if="run.status === 'completed'"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                width="16"
+                height="16"
+                class="shrink-0 text-green-400"
+                aria-hidden="true"
+              >
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              <svg
+                v-else-if="run.status === 'failed'"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                width="16"
+                height="16"
+                class="shrink-0 text-destructive"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <svg
+                v-else
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                width="16"
+                height="16"
+                class="shrink-0 text-yellow-400"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+              <div class="min-w-0 flex-1">
+                <p class="text-xs text-text-primary">{{ formatDate(run.startedAt) }}</p>
+                <p class="text-[11px] text-text-muted">
+                  {{ run.status }}
+                  <span v-if="run.finishedAt">
+                    ·
+                    {{
+                      Math.round(
+                        (new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime()) /
+                          1000
+                      )
+                    }}s
+                  </span>
+                  <span v-if="changedFilesList(run).length > 0">
+                    · {{ changedFilesList(run).length }} file{{
+                      changedFilesList(run).length !== 1 ? 's' : ''
+                    }}
+                    changed
+                  </span>
+                </p>
+              </div>
+              <svg
+                v-if="selectedRun?.id === run.id"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                width="14"
+                height="14"
+                class="text-text-muted"
+                aria-hidden="true"
+              >
+                <polyline points="18 15 12 9 6 15" />
+              </svg>
+              <svg
+                v-else
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                width="14"
+                height="14"
+                class="text-text-muted"
+                aria-hidden="true"
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Run detail -->
+        <div v-if="selectedRun" class="rounded-lg border border-fg/10 bg-fg/[0.02] overflow-hidden">
+          <div class="px-4 py-3 border-b border-fg/10 flex items-center gap-2">
+            <svg
+              v-if="selectedRun.status === 'completed'"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              width="16"
+              height="16"
+              class="text-green-400"
+              aria-hidden="true"
+            >
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            <svg
+              v-else-if="selectedRun.status === 'failed'"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              width="16"
+              height="16"
+              class="text-destructive"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <svg
+              v-else
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              width="16"
+              height="16"
+              class="text-yellow-400"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+            <span class="text-sm font-medium text-text-primary capitalize">{{
+              selectedRun.status
+            }}</span>
+            <span class="text-xs text-text-muted ml-auto">{{
+              formatDate(selectedRun.startedAt)
+            }}</span>
+          </div>
+
+          <div class="p-4 space-y-4 max-h-[420px] overflow-y-auto">
+            <!-- Changed files -->
+            <div v-if="changedFilesList(selectedRun).length > 0">
+              <p class="text-xs font-medium text-text-muted mb-2 flex items-center gap-1">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  width="14"
+                  height="14"
+                  aria-hidden="true"
+                >
+                  <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                  <line x1="2" y1="10" x2="22" y2="10" />
+                </svg>
+                Changed files ({{ changedFilesList(selectedRun).length }})
+              </p>
+              <ul class="space-y-1">
+                <li
+                  v-for="f in changedFilesList(selectedRun)"
+                  :key="f.file"
+                  class="flex items-center gap-2 text-xs"
+                >
+                  <span class="font-mono text-yellow-400 w-5 shrink-0 text-center">{{
+                    f.status
+                  }}</span>
+                  <span class="text-text-muted font-mono truncate">{{ f.file }}</span>
+                </li>
+              </ul>
+            </div>
+            <div v-else-if="selectedRun.status === 'completed'" class="text-xs text-text-muted">
+              No files changed.
+            </div>
+
+            <!-- Error -->
+            <div v-if="selectedRun.error">
+              <p class="text-xs font-medium text-destructive mb-1 flex items-center gap-1">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  width="14"
+                  height="14"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+                Error
+              </p>
+              <pre
+                class="text-xs text-destructive/80 bg-destructive/5 rounded p-2 whitespace-pre-wrap break-all font-mono"
+                >{{ selectedRun.error }}</pre
+              >
+            </div>
+
+            <!-- Agent response -->
+            <div v-if="selectedRun.agentResponse">
+              <p class="text-xs font-medium text-text-muted mb-2 flex items-center gap-1">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  width="14"
+                  height="14"
+                  aria-hidden="true"
+                >
+                  <rect x="2" y="7" width="20" height="14" rx="2" />
+                  <path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2M8 11h.01M16 11h.01M9 16h6" />
+                </svg>
+                Agent response
+              </p>
+              <div
+                class="text-xs text-text-primary bg-surface rounded p-3 whitespace-pre-wrap break-words max-h-64 overflow-y-auto"
+              >
+                {{ selectedRun.agentResponse }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Placeholder when nothing selected -->
+      <div
+        v-else-if="automations.length > 0"
+        class="w-full lg:w-[420px] lg:shrink-0 rounded-lg border border-fg/10 bg-fg/[0.02] flex items-center justify-center text-text-muted text-sm py-16 text-center px-6 mt-4 lg:mt-0"
+      >
+        <div>
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            width="32"
+            height="32"
+            class="mb-2 block mx-auto opacity-40"
+            aria-hidden="true"
+          >
+            <line x1="18" y1="20" x2="18" y2="10" />
+            <line x1="12" y1="20" x2="12" y2="4" />
+            <line x1="6" y1="20" x2="6" y2="14" />
+          </svg>
+          <p>Select an automation to view run reports</p>
+        </div>
+      </div>
+    </div>
 
     <!-- Create modal -->
     <div
@@ -904,7 +1264,12 @@ onUnmounted(() => {
         <p v-if="createError" class="text-sm text-destructive mt-2">{{ createError }}</p>
         <div class="flex items-center justify-end gap-2 mt-4">
           <label class="flex items-center gap-2 cursor-pointer mr-auto">
-            <input v-model="bNewEnabled" type="checkbox" class="accent-primary w-4 h-4" :disabled="bCreating" />
+            <input
+              v-model="bNewEnabled"
+              type="checkbox"
+              class="accent-primary w-4 h-4"
+              :disabled="bCreating"
+            />
             <span class="text-sm text-text-muted">Enabled</span>
           </label>
           <button
@@ -975,7 +1340,12 @@ onUnmounted(() => {
           </div>
           <div class="flex items-end pb-0.5">
             <label class="flex items-center gap-2 cursor-pointer">
-              <input v-model="bEditEnabled" type="checkbox" class="accent-primary w-4 h-4" :disabled="bSavingEdit" />
+              <input
+                v-model="bEditEnabled"
+                type="checkbox"
+                class="accent-primary w-4 h-4"
+                :disabled="bSavingEdit"
+              />
               <span class="text-sm text-text-muted">Enabled</span>
             </label>
           </div>
