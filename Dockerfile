@@ -42,7 +42,9 @@ ENV PATH="/root/.local/bin:/root/.opencode/bin:/usr/local/bin:${PATH}"
 RUN curl https://cursor.com/install -fsS | bash
 
 # Install Cursor ACP adapter
-RUN npm install -g @blowmage/cursor-agent-acp
+RUN npm install -g @blowmage/cursor-agent-acp \
+    && sed -i 's/text: `${processingText} (${elapsed}s)`,/text: `${this.getRandomProcessingText()} (${elapsed}s)`,/' \
+      /usr/local/lib/node_modules/@blowmage/cursor-agent-acp/dist/protocol/prompt.js
 
 # Install Mistral Vibe CLI
 RUN curl -LsSf https://mistral.ai/vibe/install.sh | bash
