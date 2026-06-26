@@ -318,6 +318,72 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
+  // POST /api/git/workspace/:workspaceId/discard — restore selected files to HEAD / remove untracked
+  fastifyInstance.post(
+    '/api/git/workspace/:workspaceId/discard',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        params: Type.Object({ workspaceId: Type.String() }),
+        body: Type.Object({
+          files: Type.Array(Type.String(), { minItems: 1 }),
+          repo: Type.Optional(Type.String())
+        }),
+        response: {
+          200: Type.Object({ discarded: Type.Number() }),
+          404: Type.Object({ error: Type.String() }),
+          400: Type.Object({ error: Type.String() })
+        }
+      }
+    },
+    async (request, reply) => {
+      const workspace = await db.getWorkspace(request.params.workspaceId);
+      if (!workspace) return reply.code(404).send({ error: 'Workspace not found' });
+
+      const workspaceRel = workspace.path.replace(/^\//, '');
+      const baseCwd = config.workspaceBrowseRoot + '/' + (workspaceRel || '.');
+      const repo = request.body.repo ?? '';
+      const cwd = repoCwd(baseCwd, repo);
+      const opts = { cwd };
+
+      try {
+        const { stdout } = await execFileAsync('git', ['status', '--porcelain', '-u'], opts);
+        const statusByRepoFile = new Map<string, string>();
+        for (const line of stdout.split('\n').filter(Boolean)) {
+          const repoFile = line.slice(3).trim();
+          statusByRepoFile.set(repoFile, line.slice(0, 2).trim());
+        }
+
+        const tracked: string[] = [];
+        const untracked: string[] = [];
+        for (const workspaceFile of request.body.files) {
+          const repoFile = toRepoRelativePath(repo, workspaceFile);
+          const status = statusByRepoFile.get(repoFile);
+          if (!status) {
+            return reply.code(400).send({ error: `No pending changes for ${workspaceFile}` });
+          }
+          if (status === '??') {
+            untracked.push(repoFile);
+          } else {
+            tracked.push(repoFile);
+          }
+        }
+
+        if (tracked.length > 0) {
+          await execFileAsync('git', ['restore', '--staged', '--worktree', '--', ...tracked], opts);
+        }
+        if (untracked.length > 0) {
+          await execFileAsync('git', ['clean', '-fd', '--', ...untracked], opts);
+        }
+
+        return { discarded: tracked.length + untracked.length };
+      } catch (err) {
+        const stderr = (err as NodeJS.ErrnoException & { stderr?: string }).stderr ?? '';
+        return reply.code(400).send({ error: stderr || (err as Error).message });
+      }
+    }
+  );
+
   // POST /api/git/workspace/:workspaceId/push — push current branch to remote
   fastifyInstance.post(
     '/api/git/workspace/:workspaceId/push',
