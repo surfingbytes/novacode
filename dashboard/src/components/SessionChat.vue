@@ -136,19 +136,7 @@ const fileInputEl = ref<HTMLInputElement | null>(null);
 const lightboxSrc = ref<string | null>(null);
 const bShowScrollToBottom = ref(false);
 const modelSelection = ref<string>('auto');
-const bShowModelSelector = ref(false);
-
-const HIDE_THINKING_LS_KEY = 'nova:chat:hideThinkingOutput';
-
-function readHideThinkingFromLs(): boolean {
-  try {
-    return localStorage.getItem(HIDE_THINKING_LS_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-const hideThinkingOutput = ref(readHideThinkingFromLs());
+const hideThinkingOutput = ref(false);
 const availableModels = ref<CursorModelOption[]>([]);
 const openCodeModels = ref<CursorModelOption[]>([]);
 const bModelsLoading = ref(false);
@@ -252,16 +240,110 @@ function onFileChange(e: Event) {
   input.value = '';
 }
 
+interface GroupedModelOption extends CursorModelOption {
+  family: string;
+  version: string;
+  versionRank: number;
+}
+
+function titleCaseToken(value: string): string {
+  return value
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function modelVersionRank(version: string): number {
+  const match = version.match(/\d+(?:\.\d+)*/);
+  if (!match) return 0;
+  return match[0]
+    .split('.')
+    .map((part) => Number.parseInt(part, 10))
+    .reduce((acc, part) => acc * 100 + (Number.isFinite(part) ? part : 0), 0);
+}
+
+function groupModelOption(option: CursorModelOption): GroupedModelOption {
+  if (option.id === 'auto') {
+    return { ...option, family: 'Auto', version: 'Default', versionRank: Number.MAX_SAFE_INTEGER };
+  }
+
+  const source = `${option.label} ${option.id}`;
+  const lower = source.toLowerCase();
+  const idTail = option.id.split('/').pop() ?? option.id;
+  const idParts = idTail.split(/[-_\s]+/).filter(Boolean);
+
+  let family = titleCaseToken(idParts[0] ?? option.label);
+  let version = titleCaseToken(idParts.slice(1).join(' ')) || option.label;
+
+  const knownFamilies = [
+    { family: 'GPT', pattern: /\bgpt[-_\s]?([\d.]+)?(?:[-_\s]?(.+))?/i },
+    { family: 'Claude', pattern: /\bclaude[-_\s]?([\d.]+)?(?:[-_\s]?(.+))?/i },
+    { family: 'Gemini', pattern: /\bgemini[-_\s]?([\d.]+)?(?:[-_\s]?(.+))?/i },
+    { family: 'Composer', pattern: /\bcomposer[-_\s]?([\d.]+)?(?:[-_\s]?(.+))?/i },
+    { family: 'Codex', pattern: /\bcodex[-_\s]?([\d.]+)?(?:[-_\s]?(.+))?/i }
+  ];
+
+  for (const known of knownFamilies) {
+    const match = lower.match(known.pattern);
+    if (!match) continue;
+    family = known.family;
+    const suffix = [match[1], match[2]].filter(Boolean).join(' ');
+    version = suffix ? titleCaseToken(suffix) : option.label;
+    break;
+  }
+
+  return { ...option, family, version, versionRank: modelVersionRank(version) };
+}
+
+const bSupportsModelSelection = computed(
+  () => session.value?.agentType === 'cursor-agent' || session.value?.agentType === 'open-code'
+);
+
+const activeModelOptions = computed<CursorModelOption[]>(() => {
+  const options = session.value?.agentType === 'open-code' ? openCodeModels.value : availableModels.value;
+  if (!modelSelection.value || options.some((m) => m.id === modelSelection.value)) return options;
+  return [...options, { id: modelSelection.value, label: modelSelection.value }];
+});
+
+const groupedModelOptions = computed<GroupedModelOption[]>(() =>
+  activeModelOptions.value.map(groupModelOption)
+);
+
+const modelFamilies = computed<string[]>(() => {
+  const families = Array.from(new Set(groupedModelOptions.value.map((m) => m.family)));
+  return families.sort((a, b) => {
+    if (a === 'Auto') return -1;
+    if (b === 'Auto') return 1;
+    return a.localeCompare(b);
+  });
+});
+
+const selectedGroupedModel = computed<GroupedModelOption | null>(() => {
+  return (
+    groupedModelOptions.value.find((m) => m.id === modelSelection.value) ??
+    groupedModelOptions.value[0] ??
+    null
+  );
+});
+
+const selectedModelFamily = computed(() => selectedGroupedModel.value?.family ?? 'Auto');
+
+const selectedModelVersions = computed<GroupedModelOption[]>(() => {
+  const family = selectedModelFamily.value;
+  return groupedModelOptions.value
+    .filter((m) => m.family === family)
+    .sort((a, b) => b.versionRank - a.versionRank || a.version.localeCompare(b.version));
+});
+
 async function loadAvailableModels() {
+  if (!bSupportsModelSelection.value) return;
   if (session.value?.agentType === 'open-code') {
     if (openCodeModels.value.length > 0) return;
     bModelsLoading.value = true;
     try {
       const { data } = await settingsApi.getOpenCodeModels();
       openCodeModels.value = data.models;
-      if (data.models.length > 0 && !data.models.some((m) => m.id === modelSelection.value)) {
-        modelSelection.value = data.models[0].id;
-      }
     } catch {
       openCodeModels.value = [{ id: 'opencode/big-pickle', label: 'opencode/big-pickle' }];
     } finally {
@@ -274,9 +356,6 @@ async function loadAvailableModels() {
   try {
     const { data } = await settingsApi.getCursorModels();
     availableModels.value = data.models;
-    if (data.models.length > 0 && !data.models.some((m) => m.id === modelSelection.value)) {
-      modelSelection.value = data.models[0].id;
-    }
   } catch {
     availableModels.value = [{ id: 'auto', label: 'Auto' }];
   } finally {
@@ -284,34 +363,37 @@ async function loadAvailableModels() {
   }
 }
 
-async function onModelChange(newModel: string) {
-  const prev = modelSelection.value;
-  modelSelection.value = newModel;
+async function saveChatSettings(patch: { modelSelection?: string; hideThinkingOutput?: boolean }) {
+  const previousModel = modelSelection.value;
+  const previousHideThinking = hideThinkingOutput.value;
+  if (patch.modelSelection !== undefined) modelSelection.value = patch.modelSelection;
+  if (patch.hideThinkingOutput !== undefined) hideThinkingOutput.value = patch.hideThinkingOutput;
+
   try {
-    await settingsApi.update({ modelSelection: newModel });
+    const { data } = await sessionsApi.update(props.workspaceId, props.sessionId, patch);
+    session.value = data;
+    modelSelection.value = data.modelSelection ?? modelSelection.value;
+    hideThinkingOutput.value = data.hideThinkingOutput ?? hideThinkingOutput.value;
   } catch {
-    modelSelection.value = prev;
+    modelSelection.value = previousModel;
+    hideThinkingOutput.value = previousHideThinking;
   }
+}
+
+async function onModelChange(newModel: string) {
+  await saveChatSettings({ modelSelection: newModel });
+}
+
+function onModelFamilyChange(family: string): void {
+  const next = groupedModelOptions.value
+    .filter((m) => m.family === family)
+    .sort((a, b) => b.versionRank - a.versionRank || a.version.localeCompare(b.version))[0];
+  if (next) void onModelChange(next.id);
 }
 
 function onHideThinkingToggle(checked: boolean): void {
-  hideThinkingOutput.value = checked;
   if (checked) streamingThinkingText.value = '';
-  try {
-    if (checked) localStorage.setItem(HIDE_THINKING_LS_KEY, '1');
-    else localStorage.removeItem(HIDE_THINKING_LS_KEY);
-  } catch {
-    // ignore quota / private mode
-  }
-}
-
-function openModelSettings(): void {
-  void loadAvailableModels();
-  bShowModelSelector.value = true;
-}
-
-function closeModelSettings(): void {
-  bShowModelSelector.value = false;
+  void saveChatSettings({ hideThinkingOutput: checked });
 }
 
 const bHasMore = ref(false);
@@ -1219,6 +1301,9 @@ async function fetchSession() {
     error.value = null;
     const response = await sessionsApi.get(props.workspaceId, props.sessionId);
     session.value = response.data;
+    modelSelection.value = response.data.modelSelection ?? 'auto';
+    hideThinkingOutput.value = response.data.hideThinkingOutput ?? false;
+    void loadAvailableModels();
   } catch (e) {
     error.value = 'Failed to load session';
     console.error('Failed to fetch session:', e);
@@ -1312,18 +1397,16 @@ onMounted(async () => {
   const savedPrompt = localStorage.getItem(promptStorageKey.value);
   if (savedPrompt != null) promptText.value = savedPrompt;
 
-  fetchSession();
+  await fetchSession();
   connectChatWs();
   try {
     const { data } = await settingsApi.get();
-    if (data.modelSelection != null) modelSelection.value = data.modelSelection;
     if (typeof data.claudeAutoContinue === 'boolean') {
       bClaudeAutoContinueEnabled.value = data.claudeAutoContinue;
     }
   } catch {
-    // keep default 'auto'
+    // keep session chat settings and auto-continue defaults
   }
-  loadAvailableModels();
   document.addEventListener('visibilitychange', onVisibilityChange);
   document.addEventListener('click', handleDocumentClickMobileMenu);
   document.addEventListener('keydown', handleKeydownMobileMenu);
@@ -2022,14 +2105,6 @@ onUnmounted(() => {
             <div
               class="flex flex-1 min-w-0 min-h-[44px] items-end gap-0.5 rounded-md border border-fg/10 bg-fg/[0.06] pl-1 pr-1 transition-colors focus-within:border-primary/50"
             >
-              <button
-                type="button"
-                @click="openModelSettings"
-                title="Model settings"
-                class="button is-transparent is-icon h-[36px]! mb-[3px]! px-0! aspect-square! shrink-0"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none" aria-hidden="true"><path d="M4 21V14M4 10V3M12 21V12M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
-              </button>
               <textarea
                 ref="textareaEl"
                 v-model="promptText"
@@ -2067,6 +2142,54 @@ onUnmounted(() => {
               <svg v-if="bIsStreaming" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none send-wait-hourglass" aria-hidden="true"><path d="M5 22h14M5 2h14M17 22v-4.172a2 2 0 00-.586-1.414L12 12M7 22v-4.172a2 2 0 01.586-1.414L12 12M17 2v4.172a2 2 0 01-.586 1.414L12 12M7 2v4.172a2 2 0 00.586 1.414L12 12"/></svg>
               <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
             </button>
+          </div>
+          <div
+            class="flex flex-wrap items-center gap-2 px-2 pt-2 text-xs text-text-muted"
+          >
+            <label
+              class="inline-flex h-8 cursor-pointer items-center gap-2 rounded-md border border-fg/10 bg-fg/[0.04] px-2.5 text-text-primary"
+            >
+              <input
+                type="checkbox"
+                class="h-3.5 w-3.5 rounded border-fg/[0.2] text-primary focus:ring-primary/40"
+                :checked="hideThinkingOutput"
+                :disabled="bIsStreaming"
+                @change="onHideThinkingToggle(($event.target as HTMLInputElement).checked)"
+              />
+              <span>Hide thinking</span>
+            </label>
+
+            <template v-if="bSupportsModelSelection">
+              <label class="inline-flex items-center gap-1.5">
+                <span>Model</span>
+                <select
+                  :value="selectedModelFamily"
+                  :disabled="bIsStreaming || bModelsLoading || modelFamilies.length === 0"
+                  class="h-8 rounded-md border border-fg/10 bg-fg/[0.04] px-2 text-xs text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
+                  @change="onModelFamilyChange(($event.target as HTMLSelectElement).value)"
+                >
+                  <option v-if="modelFamilies.length === 0" value="">Loading</option>
+                  <option v-for="family in modelFamilies" :key="family" :value="family">
+                    {{ family }}
+                  </option>
+                </select>
+              </label>
+
+              <label class="inline-flex items-center gap-1.5">
+                <span>Version</span>
+                <select
+                  :value="modelSelection"
+                  :disabled="bIsStreaming || bModelsLoading || selectedModelVersions.length === 0"
+                  class="h-8 rounded-md border border-fg/10 bg-fg/[0.04] px-2 text-xs text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
+                  @change="onModelChange(($event.target as HTMLSelectElement).value)"
+                >
+                  <option v-if="selectedModelVersions.length === 0" value="">Loading</option>
+                  <option v-for="m in selectedModelVersions" :key="m.id" :value="m.id">
+                    {{ m.version }}
+                  </option>
+                </select>
+              </label>
+            </template>
           </div>
         </div>
       </template>
@@ -2145,80 +2268,6 @@ onUnmounted(() => {
       :existing-tags="sessionTagSuggestions"
       @save="saveSessionEdit"
     />
-
-    <!-- Model settings (Cursor) -->
-    <Teleport to="body">
-      <Transition name="modal-fade">
-        <div
-          v-if="bShowModelSelector"
-          class="fixed inset-0 z-50 flex items-center justify-center p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="chat-model-title"
-        >
-          <div class="absolute inset-0 bg-black/75 backdrop-blur-sm" @click="closeModelSettings" />
-          <div
-            class="modal-panel relative w-full max-w-sm bg-surface border border-fg/[0.09] rounded-2xl shadow-2xl shadow-black/60"
-          >
-            <div class="px-6 pt-5 pb-2">
-              <h2 id="chat-model-title" class="font-semibold text-text-primary text-lg">Chat settings</h2>
-              <p class="text-xs text-text-muted mt-1">
-                Display options for this session.
-              </p>
-            </div>
-            <div class="px-6 pb-5 space-y-4">
-              <div v-if="session?.agentType === 'cursor-agent' || session?.agentType === 'open-code'">
-                <label
-                  for="model-select-modal"
-                  class="block text-xs font-medium text-text-muted mb-1.5"
-                  >Model</label
-                >
-                <select
-                  id="model-select-modal"
-                  :value="modelSelection"
-                  @change="(e) => onModelChange((e.target as HTMLSelectElement).value)"
-                  :disabled="bIsStreaming || bModelsLoading"
-                  class="w-full text-sm px-3 py-3 rounded-lg border border-fg/[0.12] bg-fg/[0.04] text-text-primary focus:outline-none focus:border-primary/50 transition-colors disabled:opacity-50"
-                >
-                  <option v-for="m in (session?.agentType === 'open-code' ? openCodeModels : availableModels)" :key="m.id" :value="m.id">
-                    {{ m.label }}
-                  </option>
-                </select>
-              </div>
-              <label
-                class="flex cursor-pointer items-start gap-3 rounded-lg border border-fg/[0.12] bg-fg/[0.04] px-3 py-3 text-sm text-text-primary"
-              >
-                <input
-                  id="hide-thinking-modal"
-                  type="checkbox"
-                  class="mt-0.5 h-4 w-4 shrink-0 rounded border-fg/[0.2] text-primary focus:ring-primary/40"
-                  :checked="hideThinkingOutput"
-                  @change="
-                    onHideThinkingToggle(($event.target as HTMLInputElement).checked)
-                  "
-                />
-                <span class="min-w-0">
-                  <span class="font-medium text-text-primary">Hide thinking output</span>
-                  <span class="mt-0.5 block text-xs text-text-muted leading-snug">
-                    When enabled, extended reasoning / thinking output is not shown in the chat
-                    (saved in this browser only).
-                  </span>
-                </span>
-              </label>
-            </div>
-            <div class="flex items-center justify-end gap-2 px-6 pb-5">
-              <button
-                type="button"
-                class="px-4 py-2.5 text-sm font-medium bg-primary hover:bg-primary-hover text-white rounded-lg shadow-lg shadow-primary/20 transition-colors"
-                @click="closeModelSettings"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
 
     <!-- Image lightbox -->
     <Teleport to="body">

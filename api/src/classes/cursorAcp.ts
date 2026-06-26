@@ -132,6 +132,7 @@ export interface RunCursorAcpParams {
   acpSessionId: string | null;
   cwd: string;
   promptText: string;
+  model?: string;
 }
 
 export interface RunCursorAcpResult {
@@ -182,6 +183,14 @@ export async function runCursorAcp(
         resolvedSessionId = resp.sessionId;
       }
       activeHandlers.delete(acpSessionId);
+    }
+
+    if (params.model && params.model !== 'auto') {
+      try {
+        await (conn as any).unstable_setSessionModel({ sessionId: resolvedSessionId, modelId: params.model });
+      } catch (err) {
+        console.warn('[cursorAcp] unstable_setSessionModel failed (non-fatal):', err);
+      }
     }
 
     activeHandlers.set(resolvedSessionId, onEvent);

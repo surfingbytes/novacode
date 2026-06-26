@@ -185,7 +185,7 @@ export async function runOpenCodeAcp(
       activeHandlers.delete(acpSessionId);
     }
 
-    if (params.model) {
+    if (params.model && params.model !== 'auto') {
       try {
         await (conn as any).unstable_setSessionModel({ sessionId: resolvedSessionId, modelId: params.model });
       } catch (err) {

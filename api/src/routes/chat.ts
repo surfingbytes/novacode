@@ -99,6 +99,7 @@ async function tryProcessQueue(sessionId: string): Promise<void> {
       queueItemId: next.id,
       prompt: {
         text: next.text,
+        model: next.model,
         imagePaths: next.imagePaths,
         createdAt: next.createdAt
       }
@@ -264,7 +265,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
         await db.enqueueSessionQueueItem({
           sessionId: id,
           text,
-          model: clientMessage.model ?? 'auto',
+          model: clientMessage.model ?? session.modelSelection ?? 'auto',
           imagePaths
         });
         await broadcastQueueUpdate(id);

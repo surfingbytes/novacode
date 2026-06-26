@@ -19,6 +19,7 @@ model User {
   darkTheme           String?            @map("dark_theme")
   lightTheme          String?            @map("light_theme")
   modelSelection      String             @default("auto") @map("model_selection")
+  hideThinkingOutput  Boolean            @default(false) @map("hide_thinking_output")
   claudeToken         String?            @map("claude_token")
   claudeAutoContinue  Boolean            @default(false) @map("claude_auto_continue")
   pushSubscriptions   PushSubscription[]
@@ -64,6 +65,8 @@ model Session {
   tags        Json?     // string[] stored as JSON
   sessionId   String?   @map("session_id")
   agentType   String    @map("agent_type")
+  modelSelection String  @default("auto") @map("model_selection")
+  hideThinkingOutput Boolean @default(false) @map("hide_thinking_output")
   messageJson String    @map("message_json")
   /** Denormalized snippet for session lists (sidebar); updated when chat is saved */
   lastPreviewText String? @map("last_preview_text")
