@@ -79,6 +79,11 @@ const AGENT_OPTIONS = computed(() => {
   return options;
 });
 
+function computeDefaultAgentTypeForCreate(): string {
+  const options = AGENT_OPTIONS.value;
+  return options.length === 1 ? options[0].value : '';
+}
+
 // -------------------------------------------------- Refs --------------------------------------------------
 const form = ref<FormState>({
   name: '',
@@ -253,7 +258,8 @@ watch(
         gitUserName: props.workspace?.gitUserName ?? '',
         gitUserEmail: props.workspace?.gitUserEmail ?? '',
         color: props.workspace?.color ?? '',
-        defaultAgentType: props.workspace?.defaultAgentType ?? '',
+        defaultAgentType:
+          props.workspace?.defaultAgentType ?? computeDefaultAgentTypeForCreate(),
         tags
       };
       tagInput.value = '';
@@ -261,6 +267,13 @@ watch(
     }
   }
 );
+
+watch(AGENT_OPTIONS, (options) => {
+  if (props.workspace) return;
+  if (options.length === 1 && !form.value.defaultAgentType) {
+    form.value.defaultAgentType = options[0].value;
+  }
+});
 </script>
 
 <template>
