@@ -79,26 +79,26 @@ Run [Cursor Agent](https://cursor.com), [Claude Code](https://claude.ai/code), a
 For a **published Docker image** under `~/.novacode` (install and updates use the same command):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/JonahFintzDev/novacode/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/surfingbytes/novacode/main/scripts/install.sh | bash
 ```
 
 **Prerequisites:** Docker with Compose (`docker compose` or `docker-compose`), and `openssl` on first install.
 
-The script writes `~/.novacode/.env` with generated secrets, pulls `ghcr.io/jonahfintzdev/novacode:latest`, and starts Compose. Re-run the same command to update. Optional environment variables:
+The script writes `~/.novacode/.env` with generated secrets, pulls `ghcr.io/surfingbytes/novacode:latest`, and starts Compose. Re-run the same command to update. Optional environment variables:
 
 | Variable | Purpose |
 |----------|---------|
 | `NOVACODE_DIR` | Install root (default: `~/.novacode`) |
 | `NOVACODE_INSTALL_BASE_URL` | Raw URL of the repo root for fetched compose and `.env.example` (see `scripts/install.sh`) |
-| `NOVACODE_IMAGE` | Image tag (default: `ghcr.io/jonahfintzdev/novacode:latest`) |
+| `NOVACODE_IMAGE` | Image tag (default: `ghcr.io/surfingbytes/novacode:latest`) |
 
 On first install you may be prompted for extra host directory mounts (workspaces under `/data-root/...`). Then open **`http://localhost:3030`** and complete **first-run setup**.
 
-### Docker Compose (build from source)
+### Docker Compose (published fork image)
 
 ```bash
 # 1. Clone the application repository
-git clone https://github.com/JonahFintzDev/novacode.git
+git clone https://github.com/surfingbytes/novacode.git
 cd novacode
 
 # 2. Create your env file
@@ -108,9 +108,10 @@ cp .env.example .env
 # 3. By default, ~/.novacode/data on the host is mounted at /data-root — put repos there
 #    (mkdir -p ~/.novacode/data) or edit docker-compose.yml to add more bind mounts.
 
-# 4. Build and start
+# 4. Pull and start the fork image
 export UID=$(id -u) GID=$(id -g)
-docker compose up --build -d
+docker compose pull
+docker compose up -d
 
 # 5. Open the app and complete first-run setup
 #    http://localhost:3030  (or whatever PORT you set)
