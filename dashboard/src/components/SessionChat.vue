@@ -244,6 +244,17 @@ interface GroupedModelOption extends CursorModelOption {
   family: string;
   version: string;
   versionRank: number;
+  thinking: string;
+  thinkingRank: number;
+  contextWindow: string;
+  contextRank: number;
+  speed: string;
+  speedRank: number;
+}
+
+interface ModelDimensionOption {
+  value: string;
+  rank: number;
 }
 
 function titleCaseToken(value: string): string {
@@ -263,12 +274,48 @@ function modelVersionRank(version: string): number {
     .reduce((acc, part) => acc * 100 + (Number.isFinite(part) ? part : 0), 0);
 }
 
+function modelThinking(source: string): { value: string; rank: number } {
+  const text = source.toLowerCase().replace(/[-_]+/g, ' ');
+  if (/\b(extra\s+high|xhigh)\b/.test(text)) return { value: 'Extra High', rank: 5 };
+  if (/\bhigh\b/.test(text)) return { value: 'High', rank: 4 };
+  if (/\bmedium\b/.test(text)) return { value: 'Medium', rank: 3 };
+  if (/\blow\b/.test(text)) return { value: 'Low', rank: 2 };
+  if (/\bnone\b/.test(text)) return { value: 'None', rank: 1 };
+  return { value: 'Default', rank: 0 };
+}
+
+function modelContextWindow(source: string): { value: string; rank: number } {
+  const match = source.toLowerCase().replace(/[-_]+/g, ' ').match(/\b(\d+(?:k|m))\b/);
+  if (!match) return { value: 'Default', rank: 0 };
+  const value = match[1] ?? 'Default';
+  const suffix = value.endsWith('m') ? 1_000_000 : 1_000;
+  const numeric = Number.parseInt(value, 10);
+  return { value, rank: Number.isFinite(numeric) ? numeric * suffix : 0 };
+}
+
+function modelSpeed(source: string): { value: string; rank: number } {
+  return /\bfast\b/i.test(source.replace(/[-_]+/g, ' '))
+    ? { value: 'Fast', rank: 1 }
+    : { value: 'Standard', rank: 0 };
+}
+
 function groupModelOption(option: CursorModelOption): GroupedModelOption {
+  const source = `${option.id} ${option.label}`;
   if (option.id === 'auto') {
-    return { ...option, family: 'Auto', version: 'Default', versionRank: Number.MAX_SAFE_INTEGER };
+    return {
+      ...option,
+      family: 'Auto',
+      version: 'Default',
+      versionRank: Number.MAX_SAFE_INTEGER,
+      thinking: 'Default',
+      thinkingRank: 0,
+      contextWindow: 'Default',
+      contextRank: 0,
+      speed: 'Standard',
+      speedRank: 0
+    };
   }
 
-  const source = `${option.label} ${option.id}`;
   const lower = source.toLowerCase();
   const idTail = option.id.split('/').pop() ?? option.id;
   const idParts = idTail.split(/[-_\s]+/).filter(Boolean);
@@ -277,7 +324,7 @@ function groupModelOption(option: CursorModelOption): GroupedModelOption {
   let version = titleCaseToken(idParts.slice(1).join(' ')) || option.label;
 
   const knownFamilies = [
-    { family: 'GPT', pattern: /\bgpt[-_\s]?([\d.]+)?(?:[-_\s]?(.+))?/i },
+    { family: 'GPT', pattern: /\bgpt[-_\s]?(\d+(?:\.\d+)*)(?:[-_\s]?(mini))?/i },
     { family: 'Claude', pattern: /\bclaude[-_\s]?([\d.]+)?(?:[-_\s]?(.+))?/i },
     { family: 'Gemini', pattern: /\bgemini[-_\s]?([\d.]+)?(?:[-_\s]?(.+))?/i },
     { family: 'Composer', pattern: /\bcomposer[-_\s]?([\d.]+)?(?:[-_\s]?(.+))?/i },
@@ -288,12 +335,29 @@ function groupModelOption(option: CursorModelOption): GroupedModelOption {
     const match = lower.match(known.pattern);
     if (!match) continue;
     family = known.family;
-    const suffix = [match[1], match[2]].filter(Boolean).join(' ');
-    version = suffix ? titleCaseToken(suffix) : option.label;
+    const suffix = known.family === 'GPT'
+      ? [match[1], match[2] === 'mini' ? 'Mini' : undefined].filter(Boolean).join(' ')
+      : [match[1], match[2]].filter(Boolean).join(' ');
+    version = suffix ? titleCaseToken(suffix) : titleCaseToken(idParts[1] ?? option.label);
     break;
   }
 
-  return { ...option, family, version, versionRank: modelVersionRank(version) };
+  const thinking = modelThinking(source);
+  const contextWindow = modelContextWindow(source);
+  const speed = modelSpeed(source);
+
+  return {
+    ...option,
+    family,
+    version,
+    versionRank: modelVersionRank(version),
+    thinking: thinking.value,
+    thinkingRank: thinking.rank,
+    contextWindow: contextWindow.value,
+    contextRank: contextWindow.rank,
+    speed: speed.value,
+    speedRank: speed.rank
+  };
 }
 
 const bSupportsModelSelection = computed(
@@ -328,13 +392,110 @@ const selectedGroupedModel = computed<GroupedModelOption | null>(() => {
 });
 
 const selectedModelFamily = computed(() => selectedGroupedModel.value?.family ?? 'Auto');
+const selectedModelVersion = computed(() => selectedGroupedModel.value?.version ?? 'Default');
+const selectedModelThinking = computed(() => selectedGroupedModel.value?.thinking ?? 'Default');
+const selectedModelContext = computed(() => selectedGroupedModel.value?.contextWindow ?? 'Default');
+const selectedModelSpeed = computed(() => selectedGroupedModel.value?.speed ?? 'Standard');
 
-const selectedModelVersions = computed<GroupedModelOption[]>(() => {
+function uniqueDimensionOptions(
+  options: GroupedModelOption[],
+  valueOf: (option: GroupedModelOption) => string,
+  rankOf: (option: GroupedModelOption) => number
+): ModelDimensionOption[] {
+  const byValue = new Map<string, ModelDimensionOption>();
+  for (const option of options) {
+    const value = valueOf(option);
+    const rank = rankOf(option);
+    const existing = byValue.get(value);
+    if (!existing || rank > existing.rank) {
+      byValue.set(value, { value, rank });
+    }
+  }
+  return Array.from(byValue.values()).sort((a, b) => b.rank - a.rank || a.value.localeCompare(b.value));
+}
+
+const selectedModelVersions = computed<ModelDimensionOption[]>(() => {
   const family = selectedModelFamily.value;
-  return groupedModelOptions.value
-    .filter((m) => m.family === family)
-    .sort((a, b) => b.versionRank - a.versionRank || a.version.localeCompare(b.version));
+  return uniqueDimensionOptions(
+    groupedModelOptions.value.filter((m) => m.family === family),
+    (m) => m.version,
+    (m) => m.versionRank
+  );
 });
+
+const selectedThinkingOptions = computed<ModelDimensionOption[]>(() =>
+  uniqueDimensionOptions(
+    groupedModelOptions.value.filter(
+      (m) => m.family === selectedModelFamily.value && m.version === selectedModelVersion.value
+    ),
+    (m) => m.thinking,
+    (m) => m.thinkingRank
+  )
+);
+
+const selectedContextOptions = computed<ModelDimensionOption[]>(() =>
+  uniqueDimensionOptions(
+    groupedModelOptions.value.filter(
+      (m) =>
+        m.family === selectedModelFamily.value &&
+        m.version === selectedModelVersion.value &&
+        m.thinking === selectedModelThinking.value
+    ),
+    (m) => m.contextWindow,
+    (m) => m.contextRank
+  )
+);
+
+const selectedSpeedOptions = computed<ModelDimensionOption[]>(() =>
+  uniqueDimensionOptions(
+    groupedModelOptions.value.filter(
+      (m) =>
+        m.family === selectedModelFamily.value &&
+        m.version === selectedModelVersion.value &&
+        m.thinking === selectedModelThinking.value &&
+        m.contextWindow === selectedModelContext.value
+    ),
+    (m) => m.speed,
+    (m) => m.speedRank
+  )
+);
+
+function selectModelVariant(patch: Partial<Pick<GroupedModelOption, 'family' | 'version' | 'thinking' | 'contextWindow' | 'speed'>>): void {
+  const current = selectedGroupedModel.value;
+  const desired = {
+    family: patch.family ?? current?.family,
+    version: patch.version ?? current?.version,
+    thinking: patch.thinking ?? current?.thinking,
+    contextWindow: patch.contextWindow ?? current?.contextWindow,
+    speed: patch.speed ?? current?.speed
+  };
+
+  let candidates = groupedModelOptions.value;
+  if (desired.family) {
+    candidates = candidates.filter((m) => m.family === desired.family);
+  }
+  if (patch.family !== undefined && patch.version === undefined && candidates.length > 0) {
+    const latestRank = Math.max(...candidates.map((m) => m.versionRank));
+    candidates = candidates.filter((m) => m.versionRank === latestRank);
+  }
+
+  for (const key of ['version', 'thinking', 'contextWindow', 'speed'] as const) {
+    const value = desired[key];
+    if (!value) continue;
+    const narrowed = candidates.filter((m) => m[key] === value);
+    if (narrowed.length > 0) candidates = narrowed;
+  }
+
+  const next = candidates.sort(
+    (a, b) =>
+      b.versionRank - a.versionRank ||
+      b.thinkingRank - a.thinkingRank ||
+      b.contextRank - a.contextRank ||
+      b.speedRank - a.speedRank ||
+      a.label.localeCompare(b.label)
+  )[0];
+  if (next) void onModelChange(next.id);
+}
 
 async function loadAvailableModels() {
   if (!bSupportsModelSelection.value) return;
@@ -385,10 +546,7 @@ async function onModelChange(newModel: string) {
 }
 
 function onModelFamilyChange(family: string): void {
-  const next = groupedModelOptions.value
-    .filter((m) => m.family === family)
-    .sort((a, b) => b.versionRank - a.versionRank || a.version.localeCompare(b.version))[0];
-  if (next) void onModelChange(next.id);
+  selectModelVariant({ family });
 }
 
 function onHideThinkingToggle(checked: boolean): void {
@@ -2217,14 +2375,56 @@ onUnmounted(() => {
               <label class="inline-flex items-center gap-1.5">
                 <span>Version</span>
                 <select
-                  :value="modelSelection"
+                  :value="selectedModelVersion"
                   :disabled="bIsStreaming || bModelsLoading || selectedModelVersions.length === 0"
                   class="h-8 rounded-md border border-fg/10 bg-fg/[0.04] px-2 text-xs text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
-                  @change="onModelChange(($event.target as HTMLSelectElement).value)"
+                  @change="selectModelVariant({ version: ($event.target as HTMLSelectElement).value })"
                 >
                   <option v-if="selectedModelVersions.length === 0" value="">Loading</option>
-                  <option v-for="m in selectedModelVersions" :key="m.id" :value="m.id">
-                    {{ m.version }}
+                  <option v-for="m in selectedModelVersions" :key="m.value" :value="m.value">
+                    {{ m.value }}
+                  </option>
+                </select>
+              </label>
+
+              <label v-if="selectedThinkingOptions.length > 1" class="inline-flex items-center gap-1.5">
+                <span>Thinking</span>
+                <select
+                  :value="selectedModelThinking"
+                  :disabled="bIsStreaming || bModelsLoading"
+                  class="h-8 rounded-md border border-fg/10 bg-fg/[0.04] px-2 text-xs text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
+                  @change="selectModelVariant({ thinking: ($event.target as HTMLSelectElement).value })"
+                >
+                  <option v-for="m in selectedThinkingOptions" :key="m.value" :value="m.value">
+                    {{ m.value }}
+                  </option>
+                </select>
+              </label>
+
+              <label v-if="selectedContextOptions.length > 1" class="inline-flex items-center gap-1.5">
+                <span>Context</span>
+                <select
+                  :value="selectedModelContext"
+                  :disabled="bIsStreaming || bModelsLoading"
+                  class="h-8 rounded-md border border-fg/10 bg-fg/[0.04] px-2 text-xs text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
+                  @change="selectModelVariant({ contextWindow: ($event.target as HTMLSelectElement).value })"
+                >
+                  <option v-for="m in selectedContextOptions" :key="m.value" :value="m.value">
+                    {{ m.value }}
+                  </option>
+                </select>
+              </label>
+
+              <label v-if="selectedSpeedOptions.length > 1" class="inline-flex items-center gap-1.5">
+                <span>Speed</span>
+                <select
+                  :value="selectedModelSpeed"
+                  :disabled="bIsStreaming || bModelsLoading"
+                  class="h-8 rounded-md border border-fg/10 bg-fg/[0.04] px-2 text-xs text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
+                  @change="selectModelVariant({ speed: ($event.target as HTMLSelectElement).value })"
+                >
+                  <option v-for="m in selectedSpeedOptions" :key="m.value" :value="m.value">
+                    {{ m.value }}
                   </option>
                 </select>
               </label>
