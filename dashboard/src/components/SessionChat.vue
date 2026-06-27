@@ -257,6 +257,8 @@ interface ModelDimensionOption {
   rank: number;
 }
 
+const AUTO_MODEL_OPTION: CursorModelOption = { id: 'auto', label: 'Auto' };
+
 function titleCaseToken(value: string): string {
   return value
     .split(/[\s_-]+/)
@@ -365,7 +367,11 @@ const bSupportsModelSelection = computed(
 );
 
 const activeModelOptions = computed<CursorModelOption[]>(() => {
-  const options = session.value?.agentType === 'open-code' ? openCodeModels.value : availableModels.value;
+  const loadedOptions =
+    session.value?.agentType === 'open-code' ? openCodeModels.value : availableModels.value;
+  const options = loadedOptions.some((m) => m.id === AUTO_MODEL_OPTION.id)
+    ? loadedOptions
+    : [AUTO_MODEL_OPTION, ...loadedOptions];
   if (!modelSelection.value || options.some((m) => m.id === modelSelection.value)) return options;
   return [...options, { id: modelSelection.value, label: modelSelection.value }];
 });
@@ -384,11 +390,7 @@ const modelFamilies = computed<string[]>(() => {
 });
 
 const selectedGroupedModel = computed<GroupedModelOption | null>(() => {
-  return (
-    groupedModelOptions.value.find((m) => m.id === modelSelection.value) ??
-    groupedModelOptions.value[0] ??
-    null
-  );
+  return groupedModelOptions.value.find((m) => m.id === modelSelection.value) ?? null;
 });
 
 const selectedModelFamily = computed(() => selectedGroupedModel.value?.family ?? 'Auto');
@@ -2333,7 +2335,7 @@ onUnmounted(() => {
                 </select>
               </label>
 
-              <label class="inline-flex items-center gap-1.5">
+              <label v-if="selectedModelFamily !== 'Auto'" class="inline-flex items-center gap-1.5">
                 <span>Version</span>
                 <select
                   :value="selectedModelVersion"
@@ -2348,7 +2350,7 @@ onUnmounted(() => {
                 </select>
               </label>
 
-              <label v-if="selectedThinkingOptions.length > 1" class="inline-flex items-center gap-1.5">
+              <label v-if="selectedModelFamily !== 'Auto' && selectedThinkingOptions.length > 1" class="inline-flex items-center gap-1.5">
                 <span>Thinking</span>
                 <select
                   :value="selectedModelThinking"
@@ -2362,7 +2364,7 @@ onUnmounted(() => {
                 </select>
               </label>
 
-              <label v-if="selectedContextOptions.length > 1" class="inline-flex items-center gap-1.5">
+              <label v-if="selectedModelFamily !== 'Auto' && selectedContextOptions.length > 1" class="inline-flex items-center gap-1.5">
                 <span>Context</span>
                 <select
                   :value="selectedModelContext"
@@ -2376,7 +2378,7 @@ onUnmounted(() => {
                 </select>
               </label>
 
-              <label v-if="selectedSpeedOptions.length > 1" class="inline-flex items-center gap-1.5">
+              <label v-if="selectedModelFamily !== 'Auto' && selectedSpeedOptions.length > 1" class="inline-flex items-center gap-1.5">
                 <span>Speed</span>
                 <select
                   :value="selectedModelSpeed"
