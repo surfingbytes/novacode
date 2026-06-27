@@ -541,9 +541,9 @@ function processAcpUpdate(
   }
 
   if (sessionUpdate === 'agent_thought_chunk') {
-    const content = update.content as { type?: string; text?: string } | undefined;
+    const content = update.content as AgentThoughtChunkContent | undefined;
     if (opts?.liveThinking && !hideThinkingOutput.value && content?.text) {
-      streamingThinkingText.value += content.text;
+      mergeAgentThoughtChunk(content.text, content);
     }
     return;
   }
@@ -677,6 +677,45 @@ function isToolResultSuccess(toolCallObj: Record<string, unknown>): boolean {
  * Mistral Vibe (and some stream shapes) may re-send the full assistant line or duplicate the final
  * chunk; Cursor-style deltas are plain appends. Merge without doubling identical/cumulative text.
  */
+type AgentThoughtChunkContent = {
+  type?: string;
+  text?: string;
+  annotations?: {
+    _meta?: {
+      heartbeat?: boolean;
+      elapsedSeconds?: number;
+    };
+  };
+};
+
+/** Strip cursor-agent-acp elapsed suffix, e.g. "Doing the thing... (12s)" → "Doing the thing..." */
+function agentThoughtStatusBase(text: string): string {
+  return text.replace(/\s\(\d+s\)\s*$/, '');
+}
+
+/**
+ * cursor-agent-acp sends funny progress lines as agent_thought_chunk (see getRandomProcessingText).
+ * Heartbeats replace the previous line; only genuine incremental thought text is appended.
+ */
+function mergeAgentThoughtChunk(text: string, content?: AgentThoughtChunkContent): void {
+  const isHeartbeat = content?.annotations?._meta?.heartbeat === true;
+  const prev = streamingThinkingText.value;
+
+  if (isHeartbeat || !prev) {
+    streamingThinkingText.value = text;
+    return;
+  }
+
+  const textBase = agentThoughtStatusBase(text);
+  const prevBase = agentThoughtStatusBase(prev);
+  if (textBase === prevBase || text.startsWith(prevBase) || prev.startsWith(textBase)) {
+    streamingThinkingText.value = text;
+    return;
+  }
+
+  streamingThinkingText.value = prev + text;
+}
+
 function mergeAssistantTextIntoDisplayItems(
   assistantText: string,
   items: DisplayItem[]
