@@ -266,7 +266,12 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
 
   // Resolve workspace rules prefix
   const rulesPrefix = await buildWorkspaceRulesPrefix(workspacePath);
-  const agentPrompt = rulesPrefix ? `${rulesPrefix}\n\nUser request:\n${effectiveText}` : effectiveText;
+  const selectedModelPrefix =
+    model && model !== 'auto'
+      ? `Selected model for this turn: ${model}. If asked what model is selected or being used, answer with this selected model rather than "Auto".`
+      : '';
+  const promptParts = [rulesPrefix, selectedModelPrefix, `User request:\n${effectiveText}`].filter(Boolean);
+  const agentPrompt = promptParts.join('\n\n');
 
   // Get Claude OAuth token (only needed for claude agent type)
   const user = await db.getFirstUser();

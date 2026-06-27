@@ -149,6 +149,7 @@ export async function runCursorAcp(
   novaSessionId: string
 ): Promise<RunCursorAcpResult> {
   const { acpSessionId, cwd, promptText } = params;
+  const model = params.model && params.model !== 'auto' ? params.model : undefined;
 
   const { conn, proc } = await spawnCursorConnection(cwd);
   const killProc = () => {
@@ -166,7 +167,11 @@ export async function runCursorAcp(
 
     if (!acpSessionId) {
       // First turn — create a new session
-      const resp = await conn.newSession({ cwd, mcpServers: [] });
+      const resp = await conn.newSession({
+        cwd,
+        mcpServers: [],
+        ...(model ? { metadata: { model } } : {})
+      } as any);
       resolvedSessionId = resp.sessionId;
     } else {
       // Subsequent turn — restore from disk.
@@ -174,22 +179,34 @@ export async function runCursorAcp(
       // to discard those replay events before the real prompt turn starts.
       activeHandlers.set(acpSessionId, () => {});
       try {
-        await conn.loadSession({ sessionId: acpSessionId, cwd, mcpServers: [] });
+        await conn.loadSession({
+          sessionId: acpSessionId,
+          cwd,
+          mcpServers: [],
+          ...(model ? { metadata: { model } } : {})
+        } as any);
         resolvedSessionId = acpSessionId;
       } catch (err) {
         console.warn('[cursorAcp] loadSession failed, starting fresh session:', err);
         activeHandlers.delete(acpSessionId);
-        const resp = await conn.newSession({ cwd, mcpServers: [] });
+        const resp = await conn.newSession({
+          cwd,
+          mcpServers: [],
+          ...(model ? { metadata: { model } } : {})
+        } as any);
         resolvedSessionId = resp.sessionId;
       }
       activeHandlers.delete(acpSessionId);
     }
 
-    if (params.model && params.model !== 'auto') {
+    if (model) {
       try {
-        await (conn as any).unstable_setSessionModel({ sessionId: resolvedSessionId, modelId: params.model });
+        await (conn as any).unstable_setSessionModel({ sessionId: resolvedSessionId, modelId: model });
       } catch (err) {
-        console.warn('[cursorAcp] unstable_setSessionModel failed (non-fatal):', err);
+        console.warn('[cursorAcp] unstable_setSessionModel failed (continuing with metadata model):', {
+          model,
+          err
+        });
       }
     }
 
