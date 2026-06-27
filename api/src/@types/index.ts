@@ -84,6 +84,7 @@ export interface ChatWsServerMessage {
   queueItemId?: string;
   prompt?: {
     text: string;
+    model?: string;
     imagePaths?: string[];
     createdAt: string;
   };

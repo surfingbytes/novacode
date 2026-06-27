@@ -391,6 +391,8 @@ export const sessionsApi = {
       name?: string;
       tags?: string[] | null;
       archived?: boolean;
+      modelSelection?: string;
+      hideThinkingOutput?: boolean;
     }
   ): ReturnType<typeof http.patch<Session>> =>
     http.patch<Session>(`/workspaces/${workspaceId}/sessions/${sessionId}`, patch),

@@ -92,6 +92,7 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         name: body.name,
         tags: tagsParsed === undefined ? null : tagsParsed,
         agentType: body.agentType,
+        userId: request.jwtUser?.id,
       });
 
       if (result.error) {
@@ -163,6 +164,8 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         name?: string;
         tags?: string[] | string | null;
         archived?: boolean;
+        modelSelection?: string;
+        hideThinkingOutput?: boolean;
       };
       const session = await db.getSession(sessionId);
       if (!session || session.workspaceId !== workspaceId) {
@@ -172,6 +175,8 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         name?: string;
         tags?: string[] | null;
         archived?: boolean;
+        modelSelection?: string;
+        hideThinkingOutput?: boolean;
       } = {};
       if (body.name !== undefined) {
         patch.name = body.name;
@@ -182,9 +187,21 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       if (body.archived !== undefined) {
         patch.archived = body.archived;
       }
+      if (body.modelSelection !== undefined) {
+        patch.modelSelection = body.modelSelection;
+      }
+      if (body.hideThinkingOutput !== undefined) {
+        patch.hideThinkingOutput = body.hideThinkingOutput;
+      }
       const updated = await db.updateSession(sessionId, patch);
       if (!updated) {
         return reply.status(500).send({ error: 'Failed to update session' });
+      }
+      if (body.modelSelection !== undefined || body.hideThinkingOutput !== undefined) {
+        await db.updateUser(request.jwtUser!.id, {
+          ...(body.modelSelection !== undefined && { modelSelection: body.modelSelection }),
+          ...(body.hideThinkingOutput !== undefined && { hideThinkingOutput: body.hideThinkingOutput })
+        });
       }
       const normalized = normalizeSessionForApi(updated);
       broadcastWorkspaceSessionUpsert(workspaceId, normalized);

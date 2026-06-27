@@ -125,6 +125,7 @@ export const db = {
       darkTheme?: string;
       lightTheme?: string;
       modelSelection?: string;
+      hideThinkingOutput?: boolean;
       claudeToken?: string | null;
     }
   ): Promise<UserModel | undefined> {
@@ -343,6 +344,8 @@ export const db = {
     workspaceId: string;
     tags?: string[] | null;
     agentType?: string | null;
+    modelSelection?: string;
+    hideThinkingOutput?: boolean;
   }): Promise<Session> {
     const id = randomUUID();
     const createdAt = new Date().toISOString();
@@ -359,6 +362,8 @@ export const db = {
         tags: tagsJson,
         sessionId: null,
         agentType: data.agentType ?? 'cursor-agent',
+        modelSelection: data.modelSelection ?? 'auto',
+        hideThinkingOutput: data.hideThinkingOutput ?? false,
         messageJson: '[]',
         workspaceId: data.workspaceId,
         createdAt
@@ -377,6 +382,8 @@ export const db = {
       name?: string;
       tags?: string[] | null;
       archived?: boolean;
+      modelSelection?: string;
+      hideThinkingOutput?: boolean;
     }
   ): Promise<Session | undefined> {
     const existingSession = await _prisma.session.findUnique({ where: { id } });
@@ -404,6 +411,8 @@ export const db = {
         name: patch.name ?? existingSession.name,
         ...(tagsJson !== undefined && { tags: tagsJson }),
         archived: patch.archived ?? existingSession.archived,
+        modelSelection: patch.modelSelection ?? existingSession.modelSelection,
+        hideThinkingOutput: patch.hideThinkingOutput ?? existingSession.hideThinkingOutput,
         updatedAt: new Date().toISOString()
       }
     });
