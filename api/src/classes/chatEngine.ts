@@ -431,11 +431,13 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
       eventCount: assistantEvents.length,
     });
 
+    const runSucceeded = !result.error && !cancelled;
+
     // Track ACP session ID changes (new session on first turn, or if Claude rotates it).
     // Folded into the same awaited DB write below to avoid a race where the fire-and-forget
     // save races the messageJson write — the messageJson write would win and clobber the sessionId.
     const newAcpSessionId =
-      result.acpSessionId && result.acpSessionId !== session.sessionId
+      runSucceeded && result.acpSessionId && result.acpSessionId !== session.sessionId
         ? result.acpSessionId
         : null;
     if (newAcpSessionId) {
@@ -454,7 +456,9 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
       await db.updateSession(sessionId, {
         messageJson: JSON.stringify(currentMessages),
         ...(newAcpSessionId ? { sessionId: newAcpSessionId } : {}),
-        ...(shouldRefreshCursorSessionForModel ? { appliedModelSelection: appliedModelForRun } : {}),
+        ...(runSucceeded && shouldRefreshCursorSessionForModel
+          ? { appliedModelSelection: appliedModelForRun }
+          : {}),
         ...(previewDone
           ? { lastPreviewText: previewDone.lastPreviewText, lastPreviewRole: previewDone.lastPreviewRole }
           : { lastPreviewText: null, lastPreviewRole: null }),

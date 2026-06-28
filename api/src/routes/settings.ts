@@ -12,6 +12,7 @@ import {
   setVibeApiKey,
   writeGlobalGitConfig,
   isClaudeAvailable,
+  isCursorCliAvailable,
   isVibeCliAvailable,
   isCodexAcpAvailable,
   readMcpClients,
@@ -291,8 +292,8 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       const user = await db.getUserById(request.jwtUser!.id);
       // Claude is available via ACP when a token is stored; the ACP package is always present
       const claudeAvailable = isClaudeAvailable(config.configDir) && !!user?.claudeToken;
-      // Cursor and Mistral UI remains but underlying backend is not yet implemented via ACP
-      const cursorAvailable = cursorAuthenticated();
+      // Cursor now runs through cursor-agent directly, so check both CLI presence and auth.
+      const cursorAvailable = isCursorCliAvailable(config.configDir) && cursorAuthenticated();
       const vibeKeyOk = getVibeApiKeyStatus(config.configDir).configured;
       const vibeCliOk = isVibeCliAvailable(config.configDir);
       const openCodeAvailable = openCodeAuthenticated();

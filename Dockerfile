@@ -41,13 +41,6 @@ ENV PATH="/root/.local/bin:/root/.opencode/bin:/usr/local/bin:${PATH}"
 # Install Cursor agent CLI
 RUN curl https://cursor.com/install -fsS | bash
 
-# Install Cursor ACP adapter
-RUN npm install -g @blowmage/cursor-agent-acp
-
-# Keep the adapter's metadata.model and state.currentModel in sync for loaded sessions.
-COPY api/scripts/patch-cursor-agent-acp.js /tmp/patch-cursor-agent-acp.js
-RUN node /tmp/patch-cursor-agent-acp.js && rm /tmp/patch-cursor-agent-acp.js
-
 # Install Mistral Vibe CLI
 RUN curl -LsSf https://mistral.ai/vibe/install.sh | bash
 

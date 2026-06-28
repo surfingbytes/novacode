@@ -1,23 +1,16 @@
 /**
- * Cursor ACP integration.
+ * Cursor agent integration.
  *
- * Spawns `cursor-agent-acp` as a subprocess for each prompt turn and communicates via
- * the ACP protocol (newline-delimited JSON over stdio) using ClientSideConnection
- * from @agentclientprotocol/sdk.
- *
- * Keep the generic acpClientProxy pattern in sync with claudeAcp.ts and vibeAcp.ts.
+ * This deliberately calls `cursor-agent` directly instead of going through the
+ * third-party cursor-agent-acp adapter. The adapter keeps its own model/session
+ * state and has repeatedly allowed Nova's selected model to drift back to Auto.
+ * Passing `--model` to the real Cursor CLI on every prompt is the authoritative
+ * path and matches the model list returned by `cursor-agent models`.
  */
 
 // node_modules
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { ClientSideConnection, ndJsonStream, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
-import type {
-  SessionNotification,
-  RequestPermissionRequest,
-  RequestPermissionResponse,
-  Client,
-} from '@agentclientprotocol/sdk';
 
 // classes
 import { config } from './config';
@@ -33,102 +26,63 @@ interface ActiveProcess {
 
 const activeProcesses = new Map<string, ActiveProcess>();
 
-// ── Permission auto-approval (same policy as claudeAcp.ts and vibeAcp.ts) ────────
-
-async function handlePermissionRequest(
-  params: RequestPermissionRequest
-): Promise<RequestPermissionResponse> {
-  const allowOption = params.options.find(
-    (o) => o.kind === 'allow_once' || o.kind === 'allow_always'
-  );
-  if (allowOption) {
-    return { outcome: { outcome: 'selected', optionId: allowOption.optionId } };
-  }
-  return { outcome: { outcome: 'cancelled' } };
+function stripAnsi(text: string): string {
+  return text.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '');
 }
 
-// ── Node → Web stream converters ─────────────────────────────────────────────
-
-function nodeReadableToWeb(readable: NodeJS.ReadableStream): ReadableStream<Uint8Array> {
-  return new ReadableStream<Uint8Array>({
-    start(controller) {
-      readable.on('data', (chunk: Buffer | string) => {
-        controller.enqueue(typeof chunk === 'string' ? Buffer.from(chunk) : new Uint8Array(chunk));
-      });
-      readable.on('end', () => controller.close());
-      readable.on('error', (err) => controller.error(err));
-    },
-  });
+function parseCreatedChatId(output: string): string | null {
+  const cleaned = stripAnsi(output)
+    .replace(/\r\n/g, '\n')
+    .trim()
+    .split('\x1B')
+    .shift()
+    ?.trim();
+  return cleaned || null;
 }
 
-function nodeWritableToWeb(writable: NodeJS.WritableStream): WritableStream<Uint8Array> {
-  return new WritableStream<Uint8Array>({
-    write(chunk) {
-      return new Promise<void>((resolve, reject) => {
-        writable.write(chunk, (err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
-    },
-    close() {
-      return new Promise<void>((resolve) => {
-        writable.end(resolve);
-      });
-    },
+async function createCursorChat(cwd: string): Promise<{ chatId?: string; error?: string }> {
+  return new Promise((resolve) => {
+    const proc = spawn(config.cursorCommand, ['-f', 'create-chat'], {
+      cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, ...config.agentEnv() },
+    });
+    let stdout = '';
+    let stderr = '';
+    const timeout = setTimeout(() => {
+      proc.kill();
+      resolve({ error: 'cursor-agent create-chat timed out' });
+    }, 30_000);
+    proc.stdout?.on('data', (chunk: string | Uint8Array) => {
+      stdout += chunk.toString();
+    });
+    proc.stderr?.on('data', (chunk: string | Uint8Array) => {
+      stderr += chunk.toString();
+    });
+    proc.on('error', (err: Error) => {
+      clearTimeout(timeout);
+      resolve({ error: err.message });
+    });
+    proc.on('close', (code: number | null) => {
+      clearTimeout(timeout);
+      if (code !== 0) {
+        resolve({ error: stripAnsi(stderr || stdout).trim() || `cursor-agent create-chat exited with code ${code}` });
+        return;
+      }
+      const chatId = parseCreatedChatId(stdout);
+      if (!chatId) {
+        resolve({ error: 'No chat id returned by cursor-agent create-chat' });
+        return;
+      }
+      resolve({ chatId });
+    });
   });
-}
-
-// ── Active session handler map (cursorSessionId → handler) ──────────────────
-
-const activeHandlers = new Map<string, AcpEventHandler>();
-
-// ── Spawn cursor-agent-acp and establish ACP connection ───────────────────────
-
-async function spawnCursorConnection(cwd: string): Promise<{
-  conn: ClientSideConnection;
-  proc: ChildProcess;
-}> {
-  const env = { ...process.env, ...config.agentEnv() };
-  const proc = spawn(config.cursorAcpCommand, [], {
-    cwd,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env,
-  });
-
-  proc.stderr?.on('data', (chunk: Buffer) => {
-    const text = chunk.toString().trim();
-    if (text) console.error('[cursorAcp] stderr:', text);
-  });
-
-  const webReadable = nodeReadableToWeb(proc.stdout!);
-  const webWritable = nodeWritableToWeb(proc.stdin!);
-  const stream = ndJsonStream(webWritable, webReadable);
-
-  const conn = new ClientSideConnection(
-    (_agent): Client => ({
-      sessionUpdate: async (notification: SessionNotification): Promise<void> => {
-        const handler = activeHandlers.get(notification.sessionId);
-        if (handler) handler(JSON.stringify(notification));
-      },
-      requestPermission: handlePermissionRequest,
-    }),
-    stream
-  );
-
-  await conn.initialize({
-    protocolVersion: PROTOCOL_VERSION,
-    clientInfo: { name: 'nova-code', version: '1.0.0' },
-    clientCapabilities: {},
-  });
-
-  return { conn, proc };
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
 export interface RunCursorAcpParams {
-  /** Cursor session ID from a previous run — null to start a new session. */
+  /** Cursor chat ID from a previous run — null to start a new chat. */
   acpSessionId: string | null;
   cwd: string;
   promptText: string;
@@ -136,7 +90,7 @@ export interface RunCursorAcpParams {
 }
 
 export interface RunCursorAcpResult {
-  /** Cursor session ID — persist in the DB for conversation continuity. */
+  /** Cursor chat ID — persist in the DB for conversation continuity. */
   acpSessionId: string;
   stopReason?: string;
   error?: string;
@@ -150,86 +104,109 @@ export async function runCursorAcp(
 ): Promise<RunCursorAcpResult> {
   const { acpSessionId, cwd, promptText } = params;
   const model = params.model && params.model !== 'auto' ? params.model : undefined;
-
-  const { conn, proc } = await spawnCursorConnection(cwd);
-  const killProc = () => {
-    try {
-      proc.kill();
-    } catch {
-      // already dead
+  let cursorChatId = acpSessionId;
+  if (!cursorChatId) {
+    const created = await createCursorChat(cwd);
+    if (!created.chatId) {
+      return { acpSessionId: '', error: created.error ?? 'Failed to create Cursor chat' };
     }
-  };
-
-  activeProcesses.set(novaSessionId, { proc, kill: killProc });
-
-  try {
-    let resolvedSessionId: string;
-
-    if (!acpSessionId) {
-      // First turn — create a new session
-      const resp = await conn.newSession({
-        cwd,
-        mcpServers: [],
-        ...(model ? { metadata: { model } } : {})
-      } as any);
-      resolvedSessionId = resp.sessionId;
-    } else {
-      // Subsequent turn — restore from disk.
-      // loadSession() replays history via sessionUpdate; install a null handler
-      // to discard those replay events before the real prompt turn starts.
-      activeHandlers.set(acpSessionId, () => {});
-      try {
-        await conn.loadSession({
-          sessionId: acpSessionId,
-          cwd,
-          mcpServers: [],
-          ...(model ? { metadata: { model } } : {})
-        } as any);
-        resolvedSessionId = acpSessionId;
-      } catch (err) {
-        console.warn('[cursorAcp] loadSession failed, starting fresh session:', err);
-        activeHandlers.delete(acpSessionId);
-        const resp = await conn.newSession({
-          cwd,
-          mcpServers: [],
-          ...(model ? { metadata: { model } } : {})
-        } as any);
-        resolvedSessionId = resp.sessionId;
-      }
-      activeHandlers.delete(acpSessionId);
-    }
-
-    if (model) {
-      try {
-        await (conn as any).unstable_setSessionModel({ sessionId: resolvedSessionId, modelId: model });
-      } catch (err) {
-        console.error('[cursorAcp] unstable_setSessionModel failed:', {
-          model,
-          err
-        });
-        return {
-          acpSessionId: resolvedSessionId,
-          error: `Failed to set Cursor model '${model}': ${err instanceof Error ? err.message : String(err)}`
-        };
-      }
-    }
-
-    activeHandlers.set(resolvedSessionId, onEvent);
-    try {
-      const resp = await conn.prompt({
-        sessionId: resolvedSessionId,
-        prompt: [{ type: 'text', text: promptText }],
-      });
-      return { acpSessionId: resolvedSessionId, stopReason: resp.stopReason };
-    } catch (err) {
-      return { acpSessionId: resolvedSessionId, error: String(err) };
-    } finally {
-      activeHandlers.delete(resolvedSessionId);
-    }
-  } finally {
-    activeProcesses.delete(novaSessionId);
-    killProc();
+    cursorChatId = created.chatId;
   }
+
+  const runPrompt = (chatId: string, allowResumeRetry: boolean): Promise<RunCursorAcpResult> =>
+    new Promise((resolve) => {
+      const args = [
+        ...(model ? ['--model', model] : []),
+        '--resume',
+        chatId,
+        '--print',
+        '--output-format',
+        'stream-json',
+        '--stream-partial-output',
+        '--force',
+        promptText,
+      ];
+      console.log('[cursorAcp] running cursor-agent', {
+        cwd,
+        model: model ?? 'auto',
+        cursorChatId: chatId,
+        args: args.map((arg) => (arg === promptText ? '<prompt>' : arg)),
+      });
+
+      const proc = spawn(config.cursorCommand, args, {
+        cwd,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, ...config.agentEnv() },
+      });
+      const killProc = () => {
+        try {
+          proc.kill();
+        } catch {
+          // already dead
+        }
+      };
+      activeProcesses.set(novaSessionId, { proc, kill: killProc });
+
+      let stderr = '';
+      let stdoutBuffer = '';
+      let settled = false;
+      const settle = (result: RunCursorAcpResult): void => {
+        if (settled) return;
+        settled = true;
+        activeProcesses.delete(novaSessionId);
+        resolve(result);
+      };
+
+      proc.stdout?.on('data', (chunk: string | Uint8Array) => {
+        stdoutBuffer += chunk.toString();
+        const lines = stdoutBuffer.split(/\r?\n/);
+        stdoutBuffer = lines.pop() ?? '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed) onEvent(trimmed);
+        }
+      });
+      proc.stderr?.on('data', (chunk: string | Uint8Array) => {
+        stderr += chunk.toString();
+      });
+      proc.on('error', (err: Error) => {
+        settle({ acpSessionId: chatId, error: err.message });
+      });
+      proc.on('close', (code: number | null) => {
+        const trailing = stdoutBuffer.trim();
+        if (trailing) onEvent(trailing);
+        if (code !== 0) {
+          if (allowResumeRetry) {
+            void (async () => {
+              const created = await createCursorChat(cwd);
+              if (!created.chatId) {
+                settle({
+                  acpSessionId: chatId,
+                  error: (created.error ?? stripAnsi(stderr).trim()) || `cursor-agent exited with code ${code}`,
+                });
+                return;
+              }
+              console.warn('[cursorAcp] resume failed, retrying with a fresh Cursor chat', {
+                previousChatId: chatId,
+                nextChatId: created.chatId,
+                stderr: stripAnsi(stderr).trim(),
+              });
+              const retryResult = await runPrompt(created.chatId, false);
+              settle(retryResult);
+            })();
+            return;
+          }
+          settle({
+            acpSessionId: chatId,
+            error: stripAnsi(stderr).trim() || `cursor-agent exited with code ${code}`,
+          });
+          return;
+        }
+        settle({ acpSessionId: chatId, stopReason: 'completed' });
+      });
+    });
+
+  return runPrompt(cursorChatId, true);
 }
 
 export function cancelCursorAcp(novaSessionId: string): void {
