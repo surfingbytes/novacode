@@ -140,6 +140,7 @@ const hideThinkingOutput = ref(false);
 const availableModels = ref<CursorModelOption[]>([]);
 const openCodeModels = ref<CursorModelOption[]>([]);
 const bModelsLoading = ref(false);
+let chatSettingsSaveSeq = 0;
 const queuedPrompts = ref<ChatQueueItem[]>([]);
 const promptStorageKey = computed(() => `sessionPrompt:${props.workspaceId}:${props.sessionId}`);
 const workspaceName = computed(
@@ -527,6 +528,7 @@ async function loadAvailableModels() {
 }
 
 async function saveChatSettings(patch: { modelSelection?: string; hideThinkingOutput?: boolean }) {
+  const saveSeq = ++chatSettingsSaveSeq;
   const previousModel = modelSelection.value;
   const previousHideThinking = hideThinkingOutput.value;
   if (patch.modelSelection !== undefined) modelSelection.value = patch.modelSelection;
@@ -534,10 +536,16 @@ async function saveChatSettings(patch: { modelSelection?: string; hideThinkingOu
 
   try {
     const { data } = await sessionsApi.update(props.workspaceId, props.sessionId, patch);
+    if (saveSeq !== chatSettingsSaveSeq) {
+      return;
+    }
     session.value = data;
     modelSelection.value = data.modelSelection ?? modelSelection.value;
     hideThinkingOutput.value = data.hideThinkingOutput ?? hideThinkingOutput.value;
   } catch {
+    if (saveSeq !== chatSettingsSaveSeq) {
+      return;
+    }
     modelSelection.value = previousModel;
     hideThinkingOutput.value = previousHideThinking;
   }

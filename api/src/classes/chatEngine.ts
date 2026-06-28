@@ -212,6 +212,7 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
   }
 
   const agentType: AgentType = (session.agentType as AgentType | null) ?? 'claude';
+  const selectedModelForRun = model ?? session.modelSelection ?? 'auto';
 
   if (agentType !== 'claude' && agentType !== 'mistral-vibe' && agentType !== 'cursor-agent' && agentType !== 'open-code' && agentType !== 'codex') {
     return { error: `Agent type '${agentType}' is not yet supported via ACP. Coming soon.` };
@@ -238,9 +239,15 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
   currentMessages.push(userMessage);
 
   const previewAfterUser = computeLastListPreview(currentMessages);
+  const shouldRefreshCursorSessionForModel =
+    agentType === 'cursor-agent' && session.appliedModelSelection !== selectedModelForRun;
   try {
     await db.updateSession(sessionId, {
       messageJson: JSON.stringify(currentMessages),
+      ...(session.modelSelection !== selectedModelForRun ? { modelSelection: selectedModelForRun } : {}),
+      ...(shouldRefreshCursorSessionForModel
+        ? { sessionId: null, appliedModelSelection: null }
+        : {}),
       ...(previewAfterUser
         ? {
             lastPreviewText: previewAfterUser.lastPreviewText,
@@ -275,9 +282,6 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
 
   let cancelled = false;
   let currentAcpSessionId = session.sessionId ?? null;
-  const selectedModelForRun = model ?? 'auto';
-  const shouldRefreshCursorSessionForModel =
-    agentType === 'cursor-agent' && session.appliedModelSelection !== selectedModelForRun;
   if (shouldRefreshCursorSessionForModel) {
     currentAcpSessionId = null;
   }
@@ -338,19 +342,34 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
       );
     } else if (agentType === 'cursor-agent') {
       result = await runCursorAcp(
-        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt, model },
+        {
+          acpSessionId: currentAcpSessionId,
+          cwd: workspacePath,
+          promptText: agentPrompt,
+          model: selectedModelForRun,
+        },
         onEvent,
         sessionId
       );
     } else if (agentType === 'open-code') {
       result = await runOpenCodeAcp(
-        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt, model },
+        {
+          acpSessionId: currentAcpSessionId,
+          cwd: workspacePath,
+          promptText: agentPrompt,
+          model: selectedModelForRun,
+        },
         onEvent,
         sessionId
       );
     } else if (agentType === 'codex') {
       result = await runCodexAcp(
-        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt, model },
+        {
+          acpSessionId: currentAcpSessionId,
+          cwd: workspacePath,
+          promptText: agentPrompt,
+          model: selectedModelForRun,
+        },
         onEvent,
         sessionId
       );
