@@ -270,6 +270,14 @@ function processEventLine(line: string, items: DisplayItem[]): void {
     return;
   }
 
+  if (event.type === 'result' && typeof event.result === 'string') {
+    const hasAssistantText = items.some((item) => item.kind === 'text' && item.text?.trim());
+    if (!hasAssistantText && event.result.trim()) {
+      mergeAssistantTextIntoDisplayItems(event.result, items);
+    }
+    return;
+  }
+
   if (event.role === 'tool' && typeof event.content === 'string') {
     const toolNameRaw = typeof event.name === 'string' ? event.name : 'tool';
     const meta = VIBE_TOOL_META[toolNameRaw] ?? { name: toolNameRaw };
