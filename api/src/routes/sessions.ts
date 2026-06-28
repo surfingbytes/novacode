@@ -175,6 +175,8 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         name?: string;
         tags?: string[] | null;
         archived?: boolean;
+        sessionId?: string | null;
+        appliedModelSelection?: string | null;
         modelSelection?: string;
         hideThinkingOutput?: boolean;
       } = {};
@@ -189,6 +191,10 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       }
       if (body.modelSelection !== undefined) {
         patch.modelSelection = body.modelSelection;
+        if (session.agentType === 'cursor-agent' && body.modelSelection !== session.modelSelection) {
+          patch.sessionId = null;
+          patch.appliedModelSelection = null;
+        }
       }
       if (body.hideThinkingOutput !== undefined) {
         patch.hideThinkingOutput = body.hideThinkingOutput;
