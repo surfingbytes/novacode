@@ -930,6 +930,10 @@ function processEventLine(
     // Skip whitespace-only chunks so we do not render empty markdown bubbles between tool calls.
     if (!assistantText.trim()) return;
     mergeAssistantTextIntoDisplayItems(assistantText, items);
+  } else if (event.type === 'result' && typeof event.result === 'string') {
+    // Cursor print mode suppresses thinking and may only emit this canonical final answer.
+    const hasAssistantText = items.some((item) => item.kind === 'text' && item.text?.trim());
+    if (!hasAssistantText && event.result.trim()) mergeAssistantTextIntoDisplayItems(event.result, items);
   } else if (event.role === 'tool' && typeof event.content === 'string') {
     const toolNameRaw = typeof event.name === 'string' ? event.name : 'tool';
     const meta = VIBE_TOOL_META[toolNameRaw] ?? { name: toolNameRaw, icon: 'build' };
@@ -1249,6 +1253,12 @@ function connectChatWs() {
       } else if (msg.type === 'queue-updated') {
         queuedPrompts.value = msg.queue ?? [];
       } else if (msg.type === 'prompt-started') {
+        bIsStreaming.value = true;
+        streamingItems.value = [];
+        streamingRawLines.length = 0;
+        streamingThinkingText.value = '';
+        streamingUsage.value = null;
+        notifiedTodoIds.clear();
         const prompt = msg.prompt;
         if (prompt) {
           messages.value.push({

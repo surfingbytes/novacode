@@ -251,6 +251,14 @@ function processEventLine(line: string, items: DisplayItem[]): void {
     return;
   }
 
+  if (event.type === 'result' && typeof event.result === 'string') {
+    const hasAssistantText = items.some((item) => item.kind === 'text' && item.text?.trim());
+    if (!hasAssistantText && event.result.trim()) {
+      mergeAssistantTextIntoDisplayItems(event.result, items);
+    }
+    return;
+  }
+
   if (event.type === 'tool_call') {
     const toolCallObj = (event.tool_call ?? {}) as Record<string, unknown>;
     const toolCallName = Object.keys(toolCallObj)[0] ?? '';
