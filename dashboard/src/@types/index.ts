@@ -67,6 +67,8 @@ export interface Session {
   tags: string[] | null;
   sessionId: string | null;
   agentType: AgentType;
+  modelSelection: string;
+  hideThinkingOutput: boolean;
   /** Present on session detail; omitted on list endpoints to save bandwidth */
   messageJson?: string;
   /** Denormalized last chat line for sidebars (from API list / WebSocket) */
@@ -97,6 +99,7 @@ export interface AppSettings {
   darkTheme: string;
   lightTheme: string;
   modelSelection: string;
+  hideThinkingOutput: boolean;
   claudeAutoContinue: boolean;
   /** ed25519 public key — add to your Git host for SSH git access */
   sshPublicKey: string;
@@ -231,6 +234,7 @@ export interface ChatWsServerMessage {
   queueItemId?: string;
   prompt?: {
     text: string;
+    model?: string;
     imagePaths?: string[];
     createdAt: string;
   };

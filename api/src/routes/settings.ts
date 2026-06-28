@@ -35,6 +35,7 @@ type AppSettingsUser = {
   darkTheme: string | null;
   lightTheme: string | null;
   modelSelection: string | null;
+  hideThinkingOutput: boolean | null;
 };
 
 /** Legacy dashboard theme id `rust` was replaced by OLED. */
@@ -50,6 +51,7 @@ type AppSettings = {
   darkTheme: string;
   lightTheme: string;
   modelSelection: string;
+  hideThinkingOutput: boolean;
   sshPublicKey: string;
   sshPrivateKey: string;
 };
@@ -62,6 +64,7 @@ const AppSettingsSchema = Type.Object({
   darkTheme: Type.String(),
   lightTheme: Type.String(),
   modelSelection: Type.String(),
+  hideThinkingOutput: Type.Boolean(),
   /** SSH public key (e.g. register on GitHub/GitLab) — persisted under config volume `.ssh/` */
   sshPublicKey: Type.String(),
   /** Private key for the same pair — treat as a secret */
@@ -83,6 +86,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       darkTheme: normalizeThemeId(user?.darkTheme ?? 'deep-space'),
       lightTheme: normalizeThemeId(user?.lightTheme ?? 'cloud'),
       modelSelection: user?.modelSelection ?? 'auto',
+      hideThinkingOutput: user?.hideThinkingOutput ?? false,
       sshPublicKey: ssh.sshPublicKey,
       sshPrivateKey: ssh.sshPrivateKey
     };
@@ -118,7 +122,8 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
           autoTheme: Type.Optional(Type.Boolean()),
           darkTheme: Type.Optional(Type.String()),
           lightTheme: Type.Optional(Type.String()),
-          modelSelection: Type.Optional(Type.String())
+          modelSelection: Type.Optional(Type.String()),
+          hideThinkingOutput: Type.Optional(Type.Boolean())
         }),
         response: { 200: AppSettingsSchema }
       }
@@ -145,6 +150,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         body.lightTheme !== undefined ? body.lightTheme : existing.lightTheme ?? 'cloud'
       );
       const modelSelection = body.modelSelection !== undefined ? body.modelSelection : existing.modelSelection ?? 'auto';
+      const hideThinkingOutput = body.hideThinkingOutput !== undefined ? body.hideThinkingOutput : existing.hideThinkingOutput ?? false;
 
       if (body.gitUserName !== undefined || body.gitUserEmail !== undefined) {
         writeGlobalGitConfig(config.configDir, gitUserName, gitUserEmail);
@@ -157,7 +163,8 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         autoTheme,
         darkTheme,
         lightTheme,
-        modelSelection
+        modelSelection,
+        hideThinkingOutput
       });
       if (!user) {
         throw new Error('Failed to update user');

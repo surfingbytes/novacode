@@ -266,7 +266,8 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
 
   // Resolve workspace rules prefix
   const rulesPrefix = await buildWorkspaceRulesPrefix(workspacePath);
-  const agentPrompt = rulesPrefix ? `${rulesPrefix}\n\nUser request:\n${effectiveText}` : effectiveText;
+  const promptParts = [rulesPrefix, `User request:\n${effectiveText}`].filter(Boolean);
+  const agentPrompt = promptParts.join('\n\n');
 
   // Get Claude OAuth token (only needed for claude agent type)
   const user = await db.getFirstUser();
@@ -329,7 +330,7 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
       );
     } else if (agentType === 'cursor-agent') {
       result = await runCursorAcp(
-        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt },
+        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt, model },
         onEvent,
         sessionId
       );

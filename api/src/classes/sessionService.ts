@@ -17,6 +17,8 @@ export interface CreateSessionWithAgentParams {
   tags?: string[] | null;
   /** Which backend agent to use for this session (defaults to workspace.defaultAgentType or cursor-agent). */
   agentType?: AgentType;
+  /** Authenticated user whose chat defaults should seed this session. */
+  userId?: string;
 }
 
 export interface CreateSessionWithAgentResult {
@@ -38,12 +40,15 @@ export async function createSessionWithAgent(
   const agentType: AgentType =
     params.agentType ??
     ((workspace.defaultAgentType as AgentType | null) ?? 'cursor-agent');
+  const userDefaults = params.userId ? await db.getUserById(params.userId) : await db.getFirstUser();
 
   const session = await db.createSession({
     name,
     tags,
     workspaceId,
-    agentType
+    agentType,
+    modelSelection: userDefaults?.modelSelection ?? 'auto',
+    hideThinkingOutput: userDefaults?.hideThinkingOutput ?? false
   });
 
   // claude / mistral-vibe: no create-chat bootstrap; cursor-agent runs create-chat for an external session id
