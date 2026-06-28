@@ -12,9 +12,9 @@ RUN curl https://cursor.com/install -fsS | bash
 # Install Cursor ACP adapter
 RUN npm install -g @blowmage/cursor-agent-acp
 
-# The adapter's loadSession path updates metadata.model but not state.currentModel.
-# Prefer metadata.model so existing Nova sessions honor model changes on the next prompt.
-RUN node -e "const fs=require('fs'); const p='/usr/local/lib/node_modules/@blowmage/cursor-agent-acp/dist/session/manager.js'; let s=fs.readFileSync(p,'utf8'); s=s.replace(\"return session?.state.currentModel || 'auto';\", \"return session?.metadata?.model || session?.state.currentModel || 'auto';\"); fs.writeFileSync(p,s);"
+# Keep the adapter's metadata.model and state.currentModel in sync for loaded sessions.
+COPY api/scripts/patch-cursor-agent-acp.js /tmp/patch-cursor-agent-acp.js
+RUN node /tmp/patch-cursor-agent-acp.js && rm /tmp/patch-cursor-agent-acp.js
 
 # Install Mistral Vibe CLI
 RUN curl -LsSf https://mistral.ai/vibe/install.sh | bash

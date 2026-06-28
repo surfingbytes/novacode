@@ -203,10 +203,14 @@ export async function runCursorAcp(
       try {
         await (conn as any).unstable_setSessionModel({ sessionId: resolvedSessionId, modelId: model });
       } catch (err) {
-        console.warn('[cursorAcp] unstable_setSessionModel failed (continuing with metadata model):', {
+        console.error('[cursorAcp] unstable_setSessionModel failed:', {
           model,
           err
         });
+        return {
+          acpSessionId: resolvedSessionId,
+          error: `Failed to set Cursor model '${model}': ${err instanceof Error ? err.message : String(err)}`
+        };
       }
     }
 
