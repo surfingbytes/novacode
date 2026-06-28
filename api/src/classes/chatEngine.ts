@@ -275,6 +275,12 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
 
   let cancelled = false;
   let currentAcpSessionId = session.sessionId ?? null;
+  const selectedModelForRun = model ?? 'auto';
+  const shouldRefreshCursorSessionForModel =
+    agentType === 'cursor-agent' && session.appliedModelSelection !== selectedModelForRun;
+  if (shouldRefreshCursorSessionForModel) {
+    currentAcpSessionId = null;
+  }
 
   const run: ActiveRun = {
     cancel: () => {
@@ -317,6 +323,8 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
       agentType,
       sessionId,
       acpSessionId: currentAcpSessionId,
+      model: selectedModelForRun,
+      appliedModelSelection: session.appliedModelSelection,
       cwd: workspacePath,
     });
 
@@ -419,6 +427,7 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
       await db.updateSession(sessionId, {
         messageJson: JSON.stringify(currentMessages),
         ...(newAcpSessionId ? { sessionId: newAcpSessionId } : {}),
+        ...(shouldRefreshCursorSessionForModel ? { appliedModelSelection: selectedModelForRun } : {}),
         ...(previewDone
           ? { lastPreviewText: previewDone.lastPreviewText, lastPreviewRole: previewDone.lastPreviewRole }
           : { lastPreviewText: null, lastPreviewRole: null }),

@@ -376,6 +376,7 @@ export const db = {
     id: string,
     patch: {
       sessionId?: string | null;
+      appliedModelSelection?: string | null;
       messageJson?: string;
       lastPreviewText?: string | null;
       lastPreviewRole?: string | null;
@@ -404,7 +405,11 @@ export const db = {
     const row = await _prisma.session.update({
       where: { id },
       data: {
-        sessionId: patch.sessionId ?? existingSession.sessionId,
+        sessionId: patch.sessionId !== undefined ? patch.sessionId : existingSession.sessionId,
+        appliedModelSelection:
+          patch.appliedModelSelection !== undefined
+            ? patch.appliedModelSelection
+            : existingSession.appliedModelSelection,
         messageJson: patch.messageJson ?? existingSession.messageJson,
         ...(patch.lastPreviewText !== undefined && { lastPreviewText: patch.lastPreviewText }),
         ...(patch.lastPreviewRole !== undefined && { lastPreviewRole: patch.lastPreviewRole }),
