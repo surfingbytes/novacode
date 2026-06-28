@@ -40,6 +40,7 @@ export interface ChatSubscriber {
 
 const activeRuns = new Map<string, ActiveRun>();
 const busySubscribers = new Set<(sessionId: string, workspaceId: string, busy: boolean) => void>();
+const CURSOR_MODEL_APPLICATION_VERSION = 'cursor-acp-model-v2';
 
 // --------------------------------------------- Functions ---------------------------------------------
 
@@ -83,6 +84,10 @@ export function addSubscriber(sessionId: string, subscriber: ChatSubscriber): vo
 
 export function removeSubscriber(sessionId: string, subscriber: ChatSubscriber): void {
   activeRuns.get(sessionId)?.subscribers.delete(subscriber);
+}
+
+function cursorAppliedModelKey(model: string): string {
+  return `${CURSOR_MODEL_APPLICATION_VERSION}:${model}`;
 }
 
 export function cancelRun(sessionId: string): void {
@@ -213,6 +218,8 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
 
   const agentType: AgentType = (session.agentType as AgentType | null) ?? 'claude';
   const selectedModelForRun = model ?? session.modelSelection ?? 'auto';
+  const appliedModelForRun =
+    agentType === 'cursor-agent' ? cursorAppliedModelKey(selectedModelForRun) : selectedModelForRun;
 
   if (agentType !== 'claude' && agentType !== 'mistral-vibe' && agentType !== 'cursor-agent' && agentType !== 'open-code' && agentType !== 'codex') {
     return { error: `Agent type '${agentType}' is not yet supported via ACP. Coming soon.` };
@@ -240,7 +247,7 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
 
   const previewAfterUser = computeLastListPreview(currentMessages);
   const shouldRefreshCursorSessionForModel =
-    agentType === 'cursor-agent' && session.appliedModelSelection !== selectedModelForRun;
+    agentType === 'cursor-agent' && session.appliedModelSelection !== appliedModelForRun;
   try {
     await db.updateSession(sessionId, {
       messageJson: JSON.stringify(currentMessages),
@@ -329,6 +336,7 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
       acpSessionId: currentAcpSessionId,
       model: selectedModelForRun,
       appliedModelSelection: session.appliedModelSelection,
+      expectedAppliedModelSelection: appliedModelForRun,
       cwd: workspacePath,
     });
 
@@ -446,7 +454,7 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
       await db.updateSession(sessionId, {
         messageJson: JSON.stringify(currentMessages),
         ...(newAcpSessionId ? { sessionId: newAcpSessionId } : {}),
-        ...(shouldRefreshCursorSessionForModel ? { appliedModelSelection: selectedModelForRun } : {}),
+        ...(shouldRefreshCursorSessionForModel ? { appliedModelSelection: appliedModelForRun } : {}),
         ...(previewDone
           ? { lastPreviewText: previewDone.lastPreviewText, lastPreviewRole: previewDone.lastPreviewRole }
           : { lastPreviewText: null, lastPreviewRole: null }),
