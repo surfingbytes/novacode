@@ -19,12 +19,6 @@ export const config = {
   claudeCommand: 'claude',
   openCodeCommand: 'opencode',
   codexCommand: 'codex',
-  /** Cursor ACP server entrypoint. Spawned per prompt turn for ACP communication. */
-  get cursorAcpCommand(): string {
-    const override = process.env['CURSOR_ACP_COMMAND'];
-    if (override) return override;
-    return existsSync('/root/.local/bin/cursor-agent-acp') ? '/root/.local/bin/cursor-agent-acp' : 'cursor-agent-acp';
-  },
   /** Mistral Vibe CLI (interactive). Resolved lazily so fresh installs are picked up. */
   get vibeCommand(): string {
     const override = process.env['VIBE_COMMAND'];
@@ -187,11 +181,11 @@ export function isClaudeAvailable(_configDir: string): boolean {
   }
 }
 
-/** True when the vibe-acp ACP server binary is on PATH and exits cleanly for --version. */
-export function isVibeCliAvailable(configDir: string): boolean {
+/** True when the cursor-agent CLI is present and can report its version. */
+export function isCursorCliAvailable(configDir: string): boolean {
   try {
     const env = { ...process.env, ...config.agentEnv() };
-    const result = spawnSync(config.vibeAcpCommand, ['--version'], {
+    const result = spawnSync(config.cursorCommand, ['--version'], {
       encoding: 'utf8',
       timeout: 5000,
       cwd: configDir,
@@ -204,11 +198,11 @@ export function isVibeCliAvailable(configDir: string): boolean {
   }
 }
 
-/** True when the cursor-agent-acp ACP server binary is on PATH and exits cleanly for --version. */
-export function isCursorAcpAvailable(configDir: string): boolean {
+/** True when the vibe-acp ACP server binary is on PATH and exits cleanly for --version. */
+export function isVibeCliAvailable(configDir: string): boolean {
   try {
     const env = { ...process.env, ...config.agentEnv() };
-    const result = spawnSync(config.cursorAcpCommand, ['--version'], {
+    const result = spawnSync(config.vibeAcpCommand, ['--version'], {
       encoding: 'utf8',
       timeout: 5000,
       cwd: configDir,
