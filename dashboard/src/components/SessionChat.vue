@@ -1520,7 +1520,7 @@ onUnmounted(() => {
     <!-- Tab content -->
     <div class="flex-1 overflow-hidden flex flex-col min-h-0">
       <!-- Chat -->
-      <template v-if="activeTab === 'chat'">
+      <div v-show="activeTab === 'chat'" class="flex-1 overflow-hidden flex flex-col min-h-0">
         <!-- Messages -->
         <div
           ref="messagesEl"
@@ -2121,18 +2121,18 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
-      </template>
+      </div>
 
       <!-- Files -->
       <FilesView
-        v-else-if="activeTab === 'files'"
+        v-if="activeTab === 'files'"
         :workspace-id="workspaceId"
         :active="activeTab === 'files'"
       />
 
       <!-- Git -->
       <GitView
-        v-else-if="activeTab === 'git'"
+        v-if="activeTab === 'git'"
         :workspace-id="workspaceId"
         :active="activeTab === 'git'"
       />
