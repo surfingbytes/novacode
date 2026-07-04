@@ -4,6 +4,7 @@ defineProps<{
   sidebarCollapsed: boolean;
   onMenuClick: () => void;
   onSearchClick: () => void;
+  hideOnMobile?: boolean;
 }>();
 
 defineEmits<{
@@ -12,7 +13,7 @@ defineEmits<{
 </script>
 
 <template>
-  <header class="topbar">
+  <header class="topbar" :class="{ 'topbar--hide-mobile': hideOnMobile }">
     <!-- Sidebar toggle -->
     <button
       type="button"
@@ -187,6 +188,10 @@ defineEmits<{
 }
 
 @media (max-width: 1023px) {
+  .topbar.topbar--hide-mobile {
+    display: none;
+  }
+
   .topbar__search {
     display: none;
   }
