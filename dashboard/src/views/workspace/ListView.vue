@@ -422,11 +422,16 @@ onMounted((): void => {
                 </div>
                 <!-- Busy indicator -->
                 <span v-if="workspaceHasBusySession(workspace.id)" class="nc-status-dot busy" />
-                <!-- Action cluster (hover-only) -->
+                <button
+                  class="ws-new-session-btn ws-card__new-session"
+                  title="New session"
+                  @click.prevent.stop="openNewSession(workspace)"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14 M5 12h14"/></svg>
+                  <span class="ws-new-session-btn__label">New session</span>
+                </button>
+                <!-- Secondary actions (hover-only) -->
                 <div class="ws-card__actions">
-                  <button class="ws-icon-btn ws-icon-btn--accent" title="New session" @click.prevent.stop="openNewSession(workspace)">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14 M5 12h14"/></svg>
-                  </button>
                   <button class="ws-icon-btn" title="Edit" @click.prevent.stop="openEditWorkspace(workspace)">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6 M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
                   </button>
@@ -767,7 +772,51 @@ onMounted((): void => {
   margin-top: 2px;
 }
 
-/* Action cluster — hidden until card hover */
+/* Primary action — icon-only on desktop until hover; label always on mobile */
+.ws-new-session-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 24px;
+  min-width: 24px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+  color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: background 0.1s;
+}
+.ws-new-session-btn:hover,
+.ws-new-session-btn:focus-visible {
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+}
+.ws-new-session-btn__label {
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-width 0.15s ease, opacity 0.12s ease;
+}
+.ws-card:hover .ws-new-session-btn__label,
+.ws-new-session-btn:hover .ws-new-session-btn__label,
+.ws-new-session-btn:focus-visible .ws-new-session-btn__label {
+  max-width: 5.5rem;
+  opacity: 1;
+}
+@media (max-width: 1024px) {
+  .ws-new-session-btn__label {
+    max-width: 5.5rem;
+    opacity: 1;
+  }
+}
+
+/* Secondary actions — hidden until card hover */
 .ws-card__actions {
   display: flex;
   align-items: center;
