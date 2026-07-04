@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router';
 
 // components
 import PageShell from '@/components/layout/PageShell.vue';
+import NewSessionModal from '@/components/NewSessionModal.vue';
 import WorkspaceDeleteModal from '@/components/workspace/DeleteModal.vue';
 import WorkspaceEditModal from '@/components/workspace/EditModal.vue';
 import ContextMenu from '@/components/ContextMenu.vue';
@@ -14,7 +15,7 @@ import type { ContextMenuItem } from '@/components/ContextMenu.vue';
 import { useWorkspacesStore } from '@/stores/workspaces';
 
 // classes
-import { agentAuthApi, settingsApi } from '@/classes/api';
+import { agentAuthApi, sessionsApi, settingsApi } from '@/classes/api';
 
 // types
 import type { AgentType, Workspace } from '@/@types/index';
@@ -45,6 +46,9 @@ const codexAvailable = ref<boolean>(false);
 const newGroupNames = ref<string[]>([]);
 const bShowWorkspaceDeleteModal = ref<boolean>(false);
 const deletingWorkspace = ref<Workspace | undefined>(undefined);
+const bShowNewSessionModal = ref<boolean>(false);
+const newSessionWorkspace = ref<Workspace | undefined>(undefined);
+const bSubmittingSession = ref<boolean>(false);
 
 const bCtxMenuOpen = ref<boolean>(false);
 const ctxMenuX = ref(0);
@@ -137,6 +141,26 @@ const busyWorkspaceIds = computed(() => {
   return ids;
 });
 
+const newSessionTags = computed((): string[] => {
+  const workspaceId = newSessionWorkspace.value?.id;
+  if (!workspaceId) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const session of store.allSessions) {
+    if (session.workspaceId !== workspaceId) continue;
+    const tags = session.tags;
+    if (!tags?.length) continue;
+    for (const tag of tags) {
+      if (typeof tag !== 'string' || !tag.trim()) continue;
+      const key = tag.trim().toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(tag.trim());
+    }
+  }
+  return out.sort((a, b) => a.localeCompare(b));
+});
+
 // -------------------------------------------------- Methods --------------------------------------------------
 const openWorkspace = (id: string): void => {
   router.push(`/workspace/${id}`);
@@ -152,6 +176,34 @@ const openCreateWorkspace = (): void => {
 const openEditWorkspace = (workspace: Workspace): void => {
   editingWorkspace.value = workspace;
   bShowWorkspaceModal.value = true;
+};
+
+const openNewSession = (workspace: Workspace): void => {
+  newSessionWorkspace.value = workspace;
+  bShowNewSessionModal.value = true;
+};
+
+const createSession = async (payload: {
+  name: string;
+  tags?: string[] | null;
+  agentType?: AgentType;
+}): Promise<void> => {
+  const workspace = newSessionWorkspace.value;
+  if (!workspace || bSubmittingSession.value) return;
+  bSubmittingSession.value = true;
+  try {
+    const { data: newSession } = await sessionsApi.create(workspace.id, payload);
+    bShowNewSessionModal.value = false;
+    newSessionWorkspace.value = undefined;
+    await router.push({
+      name: 'session',
+      params: { id: workspace.id, sessionId: newSession.id }
+    });
+  } catch (error) {
+    console.error('Failed to create session:', error);
+  } finally {
+    bSubmittingSession.value = false;
+  }
 };
 
 const handleSaveWorkspace = async (payload: {
@@ -210,12 +262,18 @@ const handleDeleteWorkspace = async (id: string): Promise<void> => {
 
 function workspaceContextItems(workspace: Workspace): ContextMenuItem[] {
   const arch = workspace.archived;
-  return [
+  const items: ContextMenuItem[] = [
     { key: 'open', label: 'Open', icon: 'open_in_new' },
+  ];
+  if (!arch) {
+    items.push({ key: 'new-session', label: 'New session', icon: 'add' });
+  }
+  items.push(
     { key: 'edit', label: 'Edit…', icon: 'edit' },
     { key: 'archive', label: arch ? 'Unarchive' : 'Archive', icon: arch ? 'unarchive' : 'inventory_2' },
     { key: 'delete', label: 'Delete…', icon: 'delete', danger: true }
-  ];
+  );
+  return items;
 }
 
 function openWorkspaceContextMenu(e: MouseEvent, workspace: Workspace): void {
@@ -225,6 +283,10 @@ function openWorkspaceContextMenu(e: MouseEvent, workspace: Workspace): void {
   ctxWorkspacePickHandler = (key: string) => {
     if (key === 'open') {
       openWorkspace(workspace.id);
+      return;
+    }
+    if (key === 'new-session') {
+      openNewSession(workspace);
       return;
     }
     if (key === 'edit') {
@@ -277,6 +339,7 @@ const fetchFirstStartStatus = async (): Promise<void> => {
     claudeAvailable.value = agentCapsResult.value.data.claudeAvailable;
     mistralVibeAvailable.value = agentCapsResult.value.data.mistralVibeAvailable;
     openCodeAvailable.value = agentCapsResult.value.data.openCodeAvailable;
+    codexAvailable.value = agentCapsResult.value.data.codexAvailable;
   }
   bFirstStartCheckDone.value = true;
 };
@@ -361,6 +424,9 @@ onMounted((): void => {
                 <span v-if="workspaceHasBusySession(workspace.id)" class="nc-status-dot busy" />
                 <!-- Action cluster (hover-only) -->
                 <div class="ws-card__actions">
+                  <button class="ws-icon-btn ws-icon-btn--accent" title="New session" @click.prevent.stop="openNewSession(workspace)">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14 M5 12h14"/></svg>
+                  </button>
                   <button class="ws-icon-btn" title="Edit" @click.prevent.stop="openEditWorkspace(workspace)">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6 M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
                   </button>
@@ -457,6 +523,19 @@ onMounted((): void => {
     v-model="bShowWorkspaceDeleteModal"
     :workspace="deletingWorkspace"
     @delete="handleDeleteWorkspace"
+  />
+
+  <NewSessionModal
+    v-model="bShowNewSessionModal"
+    :loading="bSubmittingSession"
+    :default-agent-type="newSessionWorkspace?.defaultAgentType ?? null"
+    :claude-available="claudeAvailable"
+    :cursor-available="cursorAvailable"
+    :mistral-vibe-available="mistralVibeAvailable"
+    :open-code-available="openCodeAvailable"
+    :codex-available="codexAvailable"
+    :existing-tags="newSessionTags"
+    @create="createSession"
   />
 
   <ContextMenu
@@ -633,6 +712,12 @@ onMounted((): void => {
   opacity: 1;
   pointer-events: auto;
 }
+@media (max-width: 1024px) {
+  .ws-card__actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
 
 .ws-card__bar {
   height: 3px;
@@ -709,6 +794,10 @@ onMounted((): void => {
 .ws-icon-btn:hover {
   background: var(--bg-hover);
   color: var(--fg);
+}
+.ws-icon-btn--accent:hover {
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  color: var(--accent);
 }
 .ws-icon-btn--warn:hover {
   background: color-mix(in oklab, var(--warn, #d97706) 14%, transparent);
