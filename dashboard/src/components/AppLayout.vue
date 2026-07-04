@@ -85,7 +85,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', handleKeyDown); })
     <!-- Main content -->
     <div class="flex flex-1 flex-col min-w-0 h-full">
       <NavTopBar
-        :class="{ 'max-lg:hidden': hideMobileTopBar }"
+        :hide-on-mobile="hideMobileTopBar"
         :sidebar-open="bSidebarIsOpen"
         :sidebar-collapsed="bSidebarCollapsed"
         :on-menu-click="toggleSidebar"
