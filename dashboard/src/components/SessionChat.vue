@@ -1577,7 +1577,7 @@ onUnmounted(() => {
                   </div>
                   <div
                     v-if="msg.content"
-                    class="bg-primary text-white px-4 py-2 rounded-2xl rounded-br-sm text-sm whitespace-pre-wrap break-all"
+                    class="bg-primary text-white px-4 py-2 rounded-2xl rounded-br-sm text-sm whitespace-pre-wrap break-words"
                   >
                     {{ msg.content }}
                   </div>
