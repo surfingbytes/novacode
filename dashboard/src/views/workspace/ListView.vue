@@ -422,14 +422,6 @@ onMounted((): void => {
                 </div>
                 <!-- Busy indicator -->
                 <span v-if="workspaceHasBusySession(workspace.id)" class="nc-status-dot busy" />
-                <button
-                  class="ws-new-session-btn ws-card__new-session"
-                  title="New session"
-                  @click.prevent.stop="openNewSession(workspace)"
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14 M5 12h14"/></svg>
-                  <span class="ws-new-session-btn__label">New session</span>
-                </button>
                 <!-- Secondary actions (hover-only) -->
                 <div class="ws-card__actions">
                   <button class="ws-icon-btn" title="Edit" @click.prevent.stop="openEditWorkspace(workspace)">
@@ -444,17 +436,26 @@ onMounted((): void => {
                   </button>
                 </div>
               </div>
-              <!-- Bottom row: agent chip -->
+              <!-- Bottom row: agent chip + new session -->
               <div class="ws-card__bottom">
-                <span v-if="workspace.defaultAgentType" class="nc-chip" :class="{
-                  'agent-claude': workspace.defaultAgentType === 'claude',
-                  'agent-cursor': workspace.defaultAgentType === 'cursor-agent',
-                  'agent-vibe': workspace.defaultAgentType === 'mistral-vibe',
-                  'agent-opencode': workspace.defaultAgentType === 'open-code',
-                }">
-                  {{ workspace.defaultAgentType === 'cursor-agent' ? 'cursor' : workspace.defaultAgentType === 'mistral-vibe' ? 'vibe' : workspace.defaultAgentType === 'claude' ? 'claude' : 'opencode' }}
-                </span>
-                <span v-if="workspace.defaultAgentType" class="ws-card__agent-label nc-mono">· default agent</span>
+                <div class="ws-card__bottom-meta">
+                  <span v-if="workspace.defaultAgentType" class="nc-chip" :class="{
+                    'agent-claude': workspace.defaultAgentType === 'claude',
+                    'agent-cursor': workspace.defaultAgentType === 'cursor-agent',
+                    'agent-vibe': workspace.defaultAgentType === 'mistral-vibe',
+                    'agent-opencode': workspace.defaultAgentType === 'open-code',
+                  }">
+                    {{ workspace.defaultAgentType === 'cursor-agent' ? 'cursor' : workspace.defaultAgentType === 'mistral-vibe' ? 'vibe' : workspace.defaultAgentType === 'claude' ? 'claude' : 'opencode' }}
+                  </span>
+                  <span v-if="workspace.defaultAgentType" class="ws-card__agent-label nc-mono">· default agent</span>
+                </div>
+                <button
+                  class="ws-new-session-btn"
+                  title="New session"
+                  @click.prevent.stop="openNewSession(workspace)"
+                >
+                  New session
+                </button>
               </div>
             </div>
           </div>
@@ -772,48 +773,29 @@ onMounted((): void => {
   margin-top: 2px;
 }
 
-/* Primary action — icon-only on desktop until hover; label always on mobile */
+/* Primary action — bottom row, right-aligned */
 .ws-new-session-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  height: 24px;
-  min-width: 24px;
+  height: 22px;
   padding: 0 6px;
+  margin-left: auto;
   border: none;
   border-radius: 5px;
-  background: color-mix(in oklab, var(--accent) 12%, transparent);
-  color: var(--accent);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 10.5px;
+  font-weight: 500;
+  white-space: nowrap;
   cursor: pointer;
   flex-shrink: 0;
-  overflow: hidden;
-  transition: background 0.1s;
+  transition: background 0.1s, color 0.1s;
 }
 .ws-new-session-btn:hover,
 .ws-new-session-btn:focus-visible {
-  background: color-mix(in oklab, var(--accent) 14%, transparent);
-}
-.ws-new-session-btn__label {
-  font-size: 11px;
-  font-weight: 500;
-  white-space: nowrap;
-  max-width: 0;
-  opacity: 0;
-  overflow: hidden;
-  transition: max-width 0.15s ease, opacity 0.12s ease;
-}
-.ws-card:hover .ws-new-session-btn__label,
-.ws-new-session-btn:hover .ws-new-session-btn__label,
-.ws-new-session-btn:focus-visible .ws-new-session-btn__label {
-  max-width: 5.5rem;
-  opacity: 1;
-}
-@media (max-width: 1024px) {
-  .ws-new-session-btn__label {
-    max-width: 5.5rem;
-    opacity: 1;
-  }
+  background: var(--bg-hover);
+  color: var(--fg);
 }
 
 /* Secondary actions — hidden until card hover */
@@ -875,9 +857,15 @@ onMounted((): void => {
 .ws-card__bottom {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 0 12px 10px;
   min-height: 22px;
+}
+.ws-card__bottom-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .ws-card__agent-label {
