@@ -76,7 +76,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', handleKeyDown); })
     <NavSidebar
       :is-open="bSidebarIsOpen"
       :collapsed="bSidebarCollapsed"
-      :on-navigate="closeSidebar"
+      @close="closeSidebar"
       @search="handleMobileSearch"
     />
 
