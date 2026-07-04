@@ -1,14 +1,4 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { useAuthStore } from '@/stores/auth';
-import {
-  applyTheme,
-  resolveStoredThemeId,
-  DEFAULT_DARK_THEME_ID,
-  DEFAULT_LIGHT_THEME_ID,
-  stopAutoThemeWatcher
-} from '@/lib/themes';
-
 defineProps<{
   sidebarOpen: boolean;
   sidebarCollapsed: boolean;
@@ -19,36 +9,6 @@ defineProps<{
 defineEmits<{
   (e: 'toggleCollapsed'): void;
 }>();
-
-const auth = useAuthStore();
-
-const currentMode = ref<'dark' | 'light'>(
-  (document.documentElement.getAttribute('data-theme') as 'dark' | 'light') ?? 'dark'
-);
-
-function userInitial(): string {
-  const name = auth.username ?? '';
-  return name.charAt(0).toUpperCase() || 'U';
-}
-
-function toggleTheme(): void {
-  const isDark = currentMode.value === 'dark';
-  if (isDark) {
-    const lightId = resolveStoredThemeId(localStorage.getItem('lightTheme') ?? DEFAULT_LIGHT_THEME_ID);
-    applyTheme(lightId);
-    localStorage.setItem('theme', lightId);
-    localStorage.setItem('autoTheme', 'false');
-    stopAutoThemeWatcher();
-    currentMode.value = 'light';
-  } else {
-    const darkId = resolveStoredThemeId(localStorage.getItem('darkTheme') ?? DEFAULT_DARK_THEME_ID);
-    applyTheme(darkId);
-    localStorage.setItem('theme', darkId);
-    localStorage.setItem('autoTheme', 'false');
-    stopAutoThemeWatcher();
-    currentMode.value = 'dark';
-  }
-}
 </script>
 
 <template>
@@ -120,54 +80,6 @@ function toggleTheme(): void {
     </button>
 
     <div class="topbar__spacer" aria-hidden="true" />
-
-    <!-- Theme toggle -->
-    <button
-      type="button"
-      class="topbar__theme-toggle"
-      :aria-label="currentMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
-      :title="currentMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
-      @click="toggleTheme"
-    >
-      <!-- Sun icon (shown in dark mode to switch to light) -->
-      <svg
-        v-if="currentMode === 'dark'"
-        width="15"
-        height="15"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.6"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M12 2v2 M12 20v2 M4.9 4.9l1.4 1.4 M17.7 17.7l1.4 1.4 M2 12h2 M20 12h2 M4.9 19.1l1.4-1.4 M17.7 6.3l1.4-1.4 M12 7a5 5 0 100 10 5 5 0 000-10z" />
-      </svg>
-      <!-- Moon icon (shown in light mode to switch to dark) -->
-      <svg
-        v-else
-        width="15"
-        height="15"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.6"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z" />
-      </svg>
-    </button>
-
-    <div class="topbar__divider" aria-hidden="true" />
-
-    <!-- User -->
-    <div class="topbar__user" :title="auth.username ?? ''">
-      <div class="topbar__avatar" aria-hidden="true">{{ userInitial() }}</div>
-      <span class="topbar__username">{{ auth.username }}</span>
-    </div>
   </header>
 </template>
 
@@ -274,68 +186,8 @@ function toggleTheme(): void {
   flex: 1;
 }
 
-.topbar__theme-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  color: var(--fg-muted);
-  cursor: pointer;
-  transition: background 0.1s, color 0.1s;
-  flex-shrink: 0;
-}
-.topbar__theme-toggle:hover {
-  background: var(--bg-hover);
-  color: var(--fg);
-}
-
-.topbar__divider {
-  width: 1px;
-  height: 16px;
-  background: var(--line);
-  flex-shrink: 0;
-}
-
-.topbar__user {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-left: 4px;
-  flex-shrink: 0;
-}
-
-.topbar__avatar {
-  width: 24px;
-  height: 24px;
-  border-radius: 12px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11.5px;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.topbar__username {
-  font-size: 13px;
-  color: var(--fg-muted);
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 @media (max-width: 1023px) {
   .topbar__search {
-    display: none;
-  }
-  .topbar__username {
     display: none;
   }
   /* Hide desktop toggle on mobile, show hamburger instead */

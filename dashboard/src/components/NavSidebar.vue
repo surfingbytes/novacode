@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useWorkspacesStore } from '@/stores/workspaces';
+import ThemeToggleButton from '@/components/ThemeToggleButton.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -199,34 +200,64 @@ onMounted(() => {
       </RouterLink>
     </div>
 
-    <!-- Settings pinned -->
+    <!-- Settings + Account + theme pinned -->
     <div class="sidebar__footer">
-      <RouterLink
-        to="/settings"
-        class="sidebar__nav-item"
-        active-class="sidebar__nav-item--active"
-        :title="bIsCollapsed ? 'Settings' : undefined"
-        @click="onNavigate?.()"
-      >
-        <span class="sidebar__nav-bar" aria-hidden="true" />
-        <svg
-          width="15"
-          height="15"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.6"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          class="sidebar__nav-icon"
-          aria-hidden="true"
+      <div class="sidebar__footer-row">
+        <RouterLink
+          to="/settings"
+          class="sidebar__nav-item sidebar__footer-link"
+          active-class="sidebar__nav-item--active"
+          :title="bIsCollapsed ? 'Settings' : undefined"
+          @click="onNavigate?.()"
         >
-          <path
-            d="M12 15a3 3 0 100-6 3 3 0 000 6z M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6 1.65 1.65 0 0010 3.09V3a2 2 0 014 0v.09c0 .67.4 1.27 1 1.51a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06c-.45.45-.58 1.15-.33 1.82.24.6.84 1 1.51 1H21a2 2 0 110 4h-.09c-.67 0-1.27.4-1.51 1z"
-          />
-        </svg>
-        <span v-if="!bIsCollapsed" class="sidebar__nav-label">Settings</span>
-      </RouterLink>
+          <span class="sidebar__nav-bar" aria-hidden="true" />
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="sidebar__nav-icon"
+            aria-hidden="true"
+          >
+            <path
+              d="M12 15a3 3 0 100-6 3 3 0 000 6z M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6 1.65 1.65 0 0010 3.09V3a2 2 0 014 0v.09c0 .67.4 1.27 1 1.51a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06c-.45.45-.58 1.15-.33 1.82.24.6.84 1 1.51 1H21a2 2 0 110 4h-.09c-.67 0-1.27.4-1.51 1z"
+            />
+          </svg>
+          <span v-if="!bIsCollapsed" class="sidebar__nav-label">Settings</span>
+        </RouterLink>
+
+        <RouterLink
+          to="/account"
+          class="sidebar__nav-item sidebar__footer-link"
+          active-class="sidebar__nav-item--active"
+          :title="bIsCollapsed ? 'Account' : undefined"
+          @click="onNavigate?.()"
+        >
+          <span class="sidebar__nav-bar" aria-hidden="true" />
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="sidebar__nav-icon"
+            aria-hidden="true"
+          >
+            <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+            <circle cx="12" cy="7" r="4" />
+          </svg>
+          <span v-if="!bIsCollapsed" class="sidebar__nav-label">Account</span>
+        </RouterLink>
+
+        <ThemeToggleButton compact class="sidebar__footer-theme" />
+      </div>
     </div>
   </aside>
 </template>
@@ -445,7 +476,33 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
+.sidebar__footer-row {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.sidebar__footer-link {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar__footer-theme {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 .sidebar--collapsed .sidebar__footer {
   padding: 10px 8px;
+}
+
+.sidebar--collapsed .sidebar__footer-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
+}
+
+.sidebar--collapsed .sidebar__footer-theme {
+  margin-left: 0;
 }
 </style>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // node_modules
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount, inject } from 'vue';
 import { useRoute, RouterLink } from 'vue-router';
 
 // components
@@ -14,11 +14,13 @@ import { orchestratorApi, settingsApi } from '@/classes/api';
 
 // types
 import type { Orchestrator } from '@/@types/index';
+import { APP_NAV_TOGGLE_KEY } from '@/constants/layout';
 
 // -------------------------------------------------- Store --------------------------------------------------
 
 const store = useWorkspacesStore();
 const route = useRoute();
+const toggleAppNav = inject(APP_NAV_TOGGLE_KEY, null);
 
 // -------------------------------------------------- Refs --------------------------------------------------
 
@@ -147,6 +149,16 @@ onBeforeUnmount(() => {
     <div class="wd-header">
       <div class="nc-eyebrow wd-eyebrow">// workspace</div>
       <h1 class="wd-title">
+        <button
+          v-if="toggleAppNav && isFilesRoute"
+          type="button"
+          class="button is-transparent is-icon wd-app-menu lg:hidden shrink-0"
+          title="App menu"
+          aria-label="App menu"
+          @click="toggleAppNav()"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
+        </button>
         <div class="wd-icon">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
         </div>
@@ -263,6 +275,10 @@ onBeforeUnmount(() => {
   font-weight: 600;
   letter-spacing: -0.02em;
   color: var(--fg);
+}
+
+.wd-app-menu {
+  margin-right: -2px;
 }
 
 .wd-icon {

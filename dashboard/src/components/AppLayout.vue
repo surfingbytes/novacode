@@ -1,18 +1,18 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount, provide } from 'vue';
 import { useRoute } from 'vue-router';
 import NavSidebar from '@/components/NavSidebar.vue';
 import NavTopBar from '@/components/NavTopBar.vue';
 import GlobalSearchModal from '@/components/GlobalSearchModal.vue';
-
-const FULL_HEIGHT_ROUTES = new Set(['session', 'orchestrator', 'workspace-files']);
+import { APP_NAV_TOGGLE_KEY, FULL_HEIGHT_ROUTE_NAMES } from '@/constants/layout';
 const SIDEBAR_COLLAPSED_KEY = 'sidebarCollapsed';
 
 const route = useRoute();
 const bSidebarIsOpen = ref(false);
 const bSidebarCollapsed = ref(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true');
 const bSearchModalOpen = ref(false);
-const isFullHeightRoute = computed(() => FULL_HEIGHT_ROUTES.has(route.name as string));
+const isFullHeightRoute = computed(() => FULL_HEIGHT_ROUTE_NAMES.has(route.name as string));
+const hideMobileTopBar = computed(() => isFullHeightRoute.value);
 
 watch(bSidebarCollapsed, (val) => {
   localStorage.setItem(SIDEBAR_COLLAPSED_KEY, val ? 'true' : 'false');
@@ -26,6 +26,8 @@ watch(
 function toggleSidebar(): void {
   bSidebarIsOpen.value = !bSidebarIsOpen.value;
 }
+
+provide(APP_NAV_TOGGLE_KEY, toggleSidebar);
 
 function closeSidebar(): void {
   bSidebarIsOpen.value = false;
@@ -83,6 +85,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', handleKeyDown); })
     <!-- Main content -->
     <div class="flex flex-1 flex-col min-w-0 h-full">
       <NavTopBar
+        :class="{ 'max-lg:hidden': hideMobileTopBar }"
         :sidebar-open="bSidebarIsOpen"
         :sidebar-collapsed="bSidebarCollapsed"
         :on-menu-click="toggleSidebar"
