@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // node_modules
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, inject } from 'vue';
 import { useRouter } from 'vue-router';
 
 // components
@@ -17,6 +17,7 @@ import { useWorkspacesStore } from '@/stores/workspaces';
 
 // types
 import type { Orchestrator } from '@/@types/index';
+import { APP_NAV_TOGGLE_KEY } from '@/constants/layout';
 
 // -------------------------------------------------- Props --------------------------------------------------
 
@@ -36,6 +37,7 @@ const emit = defineEmits<{
 
 const router = useRouter();
 const workspacesStore = useWorkspacesStore();
+const toggleAppNav = inject(APP_NAV_TOGGLE_KEY, null);
 
 // -------------------------------------------------- Refs --------------------------------------------------
 
@@ -174,14 +176,25 @@ watch(
     <!-- Header -->
     <div class="h-16 px-4 md:px-6 flex items-center border-b border-fg/10 shrink-0 gap-3 min-w-0">
       <div class="flex-1 min-w-0 flex flex-col gap-0.5">
-        <div class="flex items-center">
+        <div class="flex items-center min-w-0">
+          <button
+            v-if="toggleAppNav"
+            type="button"
+            class="button is-transparent is-icon mr-1 lg:hidden shrink-0"
+            title="App menu"
+            aria-label="App menu"
+            @click="toggleAppNav()"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" class="select-none" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
+          </button>
           <button
             v-if="props.showSidebarToggle"
             @click="emit('toggle-sidebar')"
-            class="button is-transparent is-icon mr-2"
-            title="Toggle sessions"
+            class="button is-transparent is-icon mr-2 shrink-0"
+            title="Sessions list"
+            aria-label="Sessions list"
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" class="select-none" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/><path d="M19 6l-6 6 6 6"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" class="select-none" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>
           </button>
           <div class="flex flex-col min-w-0">
             <h1 class="text-base font-semibold text-text-primary truncate">
