@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
+import { useRoute } from 'vue-router';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import ThemeToggleButton from '@/components/ThemeToggleButton.vue';
 
@@ -7,25 +8,39 @@ const props = withDefaults(
   defineProps<{
     isOpen?: boolean;
     collapsed?: boolean;
-    onNavigate?: () => void;
   }>(),
   { isOpen: false, collapsed: false }
 );
 
-defineEmits<{
+const emit = defineEmits<{
+  (e: 'close'): void;
   (e: 'search'): void;
 }>();
 
+const route = useRoute();
 const workspacesStore = useWorkspacesStore();
 
 const bIsCollapsed = computed(() => props.collapsed && windowWidth.value > 1024);
 const windowWidth = ref(window.innerWidth);
 
-onMounted(() => {
-  window.addEventListener('resize', () => {
-    windowWidth.value = window.innerWidth;
-  });
-});
+function onWindowResize(): void {
+  windowWidth.value = window.innerWidth;
+}
+
+function handleClose(): void {
+  emit('close');
+}
+
+function handleBrandClick(event: MouseEvent): void {
+  if (windowWidth.value <= 1024 && props.isOpen) {
+    if (route.path === '/') {
+      event.preventDefault();
+    }
+    handleClose();
+    return;
+  }
+  handleClose();
+}
 
 const navItems = [
   {
@@ -76,23 +91,29 @@ function agentClass(agentType: string): string {
 }
 
 onMounted(() => {
+  window.addEventListener('resize', onWindowResize);
   workspacesStore.ensureSessionsInitialized();
   if (workspacesStore.workspaces.length === 0) {
     workspacesStore.fetchAll();
   }
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onWindowResize);
 });
 </script>
 
 <template>
   <!-- Mobile backdrop -->
   <div
-    class="lg:hidden fixed inset-0 z-40 pointer-events-none transition-opacity duration-200"
-    :class="isOpen ? 'opacity-100 pointer-events-auto bg-black/40 backdrop-blur-sm' : 'opacity-0'"
-    @click="onNavigate?.()"
+    v-if="isOpen"
+    class="lg:hidden fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm transition-opacity duration-200"
+    aria-hidden="true"
+    @click="handleClose"
   />
 
   <aside
-    class="sidebar flex flex-col fixed lg:relative inset-y-0 left-0 z-50 transition-all duration-200 ease-out"
+    class="sidebar flex flex-col fixed lg:relative inset-y-0 left-0 z-[70] transition-all duration-200 ease-out"
     :class="[
       isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
       bIsCollapsed ? 'sidebar--collapsed' : 'sidebar--expanded'
@@ -101,7 +122,7 @@ onMounted(() => {
   >
     <!-- Brand -->
     <div class="sidebar__brand">
-      <RouterLink to="/" class="sidebar__logo-link" @click="onNavigate?.()">
+      <RouterLink to="/" class="sidebar__logo-link" @click="handleBrandClick">
         <svg
           width="22"
           height="22"
@@ -130,6 +151,26 @@ onMounted(() => {
         </svg>
         <span v-if="!bIsCollapsed" class="sidebar__wordmark">Nova Code</span>
       </RouterLink>
+      <button
+        v-if="!bIsCollapsed && windowWidth <= 1024"
+        type="button"
+        class="sidebar__close lg:hidden"
+        aria-label="Close menu"
+        @click="handleClose"
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          aria-hidden="true"
+        >
+          <path d="M6 6l12 12 M18 6L6 18" />
+        </svg>
+      </button>
     </div>
 
     <!-- Primary nav -->
@@ -141,7 +182,7 @@ onMounted(() => {
         class="sidebar__nav-item"
         active-class="sidebar__nav-item--active"
         :title="bIsCollapsed ? item.label : undefined"
-        @click="onNavigate?.()"
+        @click="handleClose"
       >
         <span class="sidebar__nav-bar" aria-hidden="true" />
         <svg
@@ -177,7 +218,7 @@ onMounted(() => {
         class="sidebar__session-item nc-row-hover"
         active-class="sidebar__session-item--active"
         :title="bIsCollapsed ? session.name : undefined"
-        @click="onNavigate?.()"
+        @click="handleClose"
       >
         <span class="nc-status-dot" :class="session.busy ? 'busy' : 'idle'" />
         <template v-if="!bIsCollapsed">
@@ -208,7 +249,7 @@ onMounted(() => {
           class="sidebar__nav-item sidebar__footer-link"
           active-class="sidebar__nav-item--active"
           :title="bIsCollapsed ? 'Settings' : undefined"
-          @click="onNavigate?.()"
+          @click="handleClose"
         >
           <span class="sidebar__nav-bar" aria-hidden="true" />
           <svg
@@ -235,7 +276,7 @@ onMounted(() => {
           class="sidebar__nav-item sidebar__footer-link"
           active-class="sidebar__nav-item--active"
           :title="bIsCollapsed ? 'Account' : undefined"
-          @click="onNavigate?.()"
+          @click="handleClose"
         >
           <span class="sidebar__nav-bar" aria-hidden="true" />
           <svg
@@ -287,6 +328,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   flex-shrink: 0;
+  position: relative;
 }
 
 .sidebar__logo-link {
@@ -310,6 +352,31 @@ onMounted(() => {
   letter-spacing: -0.01em;
   color: var(--fg);
   white-space: nowrap;
+}
+
+.sidebar__close {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition:
+    background 0.1s,
+    color 0.1s;
+}
+
+.sidebar__close:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
 }
 
 /* Primary nav */
