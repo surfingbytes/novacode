@@ -642,12 +642,6 @@ onUnmounted((): void => {
               >
                 Detached
               </span>
-              <span
-                v-if="activeRepo.dirty"
-                class="rounded-full bg-yellow-500/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-yellow-400"
-              >
-                Dirty
-              </span>
               <span v-if="activeRepo.aheadCount > 0" class="text-xs text-text-muted">↑{{ activeRepo.aheadCount }}</span>
               <span v-if="activeRepo.behindCount > 0" class="text-xs text-text-muted">↓{{ activeRepo.behindCount }}</span>
               <button
