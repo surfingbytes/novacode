@@ -14,7 +14,7 @@ import NewOrchestratorModal from '@/components/NewOrchestratorModal.vue';
 import { useWorkspacesStore } from '@/stores/workspaces';
 
 // classes
-import { sessionsApi, orchestratorApi, settingsApi } from '@/classes/api';
+import { apiErrorMessage, sessionsApi, orchestratorApi, settingsApi } from '@/classes/api';
 import { subtasksFromStoredJson } from '@/utils/orchestratorPayload';
 
 // types
@@ -54,6 +54,7 @@ const bOrchestratorsLoading = ref(false);
 const bOrchestratorsInitialFetched = ref(false);
 const bShowNewSessionModal = ref(false);
 const bSubmittingSession = ref(false);
+const createSessionError = ref<string | null>(null);
 const sessionToDelete = ref<Session | null>(null);
 const bDeletingSession = ref(false);
 const sessionToEdit = ref<Session | null>(null);
@@ -515,6 +516,7 @@ const createSession = async (payload: {
 }): Promise<void> => {
   if (!props.workspace || bSubmittingSession.value) return;
   bSubmittingSession.value = true;
+  createSessionError.value = null;
   try {
     const { data: newSession } = await sessionsApi.create(props.workspace.id, payload);
     bShowNewSessionModal.value = false;
@@ -524,6 +526,7 @@ const createSession = async (payload: {
     });
   } catch (error) {
     console.error('Failed to create session:', error);
+    createSessionError.value = apiErrorMessage(error, 'Failed to create session');
   } finally {
     bSubmittingSession.value = false;
   }
@@ -2203,6 +2206,7 @@ onBeforeUnmount(() => {
   <NewSessionModal
     v-model="bShowNewSessionModal"
     :loading="bSubmittingSession"
+    :error="createSessionError"
     :default-agent-type="(workspace && workspace.defaultAgentType) || null"
     :claude-available="bClaudeAvailable"
     :cursor-available="bCursorAvailable"

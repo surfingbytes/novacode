@@ -21,7 +21,7 @@ import { checkMcpClients } from '../classes/mcpConnectivityCheck';
 import { getCursorModels } from '../classes/cursorModels';
 import { getOpenCodeModels, clearOpenCodeModelsCache } from '../classes/openCodeModels';
 import { readSshKeyMaterial } from '../classes/sshKey';
-import { cursorAuthenticated, openCodeAuthenticated, codexAuthenticated } from './agentAuth';
+import { checkCursorAuth, openCodeAuthenticated, codexAuthenticated } from './agentAuth';
 
 // types
 import type { FastifyInstance } from 'fastify';
@@ -272,6 +272,13 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         response: {
           200: Type.Object({
             cursorAvailable: Type.Boolean(),
+            cursorStatus: Type.Union([
+              Type.Literal('authenticated'),
+              Type.Literal('unauthenticated'),
+              Type.Literal('timeout'),
+              Type.Literal('error')
+            ]),
+            cursorStatusMessage: Type.Optional(Type.String()),
             claudeAvailable: Type.Boolean(),
             mistralVibeAvailable: Type.Boolean(),
             openCodeAvailable: Type.Boolean(),
@@ -284,14 +291,17 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       const user = await db.getUserById(request.jwtUser!.id);
       // Claude is available via ACP when a token is stored; the ACP package is always present
       const claudeAvailable = isClaudeAvailable(config.configDir) && !!user?.claudeToken;
-      // Cursor and Mistral UI remains but underlying backend is not yet implemented via ACP
-      const cursorAvailable = cursorAuthenticated();
+      const cursorAuth = checkCursorAuth();
+      const cursorAvailable =
+        cursorAuth.status === 'authenticated' || cursorAuth.status === 'timeout';
       const vibeKeyOk = getVibeApiKeyStatus(config.configDir).configured;
       const vibeCliOk = isVibeCliAvailable(config.configDir);
       const openCodeAvailable = openCodeAuthenticated();
       const codexAvailable = isCodexAcpAvailable(config.configDir);
       return {
         cursorAvailable,
+        cursorStatus: cursorAuth.status,
+        ...(cursorAuth.message ? { cursorStatusMessage: cursorAuth.message } : {}),
         claudeAvailable,
         mistralVibeAvailable: vibeCliOk && vibeKeyOk,
         openCodeAvailable,

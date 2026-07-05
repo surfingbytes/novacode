@@ -225,6 +225,7 @@ export interface ChatWsServerMessage {
   messages?: ChatMessage[];
   data?: string;
   message?: string;
+  code?: 'auth_required' | 'timeout' | 'unknown';
   streaming?: boolean;
   hasMore?: boolean;
   queue?: ChatQueueItem[];

@@ -110,8 +110,8 @@ async function tryProcessQueue(sessionId: string): Promise<void> {
         void broadcastQueueUpdate(sessionId);
         void tryProcessQueue(sessionId);
       },
-      onError: (message) => {
-        broadcastChat(sessionId, { type: 'error', message });
+      onError: (message, code) => {
+        broadcastChat(sessionId, { type: 'error', message, code });
         void broadcastQueueUpdate(sessionId);
         void tryProcessQueue(sessionId);
       },
@@ -125,7 +125,7 @@ async function tryProcessQueue(sessionId: string): Promise<void> {
       subscriber: sub
     });
     if (result.error) {
-      broadcastChat(sessionId, { type: 'error', message: result.error });
+      broadcastChat(sessionId, { type: 'error', message: result.error, code: result.errorCode });
       void tryProcessQueue(sessionId);
     }
   } finally {
@@ -191,7 +191,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
       const sub: ChatSubscriber = {
         onStream: (line) => send(socket, { type: 'stream', data: line }),
         onDone: () => send(socket, { type: 'done' }),
-        onError: (message) => send(socket, { type: 'error', message }),
+        onError: (message, code) => send(socket, { type: 'error', message, code }),
         onHistory: () => {}
       };
       existingRun.subscribers.add(sub);

@@ -12,7 +12,13 @@ import SessionEditModal from '@/components/SessionEditModal.vue';
 import ClaudeLimitPopup from '@/components/ClaudeLimitPopup.vue';
 
 // classes
-import { sessionsApi, settingsApi, buildChatWsUrl, type CursorModelOption } from '@/classes/api';
+import {
+  sessionsApi,
+  settingsApi,
+  buildChatWsUrl,
+  type AgentErrorCode,
+  type CursorModelOption
+} from '@/classes/api';
 import { notifyTaskDone, notifyTodoCompleted } from '@/lib/notifications';
 
 // stores
@@ -90,6 +96,39 @@ function renderMd(src: string | undefined): string {
   return marked.parse(src, { async: false }) as string;
 }
 
+function setChatError(message: string, code?: AgentErrorCode | null): void {
+  chatError.value = message;
+  chatErrorCode.value = code ?? null;
+}
+
+function clearChatError(): void {
+  chatError.value = null;
+  chatErrorCode.value = null;
+}
+
+function retryLastPrompt(): void {
+  if (!lastPromptRequest.value || !webSocket || webSocket.readyState !== WebSocket.OPEN) return;
+  clearChatError();
+  webSocket.send(
+    JSON.stringify({
+      type: 'prompt',
+      text: lastPromptRequest.value.text,
+      model: modelSelection.value,
+      imagePaths: lastPromptRequest.value.imagePaths
+    })
+  );
+}
+
+function handleChatErrorAction(): void {
+  if (chatErrorCode.value === 'auth_required') {
+    router.push({ name: 'settings' });
+    return;
+  }
+  if (chatErrorCode.value === 'timeout') {
+    retryLastPrompt();
+  }
+}
+
 function closeMobileSessionMenu(): void {
   bMobileSessionMenuOpen.value = false;
 }
@@ -129,6 +168,7 @@ const activeTab = ref<'chat' | 'files' | 'git'>('chat');
 const messages = ref<ChatMessage[]>([]);
 const bIsStreaming = ref(false);
 const chatError = ref<string | null>(null);
+const chatErrorCode = ref<AgentErrorCode | null>(null);
 const promptText = ref<string>('');
 const messagesEl = ref<HTMLElement | null>(null);
 /** Bottom sentinel inside the scroll area so follow-bottom includes streaming + thinking. */
@@ -155,6 +195,7 @@ const availableModels = ref<CursorModelOption[]>([]);
 const openCodeModels = ref<CursorModelOption[]>([]);
 const bModelsLoading = ref(false);
 const queuedPrompts = ref<ChatQueueItem[]>([]);
+const lastPromptRequest = ref<{ text: string; imagePaths: string[] } | null>(null);
 const promptStorageKey = computed(() => `sessionPrompt:${props.workspaceId}:${props.sessionId}`);
 const workspaceName = computed(
   () => workspacesStore.workspaces.find((w) => w.id === props.workspaceId)?.name ?? 'Workspace'
@@ -174,6 +215,12 @@ const promptPlaceholder = computed(() => {
     return 'Type a message… (Ctrl+Enter to send, Enter for newline)';
   }
   return 'Type a message…';
+});
+
+const chatErrorActionLabel = computed(() => {
+  if (chatErrorCode.value === 'auth_required') return 'Open Settings';
+  if (chatErrorCode.value === 'timeout' && lastPromptRequest.value) return 'Try again';
+  return '';
 });
 
 // ── Image attachments ─────────────────────────────────────────────────────────
@@ -214,7 +261,7 @@ function uploadImageFile(file: File): void {
       const { data } = await sessionsApi.uploadImage(props.sessionId, base64, file.type);
       pendingImages.value.push({ filename: data.filename, dataUrl, serverPath: data.path });
     } catch {
-      chatError.value = 'Failed to upload image';
+      setChatError('Failed to upload image');
     } finally {
       bUploadingImage.value = false;
     }
@@ -1042,6 +1089,10 @@ function connectChatWs() {
       } else if (msg.type === 'prompt-started') {
         const prompt = msg.prompt;
         if (prompt) {
+          lastPromptRequest.value = {
+            text: prompt.text,
+            imagePaths: prompt.imagePaths ?? []
+          };
           messages.value.push({
             role: 'user',
             content: prompt.text,
@@ -1094,7 +1145,7 @@ function connectChatWs() {
           props.sessionId
         );
       } else if (msg.type === 'error') {
-        chatError.value = msg.message ?? 'Unknown error';
+        setChatError(msg.message ?? 'Unknown error', msg.code ?? null);
         streamingItems.value = [];
         streamingRawLines.length = 0;
         streamingThinkingText.value = '';
@@ -1102,7 +1153,7 @@ function connectChatWs() {
         notifiedTodoIds.clear();
         bIsStreaming.value = false;
       } else if (msg.type === 'server-shutdown') {
-        chatError.value = 'Server disconnected';
+        setChatError('Server disconnected');
         streamingThinkingText.value = '';
         bIsStreaming.value = false;
       } else if (msg.type === 'claude_limit_detected') {
@@ -1118,7 +1169,7 @@ function connectChatWs() {
     bWsConnected.value = false;
     webSocket = null;
     if (event.code === 4001 || event.code === 4004) {
-      chatError.value = event.reason || 'Connection closed';
+      setChatError(event.reason || 'Connection closed');
       return;
     }
     if (!wsUnmounted && activeTab.value === 'chat') {
@@ -1156,8 +1207,9 @@ function sendPrompt() {
     return;
   }
 
-  chatError.value = null;
+  clearChatError();
   const imagePaths = pendingImages.value.map((img) => img.serverPath);
+  lastPromptRequest.value = { text, imagePaths };
   webSocket.send(JSON.stringify({ type: 'prompt', text, model: modelSelection.value, imagePaths }));
   promptText.value = '';
   pendingImages.value = [];
@@ -1274,7 +1326,7 @@ function onVisibilityChange() {
       clearTimeout(wsReconnectTimer);
       wsReconnectTimer = null;
     }
-    chatError.value = null;
+    clearChatError();
     connectChatWs();
   }
 }
@@ -1319,7 +1371,7 @@ watch(
     streamingThinkingText.value = '';
     streamingUsage.value = null;
     notifiedTodoIds.clear();
-    chatError.value = null;
+    clearChatError();
     session.value = null;
     bLoading.value = true;
     pendingImages.value = [];
@@ -1940,9 +1992,17 @@ onUnmounted(() => {
             <!-- Inline chat error -->
             <div v-if="chatError" class="flex justify-center">
               <div
-                class="text-xs text-destructive bg-destructive/10 border border-destructive/30 px-3 py-1.5 rounded-lg"
+                class="flex items-center gap-2 text-xs text-destructive bg-destructive/10 border border-destructive/30 px-3 py-1.5 rounded-lg"
               >
-                {{ chatError }}
+                <span>{{ chatError }}</span>
+                <button
+                  v-if="chatErrorActionLabel"
+                  type="button"
+                  class="text-xs font-medium underline underline-offset-2 hover:text-destructive/80"
+                  @click="handleChatErrorAction"
+                >
+                  {{ chatErrorActionLabel }}
+                </button>
               </div>
             </div>
 

@@ -98,7 +98,9 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         const status = result.error === 'Workspace not found' ? 404 : 502;
         return reply.status(status).send({
           error: result.error === 'Workspace not found' ? result.error : 'Failed to create chat',
-          ...(status === 502 ? { details: result.error } : {}),
+          message: result.error,
+          ...(result.errorCode ? { code: result.errorCode } : {}),
+          ...(status === 502 ? { details: result.errorDetails ?? result.error } : {}),
         });
       }
       if (!result.session) {

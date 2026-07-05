@@ -16,6 +16,7 @@ import { sendTaskDonePush } from './push';
 import { computeLastListPreview } from './chatPreview';
 import { extractStreamNotificationPreview } from './chatStreamPreviewFromEvents';
 import { broadcastSessionListUpsert } from './sessionListBroadcast';
+import { classifyAgentError, type AgentErrorCode } from './agentError';
 
 // types
 import type { ChatMessage, AgentType } from '../@types/index';
@@ -32,7 +33,7 @@ export interface ActiveRun {
 export interface ChatSubscriber {
   onStream(line: string): void;
   onDone(messages: ChatMessage[]): void;
-  onError(message: string): void;
+  onError(message: string, code?: AgentErrorCode): void;
   onHistory(messages: ChatMessage[], streaming: boolean): void;
 }
 
@@ -199,7 +200,9 @@ async function buildWorkspaceRulesPrefix(workspacePath: string): Promise<string>
   ].join('\n');
 }
 
-export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?: string }> {
+export async function dispatchPrompt(
+  opts: DispatchPromptOpts
+): Promise<{ error?: string; errorCode?: AgentErrorCode }> {
   const { sessionId, text, model, imagePaths = [], subscriber } = opts;
 
   if (activeRuns.has(sessionId)) {
@@ -361,6 +364,10 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
     if (result.error && !cancelled) {
       console.error('[chatEngine] ACP error:', result.error);
       const parsedClaudeLimit = agentType === 'claude' ? parseClaudeRateLimitError(result.error) : null;
+      const classifiedError = classifyAgentError(result.error, {
+        agentLabel: agentType === 'cursor-agent' ? 'Cursor' : 'Agent',
+        fallbackMessage: 'Agent run failed'
+      });
       const resetAtIso = parsedClaudeLimit?.resetAtIso ?? null;
       const resetAtReadable = parsedClaudeLimit?.resetAtReadable;
       if (parsedClaudeLimit) {
@@ -386,7 +393,7 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
         run.bufferedLines.push(limitEvent);
         broadcast((sub) => sub.onStream(limitEvent));
       }
-      broadcast((sub) => sub.onError(result.error ?? 'Agent run failed'));
+      broadcast((sub) => sub.onError(classifiedError.message, classifiedError.code));
     }
 
     console.log('[chatEngine] agent ACP finished', {
@@ -452,22 +459,30 @@ export function dispatchPromptAndWait(opts: {
   text: string;
   model?: string;
   timeoutMs?: number;
-}): Promise<{ error?: string; messages?: ChatMessage[] }> {
+}): Promise<{ error?: string; errorCode?: AgentErrorCode; messages?: ChatMessage[] }> {
   return new Promise((resolve) => {
     const timeoutMs = opts.timeoutMs ?? 600_000; // 10 min default
-    const timeout = setTimeout(() => {
-      resolve({ error: 'Run timed out' });
+    let settled = false;
+    let timeout: ReturnType<typeof setTimeout>;
+    const finish = (result: { error?: string; errorCode?: AgentErrorCode; messages?: ChatMessage[] }): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve(result);
+    };
+    timeout = setTimeout(() => {
+      cancelRun(opts.sessionId);
+      const classifiedError = classifyAgentError('Run timed out', { agentLabel: 'Agent' });
+      finish({ error: classifiedError.message, errorCode: classifiedError.code });
     }, timeoutMs);
 
     const subscriber: ChatSubscriber = {
       onStream: () => {},
       onDone: (messages) => {
-        clearTimeout(timeout);
-        resolve({ messages });
+        finish({ messages });
       },
-      onError: (message) => {
-        clearTimeout(timeout);
-        resolve({ error: message });
+      onError: (message, code) => {
+        finish({ error: message, errorCode: code });
       },
       onHistory: () => {},
     };
@@ -479,8 +494,8 @@ export function dispatchPromptAndWait(opts: {
       subscriber,
     }).then((result) => {
       if (result.error) {
-        clearTimeout(timeout);
-        resolve({ error: result.error });
+        const classifiedError = classifyAgentError(result.error, { agentLabel: 'Agent' });
+        finish({ error: classifiedError.message, errorCode: classifiedError.code });
       }
     });
   });

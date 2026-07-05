@@ -135,6 +135,21 @@ export interface CursorModelOption {
   label: string;
 }
 
+export type AgentErrorCode = 'auth_required' | 'timeout' | 'unknown';
+export type CursorAuthStatus = 'authenticated' | 'unauthenticated' | 'timeout' | 'error';
+
+export function apiErrorMessage(error: unknown, fallback: string): string {
+  if (!isAxiosError(error)) return fallback;
+  const data = error.response?.data;
+  if (!data || typeof data !== 'object') return fallback;
+  const record = data as Record<string, unknown>;
+  for (const key of ['message', 'details', 'error']) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return fallback;
+}
+
 interface McpClientsResponse {
   servers: Record<string, McpClientServer>;
 }
@@ -158,6 +173,8 @@ export const settingsApi = {
   getAgentCapabilities: (): ReturnType<
     typeof http.get<{
       cursorAvailable: boolean;
+      cursorStatus?: CursorAuthStatus;
+      cursorStatusMessage?: string;
       claudeAvailable: boolean;
       mistralVibeAvailable: boolean;
       openCodeAvailable: boolean;
@@ -166,6 +183,8 @@ export const settingsApi = {
   > =>
     http.get<{
       cursorAvailable: boolean;
+      cursorStatus?: CursorAuthStatus;
+      cursorStatusMessage?: string;
       claudeAvailable: boolean;
       mistralVibeAvailable: boolean;
       openCodeAvailable: boolean;
@@ -213,8 +232,12 @@ export const pushApi = {
 
 // ---------------------------------- Agent Auth (Cursor, Claude & OpenCode) ----------------------------------
 export const agentAuthApi = {
-  cursorStatus: (): ReturnType<typeof http.get<{ authenticated: boolean }>> =>
-    http.get<{ authenticated: boolean }>('/agent-auth/cursor/status'),
+  cursorStatus: (): ReturnType<
+    typeof http.get<{ authenticated: boolean; status: CursorAuthStatus; message?: string }>
+  > =>
+    http.get<{ authenticated: boolean; status: CursorAuthStatus; message?: string }>(
+      '/agent-auth/cursor/status'
+    ),
   cursorLogin: (): ReturnType<typeof http.post<{ sessionId: string }>> =>
     http.post<{ sessionId: string }>('/agent-auth/cursor/login'),
   cursorLogout: (): ReturnType<typeof http.delete> => http.delete('/agent-auth/cursor/logout'),
