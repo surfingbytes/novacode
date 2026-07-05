@@ -272,33 +272,35 @@ onBeforeUnmount(() => {
         </RouterLink>
 
         <!-- Mobile only: top bar is hidden on full-height routes -->
-        <RouterLink
-          to="/account"
-          class="sidebar__nav-item sidebar__footer-icon-link lg:hidden"
-          active-class="sidebar__nav-item--active"
-          title="Account"
-          aria-label="Account"
-          @click="handleClose"
-        >
-          <span class="sidebar__nav-bar" aria-hidden="true" />
-          <svg
-            width="15"
-            height="15"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            class="sidebar__nav-icon"
-            aria-hidden="true"
+        <div class="sidebar__footer-mobile">
+          <RouterLink
+            to="/account"
+            class="sidebar__nav-item sidebar__footer-icon-link"
+            active-class="sidebar__nav-item--active"
+            title="Account"
+            aria-label="Account"
+            @click="handleClose"
           >
-            <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
-            <circle cx="12" cy="7" r="4" />
-          </svg>
-        </RouterLink>
+            <span class="sidebar__nav-bar" aria-hidden="true" />
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="sidebar__nav-icon"
+              aria-hidden="true"
+            >
+              <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+          </RouterLink>
 
-        <ThemeToggleButton compact class="sidebar__footer-theme lg:hidden" />
+          <ThemeToggleButton compact class="sidebar__footer-theme" />
+        </div>
       </div>
     </div>
   </aside>
@@ -562,13 +564,26 @@ onBeforeUnmount(() => {
   justify-content: center;
 }
 
-.sidebar__footer-theme {
+.sidebar__footer-mobile {
+  display: flex;
+  align-items: center;
+  gap: 1px;
   margin-left: auto;
+  flex-shrink: 0;
+}
+
+.sidebar__footer-theme {
   flex-shrink: 0;
 }
 
 .sidebar--collapsed .sidebar__footer {
   padding: 10px 8px;
+}
+
+@media (min-width: 1024px) {
+  .sidebar__footer-mobile {
+    display: none;
+  }
 }
 
 </style>
