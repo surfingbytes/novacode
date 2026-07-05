@@ -271,9 +271,10 @@ onBeforeUnmount(() => {
           <span v-if="!bIsCollapsed" class="sidebar__nav-label">Settings</span>
         </RouterLink>
 
+        <!-- Mobile only: top bar is hidden on full-height routes -->
         <RouterLink
           to="/account"
-          class="sidebar__nav-item sidebar__footer-icon-link"
+          class="sidebar__nav-item sidebar__footer-icon-link lg:hidden"
           active-class="sidebar__nav-item--active"
           title="Account"
           aria-label="Account"
@@ -297,7 +298,7 @@ onBeforeUnmount(() => {
           </svg>
         </RouterLink>
 
-        <ThemeToggleButton compact class="sidebar__footer-theme" />
+        <ThemeToggleButton compact class="sidebar__footer-theme lg:hidden" />
       </div>
     </div>
   </aside>
@@ -570,13 +571,4 @@ onBeforeUnmount(() => {
   padding: 10px 8px;
 }
 
-.sidebar--collapsed .sidebar__footer-row {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 1px;
-}
-
-.sidebar--collapsed .sidebar__footer-theme {
-  margin-left: 0;
-}
 </style>
