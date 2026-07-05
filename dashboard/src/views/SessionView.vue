@@ -225,7 +225,7 @@ onUnmounted(() => {
         :workspace-id="workspaceId"
         :session-id="sessionId"
         :viewport-height="viewportHeight"
-        :show-sidebar-toggle="true"
+        :show-sidebar-toggle="!isDesktop"
         @toggle-sidebar="handleSidebarToggle"
       />
 
@@ -233,7 +233,7 @@ onUnmounted(() => {
         v-else-if="mobileTab === 'chat' && activeKind === 'orchestrator' && orchestratorId"
         :workspace-id="workspaceId"
         :orchestrator-id="orchestratorId"
-        :show-sidebar-toggle="true"
+        :show-sidebar-toggle="!isDesktop"
         @toggle-sidebar="handleSidebarToggle"
       />
     </div>
