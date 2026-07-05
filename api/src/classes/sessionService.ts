@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { db } from './database';
 import { config } from './config';
 import { PtyProcess } from './ptyProcess';
+import { classifyAgentError, type AgentErrorCode } from './agentError';
 
 // types
 import type { SessionModel as Session } from '../generated/client/models/Session';
@@ -22,6 +23,8 @@ export interface CreateSessionWithAgentParams {
 export interface CreateSessionWithAgentResult {
   session?: Session;
   error?: string;
+  errorCode?: AgentErrorCode;
+  errorDetails?: string;
 }
 
 // shared by HTTP route (POST /api/workspaces/:id/sessions)
@@ -85,8 +88,14 @@ export async function createSessionWithAgent(
       sessionId = output.trim();
     } catch (err) {
       await db.deleteSession(session.id);
+      const classified = classifyAgentError(err, {
+        agentLabel: 'Cursor',
+        fallbackMessage: 'Failed to create chat'
+      });
       return {
-        error: err instanceof Error ? err.message : 'Failed to create chat'
+        error: classified.message,
+        errorCode: classified.code,
+        errorDetails: classified.rawMessage
       };
     }
   }

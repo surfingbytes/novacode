@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // node_modules
-import { ref, onMounted } from 'vue';
+import { computed, ref, onMounted } from 'vue';
 
 // components
 import AppTerminal from '@/components/AppTerminal.vue';
@@ -8,7 +8,7 @@ import PageShell from '@/components/layout/PageShell.vue';
 import PageHeader from '@/components/layout/PageHeader.vue';
 
 // classes
-import { agentAuthApi, settingsApi } from '@/classes/api';
+import { agentAuthApi, settingsApi, type CursorAuthStatus } from '@/classes/api';
 
 // lib
 import {
@@ -37,6 +37,8 @@ import type { McpClientServer, McpConnectivityCheckResult } from '@/@types/index
 // -------------------------------------------------- Refs --------------------------------------------------
 const activeTab = ref<'general' | 'git' | 'integrations' | 'mcp'>('general');
 const bCursorAuthenticated = ref<boolean>(false);
+const cursorAuthStatus = ref<CursorAuthStatus>('error');
+const cursorAuthMessage = ref<string>('');
 const bClaudeAuthenticated = ref<boolean>(false);
 const bOpenCodeAuthenticated = ref<boolean>(false);
 const bCodexAuthenticated = ref<boolean>(false);
@@ -123,7 +125,18 @@ const mcpConnectivityResults = ref<Record<string, McpConnectivityCheckResult> | 
 const mcpConnectivityError = ref<string>('');
 
 // -------------------------------------------------- Computed --------------------------------------------------
-// (none)
+const cursorAuthChipText = computed(() => {
+  if (cursorAuthStatus.value === 'authenticated') return 'Authenticated';
+  if (cursorAuthStatus.value === 'timeout') return 'Could not verify';
+  if (cursorAuthStatus.value === 'error') return 'Check failed';
+  return 'Not authenticated';
+});
+
+const cursorAuthChipClass = computed(() => {
+  if (cursorAuthStatus.value === 'authenticated') return 'success';
+  if (cursorAuthStatus.value === 'timeout') return 'warning';
+  return '';
+});
 
 // -------------------------------------------------- Methods --------------------------------------------------
 const toggleNotifications = async (): Promise<void> => {
@@ -151,8 +164,12 @@ const refreshAuthStatus = async (): Promise<void> => {
   try {
     const cursorResponse = await agentAuthApi.cursorStatus();
     bCursorAuthenticated.value = cursorResponse.data.authenticated;
+    cursorAuthStatus.value = cursorResponse.data.status;
+    cursorAuthMessage.value = cursorResponse.data.message ?? '';
   } catch {
-    // ignore
+    bCursorAuthenticated.value = false;
+    cursorAuthStatus.value = 'error';
+    cursorAuthMessage.value = 'Could not verify Cursor CLI authentication.';
   }
 
   try {
@@ -1048,17 +1065,21 @@ onMounted((): void => {
                 <div class="settings-auth-card__name">Cursor</div>
                 <div class="settings-auth-card__desc">Uses <code class="settings-mono-chip">cursor-agent login</code> — sign in with your Cursor account</div>
               </div>
-              <span class="nc-chip" :class="bCursorAuthenticated ? 'success' : ''">{{ bCursorAuthenticated ? 'Authenticated' : 'Not authenticated' }}</span>
+              <span class="nc-chip" :class="cursorAuthChipClass">{{ cursorAuthChipText }}</span>
             </div>
             <div class="settings-auth-card__actions">
-              <button v-if="!bCursorAuthenticated" class="settings-btn-primary" :disabled="bStartingCursorLogin" @click="startCursorLogin">
+              <button v-if="cursorAuthStatus === 'unauthenticated'" class="settings-btn-primary" :disabled="bStartingCursorLogin" @click="startCursorLogin">
                 <span v-if="bStartingCursorLogin" class="settings-spinner" />Login to Cursor
+              </button>
+              <button v-else-if="cursorAuthStatus === 'timeout' || cursorAuthStatus === 'error'" class="settings-btn" @click="refreshAuthStatus">
+                Check again
               </button>
               <button v-else class="settings-btn" :disabled="bLoggingOutCursor" @click="logoutCursor">
                 <span v-if="bLoggingOutCursor" class="settings-spinner" />Logout
               </button>
               <a href="https://cursor.com/dashboard?tab=spending" target="_blank" rel="noopener noreferrer" class="settings-auth-link">View account &amp; usage →</a>
             </div>
+            <p v-if="cursorAuthMessage" class="settings-auth-card__error">{{ cursorAuthMessage }}</p>
           </div>
           <div class="settings-auth-card">
             <div class="settings-auth-card__top">

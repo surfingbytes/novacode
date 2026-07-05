@@ -10,7 +10,7 @@ import OrchestratorContent from '@/components/OrchestratorContent.vue';
 import NewSessionModal from '@/components/NewSessionModal.vue';
 
 // classes
-import { sessionsApi, settingsApi } from '@/classes/api';
+import { apiErrorMessage, sessionsApi, settingsApi } from '@/classes/api';
 
 // stores
 import { useWorkspacesStore } from '@/stores/workspaces';
@@ -62,6 +62,7 @@ const sessionTags = computed(() => {
 // New session modal
 const showNewSessionModal = ref(false);
 const isSubmittingSession = ref(false);
+const createSessionError = ref<string | null>(null);
 const claudeAvailable = ref(false);
 const cursorAvailable = ref(false);
 const mistralVibeAvailable = ref(false);
@@ -97,6 +98,7 @@ async function createSession(payload: {
 }): Promise<void> {
   if (isSubmittingSession.value) return;
   isSubmittingSession.value = true;
+  createSessionError.value = null;
   try {
     const { data: newSession } = await sessionsApi.create(workspaceId.value, payload);
     showNewSessionModal.value = false;
@@ -106,6 +108,7 @@ async function createSession(payload: {
     });
   } catch (error) {
     console.error('Failed to create session:', error);
+    createSessionError.value = apiErrorMessage(error, 'Failed to create session');
   } finally {
     isSubmittingSession.value = false;
   }
@@ -239,6 +242,7 @@ onUnmounted(() => {
   <NewSessionModal
     v-model="showNewSessionModal"
     :loading="isSubmittingSession"
+    :error="createSessionError"
     :default-agent-type="(workspace && workspace.defaultAgentType) || null"
     :claude-available="claudeAvailable"
     :cursor-available="cursorAvailable"

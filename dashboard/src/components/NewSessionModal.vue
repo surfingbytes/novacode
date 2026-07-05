@@ -30,6 +30,7 @@ const props = defineProps<{
   /** Whether OpenCode can be used (CLI on PATH and ACP server available). */
   codexAvailable?: boolean;
   openCodeAvailable?: boolean;
+  error?: string | null;
   /** Tag suggestions from existing sessions in the workspace. */
   existingTags?: string[];
 }>();
@@ -235,6 +236,9 @@ watch(
                 No agents available. Configure Cursor, Mistral Vibe, or Claude in Settings.
               </p>
             </div>
+            <p v-if="error" class="text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded-lg px-3 py-2">
+              {{ error }}
+            </p>
           </div>
 
           <!-- Actions -->

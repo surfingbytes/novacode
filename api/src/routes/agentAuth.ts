@@ -11,6 +11,13 @@ import { jwtPreHandler } from '../classes/auth';
 import { config } from '../classes/config';
 import { db } from '../classes/database';
 import { sessionManager } from '../classes/sessionManager';
+import {
+  cursorAuthErrorCheck,
+  cursorAuthTimeoutCheck,
+  isAuthRequiredError,
+  isTimeoutError,
+  type CursorAuthCheck
+} from '../classes/agentError';
 
 const CURSOR_AUTH_FILE = '.config/cursor/auth.json';
 // OPENCODE_HOME is set to configDir + '/.opencode' in agentEnv(), so opencode
@@ -18,10 +25,12 @@ const CURSOR_AUTH_FILE = '.config/cursor/auth.json';
 const OPENCODE_AUTH_FILE = '.opencode/auth.json';
 const CODEX_AUTH_FILE = '.codex/auth.json';
 
-export const cursorAuthenticated = (): boolean => {
+export const checkCursorAuth = (): CursorAuthCheck => {
   const authPath = join(config.configDir, CURSOR_AUTH_FILE);
 
-  if (existsSync(authPath)) return true;
+  if (existsSync(authPath)) {
+    return { authenticated: true, status: 'authenticated' };
+  }
   const env = config.agentEnv();
   const result = spawnSync(config.cursorCommand, ['status'], {
     encoding: 'utf8',
@@ -30,12 +39,32 @@ export const cursorAuthenticated = (): boolean => {
     env: { ...process.env, ...env },
     stdio: ['ignore', 'pipe', 'pipe']
   });
-  if (result.status !== 0) return false;
   const out = [result.stdout, result.stderr].filter(Boolean).join('\n');
-  const lower = out.toLowerCase();
-  if (lower.includes('not authenticated') || lower.includes('not logged in')) return false;
-  if (out.trim() === '') return false;
-  return true;
+  const combinedError = [result.error, out].filter(Boolean).join('\n');
+
+  if (result.error && isTimeoutError(result.error)) return cursorAuthTimeoutCheck();
+  if (isTimeoutError(combinedError)) return cursorAuthTimeoutCheck();
+  if (isAuthRequiredError(out)) {
+    return {
+      authenticated: false,
+      status: 'unauthenticated',
+      message: 'Cursor CLI is not authenticated. Log in to Cursor, then try again.'
+    };
+  }
+  if (result.error) {
+    return cursorAuthErrorCheck(result.error.message);
+  }
+  if (result.status !== 0) {
+    return cursorAuthErrorCheck(out.trim() || `Cursor status exited with code ${result.status}`);
+  }
+  if (out.trim() === '') {
+    return cursorAuthErrorCheck('Cursor status returned no output.');
+  }
+  return { authenticated: true, status: 'authenticated' };
+};
+
+export const cursorAuthenticated = (): boolean => {
+  return checkCursorAuth().authenticated;
 };
 
 export const openCodeAuthenticated = (): boolean => {
@@ -60,9 +89,22 @@ export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
     '/api/agent-auth/cursor/status',
     {
       preHandler: jwtPreHandler,
-      schema: { response: { 200: Type.Object({ authenticated: Type.Boolean() }) } }
+      schema: {
+        response: {
+          200: Type.Object({
+            authenticated: Type.Boolean(),
+            status: Type.Union([
+              Type.Literal('authenticated'),
+              Type.Literal('unauthenticated'),
+              Type.Literal('timeout'),
+              Type.Literal('error')
+            ]),
+            message: Type.Optional(Type.String())
+          })
+        }
+      }
     },
-    async () => ({ authenticated: cursorAuthenticated() })
+    async () => checkCursorAuth()
   );
 
   // ─── Claude auth via ACP + token flow ──────────────────────────────────────
