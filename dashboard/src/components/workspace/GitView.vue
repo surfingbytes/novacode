@@ -54,6 +54,10 @@ const bCreatingBranch = ref<boolean>(false);
 const bDiscarding = ref<boolean>(false);
 const selectedBranch = ref<string>('');
 const newBranchName = ref<string>('');
+const branchSearch = ref<string>('');
+const bShowGitActions = ref<boolean>(false);
+const bShowSwitchBranch = ref<boolean>(false);
+const bShowCreateBranch = ref<boolean>(false);
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let commitResultTimer: ReturnType<typeof setTimeout> | null = null;
@@ -171,6 +175,15 @@ const canCreateBranch = computed(
 const canDiscardSelected = computed(
   (): boolean => !!activeRepo.value && selectedFilesInActiveRepo.value.length > 0 && !gitOperationInProgress.value
 );
+const filteredBranches = computed((): GitBranch[] => {
+  const q = branchSearch.value.trim().toLowerCase();
+  if (!q) return branches.value;
+  return branches.value.filter(
+    (branch) =>
+      branch.name.toLowerCase().includes(q) ||
+      branch.upstream?.toLowerCase().includes(q)
+  );
+});
 
 const fileKey = (file: GitFile): string => `${file.repo}::${file.file}`;
 const parseFileKey = (key: string): { repo: string; file: string } => {
@@ -341,6 +354,7 @@ const commitChanges = async (targetRepo: string): Promise<void> => {
 const pullActiveRepo = async (): Promise<void> => {
   const r = activeRepo.value;
   if (!r || !canPullActiveRepo.value) return;
+  bShowGitActions.value = false;
   bPulling.value = true;
   try {
     await gitApi.pull(props.workspaceId, r.repo);
@@ -353,13 +367,31 @@ const pullActiveRepo = async (): Promise<void> => {
   }
 };
 
-const switchBranch = async (): Promise<void> => {
+const openSwitchBranchDialog = async (): Promise<void> => {
   const r = activeRepo.value;
+  if (!r) return;
+  selectedBranch.value = r.currentBranch;
+  branchSearch.value = '';
+  bShowGitActions.value = false;
+  bShowSwitchBranch.value = true;
+  if (!branches.value.length) await loadBranches(r.repo);
+};
+
+const openCreateBranchDialog = (): void => {
+  newBranchName.value = '';
+  bShowGitActions.value = false;
+  bShowCreateBranch.value = true;
+};
+
+const switchBranch = async (branchName = selectedBranch.value): Promise<void> => {
+  const r = activeRepo.value;
+  selectedBranch.value = branchName;
   if (!r || !canSwitchBranch.value) return;
   bSwitchingBranch.value = true;
   try {
     const response = await gitApi.checkout(props.workspaceId, selectedBranch.value, r.repo);
     setGitActionResult('success', `Switched to ${response.data.branch}`, r.repo);
+    bShowSwitchBranch.value = false;
     clearSelectedFile();
     await refresh();
   } catch (e: unknown) {
@@ -379,6 +411,7 @@ const createBranch = async (): Promise<void> => {
     const response = await gitApi.createBranch(props.workspaceId, branch, r.repo);
     newBranchName.value = '';
     setGitActionResult('success', `Created ${response.data.branch}`, r.repo);
+    bShowCreateBranch.value = false;
     clearSelectedFile();
     await refresh();
   } catch (e: unknown) {
@@ -583,95 +616,50 @@ onUnmounted((): void => {
         </div>
         <div
           v-if="activeRepo"
-          class="flex flex-col gap-2 rounded-xl border border-fg/[0.08] bg-card/60 p-2"
+          class="rounded-xl border border-fg/[0.08] bg-card/60 p-2"
         >
-          <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div class="min-w-0">
-              <div class="flex items-center gap-2 min-w-0">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none flex-shrink-0 text-text-muted"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 009 9"/></svg>
-                <span class="truncate font-mono text-sm text-text-primary">
+          <div class="flex items-center justify-between gap-2">
+            <button
+              class="min-w-0 flex-1 flex items-center gap-2 text-left rounded-lg px-2 py-1.5 hover:bg-fg/[0.04] transition-colors"
+              type="button"
+              @click="openSwitchBranchDialog"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none flex-shrink-0 text-text-muted"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 009 9"/></svg>
+              <span class="min-w-0 flex-1">
+                <span class="block truncate font-mono text-sm text-text-primary">
                   {{ activeRepo.currentBranch }}
                 </span>
-                <span
-                  v-if="activeRepo.detached"
-                  class="rounded-full bg-text-muted/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-text-muted"
-                >
-                  Detached
+                <span class="block truncate text-[11px] text-text-muted">
+                  <template v-if="activeRepo.upstreamBranch">{{ activeRepo.upstreamBranch }}</template>
+                  <template v-else>No upstream</template>
                 </span>
-                <span
-                  v-if="activeRepo.dirty"
-                  class="rounded-full bg-yellow-500/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-yellow-400"
-                >
-                  Dirty
-                </span>
-              </div>
-              <div class="mt-1 flex flex-wrap gap-2 text-xs text-text-muted">
-                <span v-if="activeRepo.upstreamBranch" class="font-mono">
-                  {{ activeRepo.upstreamBranch }}
-                </span>
-                <span v-else>No upstream</span>
-                <span v-if="activeRepo.aheadCount > 0">↑{{ activeRepo.aheadCount }}</span>
-                <span v-if="activeRepo.behindCount > 0">↓{{ activeRepo.behindCount }}</span>
-              </div>
-            </div>
-            <div class="flex flex-wrap items-center gap-2">
-              <button
-                class="text-xs px-3 py-2 text-text-primary border border-fg/10 hover:border-primary/30 hover:bg-primary/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
-                :disabled="!canPullActiveRepo"
-                @click="pullActiveRepo"
+              </span>
+            </button>
+            <div class="flex items-center gap-1.5 flex-shrink-0">
+              <span
+                v-if="activeRepo.detached"
+                class="hidden sm:inline rounded-full bg-text-muted/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-text-muted"
               >
-                <div
-                  v-if="bPulling"
-                  class="w-3 h-3 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
-                ></div>
-                <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><polyline points="8 8 12 12 16 8"/><line x1="12" y1="12" x2="12" y2="3"/><path d="M20.39 18.39A5 5 0 0118 21H6a5 5 0 01-2.39-9.39"/></svg>
-                Pull
+                Detached
+              </span>
+              <span
+                v-if="activeRepo.dirty"
+                class="rounded-full bg-yellow-500/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-yellow-400"
+              >
+                Dirty
+              </span>
+              <span v-if="activeRepo.aheadCount > 0" class="text-xs text-text-muted">↑{{ activeRepo.aheadCount }}</span>
+              <span v-if="activeRepo.behindCount > 0" class="text-xs text-text-muted">↓{{ activeRepo.behindCount }}</span>
+              <button
+                class="h-8 px-2.5 rounded-lg border border-fg/10 text-text-muted hover:text-text-primary hover:bg-fg/[0.04] transition-colors"
+                type="button"
+                title="Git actions"
+                @click="bShowGitActions = true"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
               </button>
             </div>
           </div>
-
-          <div class="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-            <select
-              v-model="selectedBranch"
-              class="w-full min-w-0 bg-bg border border-fg/[0.08] rounded-lg px-3 py-2 text-sm text-text-primary font-mono outline-none focus:border-primary/50"
-              :disabled="bBranchesLoading || gitOperationInProgress"
-              @change="switchBranch"
-            >
-              <option
-                v-if="!branches.length"
-                :value="activeRepo.currentBranch"
-              >
-                {{ bBranchesLoading ? 'Loading branches...' : activeRepo.currentBranch }}
-              </option>
-              <option v-for="branch in branches" :key="branch.name" :value="branch.name">
-                {{ branch.name }}{{ branch.upstream ? ` · ${branch.upstream}` : '' }}
-              </option>
-            </select>
-            <button
-              class="text-sm px-3 py-2 text-text-primary border border-fg/10 hover:border-primary/30 hover:bg-primary/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-              :disabled="!canSwitchBranch"
-              @click="switchBranch"
-            >
-              Switch
-            </button>
-          </div>
-
-          <form class="flex flex-col gap-2 sm:flex-row" @submit.prevent="createBranch">
-            <input
-              v-model="newBranchName"
-              class="min-w-0 flex-1 bg-bg border border-fg/[0.08] rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50"
-              placeholder="New branch name..."
-              autocomplete="off"
-              :disabled="gitOperationInProgress"
-            />
-            <button
-              class="text-sm px-3 py-2 bg-primary hover:bg-primary-hover text-white rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-              :disabled="!canCreateBranch"
-              type="submit"
-            >
-              Create branch
-            </button>
-          </form>
 
           <p
             v-if="
@@ -984,4 +972,216 @@ onUnmounted((): void => {
       </div>
     </template>
   </div>
+
+  <Teleport to="body">
+    <Transition name="modal-fade">
+      <div
+        v-if="bShowGitActions && activeRepo"
+        class="fixed inset-0 z-50 flex items-end justify-center p-3 sm:items-center sm:p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="git-actions-title"
+      >
+        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" @click="bShowGitActions = false" />
+        <div class="modal-panel relative w-full max-w-sm rounded-2xl border border-fg/[0.09] bg-surface shadow-2xl shadow-black/60">
+          <div class="flex items-start justify-between gap-3 px-5 pt-5 pb-3">
+            <div class="min-w-0">
+              <h2 id="git-actions-title" class="font-semibold text-text-primary">Git actions</h2>
+              <p class="mt-1 truncate font-mono text-xs text-text-muted">{{ activeRepo.currentBranch }}</p>
+            </div>
+            <button
+              class="text-text-muted hover:text-text-primary transition-colors"
+              type="button"
+              @click="bShowGitActions = false"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div class="px-3 pb-3">
+            <button
+              class="w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-text-primary hover:bg-fg/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              type="button"
+              :disabled="!canPullActiveRepo"
+              @click="pullActiveRepo"
+            >
+              <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-fg/[0.05] text-text-muted">
+                <div
+                  v-if="bPulling"
+                  class="w-3.5 h-3.5 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
+                ></div>
+                <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><polyline points="8 8 12 12 16 8"/><line x1="12" y1="12" x2="12" y2="3"/><path d="M20.39 18.39A5 5 0 0118 21H6a5 5 0 01-2.39-9.39"/></svg>
+              </span>
+              <span class="min-w-0">
+                <span class="block font-medium">Pull</span>
+                <span class="block text-xs text-text-muted">
+                  <template v-if="activeRepo.upstreamBranch">Fast-forward from upstream</template>
+                  <template v-else>No upstream configured</template>
+                </span>
+              </span>
+            </button>
+            <button
+              class="w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-text-primary hover:bg-fg/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              type="button"
+              :disabled="gitOperationInProgress"
+              @click="openSwitchBranchDialog"
+            >
+              <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-fg/[0.05] text-text-muted">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 009 9"/></svg>
+              </span>
+              <span>
+                <span class="block font-medium">Switch branch</span>
+                <span class="block text-xs text-text-muted">Search and checkout another local branch</span>
+              </span>
+            </button>
+            <button
+              class="w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-text-primary hover:bg-fg/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              type="button"
+              :disabled="gitOperationInProgress"
+              @click="openCreateBranchDialog"
+            >
+              <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-fg/[0.05] text-text-muted">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M12 5v14M5 12h14"/></svg>
+              </span>
+              <span>
+                <span class="block font-medium">Create branch</span>
+                <span class="block text-xs text-text-muted">Create from the current HEAD and switch to it</span>
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
+
+  <Teleport to="body">
+    <Transition name="modal-fade">
+      <div
+        v-if="bShowSwitchBranch && activeRepo"
+        class="fixed inset-0 z-50 flex items-end justify-center p-3 sm:items-center sm:p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="switch-branch-title"
+      >
+        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" @click="bShowSwitchBranch = false" />
+        <div class="modal-panel relative flex max-h-[85vh] w-full max-w-md flex-col rounded-2xl border border-fg/[0.09] bg-surface shadow-2xl shadow-black/60">
+          <div class="flex items-start justify-between gap-3 px-5 pt-5 pb-3">
+            <div>
+              <h2 id="switch-branch-title" class="font-semibold text-text-primary">Switch branch</h2>
+              <p class="mt-1 text-xs text-text-muted">Current: <span class="font-mono">{{ activeRepo.currentBranch }}</span></p>
+            </div>
+            <button
+              class="text-text-muted hover:text-text-primary transition-colors"
+              type="button"
+              @click="bShowSwitchBranch = false"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div class="px-5 pb-3">
+            <input
+              v-model="branchSearch"
+              class="w-full rounded-lg border border-fg/[0.12] bg-fg/[0.04] px-3 py-3 text-sm text-text-primary placeholder:text-text-muted focus:border-primary/50 focus:outline-none"
+              placeholder="Search branches..."
+              autocomplete="off"
+              autofocus
+              @keydown.escape="bShowSwitchBranch = false"
+            />
+          </div>
+          <div class="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+            <div v-if="bBranchesLoading" class="px-3 py-4 text-sm text-text-muted">
+              Loading branches...
+            </div>
+            <div v-else-if="!filteredBranches.length" class="px-3 py-4 text-sm text-text-muted">
+              No branches found.
+            </div>
+            <button
+              v-for="branch in filteredBranches"
+              :key="branch.name"
+              class="w-full flex items-center justify-between gap-3 rounded-xl px-3 py-3 text-left hover:bg-fg/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              type="button"
+              :disabled="branch.current || gitOperationInProgress"
+              @click="switchBranch(branch.name)"
+            >
+              <span class="min-w-0">
+                <span class="block truncate font-mono text-sm text-text-primary">{{ branch.name }}</span>
+                <span v-if="branch.upstream" class="block truncate text-xs text-text-muted">{{ branch.upstream }}</span>
+              </span>
+              <span
+                v-if="branch.current"
+                class="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-primary"
+              >
+                Current
+              </span>
+              <div
+                v-else-if="bSwitchingBranch && selectedBranch === branch.name"
+                class="w-4 h-4 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
+              ></div>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
+
+  <Teleport to="body">
+    <Transition name="modal-fade">
+      <div
+        v-if="bShowCreateBranch && activeRepo"
+        class="fixed inset-0 z-50 flex items-end justify-center p-3 sm:items-center sm:p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-branch-title"
+      >
+        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" @click="bShowCreateBranch = false" />
+        <form
+          class="modal-panel relative w-full max-w-sm rounded-2xl border border-fg/[0.09] bg-surface shadow-2xl shadow-black/60"
+          @submit.prevent="createBranch"
+        >
+          <div class="flex items-start justify-between gap-3 px-5 pt-5 pb-3">
+            <div>
+              <h2 id="create-branch-title" class="font-semibold text-text-primary">Create branch</h2>
+              <p class="mt-1 text-xs text-text-muted">From <span class="font-mono">{{ activeRepo.currentBranch }}</span></p>
+            </div>
+            <button
+              class="text-text-muted hover:text-text-primary transition-colors"
+              type="button"
+              @click="bShowCreateBranch = false"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div class="px-5 pb-5">
+            <label class="text-xs font-medium text-text-muted">Branch name</label>
+            <input
+              v-model="newBranchName"
+              class="mt-1.5 w-full rounded-lg border border-fg/[0.12] bg-fg/[0.04] px-3 py-3 text-sm text-text-primary placeholder:text-text-muted focus:border-primary/50 focus:outline-none"
+              placeholder="feature/my-branch"
+              autocomplete="off"
+              autofocus
+              :disabled="gitOperationInProgress"
+              @keydown.escape="bShowCreateBranch = false"
+            />
+          </div>
+          <div class="flex justify-end gap-2 border-t border-fg/[0.08] px-5 py-4">
+            <button
+              class="rounded-lg px-3 py-2 text-sm text-text-muted hover:text-text-primary transition-colors"
+              type="button"
+              :disabled="gitOperationInProgress"
+              @click="bShowCreateBranch = false"
+            >
+              Cancel
+            </button>
+            <button
+              class="rounded-lg bg-primary px-4 py-2 text-sm text-white transition-colors hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed"
+              type="submit"
+              :disabled="!canCreateBranch"
+            >
+              <span v-if="!bCreatingBranch">Create and switch</span>
+              <span v-else>Creating...</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
