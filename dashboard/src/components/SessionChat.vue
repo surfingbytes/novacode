@@ -1355,7 +1355,7 @@ onUnmounted(() => {
           <button
             v-if="toggleAppNav"
             type="button"
-            class="button is-transparent is-icon mr-1 lg:hidden shrink-0"
+            class="button is-transparent is-icon mr-1 lg:hidden! shrink-0"
             title="App menu"
             aria-label="App menu"
             @click="toggleAppNav()"
@@ -1365,7 +1365,7 @@ onUnmounted(() => {
           <button
             v-if="props.showSidebarToggle"
             @click="emit('toggle-sidebar')"
-            class="button is-transparent is-icon mr-2 shrink-0"
+            class="button is-transparent is-icon mr-2 lg:hidden! shrink-0"
             title="Sessions list"
             aria-label="Sessions list"
           >
