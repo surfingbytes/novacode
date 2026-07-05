@@ -43,9 +43,15 @@ marked.use({
   renderer: {
     code({ text, lang }: { text: string; lang?: string }) {
       const langAttr = lang ? ` class="language-${escapeHtmlForMd(lang)}"` : '';
+      const langLabel = lang
+        ? `<span class="code-block-lang mr-auto text-[10px] font-mono uppercase tracking-wide text-text-muted/70">${escapeHtmlForMd(lang)}</span>`
+        : '';
       return (
-        `<div class="code-block-wrap group relative my-2">` +
-        `<button type="button" class="code-copy-btn absolute top-1.5 right-1.5 z-10 px-1.5 py-0.5 text-[10px] font-medium leading-none rounded border border-fg/10 bg-bg/80 text-text-muted hover:text-text-primary backdrop-blur-sm transition-colors" aria-label="Copy code">Copy</button>` +
+        `<div class="code-block-card my-2.5 rounded-xl border border-fg/10 bg-fg/[0.03] overflow-hidden">` +
+        `<div class="code-block-header flex items-center gap-2 px-2 py-1 border-b border-fg/10 bg-fg/[0.02]">` +
+        langLabel +
+        `<button type="button" class="code-copy-btn ml-auto shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded text-text-muted/70 hover:text-text-primary transition-colors" aria-label="Copy code" title="Copy">Copy</button>` +
+        `</div>` +
         `<pre><code${langAttr}>${escapeHtmlForMd(text)}</code></pre>` +
         `</div>`
       );
@@ -270,15 +276,21 @@ async function copyCodeBlockFromEvent(e: MouseEvent): Promise<void> {
   if (!btn) return;
   e.preventDefault();
   e.stopPropagation();
-  const code = btn.closest('.code-block-wrap')?.querySelector('code');
+  const code = btn.closest('.code-block-card')?.querySelector('code');
   const text = code?.textContent ?? '';
   if (!text) return;
   try {
     await navigator.clipboard.writeText(text);
     const prev = btn.textContent;
     btn.textContent = 'Copied';
+    btn.setAttribute('aria-label', 'Copied');
+    btn.setAttribute('title', 'Copied');
+    btn.dataset.copied = '1';
     window.setTimeout(() => {
       btn.textContent = prev ?? 'Copy';
+      btn.setAttribute('aria-label', 'Copy code');
+      btn.setAttribute('title', 'Copy');
+      delete btn.dataset.copied;
     }, 2000);
   } catch {
     // Clipboard may be unavailable; leave button unchanged.

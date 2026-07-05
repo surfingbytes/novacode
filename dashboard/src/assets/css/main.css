@@ -521,6 +521,18 @@ hr {
   overflow-wrap: anywhere;
   word-break: break-word;
 
+  .code-block-card {
+    max-width: 100%;
+
+    pre {
+      @apply m-0 px-3 py-2 text-xs font-mono leading-relaxed text-text-primary/90;
+    }
+  }
+
+  .code-copy-btn[data-copied='1'] {
+    @apply text-green-500;
+  }
+
   img {
     @apply max-w-full cursor-pointer rounded-md;
     height: auto;
