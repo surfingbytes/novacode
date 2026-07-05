@@ -3,7 +3,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 
 // classes
-import { gitApi, type GitFile, type GitRepoStatus } from '@/classes/api';
+import { gitApi, type GitBranch, type GitFile, type GitRepoStatus } from '@/classes/api';
 
 // -------------------------------------------------- Props --------------------------------------------------
 const props = withDefaults(
@@ -44,10 +44,21 @@ const committingRepo = ref<string | null>(null);
 const pushingRepo = ref<string | null>(null);
 const commitResult = ref<{ type: 'success' | 'error'; text: string; repo?: string } | null>(null);
 const pushResult = ref<{ type: 'success' | 'error'; text: string; repo?: string } | null>(null);
+const gitActionResult = ref<{ type: 'success' | 'error'; text: string; repo?: string } | null>(null);
+
+const branches = ref<GitBranch[]>([]);
+const bBranchesLoading = ref<boolean>(false);
+const bPulling = ref<boolean>(false);
+const bSwitchingBranch = ref<boolean>(false);
+const bCreatingBranch = ref<boolean>(false);
+const bDiscarding = ref<boolean>(false);
+const selectedBranch = ref<string>('');
+const newBranchName = ref<string>('');
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let commitResultTimer: ReturnType<typeof setTimeout> | null = null;
 let pushResultTimer: ReturnType<typeof setTimeout> | null = null;
+let gitActionResultTimer: ReturnType<typeof setTimeout> | null = null;
 
 // -------------------------------------------------- Computed --------------------------------------------------
 const diffLines = computed((): string[] => diffContent.value.split('\n'));
@@ -86,11 +97,21 @@ const canCommit = computed(
     selectedFiles.value.size > 0 &&
     committingRepo.value === null &&
     pushingRepo.value === null &&
+    !bPulling.value &&
+    !bSwitchingBranch.value &&
+    !bCreatingBranch.value &&
+    !bDiscarding.value &&
     !hasMixedSelection.value
 );
 const canPushSingleRepo = computed(
   (): boolean =>
-    pushingRepo.value === null && committingRepo.value === null && repos.value.length === 1
+    pushingRepo.value === null &&
+    committingRepo.value === null &&
+    !bPulling.value &&
+    !bSwitchingBranch.value &&
+    !bCreatingBranch.value &&
+    !bDiscarding.value &&
+    repos.value.length === 1
 );
 const canCommitActiveRepo = computed((): boolean => {
   const r = activeRepo.value;
@@ -100,14 +121,55 @@ const canCommitActiveRepo = computed((): boolean => {
     !!msg &&
     selectedCountInRepo(r.repo) > 0 &&
     committingRepo.value === null &&
-    pushingRepo.value === null
+    pushingRepo.value === null &&
+    !bPulling.value &&
+    !bSwitchingBranch.value &&
+    !bCreatingBranch.value &&
+    !bDiscarding.value
   );
 });
 const canPushActiveRepo = computed(
   (): boolean =>
     !!activeRepo.value &&
     pushingRepo.value === null &&
-    committingRepo.value === null
+    committingRepo.value === null &&
+    !bPulling.value &&
+    !bSwitchingBranch.value &&
+    !bCreatingBranch.value &&
+    !bDiscarding.value
+);
+const selectedFilesInActiveRepo = computed((): string[] => {
+  const r = activeRepo.value;
+  if (!r) return [];
+  return [...selectedFiles.value]
+    .map((key) => parseFileKey(key))
+    .filter((entry) => entry.repo === r.repo)
+    .map((entry) => entry.file);
+});
+const gitOperationInProgress = computed(
+  (): boolean =>
+    committingRepo.value !== null ||
+    pushingRepo.value !== null ||
+    bPulling.value ||
+    bSwitchingBranch.value ||
+    bCreatingBranch.value ||
+    bDiscarding.value
+);
+const canPullActiveRepo = computed(
+  (): boolean => !!activeRepo.value?.upstreamBranch && !gitOperationInProgress.value
+);
+const canSwitchBranch = computed(
+  (): boolean =>
+    !!activeRepo.value &&
+    !!selectedBranch.value &&
+    selectedBranch.value !== activeRepo.value.currentBranch &&
+    !gitOperationInProgress.value
+);
+const canCreateBranch = computed(
+  (): boolean => !!activeRepo.value && !!newBranchName.value.trim() && !gitOperationInProgress.value
+);
+const canDiscardSelected = computed(
+  (): boolean => !!activeRepo.value && selectedFilesInActiveRepo.value.length > 0 && !gitOperationInProgress.value
 );
 
 const fileKey = (file: GitFile): string => `${file.repo}::${file.file}`;
@@ -118,6 +180,38 @@ const parseFileKey = (key: string): { repo: string; file: string } => {
 };
 
 // -------------------------------------------------- Methods --------------------------------------------------
+const gitErrorMessage = (e: unknown, fallback: string): string => {
+  const msg = e as { response?: { data?: { error?: string } }; message?: string };
+  return msg?.response?.data?.error ?? msg?.message ?? fallback;
+};
+
+const setGitActionResult = (
+  type: 'success' | 'error',
+  text: string,
+  repo?: string
+): void => {
+  gitActionResult.value = { type, text, repo: repos.value.length > 1 ? repo : undefined };
+  if (gitActionResultTimer) clearTimeout(gitActionResultTimer);
+  gitActionResultTimer = setTimeout(() => {
+    gitActionResult.value = null;
+  }, 6000);
+};
+
+const loadBranches = async (repo: string): Promise<void> => {
+  bBranchesLoading.value = true;
+  try {
+    const response = await gitApi.branches(props.workspaceId, repo);
+    branches.value = response.data.branches;
+    selectedBranch.value = response.data.currentBranch;
+  } catch (e: unknown) {
+    setGitActionResult('error', gitErrorMessage(e, 'Failed to load branches'), repo);
+    branches.value = [];
+    selectedBranch.value = '';
+  } finally {
+    bBranchesLoading.value = false;
+  }
+};
+
 const refresh = async (): Promise<void> => {
   bIsLoading.value = true;
   error.value = null;
@@ -146,9 +240,11 @@ const refresh = async (): Promise<void> => {
     if (selectedFiles.value.size === 0 && response.data.files.length > 0) {
       selectedFiles.value = new Set(response.data.files.map((f) => fileKey(f)));
     }
+
+    const repo = activeRepo.value?.repo ?? selectedGitRepo.value;
+    if (repo !== undefined && repos.value.length > 0) await loadBranches(repo);
   } catch (e: unknown) {
-    const msg = e as { response?: { data?: { error?: string } }; message?: string };
-    error.value = msg?.response?.data?.error ?? msg?.message ?? 'Failed to get git status';
+    error.value = gitErrorMessage(e, 'Failed to get git status');
   } finally {
     bIsLoading.value = false;
   }
@@ -164,8 +260,7 @@ const openFile = async (file: GitFile): Promise<void> => {
     const response = await gitApi.diff(props.workspaceId, file.file, file.status, file.repo);
     diffContent.value = response.data.diff;
   } catch (e: unknown) {
-    const msg = e as { response?: { data?: { error?: string } }; message?: string };
-    diffError.value = msg?.response?.data?.error ?? msg?.message ?? 'Failed to get diff';
+    diffError.value = gitErrorMessage(e, 'Failed to get diff');
   } finally {
     bDiffLoading.value = false;
   }
@@ -240,6 +335,76 @@ const commitChanges = async (targetRepo: string): Promise<void> => {
     commitResultTimer = setTimeout(() => {
       commitResult.value = null;
     }, 5000);
+  }
+};
+
+const pullActiveRepo = async (): Promise<void> => {
+  const r = activeRepo.value;
+  if (!r || !canPullActiveRepo.value) return;
+  bPulling.value = true;
+  try {
+    await gitApi.pull(props.workspaceId, r.repo);
+    setGitActionResult('success', 'Pulled latest changes', r.repo);
+    await refresh();
+  } catch (e: unknown) {
+    setGitActionResult('error', gitErrorMessage(e, 'Pull failed'), r.repo);
+  } finally {
+    bPulling.value = false;
+  }
+};
+
+const switchBranch = async (): Promise<void> => {
+  const r = activeRepo.value;
+  if (!r || !canSwitchBranch.value) return;
+  bSwitchingBranch.value = true;
+  try {
+    const response = await gitApi.checkout(props.workspaceId, selectedBranch.value, r.repo);
+    setGitActionResult('success', `Switched to ${response.data.branch}`, r.repo);
+    clearSelectedFile();
+    await refresh();
+  } catch (e: unknown) {
+    selectedBranch.value = r.currentBranch;
+    setGitActionResult('error', gitErrorMessage(e, 'Switch branch failed'), r.repo);
+  } finally {
+    bSwitchingBranch.value = false;
+  }
+};
+
+const createBranch = async (): Promise<void> => {
+  const r = activeRepo.value;
+  const branch = newBranchName.value.trim();
+  if (!r || !branch || !canCreateBranch.value) return;
+  bCreatingBranch.value = true;
+  try {
+    const response = await gitApi.createBranch(props.workspaceId, branch, r.repo);
+    newBranchName.value = '';
+    setGitActionResult('success', `Created ${response.data.branch}`, r.repo);
+    clearSelectedFile();
+    await refresh();
+  } catch (e: unknown) {
+    setGitActionResult('error', gitErrorMessage(e, 'Create branch failed'), r.repo);
+  } finally {
+    bCreatingBranch.value = false;
+  }
+};
+
+const discardFiles = async (targetFiles: string[], repo: string): Promise<void> => {
+  if (!targetFiles.length || bDiscarding.value) return;
+  const label = targetFiles.length === 1 ? targetFiles[0] : `${targetFiles.length} files`;
+  if (!window.confirm(`Discard changes in ${label}? This cannot be undone.`)) return;
+
+  bDiscarding.value = true;
+  try {
+    await gitApi.discard(props.workspaceId, targetFiles, repo);
+    setGitActionResult('success', `Discarded ${label}`, repo);
+    if (selectedFile.value && targetFiles.includes(selectedFile.value.file)) clearSelectedFile();
+    const discarded = new Set(targetFiles.map((file) => `${repo}::${file}`));
+    selectedFiles.value = new Set([...selectedFiles.value].filter((key) => !discarded.has(key)));
+    await refresh();
+  } catch (e: unknown) {
+    setGitActionResult('error', gitErrorMessage(e, 'Discard failed'), repo);
+  } finally {
+    bDiscarding.value = false;
   }
 };
 
@@ -325,6 +490,11 @@ watch(
   { deep: true }
 );
 
+watch(selectedGitRepo, (repo) => {
+  if (!props.active || (!repo && repos.value.length === 0)) return;
+  loadBranches(repo);
+});
+
 watch(
   () => props.active,
   (active: boolean) => {
@@ -351,6 +521,7 @@ onUnmounted((): void => {
   if (pollTimer) clearInterval(pollTimer);
   if (commitResultTimer) clearTimeout(commitResultTimer);
   if (pushResultTimer) clearTimeout(pushResultTimer);
+  if (gitActionResultTimer) clearTimeout(gitActionResultTimer);
 });
 </script>
 
@@ -409,6 +580,109 @@ onUnmounted((): void => {
               }}{{ r.aheadCount > 0 ? ` · ↑${r.aheadCount}` : '' }}
             </option>
           </select>
+        </div>
+        <div
+          v-if="activeRepo"
+          class="flex flex-col gap-2 rounded-xl border border-fg/[0.08] bg-card/60 p-2"
+        >
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div class="min-w-0">
+              <div class="flex items-center gap-2 min-w-0">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none flex-shrink-0 text-text-muted"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 009 9"/></svg>
+                <span class="truncate font-mono text-sm text-text-primary">
+                  {{ activeRepo.currentBranch }}
+                </span>
+                <span
+                  v-if="activeRepo.detached"
+                  class="rounded-full bg-text-muted/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-text-muted"
+                >
+                  Detached
+                </span>
+                <span
+                  v-if="activeRepo.dirty"
+                  class="rounded-full bg-yellow-500/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-yellow-400"
+                >
+                  Dirty
+                </span>
+              </div>
+              <div class="mt-1 flex flex-wrap gap-2 text-xs text-text-muted">
+                <span v-if="activeRepo.upstreamBranch" class="font-mono">
+                  {{ activeRepo.upstreamBranch }}
+                </span>
+                <span v-else>No upstream</span>
+                <span v-if="activeRepo.aheadCount > 0">↑{{ activeRepo.aheadCount }}</span>
+                <span v-if="activeRepo.behindCount > 0">↓{{ activeRepo.behindCount }}</span>
+              </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <button
+                class="text-xs px-3 py-2 text-text-primary border border-fg/10 hover:border-primary/30 hover:bg-primary/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                :disabled="!canPullActiveRepo"
+                @click="pullActiveRepo"
+              >
+                <div
+                  v-if="bPulling"
+                  class="w-3 h-3 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
+                ></div>
+                <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><polyline points="8 8 12 12 16 8"/><line x1="12" y1="12" x2="12" y2="3"/><path d="M20.39 18.39A5 5 0 0118 21H6a5 5 0 01-2.39-9.39"/></svg>
+                Pull
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <select
+              v-model="selectedBranch"
+              class="w-full min-w-0 bg-bg border border-fg/[0.08] rounded-lg px-3 py-2 text-sm text-text-primary font-mono outline-none focus:border-primary/50"
+              :disabled="bBranchesLoading || gitOperationInProgress"
+              @change="switchBranch"
+            >
+              <option
+                v-if="!branches.length"
+                :value="activeRepo.currentBranch"
+              >
+                {{ bBranchesLoading ? 'Loading branches...' : activeRepo.currentBranch }}
+              </option>
+              <option v-for="branch in branches" :key="branch.name" :value="branch.name">
+                {{ branch.name }}{{ branch.upstream ? ` · ${branch.upstream}` : '' }}
+              </option>
+            </select>
+            <button
+              class="text-sm px-3 py-2 text-text-primary border border-fg/10 hover:border-primary/30 hover:bg-primary/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              :disabled="!canSwitchBranch"
+              @click="switchBranch"
+            >
+              Switch
+            </button>
+          </div>
+
+          <form class="flex flex-col gap-2 sm:flex-row" @submit.prevent="createBranch">
+            <input
+              v-model="newBranchName"
+              class="min-w-0 flex-1 bg-bg border border-fg/[0.08] rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50"
+              placeholder="New branch name..."
+              autocomplete="off"
+              :disabled="gitOperationInProgress"
+            />
+            <button
+              class="text-sm px-3 py-2 bg-primary hover:bg-primary-hover text-white rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              :disabled="!canCreateBranch"
+              type="submit"
+            >
+              Create branch
+            </button>
+          </form>
+
+          <p
+            v-if="
+              gitActionResult &&
+              (gitActionResult.repo === undefined || gitActionResult.repo === selectedGitRepo)
+            "
+            class="text-xs"
+            :class="gitActionResult.type === 'success' ? 'text-success' : 'text-destructive'"
+          >
+            {{ gitActionResult.text }}
+          </p>
         </div>
       </div>
 
@@ -490,6 +764,14 @@ onUnmounted((): void => {
             }}</span>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none flex-shrink-0 text-text-muted/50"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
+          <button
+            class="flex-shrink-0 text-text-muted hover:text-destructive transition-colors p-1 disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Discard changes"
+            :disabled="bDiscarding"
+            @click.stop="discardFiles([f.file], f.repo)"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>
+          </button>
         </div>
       </div>
 
@@ -534,6 +816,19 @@ onUnmounted((): void => {
               ></div>
               <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>
               Push<template v-if="repos[0].aheadCount > 0"> ({{ repos[0].aheadCount }})</template>
+            </button>
+            <button
+              v-if="files.length"
+              class="text-sm px-3 py-2 text-destructive border border-destructive/20 hover:border-destructive/40 hover:bg-destructive/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              :disabled="!canDiscardSelected"
+              @click="discardFiles(selectedFilesInActiveRepo, repos[0].repo)"
+            >
+              <div
+                v-if="bDiscarding"
+                class="w-3 h-3 border border-destructive/30 border-t-destructive rounded-full animate-spin"
+              ></div>
+              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>
+              Discard ({{ selectedFilesInActiveRepo.length }})
             </button>
           </div>
           <p
@@ -592,6 +887,19 @@ onUnmounted((): void => {
               <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>
               Push<template v-if="activeRepo.aheadCount > 0"> ({{ activeRepo.aheadCount }})</template>
             </button>
+            <button
+              v-if="activeRepo.files.length"
+              class="text-sm px-3 py-2 text-destructive border border-destructive/20 hover:border-destructive/40 hover:bg-destructive/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              :disabled="!canDiscardSelected"
+              @click="discardFiles(selectedFilesInActiveRepo, activeRepo.repo)"
+            >
+              <div
+                v-if="bDiscarding"
+                class="w-3 h-3 border border-destructive/30 border-t-destructive rounded-full animate-spin"
+              ></div>
+              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>
+              Discard ({{ selectedFilesInActiveRepo.length }})
+            </button>
           </div>
           <p
             v-if="
@@ -632,6 +940,13 @@ onUnmounted((): void => {
           >{{ selectedFile.status || '?' }}</span
         >
         <span class="text-xs text-text-muted font-mono truncate">{{ selectedFile.file }}</span>
+        <button
+          class="ml-auto flex-shrink-0 text-xs text-destructive hover:text-destructive/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          :disabled="bDiscarding"
+          @click="discardFiles([selectedFile.file], selectedFile.repo)"
+        >
+          Discard
+        </button>
       </div>
 
       <!-- Diff skeleton -->

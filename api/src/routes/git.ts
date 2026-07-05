@@ -4,7 +4,7 @@ import { Type } from '@sinclair/typebox';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readdir } from 'node:fs/promises';
+import { readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 
 // classes
@@ -23,8 +23,31 @@ interface RepoStatusFile {
 
 interface RepoStatus {
   repo: string;
+  currentBranch: string;
+  upstreamBranch: string | null;
   aheadCount: number;
+  behindCount: number;
+  detached: boolean;
+  dirty: boolean;
   files: RepoStatusFile[];
+}
+
+interface BranchInfo {
+  name: string;
+  current: boolean;
+  upstream: string | null;
+}
+
+interface WorkspaceGitContext {
+  workspace: {
+    path: string;
+    gitUserName?: string | null;
+    gitUserEmail?: string | null;
+  };
+  baseCwd: string;
+  repo: string;
+  cwd: string;
+  repoPaths: string[];
 }
 
 function gitEnv(workspace: {
@@ -97,6 +120,96 @@ function repoCwd(baseCwd: string, repo: string): string {
   return repo ? path.join(baseCwd, repo) : baseCwd;
 }
 
+function gitErrorMessage(err: unknown): string {
+  const gitErr = err as NodeJS.ErrnoException & { stderr?: string; stdout?: string };
+  return gitErr.stderr?.trim() || gitErr.stdout?.trim() || (err as Error).message;
+}
+
+async function gitOutput(cwd: string, args: string[], env?: Record<string, string>): Promise<string> {
+  const { stdout } = await execFileAsync('git', args, { cwd, env });
+  return stdout.trim();
+}
+
+async function maybeGitOutput(
+  cwd: string,
+  args: string[],
+  fallback: string,
+  env?: Record<string, string>
+): Promise<string> {
+  try {
+    return await gitOutput(cwd, args, env);
+  } catch {
+    return fallback;
+  }
+}
+
+function ensureSafeGitArg(value: string, label: string): void {
+  if (!value.trim()) throw new Error(`${label} is required`);
+  if (value.includes('\0') || value.startsWith('-')) throw new Error(`Invalid ${label}`);
+}
+
+async function ensureBranchName(cwd: string, branch: string): Promise<void> {
+  ensureSafeGitArg(branch, 'branch name');
+  await execFileAsync('git', ['check-ref-format', '--branch', branch], { cwd });
+}
+
+async function resolveWorkspaceGitContext(
+  workspaceId: string,
+  repo = ''
+): Promise<WorkspaceGitContext | null> {
+  const workspace = await db.getWorkspace(workspaceId);
+  if (!workspace) return null;
+
+  const workspaceRel = workspace.path.replace(/^\//, '');
+  const baseCwd = config.workspaceBrowseRoot + '/' + (workspaceRel || '.');
+  const repoPaths = await discoverGitRepos(baseCwd);
+
+  if (repoPaths.length === 0) throw new Error('No Git repositories found');
+  if (!repoPaths.includes(repo)) throw new Error('Repository not found in workspace');
+
+  return {
+    workspace,
+    baseCwd,
+    repo,
+    cwd: repoCwd(baseCwd, repo),
+    repoPaths
+  };
+}
+
+async function getBranchMeta(cwd: string): Promise<{
+  currentBranch: string;
+  upstreamBranch: string | null;
+  aheadCount: number;
+  behindCount: number;
+  detached: boolean;
+}> {
+  const branch = await maybeGitOutput(cwd, ['branch', '--show-current'], '');
+  const detached = !branch;
+  const currentBranch = branch || (await maybeGitOutput(cwd, ['rev-parse', '--short', 'HEAD'], 'HEAD'));
+  const upstream = await maybeGitOutput(
+    cwd,
+    ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
+    ''
+  );
+
+  let aheadCount = 0;
+  let behindCount = 0;
+  if (upstream) {
+    const counts = await maybeGitOutput(cwd, ['rev-list', '--left-right', '--count', 'HEAD...@{upstream}'], '');
+    const [ahead, behind] = counts.split(/\s+/);
+    aheadCount = parseInt(ahead, 10) || 0;
+    behindCount = parseInt(behind, 10) || 0;
+  }
+
+  return {
+    currentBranch,
+    upstreamBranch: upstream || null,
+    aheadCount,
+    behindCount,
+    detached
+  };
+}
+
 async function getRepoStatus(baseCwd: string, repo: string): Promise<RepoStatus> {
   const cwd = repoCwd(baseCwd, repo);
   const { stdout } = await execFileAsync('git', ['status', '--porcelain', '-u'], { cwd });
@@ -113,19 +226,9 @@ async function getRepoStatus(baseCwd: string, repo: string): Promise<RepoStatus>
       };
     });
 
-  let aheadCount = 0;
-  try {
-    const { stdout: revList } = await execFileAsync(
-      'git',
-      ['rev-list', '--count', '@{upstream}..HEAD'],
-      { cwd }
-    );
-    aheadCount = parseInt(revList.trim(), 10) || 0;
-  } catch {
-    // No upstream configured or other error — leave as 0
-  }
+  const branchMeta = await getBranchMeta(cwd);
 
-  return { repo, aheadCount, files };
+  return { repo, ...branchMeta, dirty: files.length > 0, files };
 }
 
 function toRepoRelativePath(repo: string, workspaceFile: string): string {
@@ -133,6 +236,54 @@ function toRepoRelativePath(repo: string, workspaceFile: string): string {
   const prefix = `${repo}/`;
   if (workspaceFile.startsWith(prefix)) return workspaceFile.slice(prefix.length);
   return workspaceFile;
+}
+
+function safeRepoFilePath(cwd: string, repoFile: string): string {
+  const absolute = path.resolve(cwd, repoFile);
+  const root = path.resolve(cwd);
+  if (absolute !== root && !absolute.startsWith(root + path.sep)) {
+    throw new Error('File path escapes repository');
+  }
+  return absolute;
+}
+
+async function listBranches(cwd: string): Promise<{
+  branches: BranchInfo[];
+  remoteBranches: string[];
+  currentBranch: string;
+  upstreamBranch: string | null;
+  detached: boolean;
+}> {
+  const meta = await getBranchMeta(cwd);
+  const localRaw = await maybeGitOutput(
+    cwd,
+    ['for-each-ref', '--format=%(refname:short)%00%(upstream:short)%00%(HEAD)', 'refs/heads'],
+    ''
+  );
+  const branches = localRaw
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      const [name, upstream, head] = line.split('\0');
+      return {
+        name,
+        upstream: upstream || null,
+        current: head === '*' || name === meta.currentBranch
+      };
+    });
+  const remoteRaw = await maybeGitOutput(cwd, ['for-each-ref', '--format=%(refname:short)', 'refs/remotes'], '');
+  const remoteBranches = remoteRaw
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.endsWith('/HEAD'));
+
+  return {
+    branches,
+    remoteBranches,
+    currentBranch: meta.currentBranch,
+    upstreamBranch: meta.upstreamBranch,
+    detached: meta.detached
+  };
 }
 
 export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
@@ -158,7 +309,12 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
             repos: Type.Array(
               Type.Object({
                 repo: Type.String(),
+                currentBranch: Type.String(),
+                upstreamBranch: Type.Union([Type.String(), Type.Null()]),
                 aheadCount: Type.Number(),
+                behindCount: Type.Number(),
+                detached: Type.Boolean(),
+                dirty: Type.Boolean(),
                 files: Type.Array(
                   Type.Object({
                     status: Type.String(),
@@ -217,20 +373,19 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
       }
     },
     async (request, reply) => {
-      const workspace = await db.getWorkspace(request.params.workspaceId);
-      if (!workspace) return reply.code(404).send({ error: 'Workspace not found' });
-
       const { file, status, repo = '' } = request.query;
-      const workspaceRel = workspace.path.replace(/^\//, '');
-      const baseCwd = config.workspaceBrowseRoot + '/' + (workspaceRel || '.');
-      const cwd = repoCwd(baseCwd, repo);
-      const repoFile = toRepoRelativePath(repo, file);
-      const opts = {
-        cwd,
-        maxBuffer: 5 * 1024 * 1024
-      };
 
       try {
+        const context = await resolveWorkspaceGitContext(request.params.workspaceId, repo);
+        if (!context) return reply.code(404).send({ error: 'Workspace not found' });
+
+        const repoFile = toRepoRelativePath(context.repo, file);
+        safeRepoFilePath(context.cwd, repoFile);
+        const opts = {
+          cwd: context.cwd,
+          maxBuffer: 5 * 1024 * 1024
+        };
+
         // Untracked file: diff against /dev/null
         if (status === '??') {
           let diff = '';
@@ -264,7 +419,233 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
 
         return { diff: cachedDiff };
       } catch (err) {
-        return reply.code(400).send({ error: (err as Error).message });
+        return reply.code(400).send({ error: gitErrorMessage(err) });
+      }
+    }
+  );
+
+  // GET /api/git/workspace/:workspaceId/branches?repo=... — list local and remote branches
+  fastifyInstance.get(
+    '/api/git/workspace/:workspaceId/branches',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        params: Type.Object({ workspaceId: Type.String() }),
+        querystring: Type.Object({
+          repo: Type.Optional(Type.String())
+        }),
+        response: {
+          200: Type.Object({
+            branches: Type.Array(
+              Type.Object({
+                name: Type.String(),
+                current: Type.Boolean(),
+                upstream: Type.Union([Type.String(), Type.Null()])
+              })
+            ),
+            remoteBranches: Type.Array(Type.String()),
+            currentBranch: Type.String(),
+            upstreamBranch: Type.Union([Type.String(), Type.Null()]),
+            detached: Type.Boolean()
+          }),
+          404: Type.Object({ error: Type.String() }),
+          400: Type.Object({ error: Type.String() })
+        }
+      }
+    },
+    async (request, reply) => {
+      try {
+        const context = await resolveWorkspaceGitContext(
+          request.params.workspaceId,
+          request.query.repo ?? ''
+        );
+        if (!context) return reply.code(404).send({ error: 'Workspace not found' });
+        return await listBranches(context.cwd);
+      } catch (err) {
+        return reply.code(400).send({ error: gitErrorMessage(err) });
+      }
+    }
+  );
+
+  // POST /api/git/workspace/:workspaceId/pull — fast-forward pull current branch
+  fastifyInstance.post(
+    '/api/git/workspace/:workspaceId/pull',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        params: Type.Object({ workspaceId: Type.String() }),
+        querystring: Type.Object({
+          repo: Type.Optional(Type.String())
+        }),
+        response: {
+          200: Type.Object({ output: Type.String() }),
+          404: Type.Object({ error: Type.String() }),
+          400: Type.Object({ error: Type.String() })
+        }
+      }
+    },
+    async (request, reply) => {
+      try {
+        const context = await resolveWorkspaceGitContext(
+          request.params.workspaceId,
+          request.query.repo ?? ''
+        );
+        if (!context) return reply.code(404).send({ error: 'Workspace not found' });
+
+        const { stdout, stderr } = await execFileAsync('git', ['pull', '--ff-only'], {
+          cwd: context.cwd,
+          env: gitEnv(context.workspace),
+          timeout: 60_000
+        });
+        return { output: (stdout + '\n' + stderr).trim() };
+      } catch (err) {
+        return reply.code(400).send({ error: gitErrorMessage(err) });
+      }
+    }
+  );
+
+  // POST /api/git/workspace/:workspaceId/checkout — switch to an existing branch
+  fastifyInstance.post(
+    '/api/git/workspace/:workspaceId/checkout',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        params: Type.Object({ workspaceId: Type.String() }),
+        body: Type.Object({
+          branch: Type.String({ minLength: 1 }),
+          repo: Type.Optional(Type.String())
+        }),
+        response: {
+          200: Type.Object({ branch: Type.String() }),
+          404: Type.Object({ error: Type.String() }),
+          400: Type.Object({ error: Type.String() })
+        }
+      }
+    },
+    async (request, reply) => {
+      try {
+        const context = await resolveWorkspaceGitContext(
+          request.params.workspaceId,
+          request.body.repo ?? ''
+        );
+        if (!context) return reply.code(404).send({ error: 'Workspace not found' });
+
+        ensureSafeGitArg(request.body.branch, 'branch name');
+        await execFileAsync('git', ['switch', request.body.branch], {
+          cwd: context.cwd,
+          env: gitEnv(context.workspace)
+        });
+        const branch = await maybeGitOutput(context.cwd, ['branch', '--show-current'], request.body.branch);
+        return { branch };
+      } catch (err) {
+        return reply.code(400).send({ error: gitErrorMessage(err) });
+      }
+    }
+  );
+
+  // POST /api/git/workspace/:workspaceId/branches — create a branch, optionally switching to it
+  fastifyInstance.post(
+    '/api/git/workspace/:workspaceId/branches',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        params: Type.Object({ workspaceId: Type.String() }),
+        body: Type.Object({
+          branch: Type.String({ minLength: 1 }),
+          startPoint: Type.Optional(Type.String()),
+          checkout: Type.Optional(Type.Boolean()),
+          repo: Type.Optional(Type.String())
+        }),
+        response: {
+          200: Type.Object({ branch: Type.String(), checkedOut: Type.Boolean() }),
+          404: Type.Object({ error: Type.String() }),
+          400: Type.Object({ error: Type.String() })
+        }
+      }
+    },
+    async (request, reply) => {
+      try {
+        const context = await resolveWorkspaceGitContext(
+          request.params.workspaceId,
+          request.body.repo ?? ''
+        );
+        if (!context) return reply.code(404).send({ error: 'Workspace not found' });
+
+        await ensureBranchName(context.cwd, request.body.branch);
+        const startPoint = request.body.startPoint?.trim();
+        if (startPoint) ensureSafeGitArg(startPoint, 'start point');
+
+        const args = request.body.checkout ? ['switch', '-c', request.body.branch] : ['branch', request.body.branch];
+        if (startPoint) args.push(startPoint);
+        await execFileAsync('git', args, {
+          cwd: context.cwd,
+          env: gitEnv(context.workspace)
+        });
+
+        return { branch: request.body.branch, checkedOut: request.body.checkout === true };
+      } catch (err) {
+        return reply.code(400).send({ error: gitErrorMessage(err) });
+      }
+    }
+  );
+
+  // POST /api/git/workspace/:workspaceId/discard — discard selected working tree changes
+  fastifyInstance.post(
+    '/api/git/workspace/:workspaceId/discard',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        params: Type.Object({ workspaceId: Type.String() }),
+        body: Type.Object({
+          files: Type.Array(Type.String(), { minItems: 1 }),
+          repo: Type.Optional(Type.String())
+        }),
+        response: {
+          200: Type.Object({ discarded: Type.Array(Type.String()) }),
+          404: Type.Object({ error: Type.String() }),
+          400: Type.Object({ error: Type.String() })
+        }
+      }
+    },
+    async (request, reply) => {
+      try {
+        const context = await resolveWorkspaceGitContext(
+          request.params.workspaceId,
+          request.body.repo ?? ''
+        );
+        if (!context) return reply.code(404).send({ error: 'Workspace not found' });
+
+        const status = await getRepoStatus(context.baseCwd, context.repo);
+        const statusByRepoPath = new Map(
+          status.files.map((file) => [toRepoRelativePath(context.repo, file.file), file.status])
+        );
+        const trackedFiles: string[] = [];
+        const untrackedFiles: string[] = [];
+
+        for (const workspaceFile of request.body.files) {
+          const repoFile = toRepoRelativePath(context.repo, workspaceFile);
+          safeRepoFilePath(context.cwd, repoFile);
+          const fileStatus = statusByRepoPath.get(repoFile);
+          if (!fileStatus) throw new Error(`No pending change found for ${workspaceFile}`);
+          if (fileStatus === '??') {
+            untrackedFiles.push(repoFile);
+          } else {
+            trackedFiles.push(repoFile);
+          }
+        }
+
+        if (trackedFiles.length > 0) {
+          await execFileAsync('git', ['restore', '--source=HEAD', '--staged', '--worktree', '--', ...trackedFiles], {
+            cwd: context.cwd
+          });
+        }
+        for (const repoFile of untrackedFiles) {
+          await rm(safeRepoFilePath(context.cwd, repoFile), { recursive: true, force: true });
+        }
+
+        return { discarded: request.body.files };
+      } catch (err) {
+        return reply.code(400).send({ error: gitErrorMessage(err) });
       }
     }
   );
@@ -289,20 +670,22 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
       }
     },
     async (request, reply) => {
-      const workspace = await db.getWorkspace(request.params.workspaceId);
-      if (!workspace) return reply.code(404).send({ error: 'Workspace not found' });
-
-      const workspaceRel = workspace.path.replace(/^\//, '');
-      const baseCwd = config.workspaceBrowseRoot + '/' + (workspaceRel || '.');
-      const repo = request.body.repo ?? '';
-      const cwd = repoCwd(baseCwd, repo);
-      const env = gitEnv(workspace);
-      const opts = { cwd, env };
-
       try {
+        const context = await resolveWorkspaceGitContext(
+          request.params.workspaceId,
+          request.body.repo ?? ''
+        );
+        if (!context) return reply.code(404).send({ error: 'Workspace not found' });
+
+        const env = gitEnv(context.workspace);
+        const opts = { cwd: context.cwd, env };
         const filesToStage = request.body.files;
         if (filesToStage && filesToStage.length > 0) {
-          const repoRelativeFiles = filesToStage.map((file) => toRepoRelativePath(repo, file));
+          const repoRelativeFiles = filesToStage.map((file) => {
+            const repoFile = toRepoRelativePath(context.repo, file);
+            safeRepoFilePath(context.cwd, repoFile);
+            return repoFile;
+          });
           await execFileAsync('git', ['add', '--', ...repoRelativeFiles], opts);
         } else {
           await execFileAsync('git', ['add', '-A'], opts);
@@ -312,8 +695,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         const [hash, ...rest] = stdout.trim().split(' ');
         return { hash, message: rest.join(' ') };
       } catch (err) {
-        const stderr = (err as NodeJS.ErrnoException & { stderr?: string }).stderr ?? '';
-        return reply.code(400).send({ error: stderr || (err as Error).message });
+        return reply.code(400).send({ error: gitErrorMessage(err) });
       }
     }
   );
@@ -336,24 +718,21 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
       }
     },
     async (request, reply) => {
-      const workspace = await db.getWorkspace(request.params.workspaceId);
-      if (!workspace) return reply.code(404).send({ error: 'Workspace not found' });
-
-      const workspaceRel = workspace.path.replace(/^\//, '');
-      const baseCwd = config.workspaceBrowseRoot + '/' + (workspaceRel || '.');
-      const cwd = repoCwd(baseCwd, request.query.repo ?? '');
-      const env = gitEnv(workspace);
-
       try {
+        const context = await resolveWorkspaceGitContext(
+          request.params.workspaceId,
+          request.query.repo ?? ''
+        );
+        if (!context) return reply.code(404).send({ error: 'Workspace not found' });
+
         const { stdout, stderr } = await execFileAsync('git', ['push'], {
-          cwd,
-          env,
+          cwd: context.cwd,
+          env: gitEnv(context.workspace),
           timeout: 30_000
         });
         return { output: (stdout + '\n' + stderr).trim() };
       } catch (err) {
-        const stderr = (err as NodeJS.ErrnoException & { stderr?: string }).stderr ?? '';
-        return reply.code(400).send({ error: stderr || (err as Error).message });
+        return reply.code(400).send({ error: gitErrorMessage(err) });
       }
     }
   );
