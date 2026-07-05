@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { useAuthStore } from '@/stores/auth';
+import ThemeToggleButton from '@/components/ThemeToggleButton.vue';
+
 defineProps<{
   sidebarOpen: boolean;
   sidebarCollapsed: boolean;
@@ -10,6 +13,13 @@ defineProps<{
 defineEmits<{
   (e: 'toggleCollapsed'): void;
 }>();
+
+const auth = useAuthStore();
+
+function userInitial(): string {
+  const name = auth.username ?? '';
+  return name.charAt(0).toUpperCase() || 'U';
+}
 </script>
 
 <template>
@@ -81,6 +91,18 @@ defineEmits<{
     </button>
 
     <div class="topbar__spacer" aria-hidden="true" />
+
+    <!-- Theme + account: desktop always; mobile only when top bar is visible -->
+    <div class="topbar__actions" :class="{ 'topbar__actions--hide-mobile': hideOnMobile }">
+      <ThemeToggleButton />
+
+      <div class="topbar__divider" aria-hidden="true" />
+
+      <div class="topbar__user" :title="auth.username ?? ''">
+        <div class="topbar__avatar" aria-hidden="true">{{ userInitial() }}</div>
+        <span class="topbar__username">{{ auth.username }}</span>
+      </div>
+    </div>
   </header>
 </template>
 
@@ -187,12 +209,63 @@ defineEmits<{
   flex: 1;
 }
 
+.topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.topbar__divider {
+  width: 1px;
+  height: 16px;
+  background: var(--line);
+  flex-shrink: 0;
+}
+
+.topbar__user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 4px;
+  flex-shrink: 0;
+}
+
+.topbar__avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11.5px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.topbar__username {
+  font-size: 13px;
+  color: var(--fg-muted);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 1023px) {
   .topbar.topbar--hide-mobile {
     display: none;
   }
 
   .topbar__search {
+    display: none;
+  }
+  .topbar__username {
+    display: none;
+  }
+  .topbar__actions--hide-mobile {
     display: none;
   }
   /* Hide desktop toggle on mobile, show hamburger instead */
