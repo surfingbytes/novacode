@@ -30,6 +30,29 @@ import { APP_NAV_TOGGLE_KEY } from '@/constants/layout';
 
 marked.setOptions({ breaks: true, gfm: true });
 
+function escapeHtmlForMd(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+marked.use({
+  renderer: {
+    code({ text, lang }: { text: string; lang?: string }) {
+      const langAttr = lang ? ` class="language-${escapeHtmlForMd(lang)}"` : '';
+      return (
+        `<div class="code-block-wrap group relative my-2">` +
+        `<button type="button" class="code-copy-btn absolute top-1.5 right-1.5 z-10 px-1.5 py-0.5 text-[10px] font-medium leading-none rounded border border-fg/10 bg-bg/80 text-text-muted hover:text-text-primary backdrop-blur-sm transition-colors" aria-label="Copy code">Copy</button>` +
+        `<pre><code${langAttr}>${escapeHtmlForMd(text)}</code></pre>` +
+        `</div>`
+      );
+    }
+  }
+});
+
 // -------------------------------------------------- Props --------------------------------------------------
 const props = defineProps<{
   workspaceId: string;
@@ -241,13 +264,38 @@ function imageApiUrl(serverPath: string): string {
   return sessionsApi.imageUrl(sid, fname);
 }
 
-/** Markdown-rendered assistant bubbles: open embedded images in the same lightbox as user attachments */
-function onChatMarkdownImageClick(e: MouseEvent): void {
-  const t = e.target as EventTarget | null;
-  if (!t || !(t instanceof HTMLImageElement)) return;
+/** Markdown-rendered assistant bubbles: copy code blocks and open images in the lightbox */
+async function copyCodeBlockFromEvent(e: MouseEvent): Promise<void> {
+  const btn = (e.target as HTMLElement | null)?.closest('.code-copy-btn') as HTMLButtonElement | null;
+  if (!btn) return;
   e.preventDefault();
   e.stopPropagation();
-  const src = t.currentSrc || t.src;
+  const code = btn.closest('.code-block-wrap')?.querySelector('code');
+  const text = code?.textContent ?? '';
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    const prev = btn.textContent;
+    btn.textContent = 'Copied';
+    window.setTimeout(() => {
+      btn.textContent = prev ?? 'Copy';
+    }, 2000);
+  } catch {
+    // Clipboard may be unavailable; leave button unchanged.
+  }
+}
+
+function onChatMarkdownClick(e: MouseEvent): void {
+  const target = e.target as HTMLElement | null;
+  if (!target) return;
+  if (target.closest('.code-copy-btn')) {
+    void copyCodeBlockFromEvent(e);
+    return;
+  }
+  if (!(target instanceof HTMLImageElement)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const src = target.currentSrc || target.src;
   if (src) lightboxSrc.value = src;
 }
 
@@ -1656,7 +1704,7 @@ onUnmounted(() => {
                     <div
                       class="chat-markdown max-w-[85%] bg-fg/[0.06] text-text-primary px-4 py-2 rounded-2xl rounded-bl-sm text-sm"
                       v-html="renderMd(item.text)"
-                      @click="onChatMarkdownImageClick"
+                      @click="onChatMarkdownClick"
                     ></div>
                   </div>
                   <div v-else-if="item.kind === 'todos'" class="flex justify-start">
@@ -1789,7 +1837,7 @@ onUnmounted(() => {
                   <div
                     class="chat-markdown max-w-[85%] bg-fg/[0.06] text-text-primary px-4 py-2 rounded-2xl rounded-bl-sm text-sm"
                     v-html="renderMd(msg.content)"
-                    @click="onChatMarkdownImageClick"
+                    @click="onChatMarkdownClick"
                   ></div>
                 </div>
               </template>
@@ -1802,7 +1850,7 @@ onUnmounted(() => {
                   <div
                     class="chat-markdown max-w-[85%] bg-fg/[0.06] text-text-primary px-4 py-2 rounded-2xl rounded-bl-sm text-sm"
                     v-html="renderMd(item.text)"
-                    @click="onChatMarkdownImageClick"
+                    @click="onChatMarkdownClick"
                   ></div>
                 </div>
                 <div v-else-if="item.kind === 'todos'" class="flex justify-start">
