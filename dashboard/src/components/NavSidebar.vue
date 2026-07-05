@@ -273,9 +273,10 @@ onBeforeUnmount(() => {
 
         <RouterLink
           to="/account"
-          class="sidebar__nav-item sidebar__footer-link"
+          class="sidebar__nav-item sidebar__footer-icon-link"
           active-class="sidebar__nav-item--active"
-          :title="bIsCollapsed ? 'Account' : undefined"
+          title="Account"
+          aria-label="Account"
           @click="handleClose"
         >
           <span class="sidebar__nav-bar" aria-hidden="true" />
@@ -294,7 +295,6 @@ onBeforeUnmount(() => {
             <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
             <circle cx="12" cy="7" r="4" />
           </svg>
-          <span v-if="!bIsCollapsed" class="sidebar__nav-label">Account</span>
         </RouterLink>
 
         <ThemeToggleButton compact class="sidebar__footer-theme" />
@@ -552,6 +552,13 @@ onBeforeUnmount(() => {
 .sidebar__footer-link {
   flex: 1;
   min-width: 0;
+}
+
+.sidebar__footer-icon-link {
+  flex-shrink: 0;
+  width: 32px;
+  padding: 0;
+  justify-content: center;
 }
 
 .sidebar__footer-theme {
