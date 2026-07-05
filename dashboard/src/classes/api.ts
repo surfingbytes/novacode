@@ -308,15 +308,6 @@ export const gitApi = {
   push: (workspaceId: string, repo?: string): ReturnType<typeof http.post<{ output: string }>> =>
     http.post<{ output: string }>(`/git/workspace/${workspaceId}/push`, undefined, {
       params: { repo }
-    }),
-  discard: (
-    workspaceId: string,
-    files: string[],
-    repo?: string
-  ): ReturnType<typeof http.post<{ discarded: number }>> =>
-    http.post<{ discarded: number }>(`/git/workspace/${workspaceId}/discard`, {
-      files,
-      repo
     })
 };
 

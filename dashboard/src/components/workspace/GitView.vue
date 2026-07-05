@@ -5,9 +5,6 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 // classes
 import { gitApi, type GitFile, type GitRepoStatus } from '@/classes/api';
 
-// components
-import ConfirmModal from '@/components/ConfirmModal.vue';
-
 // -------------------------------------------------- Props --------------------------------------------------
 const props = withDefaults(
   defineProps<{
@@ -45,17 +42,12 @@ const commitMessage = ref<string>('');
 const commitMessagesByRepo = ref<Record<string, string>>({});
 const committingRepo = ref<string | null>(null);
 const pushingRepo = ref<string | null>(null);
-const discardingRepo = ref<string | null>(null);
-const bShowDiscardModal = ref<boolean>(false);
-const discardTargetRepo = ref<string>('');
 const commitResult = ref<{ type: 'success' | 'error'; text: string; repo?: string } | null>(null);
 const pushResult = ref<{ type: 'success' | 'error'; text: string; repo?: string } | null>(null);
-const discardResult = ref<{ type: 'success' | 'error'; text: string; repo?: string } | null>(null);
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let commitResultTimer: ReturnType<typeof setTimeout> | null = null;
 let pushResultTimer: ReturnType<typeof setTimeout> | null = null;
-let discardResultTimer: ReturnType<typeof setTimeout> | null = null;
 
 // -------------------------------------------------- Computed --------------------------------------------------
 const diffLines = computed((): string[] => diffContent.value.split('\n'));
@@ -94,15 +86,11 @@ const canCommit = computed(
     selectedFiles.value.size > 0 &&
     committingRepo.value === null &&
     pushingRepo.value === null &&
-    discardingRepo.value === null &&
     !hasMixedSelection.value
 );
 const canPushSingleRepo = computed(
   (): boolean =>
-    pushingRepo.value === null &&
-    committingRepo.value === null &&
-    discardingRepo.value === null &&
-    repos.value.length === 1
+    pushingRepo.value === null && committingRepo.value === null && repos.value.length === 1
 );
 const canCommitActiveRepo = computed((): boolean => {
   const r = activeRepo.value;
@@ -112,29 +100,15 @@ const canCommitActiveRepo = computed((): boolean => {
     !!msg &&
     selectedCountInRepo(r.repo) > 0 &&
     committingRepo.value === null &&
-    pushingRepo.value === null &&
-    discardingRepo.value === null
+    pushingRepo.value === null
   );
 });
 const canPushActiveRepo = computed(
   (): boolean =>
     !!activeRepo.value &&
     pushingRepo.value === null &&
-    committingRepo.value === null &&
-    discardingRepo.value === null
+    committingRepo.value === null
 );
-const canDiscardInRepo = (repo: string): boolean =>
-  selectedCountInRepo(repo) > 0 &&
-  committingRepo.value === null &&
-  pushingRepo.value === null &&
-  discardingRepo.value === null &&
-  !hasMixedSelection.value;
-const discardModalDescription = computed((): string => {
-  const repo = discardTargetRepo.value;
-  const count = selectedCountInRepo(repo);
-  const noun = count === 1 ? 'file' : 'files';
-  return `This will permanently discard uncommitted changes in ${count} selected ${noun}. This cannot be undone.`;
-});
 
 const fileKey = (file: GitFile): string => `${file.repo}::${file.file}`;
 const parseFileKey = (key: string): { repo: string; file: string } => {
@@ -296,50 +270,6 @@ const pushChanges = async (targetRepo: string): Promise<void> => {
   }
 };
 
-const openDiscardModal = (targetRepo: string): void => {
-  if (!canDiscardInRepo(targetRepo)) return;
-  discardTargetRepo.value = targetRepo;
-  bShowDiscardModal.value = true;
-};
-
-const discardChanges = async (): Promise<void> => {
-  const targetRepo = discardTargetRepo.value;
-  const filesToDiscard = [...selectedFiles.value]
-    .map((key) => parseFileKey(key))
-    .filter((entry) => entry.repo === targetRepo)
-    .map((entry) => entry.file);
-  if (filesToDiscard.length === 0) return;
-
-  discardingRepo.value = targetRepo;
-  discardResult.value = null;
-  try {
-    const response = await gitApi.discard(props.workspaceId, filesToDiscard, targetRepo);
-    discardResult.value = {
-      type: 'success',
-      text: `Discarded ${response.data.discarded} file${response.data.discarded === 1 ? '' : 's'}`,
-      repo: repos.value.length > 1 ? targetRepo : undefined
-    };
-    if (selectedFile.value && filesToDiscard.includes(selectedFile.value.file)) {
-      clearSelectedFile();
-    }
-    bShowDiscardModal.value = false;
-    await refresh();
-  } catch (e: unknown) {
-    const caughtError = e as { response?: { data?: { error?: string } }; message?: string };
-    discardResult.value = {
-      type: 'error',
-      text: caughtError?.response?.data?.error ?? caughtError?.message ?? 'Discard failed',
-      repo: repos.value.length > 1 ? targetRepo : undefined
-    };
-  } finally {
-    discardingRepo.value = null;
-    if (discardResultTimer) clearTimeout(discardResultTimer);
-    discardResultTimer = setTimeout(() => {
-      discardResult.value = null;
-    }, 5000);
-  }
-};
-
 const statusBadgeClass = (status: string): string => {
   const s = status.toUpperCase();
   if (s === 'M' || s === 'MM' || s === ' M' || s === 'M ')
@@ -421,7 +351,6 @@ onUnmounted((): void => {
   if (pollTimer) clearInterval(pollTimer);
   if (commitResultTimer) clearTimeout(commitResultTimer);
   if (pushResultTimer) clearTimeout(pushResultTimer);
-  if (discardResultTimer) clearTimeout(discardResultTimer);
 });
 </script>
 
@@ -606,19 +535,6 @@ onUnmounted((): void => {
               <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>
               Push<template v-if="repos[0].aheadCount > 0"> ({{ repos[0].aheadCount }})</template>
             </button>
-            <button
-              v-if="files.length"
-              class="text-sm px-3 py-2 text-destructive border border-destructive/20 hover:border-destructive/40 hover:bg-destructive/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
-              :disabled="!canDiscardInRepo(repos[0].repo)"
-              @click="openDiscardModal(repos[0].repo)"
-            >
-              <div
-                v-if="discardingRepo === repos[0].repo"
-                class="w-3 h-3 border border-destructive/30 border-t-destructive rounded-full animate-spin"
-              ></div>
-              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
-              Discard ({{ selectedFiles.size }})
-            </button>
           </div>
           <p
             v-if="commitResult"
@@ -633,13 +549,6 @@ onUnmounted((): void => {
             :class="pushResult.type === 'success' ? 'text-success' : 'text-destructive'"
           >
             {{ pushResult.text }}
-          </p>
-          <p
-            v-if="discardResult"
-            class="text-xs"
-            :class="discardResult.type === 'success' ? 'text-success' : 'text-destructive'"
-          >
-            {{ discardResult.text }}
           </p>
           <p v-if="hasMixedSelection" class="text-xs text-text-muted">
             Select files from a single repository for commit/push.
@@ -683,19 +592,6 @@ onUnmounted((): void => {
               <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>
               Push<template v-if="activeRepo.aheadCount > 0"> ({{ activeRepo.aheadCount }})</template>
             </button>
-            <button
-              v-if="activeRepo.files.length"
-              class="text-sm px-3 py-2 text-destructive border border-destructive/20 hover:border-destructive/40 hover:bg-destructive/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
-              :disabled="!canDiscardInRepo(activeRepo.repo)"
-              @click="openDiscardModal(activeRepo.repo)"
-            >
-              <div
-                v-if="discardingRepo === activeRepo.repo"
-                class="w-3 h-3 border border-destructive/30 border-t-destructive rounded-full animate-spin"
-              ></div>
-              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
-              Discard ({{ selectedCountInRepo(activeRepo.repo) }})
-            </button>
           </div>
           <p
             v-if="
@@ -713,16 +609,6 @@ onUnmounted((): void => {
             :class="pushResult.type === 'success' ? 'text-success' : 'text-destructive'"
           >
             {{ pushResult.text }}
-          </p>
-          <p
-            v-if="
-              discardResult &&
-              (!discardResult.repo || discardResult.repo === selectedGitRepo)
-            "
-            class="text-xs"
-            :class="discardResult.type === 'success' ? 'text-success' : 'text-destructive'"
-          >
-            {{ discardResult.text }}
           </p>
         </template>
       </div>
@@ -783,13 +669,4 @@ onUnmounted((): void => {
       </div>
     </template>
   </div>
-
-  <ConfirmModal
-    v-model="bShowDiscardModal"
-    title="Discard changes?"
-    :description="discardModalDescription"
-    confirm-label="Discard"
-    :loading="discardingRepo !== null"
-    @confirm="discardChanges"
-  />
 </template>
