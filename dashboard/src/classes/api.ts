@@ -272,8 +272,27 @@ export interface GitFile {
 
 export interface GitRepoStatus {
   repo: string;
+  currentBranch: string;
+  upstreamBranch: string | null;
   aheadCount: number;
+  behindCount: number;
+  detached: boolean;
+  dirty: boolean;
   files: GitFile[];
+}
+
+export interface GitBranch {
+  name: string;
+  current: boolean;
+  upstream: string | null;
+}
+
+export interface GitBranchesResponse {
+  branches: GitBranch[];
+  remoteBranches: string[];
+  currentBranch: string;
+  upstreamBranch: string | null;
+  detached: boolean;
 }
 
 export const gitApi = {
@@ -308,7 +327,43 @@ export const gitApi = {
   push: (workspaceId: string, repo?: string): ReturnType<typeof http.post<{ output: string }>> =>
     http.post<{ output: string }>(`/git/workspace/${workspaceId}/push`, undefined, {
       params: { repo }
-    })
+    }),
+  branches: (
+    workspaceId: string,
+    repo?: string
+  ): ReturnType<typeof http.get<GitBranchesResponse>> =>
+    http.get<GitBranchesResponse>(`/git/workspace/${workspaceId}/branches`, {
+      params: { repo }
+    }),
+  pull: (workspaceId: string, repo?: string): ReturnType<typeof http.post<{ output: string }>> =>
+    http.post<{ output: string }>(`/git/workspace/${workspaceId}/pull`, undefined, {
+      params: { repo }
+    }),
+  checkout: (
+    workspaceId: string,
+    branch: string,
+    repo?: string
+  ): ReturnType<typeof http.post<{ branch: string }>> =>
+    http.post<{ branch: string }>(`/git/workspace/${workspaceId}/checkout`, { branch, repo }),
+  createBranch: (
+    workspaceId: string,
+    branch: string,
+    repo?: string,
+    startPoint?: string,
+    checkout = true
+  ): ReturnType<typeof http.post<{ branch: string; checkedOut: boolean }>> =>
+    http.post<{ branch: string; checkedOut: boolean }>(`/git/workspace/${workspaceId}/branches`, {
+      branch,
+      repo,
+      startPoint,
+      checkout
+    }),
+  discard: (
+    workspaceId: string,
+    files: string[],
+    repo?: string
+  ): ReturnType<typeof http.post<{ discarded: string[] }>> =>
+    http.post<{ discarded: string[] }>(`/git/workspace/${workspaceId}/discard`, { files, repo })
 };
 
 // ---------------------------------- Files (workspace-scoped) ----------------------------------
