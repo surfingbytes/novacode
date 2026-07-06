@@ -256,10 +256,6 @@ async function spawnCursorConnection(cwd: string, model?: string): Promise<{
     authMethods: authMethodIds,
   });
 
-  if (authMethodIds.includes('cursor_login')) {
-    throw new Error('Cursor CLI is not authenticated. Use Settings > Agents > Cursor login, then try again.');
-  }
-
   return { conn, proc };
 }
 
