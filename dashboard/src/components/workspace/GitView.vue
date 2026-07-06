@@ -1,9 +1,27 @@
 <script setup lang="ts">
 // node_modules
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import {
+  ArrowLeft,
+  Check,
+  ChevronRight,
+  CloudDownload,
+  CloudUpload,
+  GitBranch as GitBranchIcon,
+  Minus,
+  MoreHorizontal,
+  Plus,
+  RefreshCw,
+  Trash2,
+  X
+} from 'lucide-vue-next';
 
 // classes
 import { gitApi, type GitBranch, type GitFile, type GitRepoStatus } from '@/classes/api';
+
+// components
+import ContextMenu from '@/components/ContextMenu.vue';
+import type { ContextMenuItem } from '@/components/ContextMenu.vue';
 
 // -------------------------------------------------- Props --------------------------------------------------
 const props = withDefaults(
@@ -26,6 +44,7 @@ const emit = defineEmits<{
 const files = ref<GitFile[]>([]);
 const repos = ref<GitRepoStatus[]>([]);
 const bIsLoading = ref<boolean>(false);
+const bHasLoadedStatus = ref<boolean>(false);
 const error = ref<string | null>(null);
 
 const selectedFiles = ref<Set<string>>(new Set());
@@ -58,6 +77,10 @@ const branchSearch = ref<string>('');
 const bShowGitActions = ref<boolean>(false);
 const bShowSwitchBranch = ref<boolean>(false);
 const bShowCreateBranch = ref<boolean>(false);
+const bGitActionsMenuOpen = ref<boolean>(false);
+const gitActionsMenuX = ref<number>(0);
+const gitActionsMenuY = ref<number>(0);
+const gitActionsButtonRef = ref<HTMLElement | null>(null);
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let commitResultTimer: ReturnType<typeof setTimeout> | null = null;
@@ -184,6 +207,25 @@ const filteredBranches = computed((): GitBranch[] => {
       branch.upstream?.toLowerCase().includes(q)
   );
 });
+const gitActionsMenuItems = computed(
+  (): ContextMenuItem[] => [
+    {
+      key: 'pull',
+      label: 'Pull',
+      disabled: !canPullActiveRepo.value
+    },
+    {
+      key: 'switch',
+      label: 'Switch branch',
+      disabled: gitOperationInProgress.value
+    },
+    {
+      key: 'create',
+      label: 'Create branch',
+      disabled: gitOperationInProgress.value
+    }
+  ]
+);
 
 const fileKey = (file: GitFile): string => `${file.repo}::${file.file}`;
 const parseFileKey = (key: string): { repo: string; file: string } => {
@@ -259,6 +301,7 @@ const refresh = async (): Promise<void> => {
   } catch (e: unknown) {
     error.value = gitErrorMessage(e, 'Failed to get git status');
   } finally {
+    bHasLoadedStatus.value = true;
     bIsLoading.value = false;
   }
 };
@@ -355,6 +398,7 @@ const pullActiveRepo = async (): Promise<void> => {
   const r = activeRepo.value;
   if (!r || !canPullActiveRepo.value) return;
   bShowGitActions.value = false;
+  bGitActionsMenuOpen.value = false;
   bPulling.value = true;
   try {
     await gitApi.pull(props.workspaceId, r.repo);
@@ -373,6 +417,7 @@ const openSwitchBranchDialog = async (): Promise<void> => {
   selectedBranch.value = r.currentBranch;
   branchSearch.value = '';
   bShowGitActions.value = false;
+  bGitActionsMenuOpen.value = false;
   bShowSwitchBranch.value = true;
   if (!branches.value.length) await loadBranches(r.repo);
 };
@@ -380,7 +425,35 @@ const openSwitchBranchDialog = async (): Promise<void> => {
 const openCreateBranchDialog = (): void => {
   newBranchName.value = '';
   bShowGitActions.value = false;
+  bGitActionsMenuOpen.value = false;
   bShowCreateBranch.value = true;
+};
+
+const openGitActions = (): void => {
+  const button = gitActionsButtonRef.value;
+  if (!button || window.matchMedia('(max-width: 767px)').matches) {
+    bShowGitActions.value = true;
+    return;
+  }
+
+  const rect = button.getBoundingClientRect();
+  gitActionsMenuX.value = rect.right - 176;
+  gitActionsMenuY.value = rect.bottom + 6;
+  bGitActionsMenuOpen.value = true;
+};
+
+const onGitActionPick = (key: string): void => {
+  if (key === 'pull') {
+    pullActiveRepo();
+    return;
+  }
+  if (key === 'switch') {
+    openSwitchBranchDialog();
+    return;
+  }
+  if (key === 'create') {
+    openCreateBranchDialog();
+  }
 };
 
 const switchBranch = async (branchName = selectedBranch.value): Promise<void> => {
@@ -565,42 +638,6 @@ onUnmounted((): void => {
       <div
         class="flex flex-col gap-2 px-3 py-2 border-b border-fg/[0.08] flex-shrink-0"
       >
-        <div class="flex items-center justify-between gap-2">
-          <div class="flex items-center gap-2 min-w-0">
-            <button
-              v-if="filesInSelectedRepo.length"
-              class="flex items-center justify-center w-4 h-4 rounded border transition-colors flex-shrink-0"
-              :class="
-                allSelected
-                  ? 'bg-primary border-primary'
-                  : someSelected
-                    ? 'bg-primary/40 border-primary'
-                    : 'border-fg/20 hover:border-fg/40'
-              "
-              title="Select all / none"
-              @click.stop="toggleAll"
-            >
-              <svg v-if="allSelected" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none text-white"><polyline points="20 6 9 17 4 12"/></svg>
-              <svg v-else-if="someSelected" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none text-white"><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            </button>
-            <span class="text-xs font-medium text-text-muted truncate">
-              Changed files
-              <span
-                v-if="repos.length > 1 ? filesInSelectedRepo.length : files.length"
-                class="ml-1 text-text-muted/60"
-                >({{ repos.length > 1 ? filesInSelectedRepo.length : files.length }})</span
-              >
-            </span>
-          </div>
-          <button
-            class="text-text-muted hover:text-text-primary transition-colors px-1 flex-shrink-0"
-            :class="{ 'animate-spin': bIsLoading }"
-            title="Refresh"
-            @click="refresh"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
-          </button>
-        </div>
         <div v-if="repos.length > 1" class="flex flex-col gap-1">
           <label class="text-xs font-medium text-text-muted" for="git-repo-select">Repository</label>
           <select
@@ -624,7 +661,7 @@ onUnmounted((): void => {
               type="button"
               @click="openSwitchBranchDialog"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none flex-shrink-0 text-text-muted"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 009 9"/></svg>
+              <GitBranchIcon :size="14" :stroke-width="1.6" class="select-none flex-shrink-0 text-text-muted" aria-hidden="true" />
               <span class="min-w-0 flex-1">
                 <span class="block truncate font-mono text-sm text-text-primary">
                   {{ activeRepo.currentBranch }}
@@ -645,12 +682,13 @@ onUnmounted((): void => {
               <span v-if="activeRepo.aheadCount > 0" class="text-xs text-text-muted">↑{{ activeRepo.aheadCount }}</span>
               <span v-if="activeRepo.behindCount > 0" class="text-xs text-text-muted">↓{{ activeRepo.behindCount }}</span>
               <button
+                ref="gitActionsButtonRef"
                 class="h-8 px-2.5 rounded-lg border border-fg/10 text-text-muted hover:text-text-primary hover:bg-fg/[0.04] transition-colors"
                 type="button"
                 title="Git actions"
-                @click="bShowGitActions = true"
+                @click="openGitActions"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+                <MoreHorizontal :size="16" :stroke-width="1.8" class="select-none" aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -665,6 +703,42 @@ onUnmounted((): void => {
           >
             {{ gitActionResult.text }}
           </p>
+        </div>
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2 min-w-0">
+            <button
+              v-if="filesInSelectedRepo.length"
+              class="flex items-center justify-center w-4 h-4 rounded border transition-colors flex-shrink-0"
+              :class="
+                allSelected
+                  ? 'bg-primary border-primary'
+                  : someSelected
+                    ? 'bg-primary/40 border-primary'
+                    : 'border-fg/20 hover:border-fg/40'
+              "
+              title="Select all / none"
+              @click.stop="toggleAll"
+            >
+              <Check v-if="allSelected" :size="10" :stroke-width="1.6" class="select-none text-white" aria-hidden="true" />
+              <Minus v-else-if="someSelected" :size="10" :stroke-width="1.6" class="select-none text-white" aria-hidden="true" />
+            </button>
+            <span class="text-xs font-medium text-text-muted truncate">
+              Changed files
+              <span
+                v-if="repos.length > 1 ? filesInSelectedRepo.length : files.length"
+                class="ml-1 text-text-muted/60"
+                >({{ repos.length > 1 ? filesInSelectedRepo.length : files.length }})</span
+              >
+            </span>
+          </div>
+          <button
+            class="text-text-muted hover:text-text-primary transition-colors px-1 flex-shrink-0"
+            :class="{ 'animate-spin': bIsLoading }"
+            title="Refresh"
+            @click="refresh"
+          >
+            <RefreshCw :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
+          </button>
         </div>
       </div>
 
@@ -682,7 +756,7 @@ onUnmounted((): void => {
       </div>
 
       <!-- Git file list skeleton -->
-      <div v-else-if="bIsLoading && !files.length" class="flex-1 overflow-hidden flex flex-col">
+      <div v-else-if="bIsLoading && !bHasLoadedStatus" class="flex-1 overflow-hidden flex flex-col">
         <div
           v-for="i in 5"
           :key="'git-skel-' + i"
@@ -733,7 +807,7 @@ onUnmounted((): void => {
             "
             @click.stop="toggleFile(f)"
           >
-            <svg v-if="selectedFiles.has(fileKey(f))" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none text-white"><polyline points="20 6 9 17 4 12"/></svg>
+            <Check v-if="selectedFiles.has(fileKey(f))" :size="10" :stroke-width="1.6" class="select-none text-white" aria-hidden="true" />
           </button>
           <button class="flex items-center gap-2.5 flex-1 min-w-0" @click="openFile(f)">
             <span
@@ -744,7 +818,7 @@ onUnmounted((): void => {
             <span class="text-xs text-text-primary truncate font-mono flex-1 text-left">{{
               f.file
             }}</span>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none flex-shrink-0 text-text-muted/50"><polyline points="9 18 15 12 9 6"/></svg>
+            <ChevronRight :size="14" :stroke-width="1.6" class="select-none flex-shrink-0 text-text-muted/50" aria-hidden="true" />
           </button>
           <button
             class="flex-shrink-0 text-text-muted hover:text-destructive transition-colors p-1 disabled:opacity-40 disabled:cursor-not-allowed"
@@ -752,7 +826,7 @@ onUnmounted((): void => {
             :disabled="bDiscarding"
             @click.stop="discardFiles([f.file], f.repo)"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>
+            <Trash2 :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -784,7 +858,7 @@ onUnmounted((): void => {
                 v-if="committingRepo === repos[0].repo"
                 class="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin"
               ></div>
-              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><polyline points="20 6 9 17 4 12"/></svg>
+              <Check v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
               Commit ({{ selectedFiles.size }})
             </button>
             <button
@@ -796,7 +870,7 @@ onUnmounted((): void => {
                 v-if="pushingRepo === repos[0].repo"
                 class="w-3 h-3 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
               ></div>
-              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>
+              <CloudUpload v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
               Push<template v-if="repos[0].aheadCount > 0"> ({{ repos[0].aheadCount }})</template>
             </button>
             <button
@@ -809,7 +883,7 @@ onUnmounted((): void => {
                 v-if="bDiscarding"
                 class="w-3 h-3 border border-destructive/30 border-t-destructive rounded-full animate-spin"
               ></div>
-              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>
+              <Trash2 v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
               Discard ({{ selectedFilesInActiveRepo.length }})
             </button>
           </div>
@@ -854,7 +928,7 @@ onUnmounted((): void => {
                 v-if="committingRepo === activeRepo.repo"
                 class="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin"
               ></div>
-              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><polyline points="20 6 9 17 4 12"/></svg>
+              <Check v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
               Commit ({{ selectedCountInRepo(activeRepo.repo) }})
             </button>
             <button
@@ -866,7 +940,7 @@ onUnmounted((): void => {
                 v-if="pushingRepo === activeRepo.repo"
                 class="w-3 h-3 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
               ></div>
-              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>
+              <CloudUpload v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
               Push<template v-if="activeRepo.aheadCount > 0"> ({{ activeRepo.aheadCount }})</template>
             </button>
             <button
@@ -879,7 +953,7 @@ onUnmounted((): void => {
                 v-if="bDiscarding"
                 class="w-3 h-3 border border-destructive/30 border-t-destructive rounded-full animate-spin"
               ></div>
-              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>
+              <Trash2 v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
               Discard ({{ selectedFilesInActiveRepo.length }})
             </button>
           </div>
@@ -913,7 +987,7 @@ onUnmounted((): void => {
           class="flex-shrink-0 text-xs text-primary hover:text-primary-hover transition-colors"
           @click="clearSelectedFile"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          <ArrowLeft :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
           Back
         </button>
         <span
@@ -988,7 +1062,7 @@ onUnmounted((): void => {
               type="button"
               @click="bShowGitActions = false"
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              <X :size="18" :stroke-width="1.8" class="select-none" aria-hidden="true" />
             </button>
           </div>
           <div class="px-3 pb-3">
@@ -1003,7 +1077,7 @@ onUnmounted((): void => {
                   v-if="bPulling"
                   class="w-3.5 h-3.5 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
                 ></div>
-                <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><polyline points="8 8 12 12 16 8"/><line x1="12" y1="12" x2="12" y2="3"/><path d="M20.39 18.39A5 5 0 0118 21H6a5 5 0 01-2.39-9.39"/></svg>
+                <CloudDownload v-else :size="16" :stroke-width="1.7" class="select-none" aria-hidden="true" />
               </span>
               <span class="min-w-0">
                 <span class="block font-medium">Pull</span>
@@ -1020,7 +1094,7 @@ onUnmounted((): void => {
               @click="openSwitchBranchDialog"
             >
               <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-fg/[0.05] text-text-muted">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 009 9"/></svg>
+                <GitBranchIcon :size="16" :stroke-width="1.7" class="select-none" aria-hidden="true" />
               </span>
               <span>
                 <span class="block font-medium">Switch branch</span>
@@ -1034,7 +1108,7 @@ onUnmounted((): void => {
               @click="openCreateBranchDialog"
             >
               <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-fg/[0.05] text-text-muted">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M12 5v14M5 12h14"/></svg>
+                <Plus :size="16" :stroke-width="1.7" class="select-none" aria-hidden="true" />
               </span>
               <span>
                 <span class="block font-medium">Create branch</span>
@@ -1046,6 +1120,14 @@ onUnmounted((): void => {
       </div>
     </Transition>
   </Teleport>
+
+  <ContextMenu
+    v-model="bGitActionsMenuOpen"
+    :x="gitActionsMenuX"
+    :y="gitActionsMenuY"
+    :items="gitActionsMenuItems"
+    @pick="onGitActionPick"
+  />
 
   <Teleport to="body">
     <Transition name="modal-fade">
@@ -1068,7 +1150,7 @@ onUnmounted((): void => {
               type="button"
               @click="bShowSwitchBranch = false"
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              <X :size="18" :stroke-width="1.8" class="select-none" aria-hidden="true" />
             </button>
           </div>
           <div class="px-5 pb-3">
@@ -1141,7 +1223,7 @@ onUnmounted((): void => {
               type="button"
               @click="bShowCreateBranch = false"
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              <X :size="18" :stroke-width="1.8" class="select-none" aria-hidden="true" />
             </button>
           </div>
           <div class="px-5 pb-5">
