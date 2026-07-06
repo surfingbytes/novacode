@@ -19,9 +19,9 @@ export const config = {
   get cursorCommand(): string {
     const override = process.env['CURSOR_COMMAND'];
     if (override) return override;
-    if (existsSync('/root/.local/bin/agent')) return '/root/.local/bin/agent';
     if (existsSync('/root/.local/bin/cursor-agent')) return '/root/.local/bin/cursor-agent';
-    return 'agent';
+    if (existsSync('/root/.local/bin/agent')) return '/root/.local/bin/agent';
+    return 'cursor-agent';
   },
   /** Backwards-compatible alias for older Cursor ACP wiring. Prefer `cursorCommand`. */
   get cursorAcpCommand(): string {

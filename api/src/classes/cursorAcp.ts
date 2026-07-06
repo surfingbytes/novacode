@@ -175,6 +175,15 @@ async function spawnCursorConnection(cwd: string): Promise<{
     env,
   });
 
+  // Permanent listeners so a dying child never surfaces as an uncaught
+  // 'error' event / unhandled rejection that would kill the whole API process.
+  proc.on('error', (err) => console.error('[cursorAcp] process error:', err));
+  proc.stdin?.on('error', (err) => console.error('[cursorAcp] stdin error:', err.message));
+  proc.stdout?.on('error', (err) => console.error('[cursorAcp] stdout error:', err.message));
+  proc.on('exit', (code, signal) => {
+    console.log('[cursorAcp] process exited with', formatProcessExit(code, signal));
+  });
+
   proc.stderr?.on('data', (chunk: Buffer) => {
     const text = chunk.toString().trim();
     if (text) console.error('[cursorAcp] stderr:', text);
@@ -200,6 +209,12 @@ async function spawnCursorConnection(cwd: string): Promise<{
     }),
     stream
   );
+
+  // The SDK rejects conn.closed when the child dies; without a handler that
+  // becomes a fatal unhandled rejection ("Error: ACP connection closed").
+  void Promise.resolve(conn.closed).catch((err: unknown) => {
+    console.error('[cursorAcp] connection closed:', err instanceof Error ? err.message : err);
+  });
 
   await withProcessStartupGuard(
     proc,
