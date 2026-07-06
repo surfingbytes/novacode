@@ -35,6 +35,14 @@ import { ensureSshKey } from './classes/sshKey';
 
 const startTime = Date.now();
 
+process.on('unhandledRejection', (reason) => {
+  console.error('[process] unhandled rejection:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[process] uncaught exception:', err);
+});
+
 /** Max JSON/raw body size (e.g. session image uploads). Default Fastify limit is 1MiB and returns 413. */
 const BODY_LIMIT_BYTES = 25 * 1024 * 1024;
 
