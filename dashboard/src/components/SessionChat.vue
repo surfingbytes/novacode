@@ -251,31 +251,58 @@ function onFileChange(e: Event) {
   input.value = '';
 }
 
-const selectedModelOption = computed(() =>
-  modelOptions.value.find((option) => option.id === modelSelection.value) ?? modelOptions.value[0] ?? null
-);
-
 function uniqueValues(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))];
 }
 
-const modelList = computed(() => uniqueValues(modelOptions.value.map((option) => option.model)));
-const selectedModelName = computed(() => selectedModelOption.value?.model ?? modelList.value[0] ?? 'Auto');
+function titleToken(token: string): string {
+  const lower = token.toLowerCase();
+  if (lower === 'gpt') return 'GPT';
+  if (/^\d/.test(token)) return token.toUpperCase();
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
+}
+
+function fallbackModelOption(id: string): AgentModelOption {
+  if (!id || id === 'auto') {
+    return { id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto' };
+  }
+  const model = id
+    .split(/[/:_\-\s]+/)
+    .filter(Boolean)
+    .map(titleToken)
+    .join(' ');
+  return { id, label: model, model, thinking: 'Default', context: 'Default' };
+}
+
+const selectedModelOption = computed(
+  () => modelOptions.value.find((option) => option.id === modelSelection.value) ?? fallbackModelOption(modelSelection.value)
+);
+
+const effectiveModelOptions = computed(() => {
+  const selected = selectedModelOption.value;
+  if (modelOptions.value.some((option) => option.id === selected.id)) {
+    return modelOptions.value;
+  }
+  return [selected, ...modelOptions.value];
+});
+
+const modelList = computed(() => uniqueValues(effectiveModelOptions.value.map((option) => option.model)));
+const selectedModelName = computed(() => selectedModelOption.value.model);
 const thinkingList = computed(() =>
   uniqueValues(
-    modelOptions.value
+    effectiveModelOptions.value
       .filter((option) => option.model === selectedModelName.value)
       .map((option) => option.thinking)
   )
 );
 const selectedThinkingName = computed(() => {
   const current = selectedModelOption.value;
-  if (current?.model === selectedModelName.value) return current.thinking;
+  if (current.model === selectedModelName.value) return current.thinking;
   return thinkingList.value[0] ?? 'Default';
 });
 const contextList = computed(() =>
   uniqueValues(
-    modelOptions.value
+    effectiveModelOptions.value
       .filter(
         (option) =>
           option.model === selectedModelName.value && option.thinking === selectedThinkingName.value
@@ -285,7 +312,7 @@ const contextList = computed(() =>
 );
 const selectedContextName = computed(() => {
   const current = selectedModelOption.value;
-  if (current?.model === selectedModelName.value && current.thinking === selectedThinkingName.value) {
+  if (current.model === selectedModelName.value && current.thinking === selectedThinkingName.value) {
     return current.context;
   }
   return contextList.value[0] ?? 'Default';
@@ -309,13 +336,13 @@ async function loadAvailableModels() {
 
 function resolveModelOption(model: string, thinking: string, context: string): AgentModelOption | null {
   return (
-    modelOptions.value.find(
+    effectiveModelOptions.value.find(
       (option) =>
         option.model === model && option.thinking === thinking && option.context === context
     ) ??
-    modelOptions.value.find((option) => option.model === model && option.thinking === thinking) ??
-    modelOptions.value.find((option) => option.model === model) ??
-    modelOptions.value[0] ??
+    effectiveModelOptions.value.find((option) => option.model === model && option.thinking === thinking) ??
+    effectiveModelOptions.value.find((option) => option.model === model) ??
+    effectiveModelOptions.value[0] ??
     null
   );
 }
@@ -2114,25 +2141,25 @@ onUnmounted(() => {
               <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
             </button>
           </div>
-          <div class="px-2 flex flex-col gap-2 md:flex-row md:items-end">
+          <div class="px-2 flex flex-col gap-1.5 md:flex-row md:items-center md:gap-3">
             <label
-              class="flex min-h-[36px] cursor-pointer items-center gap-2 rounded-md border border-fg/[0.1] bg-fg/[0.04] px-3 text-xs text-text-primary md:self-stretch"
+              class="flex cursor-pointer items-center gap-1.5 text-xs text-text-muted hover:text-text-primary"
             >
               <input
                 type="checkbox"
-                class="h-4 w-4 shrink-0 rounded border-fg/[0.2] text-primary focus:ring-primary/40"
+                class="h-3.5 w-3.5 shrink-0 rounded border-fg/[0.2] text-primary focus:ring-primary/40"
                 :checked="!hideThinkingOutput"
                 @change="onShowThinkingToggle(($event.target as HTMLInputElement).checked)"
               />
               <span>Show thinking process</span>
             </label>
-            <div class="grid flex-1 grid-cols-1 gap-2 md:grid-cols-3">
-              <label class="flex min-w-0 flex-col gap-1">
-                <span class="text-[11px] font-medium uppercase tracking-wide text-text-muted">Model</span>
+            <div class="grid flex-1 grid-cols-3 gap-1.5 md:gap-2">
+              <label class="flex min-w-0 items-center gap-1.5">
+                <span class="shrink-0 text-[10px] font-medium uppercase tracking-wide text-text-muted">Model</span>
                 <select
                   :value="selectedModelName"
                   :disabled="bIsStreaming || bModelsLoading || bSavingModelSelection"
-                  class="min-w-0 rounded-md border border-fg/[0.12] bg-fg/[0.04] px-2.5 py-2 text-xs text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
+                  class="min-w-0 flex-1 rounded-md border border-fg/[0.08] bg-fg/[0.03] px-2 py-1 text-xs text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
                   @change="onModelDimensionChange('model', ($event.target as HTMLSelectElement).value)"
                 >
                   <option v-for="model in modelList" :key="model" :value="model">
@@ -2140,12 +2167,12 @@ onUnmounted(() => {
                   </option>
                 </select>
               </label>
-              <label class="flex min-w-0 flex-col gap-1">
-                <span class="text-[11px] font-medium uppercase tracking-wide text-text-muted">Thinking</span>
+              <label class="flex min-w-0 items-center gap-1.5">
+                <span class="shrink-0 text-[10px] font-medium uppercase tracking-wide text-text-muted">Thinking</span>
                 <select
                   :value="selectedThinkingName"
                   :disabled="bIsStreaming || bModelsLoading || bSavingModelSelection"
-                  class="min-w-0 rounded-md border border-fg/[0.12] bg-fg/[0.04] px-2.5 py-2 text-xs text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
+                  class="min-w-0 flex-1 rounded-md border border-fg/[0.08] bg-fg/[0.03] px-2 py-1 text-xs text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
                   @change="onModelDimensionChange('thinking', ($event.target as HTMLSelectElement).value)"
                 >
                   <option v-for="thinking in thinkingList" :key="thinking" :value="thinking">
@@ -2153,12 +2180,12 @@ onUnmounted(() => {
                   </option>
                 </select>
               </label>
-              <label class="flex min-w-0 flex-col gap-1">
-                <span class="text-[11px] font-medium uppercase tracking-wide text-text-muted">Context</span>
+              <label class="flex min-w-0 items-center gap-1.5">
+                <span class="shrink-0 text-[10px] font-medium uppercase tracking-wide text-text-muted">Context</span>
                 <select
                   :value="selectedContextName"
                   :disabled="bIsStreaming || bModelsLoading || bSavingModelSelection"
-                  class="min-w-0 rounded-md border border-fg/[0.12] bg-fg/[0.04] px-2.5 py-2 text-xs text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
+                  class="min-w-0 flex-1 rounded-md border border-fg/[0.08] bg-fg/[0.03] px-2 py-1 text-xs text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
                   @change="onModelDimensionChange('context', ($event.target as HTMLSelectElement).value)"
                 >
                   <option v-for="context in contextList" :key="context" :value="context">
