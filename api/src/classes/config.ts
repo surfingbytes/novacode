@@ -15,7 +15,12 @@ export const config = {
   // auth: credentials stored in DB, first-use setup creates the initial user
   jwtSecret: optional('JWT_SECRET'),
   port: parseInt(optional('PORT', '3000'), 10),
-  cursorCommand: '/root/.local/bin/cursor-agent',
+  /** Cursor CLI. Resolved lazily so local/dev PATH installs and Docker installs both work. */
+  get cursorCommand(): string {
+    const override = process.env['CURSOR_COMMAND'];
+    if (override) return override;
+    return existsSync('/root/.local/bin/cursor-agent') ? '/root/.local/bin/cursor-agent' : 'cursor-agent';
+  },
   claudeCommand: 'claude',
   openCodeCommand: 'opencode',
   codexCommand: 'codex',
