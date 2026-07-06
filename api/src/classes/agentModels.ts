@@ -20,6 +20,7 @@ export interface AgentModelOption {
   model: string;
   thinking: string;
   context: string;
+  current?: boolean;
 }
 
 const cache = new Map<AgentType, { models: AgentModelOption[]; fetchedAt: number }>();
@@ -80,12 +81,13 @@ function extractDimensions(id: string, label: string): { model: string; thinking
   };
 }
 
-function toAgentModelOption(option: { id: string; label: string }): AgentModelOption {
+function toAgentModelOption(option: { id: string; label: string; current?: boolean }): AgentModelOption {
   const id = option.id.trim();
   const label = (option.label || option.id).replace(/\s*\((current|default)\)\s*$/i, '').trim();
   return {
     id,
     label,
+    ...(option.current ? { current: true } : {}),
     ...extractDimensions(id, label)
   };
 }
