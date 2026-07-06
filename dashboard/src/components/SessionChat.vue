@@ -275,7 +275,13 @@ function fallbackModelOption(id: string): AgentModelOption {
 }
 
 const selectedModelOption = computed(
-  () => modelOptions.value.find((option) => option.id === modelSelection.value) ?? fallbackModelOption(modelSelection.value)
+  () => {
+    if (modelSelection.value === 'auto') {
+      const current = modelOptions.value.find((option) => option.current && option.id !== 'auto');
+      if (current) return current;
+    }
+    return modelOptions.value.find((option) => option.id === modelSelection.value) ?? fallbackModelOption(modelSelection.value);
+  }
 );
 
 const effectiveModelOptions = computed(() => {
@@ -2141,25 +2147,25 @@ onUnmounted(() => {
               <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
             </button>
           </div>
-          <div class="px-2 flex flex-col gap-1.5 md:flex-row md:items-center md:gap-3">
+          <div class="px-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] leading-none">
             <label
-              class="flex cursor-pointer items-center gap-1.5 text-xs text-text-muted hover:text-text-primary"
+              class="flex cursor-pointer items-center gap-1.5 text-text-muted hover:text-text-primary"
             >
               <input
                 type="checkbox"
-                class="h-3.5 w-3.5 shrink-0 rounded border-fg/[0.2] text-primary focus:ring-primary/40"
+                class="h-3 w-3 shrink-0 rounded border-fg/[0.2] text-primary focus:ring-primary/40"
                 :checked="!hideThinkingOutput"
                 @change="onShowThinkingToggle(($event.target as HTMLInputElement).checked)"
               />
               <span>Show thinking process</span>
             </label>
-            <div class="grid flex-1 grid-cols-3 gap-1.5 md:gap-2">
-              <label class="flex min-w-0 items-center gap-1.5">
-                <span class="shrink-0 text-[10px] font-medium uppercase tracking-wide text-text-muted">Model</span>
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <label class="flex min-w-0 items-center gap-1">
+                <span class="shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted">Model</span>
                 <select
                   :value="selectedModelName"
                   :disabled="bIsStreaming || bModelsLoading || bSavingModelSelection"
-                  class="min-w-0 flex-1 rounded-md border border-fg/[0.08] bg-fg/[0.03] px-2 py-1 text-xs text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
+                  class="h-5! min-h-0! w-32 rounded border border-fg/[0.08] bg-transparent px-1.5! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
                   @change="onModelDimensionChange('model', ($event.target as HTMLSelectElement).value)"
                 >
                   <option v-for="model in modelList" :key="model" :value="model">
@@ -2167,12 +2173,12 @@ onUnmounted(() => {
                   </option>
                 </select>
               </label>
-              <label class="flex min-w-0 items-center gap-1.5">
-                <span class="shrink-0 text-[10px] font-medium uppercase tracking-wide text-text-muted">Thinking</span>
+              <label class="flex min-w-0 items-center gap-1">
+                <span class="shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted">Thinking</span>
                 <select
                   :value="selectedThinkingName"
                   :disabled="bIsStreaming || bModelsLoading || bSavingModelSelection"
-                  class="min-w-0 flex-1 rounded-md border border-fg/[0.08] bg-fg/[0.03] px-2 py-1 text-xs text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
+                  class="h-5! min-h-0! w-24 rounded border border-fg/[0.08] bg-transparent px-1.5! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
                   @change="onModelDimensionChange('thinking', ($event.target as HTMLSelectElement).value)"
                 >
                   <option v-for="thinking in thinkingList" :key="thinking" :value="thinking">
@@ -2180,12 +2186,12 @@ onUnmounted(() => {
                   </option>
                 </select>
               </label>
-              <label class="flex min-w-0 items-center gap-1.5">
-                <span class="shrink-0 text-[10px] font-medium uppercase tracking-wide text-text-muted">Context</span>
+              <label class="flex min-w-0 items-center gap-1">
+                <span class="shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted">Context</span>
                 <select
                   :value="selectedContextName"
                   :disabled="bIsStreaming || bModelsLoading || bSavingModelSelection"
-                  class="min-w-0 flex-1 rounded-md border border-fg/[0.08] bg-fg/[0.03] px-2 py-1 text-xs text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
+                  class="h-5! min-h-0! w-24 rounded border border-fg/[0.08] bg-transparent px-1.5! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
                   @change="onModelDimensionChange('context', ($event.target as HTMLSelectElement).value)"
                 >
                   <option v-for="context in contextList" :key="context" :value="context">

@@ -10,6 +10,7 @@ const CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
 export interface CursorModelOption {
   id: string;
   label: string;
+  current?: boolean;
 }
 
 let cache: { models: CursorModelOption[]; fetchedAt: number } | null = null;
@@ -39,9 +40,10 @@ function parseModelsOutput(stdout: string): CursorModelOption[] {
     if (!id) {
       continue;
     }
+    const current = /\s*\((current|default)\)\s*$/i.test(label);
     // Strip " (current)" or " (default)" from label for display
     label = label.replace(/\s*\((current|default)\)\s*$/i, '').trim();
-    result.push({ id, label });
+    result.push({ id, label, ...(current ? { current: true } : {}) });
   }
 
   return result;

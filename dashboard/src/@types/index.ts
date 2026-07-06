@@ -86,6 +86,7 @@ export interface AgentModelOption {
   model: string;
   thinking: string;
   context: string;
+  current?: boolean;
 }
 
 export interface WorkspaceRuleFileSummary {
