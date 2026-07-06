@@ -87,6 +87,15 @@ function formatProcessExit(code: number | null, signal: NodeJS.Signals | null): 
   return signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`;
 }
 
+function formatAcpError(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const details = err as Error & { code?: unknown; data?: unknown };
+  const parts = [err.name ? `${err.name}: ${err.message}` : err.message];
+  if (details.code !== undefined) parts.push(`code=${String(details.code)}`);
+  if (details.data !== undefined) parts.push(`data=${JSON.stringify(details.data)}`);
+  return parts.join(' ');
+}
+
 async function withProcessStartupGuard<T>(
   proc: ChildProcess,
   phase: string,
@@ -122,6 +131,7 @@ async function withProcessStartupGuard<T>(
       },
       (err: unknown) => {
         cleanup();
+        console.error(`[cursorAcp] ${phase} failed:`, formatAcpError(err));
         reject(err);
       }
     );
@@ -216,7 +226,7 @@ async function spawnCursorConnection(cwd: string): Promise<{
     console.error('[cursorAcp] connection closed:', err instanceof Error ? err.message : err);
   });
 
-  await withProcessStartupGuard(
+  const init = await withProcessStartupGuard(
     proc,
     'initialize',
     conn.initialize({
@@ -228,7 +238,18 @@ async function spawnCursorConnection(cwd: string): Promise<{
       },
     })
   );
-  await withProcessStartupGuard(proc, 'authenticate', conn.authenticate({ methodId: 'cursor_login' }));
+
+  const authMethods = init.authMethods ?? [];
+  const authMethodIds = authMethods.map((method) => method.id);
+  console.log('[cursorAcp] initialized Cursor ACP server:', {
+    protocolVersion: init.protocolVersion,
+    agentInfo: init.agentInfo,
+    authMethods: authMethodIds,
+  });
+
+  if (authMethodIds.includes('cursor_login')) {
+    await withProcessStartupGuard(proc, 'authenticate', conn.authenticate({ methodId: 'cursor_login' }));
+  }
 
   return { conn, proc };
 }
