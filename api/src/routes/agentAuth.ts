@@ -88,7 +88,7 @@ export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
       schema: { response: { 201: Type.Object({ sessionId: Type.String() }) } }
     },
     async (_request, reply) => {
-      const session = sessionManager.createAuthSession(config.cursorCommand, ['-f', 'login']);
+      const session = sessionManager.createAuthSession(config.cursorCommand, ['login']);
       return reply.code(201).send({ sessionId: session.id });
     }
   );
