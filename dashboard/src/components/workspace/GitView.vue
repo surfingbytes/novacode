@@ -12,6 +12,7 @@ import {
   MoreHorizontal,
   Plus,
   RefreshCw,
+  Sparkles,
   Trash2,
   X
 } from 'lucide-vue-next';
@@ -61,6 +62,7 @@ const commitMessage = ref<string>('');
 const commitMessagesByRepo = ref<Record<string, string>>({});
 const committingRepo = ref<string | null>(null);
 const pushingRepo = ref<string | null>(null);
+const bGeneratingCommitMessage = ref<boolean>(false);
 const commitResult = ref<{ type: 'success' | 'error'; text: string; repo?: string } | null>(null);
 const pushResult = ref<{ type: 'success' | 'error'; text: string; repo?: string } | null>(null);
 const gitActionResult = ref<{ type: 'success' | 'error'; text: string; repo?: string } | null>(null);
@@ -128,6 +130,7 @@ const canCommit = computed(
     !bSwitchingBranch.value &&
     !bCreatingBranch.value &&
     !bDiscarding.value &&
+    !bGeneratingCommitMessage.value &&
     !hasMixedSelection.value
 );
 const canPushSingleRepo = computed(
@@ -138,6 +141,7 @@ const canPushSingleRepo = computed(
     !bSwitchingBranch.value &&
     !bCreatingBranch.value &&
     !bDiscarding.value &&
+    !bGeneratingCommitMessage.value &&
     repos.value.length === 1
 );
 const canCommitActiveRepo = computed((): boolean => {
@@ -152,7 +156,8 @@ const canCommitActiveRepo = computed((): boolean => {
     !bPulling.value &&
     !bSwitchingBranch.value &&
     !bCreatingBranch.value &&
-    !bDiscarding.value
+    !bDiscarding.value &&
+    !bGeneratingCommitMessage.value
   );
 });
 const canPushActiveRepo = computed(
@@ -163,7 +168,8 @@ const canPushActiveRepo = computed(
     !bPulling.value &&
     !bSwitchingBranch.value &&
     !bCreatingBranch.value &&
-    !bDiscarding.value
+    !bDiscarding.value &&
+    !bGeneratingCommitMessage.value
 );
 const selectedFilesInActiveRepo = computed((): string[] => {
   const r = activeRepo.value;
@@ -180,7 +186,8 @@ const gitOperationInProgress = computed(
     bPulling.value ||
     bSwitchingBranch.value ||
     bCreatingBranch.value ||
-    bDiscarding.value
+    bDiscarding.value ||
+    bGeneratingCommitMessage.value
 );
 const canPullActiveRepo = computed(
   (): boolean => !!activeRepo.value?.upstreamBranch && !gitOperationInProgress.value
@@ -233,6 +240,16 @@ const parseFileKey = (key: string): { repo: string; file: string } => {
   if (sep < 0) return { repo: '', file: key };
   return { repo: key.slice(0, sep), file: key.slice(sep + 2) };
 };
+const canGenerateCommitMessage = (targetRepo: string): boolean =>
+  selectedCountInRepo(targetRepo) > 0 &&
+  committingRepo.value === null &&
+  pushingRepo.value === null &&
+  !bPulling.value &&
+  !bSwitchingBranch.value &&
+  !bCreatingBranch.value &&
+  !bDiscarding.value &&
+  !bGeneratingCommitMessage.value &&
+  (repos.value.length === 1 || activeRepo.value?.repo === targetRepo);
 
 // -------------------------------------------------- Methods --------------------------------------------------
 const gitErrorMessage = (e: unknown, fallback: string): string => {
@@ -349,6 +366,47 @@ const toggleAll = (): void => {
     for (const f of list) next.add(fileKey(f));
   }
   selectedFiles.value = next;
+};
+
+const generateCommitMessage = async (targetRepo: string): Promise<void> => {
+  if (!canGenerateCommitMessage(targetRepo)) return;
+  const filesToSummarize = [...selectedFiles.value]
+    .map((key) => parseFileKey(key))
+    .filter((entry) => entry.repo === targetRepo)
+    .map((entry) => entry.file);
+
+  if (!filesToSummarize.length) return;
+
+  bGeneratingCommitMessage.value = true;
+  commitResult.value = null;
+  try {
+    const response = await gitApi.generateCommitMessage(
+      props.workspaceId,
+      filesToSummarize,
+      targetRepo
+    );
+    if (repos.value.length === 1) {
+      commitMessage.value = response.data.message;
+    } else {
+      commitMessagesByRepo.value = {
+        ...commitMessagesByRepo.value,
+        [targetRepo]: response.data.message
+      };
+    }
+    setGitActionResult('success', 'Generated commit message', targetRepo);
+  } catch (e: unknown) {
+    commitResult.value = {
+      type: 'error',
+      text: gitErrorMessage(e, 'Failed to generate commit message'),
+      repo: repos.value.length > 1 ? targetRepo : undefined
+    };
+    if (commitResultTimer) clearTimeout(commitResultTimer);
+    commitResultTimer = setTimeout(() => {
+      commitResult.value = null;
+    }, 5000);
+  } finally {
+    bGeneratingCommitMessage.value = false;
+  }
 };
 
 const commitChanges = async (targetRepo: string): Promise<void> => {
@@ -839,13 +897,29 @@ onUnmounted((): void => {
         <!-- Single Git root: one bar -->
         <template v-if="repos.length === 1">
           <template v-if="files.length">
-            <textarea
-              v-model="commitMessage"
-              rows="2"
-              class="w-full bg-card border border-fg/[0.08] focus:border-primary/50 focus:ring-2 focus:ring-primary/10 rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all resize-none"
-              placeholder="Commit message..."
-              :disabled="committingRepo !== null"
-            />
+            <div class="flex items-stretch gap-2">
+              <textarea
+                v-model="commitMessage"
+                rows="2"
+                class="min-w-0 flex-1 bg-card border border-fg/[0.08] focus:border-primary/50 focus:ring-2 focus:ring-primary/10 rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all resize-none"
+                placeholder="Commit message..."
+                :disabled="committingRepo !== null || bGeneratingCommitMessage"
+              />
+              <button
+                class="flex-shrink-0 w-10 rounded-lg text-text-muted hover:text-primary hover:bg-fg/[0.06] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
+                type="button"
+                title="Generate commit message"
+                aria-label="Generate commit message"
+                :disabled="!canGenerateCommitMessage(repos[0].repo)"
+                @click="generateCommitMessage(repos[0].repo)"
+              >
+                <div
+                  v-if="bGeneratingCommitMessage"
+                  class="w-4 h-4 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
+                ></div>
+                <Sparkles v-else :size="17" :stroke-width="1.7" class="select-none" aria-hidden="true" />
+              </button>
+            </div>
           </template>
           <div class="flex items-center gap-2">
             <button
@@ -909,13 +983,29 @@ onUnmounted((): void => {
         <!-- Multiple Git roots: one message + actions for the repository selected above -->
         <template v-else-if="activeRepo">
           <template v-if="activeRepo.files.length">
-            <textarea
-              v-model="commitMessagesByRepo[selectedGitRepo]"
-              rows="2"
-              class="w-full bg-card border border-fg/[0.08] focus:border-primary/50 focus:ring-2 focus:ring-primary/10 rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all resize-none"
-              placeholder="Commit message..."
-              :disabled="committingRepo !== null"
-            />
+            <div class="flex items-stretch gap-2">
+              <textarea
+                v-model="commitMessagesByRepo[selectedGitRepo]"
+                rows="2"
+                class="min-w-0 flex-1 bg-card border border-fg/[0.08] focus:border-primary/50 focus:ring-2 focus:ring-primary/10 rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all resize-none"
+                placeholder="Commit message..."
+                :disabled="committingRepo !== null || bGeneratingCommitMessage"
+              />
+              <button
+                class="flex-shrink-0 w-10 rounded-lg text-text-muted hover:text-primary hover:bg-fg/[0.06] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
+                type="button"
+                title="Generate commit message"
+                aria-label="Generate commit message"
+                :disabled="!canGenerateCommitMessage(activeRepo.repo)"
+                @click="generateCommitMessage(activeRepo.repo)"
+              >
+                <div
+                  v-if="bGeneratingCommitMessage"
+                  class="w-4 h-4 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
+                ></div>
+                <Sparkles v-else :size="17" :stroke-width="1.7" class="select-none" aria-hidden="true" />
+              </button>
+            </div>
           </template>
           <div class="flex items-center gap-2 flex-wrap">
             <button

@@ -301,6 +301,12 @@ export const gitApi = {
       files,
       repo
     }),
+  generateCommitMessage: (
+    workspaceId: string,
+    files: string[],
+    repo?: string
+  ): ReturnType<typeof http.post<{ message: string }>> =>
+    http.post<{ message: string }>(`/git/workspace/${workspaceId}/commit-message`, { files, repo }),
   push: (workspaceId: string, repo?: string): ReturnType<typeof http.post<{ output: string }>> =>
     http.post<{ output: string }>(`/git/workspace/${workspaceId}/push`, undefined, {
       params: { repo }

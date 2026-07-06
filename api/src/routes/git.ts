@@ -6,14 +6,26 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 // classes
 import { jwtPreHandler } from '../classes/auth';
 import { db } from '../classes/database';
 import { config } from '../classes/config';
 import { sshEnvForGit } from '../classes/sshKey';
+import { runClaudeAcp } from '../classes/claudeAcp';
+import { runCodexAcp } from '../classes/codexAcp';
+import { runCursorAcp } from '../classes/cursorAcp';
+import { runOpenCodeAcp } from '../classes/openCodeAcp';
+import { runVibeAcp } from '../classes/vibeAcp';
+
+// types
+import type { AgentType } from '../@types';
 
 const execFileAsync = promisify(execFile);
+const COMMIT_MESSAGE_DIFF_MAX_CHARS = 60_000;
+const COMMIT_MESSAGE_FILE_DIFF_MAX_CHARS = 12_000;
+const COMMIT_MESSAGE_AGENT_TYPES: AgentType[] = ['cursor-agent', 'claude', 'mistral-vibe', 'open-code', 'codex'];
 
 interface RepoStatusFile {
   status: string;
@@ -43,6 +55,7 @@ interface WorkspaceGitContext {
     path: string;
     gitUserName?: string | null;
     gitUserEmail?: string | null;
+    defaultAgentType?: string | null;
   };
   baseCwd: string;
   repo: string;
@@ -286,6 +299,117 @@ async function listBranches(cwd: string): Promise<{
   };
 }
 
+function appendAssistantText(line: string, chunks: string[]): void {
+  let event: Record<string, unknown>;
+  try {
+    event = JSON.parse(line) as Record<string, unknown>;
+  } catch {
+    return;
+  }
+
+  if (typeof event.sessionId === 'string' && event.update && typeof event.update === 'object') {
+    const update = event.update as Record<string, unknown>;
+    const content = update.content as { type?: string; text?: string } | undefined;
+    if (update.sessionUpdate === 'agent_message_chunk' && content?.type === 'text' && content.text) {
+      chunks.push(content.text);
+    }
+    return;
+  }
+
+  if (event.type === 'stream' && typeof event.data === 'string') {
+    appendAssistantText(event.data, chunks);
+    return;
+  }
+
+  if (event.type === 'assistant' && Array.isArray((event.message as Record<string, unknown>)?.content)) {
+    const content = (event.message as Record<string, unknown>).content as Array<{
+      type?: string;
+      text?: string;
+    }>;
+    for (const block of content) {
+      if (block.type === 'text' && block.text) chunks.push(block.text);
+    }
+    return;
+  }
+
+  if ((event.role === 'assistant' || event.type === 'assistant') && typeof event.content === 'string') {
+    chunks.push(event.content);
+  }
+}
+
+function cleanGeneratedCommitMessage(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^```(?:text)?/i, '')
+    .replace(/```$/i, '')
+    .trim()
+    .replace(/^["'`]+|["'`]+$/g, '')
+    .trim();
+}
+
+async function runCommitMessageAgent(params: {
+  agentType: AgentType;
+  cwd: string;
+  promptText: string;
+  model: string;
+  claudeToken?: string | null;
+}): Promise<string> {
+  const chunks: string[] = [];
+  const onEvent = (line: string): void => appendAssistantText(line, chunks);
+  const runId = `git-commit-message-${randomUUID()}`;
+  let result: { error?: string };
+
+  if (params.agentType === 'open-code') {
+    result = await runOpenCodeAcp(
+      { acpSessionId: null, cwd: params.cwd, promptText: params.promptText, model: params.model },
+      onEvent,
+      runId
+    );
+  } else if (params.agentType === 'codex') {
+    result = await runCodexAcp(
+      { acpSessionId: null, cwd: params.cwd, promptText: params.promptText, model: params.model },
+      onEvent,
+      runId
+    );
+  } else if (params.agentType === 'mistral-vibe') {
+    result = await runVibeAcp(
+      { acpSessionId: null, cwd: params.cwd, promptText: params.promptText },
+      onEvent,
+      runId
+    );
+  } else if (params.agentType === 'claude') {
+    result = await runClaudeAcp(
+      { acpSessionId: null, cwd: params.cwd, promptText: params.promptText, claudeToken: params.claudeToken },
+      onEvent
+    );
+  } else {
+    result = await runCursorAcp(
+      { acpSessionId: null, cwd: params.cwd, promptText: params.promptText },
+      onEvent,
+      runId
+    );
+  }
+
+  if (result.error) throw new Error(result.error);
+  const message = cleanGeneratedCommitMessage(chunks.join(''));
+  if (!message) throw new Error('AI did not return a commit message');
+  return message;
+}
+
+function buildCommitMessagePrompt(diff: string): string {
+  return `Generate a concise git commit message for the following changes.
+
+Rules:
+- Return only the commit message text.
+- Use an imperative subject line.
+- Keep the subject under 72 characters.
+- Add a short body only if it helps explain why.
+- Do not wrap the answer in quotes or markdown fences.
+
+Diff:
+${diff}`;
+}
+
 export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
   const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
 
@@ -418,6 +542,104 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         ).catch(() => ({ stdout: '' }));
 
         return { diff: cachedDiff };
+      } catch (err) {
+        return reply.code(400).send({ error: gitErrorMessage(err) });
+      }
+    }
+  );
+
+  // POST /api/git/workspace/:workspaceId/commit-message — generate a commit message for selected files
+  fastifyInstance.post(
+    '/api/git/workspace/:workspaceId/commit-message',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        params: Type.Object({ workspaceId: Type.String() }),
+        body: Type.Object({
+          files: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+          repo: Type.Optional(Type.String())
+        }),
+        response: {
+          200: Type.Object({ message: Type.String() }),
+          404: Type.Object({ error: Type.String() }),
+          400: Type.Object({ error: Type.String() })
+        }
+      }
+    },
+    async (request, reply) => {
+      const { files, repo = '' } = request.body;
+
+      try {
+        const context = await resolveWorkspaceGitContext(request.params.workspaceId, repo);
+        if (!context) return reply.code(404).send({ error: 'Workspace not found' });
+
+        const status = await getRepoStatus(context.baseCwd, context.repo);
+        const statusByFile = new Map(status.files.map((file) => [file.file, file.status]));
+        const diffParts: string[] = [];
+        let totalChars = 0;
+
+        for (const file of files) {
+          const repoFile = toRepoRelativePath(context.repo, file);
+          safeRepoFilePath(context.cwd, repoFile);
+          const fileStatus = statusByFile.get(file) ?? statusByFile.get(repoFile) ?? '';
+          const opts = { cwd: context.cwd, maxBuffer: 5 * 1024 * 1024 };
+          let diff = '';
+
+          if (fileStatus === '??') {
+            try {
+              await execFileAsync('git', ['diff', '--no-index', '/dev/null', repoFile], opts);
+            } catch (err) {
+              diff = (err as NodeJS.ErrnoException & { stdout?: string }).stdout ?? '';
+            }
+          } else {
+            const { stdout: headDiff } = await execFileAsync(
+              'git',
+              ['diff', 'HEAD', '--', repoFile],
+              opts
+            ).catch(() => ({ stdout: '' }));
+            if (headDiff.trim()) {
+              diff = headDiff;
+            } else {
+              const { stdout: cachedDiff } = await execFileAsync(
+                'git',
+                ['diff', '--cached', '--', repoFile],
+                opts
+              ).catch(() => ({ stdout: '' }));
+              diff = cachedDiff;
+            }
+          }
+
+          if (!diff.trim()) continue;
+          if (diff.length > COMMIT_MESSAGE_FILE_DIFF_MAX_CHARS) {
+            diff = `${diff.slice(0, COMMIT_MESSAGE_FILE_DIFF_MAX_CHARS)}\n... diff truncated ...\n`;
+          }
+
+          const part = `\n--- ${file} ---\n${diff}`;
+          if (totalChars + part.length > COMMIT_MESSAGE_DIFF_MAX_CHARS) {
+            diffParts.push('\n... remaining diff truncated ...\n');
+            break;
+          }
+          diffParts.push(part);
+          totalChars += part.length;
+        }
+
+        const diff = diffParts.join('').trim();
+        if (!diff) return reply.code(400).send({ error: 'No diff found for selected files' });
+
+        const user = await db.getFirstUser();
+        const configuredAgentType = context.workspace.defaultAgentType as AgentType | null | undefined;
+        const agentType = configuredAgentType && COMMIT_MESSAGE_AGENT_TYPES.includes(configuredAgentType)
+          ? configuredAgentType
+          : 'cursor-agent';
+        const message = await runCommitMessageAgent({
+          agentType,
+          cwd: context.cwd,
+          promptText: buildCommitMessagePrompt(diff),
+          model: user?.modelSelection ?? 'auto',
+          claudeToken: user?.claudeToken ?? null
+        });
+
+        return { message };
       } catch (err) {
         return reply.code(400).send({ error: gitErrorMessage(err) });
       }
