@@ -163,6 +163,7 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         name?: string;
         tags?: string[] | string | null;
         archived?: boolean;
+        modelSelection?: string;
       };
       const session = await db.getSession(sessionId);
       if (!session || session.workspaceId !== workspaceId) {
@@ -172,6 +173,7 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         name?: string;
         tags?: string[] | null;
         archived?: boolean;
+        modelSelection?: string;
       } = {};
       if (body.name !== undefined) {
         patch.name = body.name;
@@ -181,6 +183,9 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       }
       if (body.archived !== undefined) {
         patch.archived = body.archived;
+      }
+      if (body.modelSelection !== undefined) {
+        patch.modelSelection = body.modelSelection;
       }
       const updated = await db.updateSession(sessionId, patch);
       if (!updated) {

@@ -20,12 +20,14 @@ import {
 import { checkMcpClients } from '../classes/mcpConnectivityCheck';
 import { getCursorModels } from '../classes/cursorModels';
 import { getOpenCodeModels, clearOpenCodeModelsCache } from '../classes/openCodeModels';
+import { getAgentModels } from '../classes/agentModels';
 import { readSshKeyMaterial } from '../classes/sshKey';
 import { cursorAuthenticated, openCodeAuthenticated, codexAuthenticated } from './agentAuth';
 
 // types
 import type { FastifyInstance } from 'fastify';
 import type { McpClientServerConfig } from '../classes/config';
+import type { AgentType } from '../@types/index';
 
 type AppSettingsUser = {
   gitUserName: string | null;
@@ -40,6 +42,10 @@ type AppSettingsUser = {
 /** Legacy dashboard theme id `rust` was replaced by OLED. */
 function normalizeThemeId(theme: string): string {
   return theme === 'rust' ? 'oled' : theme;
+}
+
+function isAgentType(value: string): value is AgentType {
+  return value === 'cursor-agent' || value === 'claude' || value === 'mistral-vibe' || value === 'open-code' || value === 'codex';
 }
 
 type AppSettings = {
@@ -173,6 +179,14 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     label: Type.String()
   });
 
+  const AgentModelOptionSchema = Type.Object({
+    id: Type.String(),
+    label: Type.String(),
+    model: Type.String(),
+    thinking: Type.String(),
+    context: Type.String()
+  });
+
   fastifyInstance.get(
     '/api/settings/cursor-models',
     {
@@ -208,6 +222,31 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     async (request) => {
       if ((request.query as Record<string, string>)['bust']) clearOpenCodeModelsCache();
       return getOpenCodeModels();
+    }
+  );
+
+  // GET /api/settings/agent-models/:agentType - normalized model options for chat controls
+  fastifyInstance.get(
+    '/api/settings/agent-models/:agentType',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        params: Type.Object({ agentType: Type.String() }),
+        response: {
+          200: Type.Object({
+            models: Type.Array(AgentModelOptionSchema),
+            fromCache: Type.Boolean()
+          }),
+          400: Type.Object({ error: Type.String() })
+        }
+      }
+    },
+    async (request, reply) => {
+      const { agentType } = request.params;
+      if (!isAgentType(agentType)) {
+        return reply.status(400).send({ error: 'Unsupported agent type' });
+      }
+      return getAgentModels(agentType);
     }
   );
 

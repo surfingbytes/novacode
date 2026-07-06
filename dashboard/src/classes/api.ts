@@ -20,7 +20,8 @@ import type {
   WorkspaceRuleFileContent,
   AgentType,
   Automation,
-  AutomationRun
+  AutomationRun,
+  AgentModelOption
 } from '@/@types/index';
 
 // ---------------------------------- HTTP ----------------------------------
@@ -154,6 +155,11 @@ export const settingsApi = {
 
   getOpenCodeModels: (): ReturnType<typeof http.get<{ models: { id: string; label: string }[]; fromCache: boolean }>> =>
     http.get<{ models: { id: string; label: string }[]; fromCache: boolean }>('/settings/opencode-models'),
+
+  getAgentModels: (
+    agentType: AgentType
+  ): ReturnType<typeof http.get<{ models: AgentModelOption[]; fromCache: boolean }>> =>
+    http.get<{ models: AgentModelOption[]; fromCache: boolean }>(`/settings/agent-models/${agentType}`),
 
   getAgentCapabilities: (): ReturnType<
     typeof http.get<{
@@ -382,6 +388,7 @@ export const sessionsApi = {
       name?: string;
       tags?: string[] | null;
       archived?: boolean;
+      modelSelection?: string;
     }
   ): ReturnType<typeof http.patch<Session>> =>
     http.patch<Session>(`/workspaces/${workspaceId}/sessions/${sessionId}`, patch),
