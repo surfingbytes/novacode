@@ -83,6 +83,50 @@ function nodeWritableToWeb(writable: NodeJS.WritableStream): WritableStream<Uint
 
 const activeHandlers = new Map<string, AcpEventHandler>();
 
+function formatProcessExit(code: number | null, signal: NodeJS.Signals | null): string {
+  return signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`;
+}
+
+async function withProcessStartupGuard<T>(
+  proc: ChildProcess,
+  phase: string,
+  operation: Promise<T>
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`cursor-agent acp timed out during ${phase}`));
+    }, 30_000);
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      proc.off('error', onError);
+      proc.off('exit', onExit);
+    };
+    const onError = (err: Error) => {
+      cleanup();
+      reject(err);
+    };
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      cleanup();
+      reject(new Error(`cursor-agent acp exited during ${phase} with ${formatProcessExit(code, signal)}`));
+    };
+
+    proc.once('error', onError);
+    proc.once('exit', onExit);
+    operation.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (err: unknown) => {
+        cleanup();
+        reject(err);
+      }
+    );
+  });
+}
+
 // ── Spawn cursor-agent ACP and establish ACP connection ───────────────────────
 
 async function spawnCursorConnection(cwd: string): Promise<{
@@ -116,12 +160,16 @@ async function spawnCursorConnection(cwd: string): Promise<{
     stream
   );
 
-  await conn.initialize({
-    protocolVersion: PROTOCOL_VERSION,
-    clientInfo: { name: 'nova-code', version: '1.0.0' },
-    clientCapabilities: {},
-  });
-  await conn.authenticate({ methodId: 'cursor_login' });
+  await withProcessStartupGuard(
+    proc,
+    'initialize',
+    conn.initialize({
+      protocolVersion: PROTOCOL_VERSION,
+      clientInfo: { name: 'nova-code', version: '1.0.0' },
+      clientCapabilities: {},
+    })
+  );
+  await withProcessStartupGuard(proc, 'authenticate', conn.authenticate({ methodId: 'cursor_login' }));
 
   return { conn, proc };
 }
@@ -150,7 +198,14 @@ export async function runCursorAcp(
 ): Promise<RunCursorAcpResult> {
   const { acpSessionId, cwd, promptText } = params;
 
-  const { conn, proc } = await spawnCursorConnection(cwd);
+  let conn: ClientSideConnection;
+  let proc: ChildProcess;
+  try {
+    ({ conn, proc } = await spawnCursorConnection(cwd));
+  } catch (err) {
+    return { acpSessionId: acpSessionId ?? '', error: String(err) };
+  }
+
   const killProc = () => {
     try {
       proc.kill();
@@ -197,6 +252,8 @@ export async function runCursorAcp(
     } finally {
       activeHandlers.delete(resolvedSessionId);
     }
+  } catch (err) {
+    return { acpSessionId: acpSessionId ?? '', error: String(err) };
   } finally {
     activeProcesses.delete(novaSessionId);
     killProc();

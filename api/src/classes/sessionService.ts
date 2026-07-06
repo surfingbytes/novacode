@@ -1,11 +1,6 @@
-// node_modules
-import { join } from 'node:path';
-
 // classes
 import { db } from './database';
-import { config } from './config';
-import { PtyProcess } from './ptyProcess';
-import { classifyAgentError, type AgentErrorCode } from './agentError';
+import type { AgentErrorCode } from './agentError';
 
 // types
 import type { SessionModel as Session } from '../generated/client/models/Session';
@@ -49,56 +44,9 @@ export async function createSessionWithAgent(
     agentType
   });
 
-  // claude / mistral-vibe: no create-chat bootstrap; cursor-agent runs create-chat for an external session id
-  let sessionId: string | null = null;
-  if (agentType === 'cursor-agent') {
-    try {
-      const rawOutput = await new Promise<string>((resolve, reject) => {
-        const pty = new PtyProcess(
-          config.cursorCommand,
-          ['-f', 'create-chat'],
-          join('/data-root', workspace.path),
-          config.agentEnv()
-        );
-        const timeout = setTimeout(() => {
-          pty.kill();
-          reject(new Error('cursor-agent timed out'));
-        }, 30_000);
-        pty.onExit((code) => {
-          clearTimeout(timeout);
-          if (code !== 0) {
-            reject(new Error(`cursor-agent exited with code ${code}`));
-            return;
-          }
-          resolve(pty.history);
-        });
-      });
-
-      const output = rawOutput
-        .replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '')
-        .replace(/\r\n/g, '')
-        .trim()
-        .split('\x1B')
-        .shift();
-
-      if (!output || !output.trim()) {
-        throw new Error('No output from cursor-agent');
-      }
-
-      sessionId = output.trim();
-    } catch (err) {
-      await db.deleteSession(session.id);
-      const classified = classifyAgentError(err, {
-        agentLabel: 'Cursor',
-        fallbackMessage: 'Failed to create chat'
-      });
-      return {
-        error: classified.message,
-        errorCode: classified.code,
-        errorDetails: classified.rawMessage
-      };
-    }
-  }
+  // ACP agents create their backend session lazily on the first prompt. Cursor used
+  // to pre-create a CLI chat id here, but native `cursor-agent acp` needs ACP ids.
+  const sessionId: string | null = null;
 
   const updatedSession = await db.updateSession(session.id, { sessionId });
   if (!updatedSession) {
