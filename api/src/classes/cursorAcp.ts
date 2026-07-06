@@ -1,7 +1,7 @@
 /**
  * Cursor ACP integration.
  *
- * Spawns `cursor-agent-acp` as a subprocess for each prompt turn and communicates via
+ * Spawns `cursor-agent acp` as a subprocess for each prompt turn and communicates via
  * the ACP protocol (newline-delimited JSON over stdio) using ClientSideConnection
  * from @agentclientprotocol/sdk.
  *
@@ -83,14 +83,14 @@ function nodeWritableToWeb(writable: NodeJS.WritableStream): WritableStream<Uint
 
 const activeHandlers = new Map<string, AcpEventHandler>();
 
-// ── Spawn cursor-agent-acp and establish ACP connection ───────────────────────
+// ── Spawn cursor-agent ACP and establish ACP connection ───────────────────────
 
 async function spawnCursorConnection(cwd: string): Promise<{
   conn: ClientSideConnection;
   proc: ChildProcess;
 }> {
   const env = { ...process.env, ...config.agentEnv() };
-  const proc = spawn(config.cursorAcpCommand, [], {
+  const proc = spawn(config.cursorCommand, ['acp'], {
     cwd,
     stdio: ['pipe', 'pipe', 'pipe'],
     env,
@@ -121,6 +121,7 @@ async function spawnCursorConnection(cwd: string): Promise<{
     clientInfo: { name: 'nova-code', version: '1.0.0' },
     clientCapabilities: {},
   });
+  await conn.authenticate({ methodId: 'cursor_login' });
 
   return { conn, proc };
 }
