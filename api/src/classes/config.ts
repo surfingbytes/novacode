@@ -23,6 +23,10 @@ export const config = {
     if (existsSync('/root/.local/bin/cursor-agent')) return '/root/.local/bin/cursor-agent';
     return 'agent';
   },
+  /** Backwards-compatible alias for older Cursor ACP wiring. Prefer `cursorCommand`. */
+  get cursorAcpCommand(): string {
+    return config.cursorCommand;
+  },
   claudeCommand: 'claude',
   openCodeCommand: 'opencode',
   codexCommand: 'codex',
