@@ -90,13 +90,14 @@ function formatProcessExit(code: number | null, signal: NodeJS.Signals | null): 
 async function withProcessStartupGuard<T>(
   proc: ChildProcess,
   phase: string,
-  operation: Promise<T>
+  operation: Promise<T>,
+  timeoutMs = 30_000
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timeout = setTimeout(() => {
       cleanup();
       reject(new Error(`cursor-agent acp timed out during ${phase}`));
-    }, 30_000);
+    }, timeoutMs);
 
     const cleanup = () => {
       clearTimeout(timeout);
@@ -125,6 +126,35 @@ async function withProcessStartupGuard<T>(
       }
     );
   });
+}
+
+async function handleCursorExtensionMethod(
+  method: string,
+  params: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  console.log('[cursorAcp] extension request:', method, params);
+
+  if (method === 'cursor/ask_question') {
+    return { outcome: { outcome: 'skipped', reason: 'Nova Code does not support interactive questions yet.' } };
+  }
+
+  if (method === 'cursor/create_plan') {
+    return { outcome: { outcome: 'accepted' } };
+  }
+
+  if (method === 'cursor/update_todos') {
+    return { outcome: { outcome: 'accepted', todos: Array.isArray(params.todos) ? params.todos : [] } };
+  }
+
+  if (method === 'cursor/task') {
+    return { outcome: { outcome: 'completed' } };
+  }
+
+  if (method === 'cursor/generate_image') {
+    return { outcome: { outcome: 'rejected', reason: 'Nova Code does not support image generation yet.' } };
+  }
+
+  return {};
 }
 
 // ── Spawn cursor-agent ACP and establish ACP connection ───────────────────────
@@ -156,6 +186,12 @@ async function spawnCursorConnection(cwd: string): Promise<{
         if (handler) handler(JSON.stringify(notification));
       },
       requestPermission: handlePermissionRequest,
+      readTextFile: async () => ({ content: '' }),
+      writeTextFile: async () => ({}),
+      extMethod: handleCursorExtensionMethod,
+      extNotification: async (method: string, params: Record<string, unknown>): Promise<void> => {
+        console.log('[cursorAcp] extension notification:', method, params);
+      },
     }),
     stream
   );
@@ -166,7 +202,10 @@ async function spawnCursorConnection(cwd: string): Promise<{
     conn.initialize({
       protocolVersion: PROTOCOL_VERSION,
       clientInfo: { name: 'nova-code', version: '1.0.0' },
-      clientCapabilities: {},
+      clientCapabilities: {
+        fs: { readTextFile: false, writeTextFile: false },
+        terminal: false,
+      },
     })
   );
   await withProcessStartupGuard(proc, 'authenticate', conn.authenticate({ methodId: 'cursor_login' }));
@@ -221,7 +260,7 @@ export async function runCursorAcp(
 
     if (!acpSessionId) {
       // First turn — create a new session
-      const resp = await conn.newSession({ cwd, mcpServers: [] });
+      const resp = await withProcessStartupGuard(proc, 'newSession', conn.newSession({ cwd, mcpServers: [] }));
       resolvedSessionId = resp.sessionId;
     } else {
       // Subsequent turn — restore from disk.
@@ -229,12 +268,16 @@ export async function runCursorAcp(
       // to discard those replay events before the real prompt turn starts.
       activeHandlers.set(acpSessionId, () => {});
       try {
-        await conn.loadSession({ sessionId: acpSessionId, cwd, mcpServers: [] });
+        await withProcessStartupGuard(
+          proc,
+          'loadSession',
+          conn.loadSession({ sessionId: acpSessionId, cwd, mcpServers: [] })
+        );
         resolvedSessionId = acpSessionId;
       } catch (err) {
         console.warn('[cursorAcp] loadSession failed, starting fresh session:', err);
         activeHandlers.delete(acpSessionId);
-        const resp = await conn.newSession({ cwd, mcpServers: [] });
+        const resp = await withProcessStartupGuard(proc, 'newSession', conn.newSession({ cwd, mcpServers: [] }));
         resolvedSessionId = resp.sessionId;
       }
       activeHandlers.delete(acpSessionId);
@@ -242,10 +285,15 @@ export async function runCursorAcp(
 
     activeHandlers.set(resolvedSessionId, onEvent);
     try {
-      const resp = await conn.prompt({
-        sessionId: resolvedSessionId,
-        prompt: [{ type: 'text', text: promptText }],
-      });
+      const resp = await withProcessStartupGuard(
+        proc,
+        'prompt',
+        conn.prompt({
+          sessionId: resolvedSessionId,
+          prompt: [{ type: 'text', text: promptText }],
+        }),
+        2 * 60 * 60 * 1000
+      );
       return { acpSessionId: resolvedSessionId, stopReason: resp.stopReason };
     } catch (err) {
       return { acpSessionId: resolvedSessionId, error: String(err) };

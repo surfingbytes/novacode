@@ -19,7 +19,9 @@ export const config = {
   get cursorCommand(): string {
     const override = process.env['CURSOR_COMMAND'];
     if (override) return override;
-    return existsSync('/root/.local/bin/cursor-agent') ? '/root/.local/bin/cursor-agent' : 'cursor-agent';
+    if (existsSync('/root/.local/bin/agent')) return '/root/.local/bin/agent';
+    if (existsSync('/root/.local/bin/cursor-agent')) return '/root/.local/bin/cursor-agent';
+    return 'agent';
   },
   claudeCommand: 'claude',
   openCodeCommand: 'opencode',
