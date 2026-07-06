@@ -332,7 +332,7 @@ export async function dispatchPrompt(
       );
     } else if (agentType === 'cursor-agent') {
       result = await runCursorAcp(
-        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt },
+        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt, model },
         onEvent,
         sessionId
       );

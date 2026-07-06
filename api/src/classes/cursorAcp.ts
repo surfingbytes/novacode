@@ -169,7 +169,15 @@ async function handleCursorExtensionMethod(
 
 // ── Spawn cursor-agent ACP and establish ACP connection ───────────────────────
 
-async function spawnCursorConnection(cwd: string): Promise<{
+function cursorAcpArgs(model?: string): string[] {
+  const selectedModel = model?.trim();
+  if (selectedModel && selectedModel !== 'auto') {
+    return ['--model', selectedModel, 'acp'];
+  }
+  return ['acp'];
+}
+
+async function spawnCursorConnection(cwd: string, model?: string): Promise<{
   conn: ClientSideConnection;
   proc: ChildProcess;
 }> {
@@ -178,8 +186,9 @@ async function spawnCursorConnection(cwd: string): Promise<{
   if (!cursorCommand) {
     throw new Error('Cursor ACP command is not configured');
   }
-  console.log('[cursorAcp] spawning Cursor ACP server:', cursorCommand, ['acp']);
-  const proc = spawn(cursorCommand, ['acp'], {
+  const args = cursorAcpArgs(model);
+  console.log('[cursorAcp] spawning Cursor ACP server:', cursorCommand, args);
+  const proc = spawn(cursorCommand, args, {
     cwd,
     stdio: ['pipe', 'pipe', 'pipe'],
     env,
@@ -248,7 +257,7 @@ async function spawnCursorConnection(cwd: string): Promise<{
   });
 
   if (authMethodIds.includes('cursor_login')) {
-    await withProcessStartupGuard(proc, 'authenticate', conn.authenticate({ methodId: 'cursor_login' }));
+    throw new Error('Cursor CLI is not authenticated. Use Settings > Agents > Cursor login, then try again.');
   }
 
   return { conn, proc };
@@ -261,6 +270,7 @@ export interface RunCursorAcpParams {
   acpSessionId: string | null;
   cwd: string;
   promptText: string;
+  model?: string;
 }
 
 export interface RunCursorAcpResult {
@@ -276,12 +286,12 @@ export async function runCursorAcp(
   /** Nova Code session ID — used to track this run for cancellation. */
   novaSessionId: string
 ): Promise<RunCursorAcpResult> {
-  const { acpSessionId, cwd, promptText } = params;
+  const { acpSessionId, cwd, promptText, model } = params;
 
   let conn: ClientSideConnection;
   let proc: ChildProcess;
   try {
-    ({ conn, proc } = await spawnCursorConnection(cwd));
+    ({ conn, proc } = await spawnCursorConnection(cwd, model));
   } catch (err) {
     return { acpSessionId: acpSessionId ?? '', error: String(err) };
   }
