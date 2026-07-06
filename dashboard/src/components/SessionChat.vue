@@ -255,33 +255,60 @@ function uniqueValues(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))];
 }
 
-function titleToken(token: string): string {
+const FALLBACK_THINKING_VALUES = ['minimal', 'low', 'medium', 'high', 'max', 'fast', 'none'];
+const FALLBACK_CONTEXT_VALUES = ['32k', '64k', '128k', '200k', '256k', '1m', '2m'];
+
+function titleModelToken(token: string): string {
   const lower = token.toLowerCase();
   if (lower === 'gpt') return 'GPT';
   if (/^\d/.test(token)) return token.toUpperCase();
   return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
+function normalizeFallbackContext(value: string | undefined): string {
+  if (!value) return 'Default';
+  const lower = value.toLowerCase();
+  if (lower.endsWith('m')) return `${lower.slice(0, -1)}M`;
+  if (lower.endsWith('k')) return `${lower.slice(0, -1)}K`;
+  return titleModelToken(value);
+}
+
 function fallbackModelOption(id: string): AgentModelOption {
   if (!id || id === 'auto') {
     return { id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto' };
   }
-  const model = id
-    .split(/[/:_\-\s]+/)
-    .filter(Boolean)
-    .map(titleToken)
-    .join(' ');
-  return { id, label: model, model, thinking: 'Default', context: 'Default' };
+
+  const source = id.toLowerCase();
+  const thinking = FALLBACK_THINKING_VALUES.find((value) =>
+    new RegExp(`(?:^|[\\s_\\-/])(?:thinking[\\s_\\-/]?)?${value}(?:$|[\\s_\\-/])`, 'i').test(source)
+  );
+  const context = FALLBACK_CONTEXT_VALUES.find((value) =>
+    new RegExp(`(?:^|[\\s_\\-/()])${value}(?:$|[\\s_\\-/()])`, 'i').test(source)
+  );
+  const modelTokens = id.split(/[/:_\-\s]+/).filter((token) => {
+    const lower = token.toLowerCase();
+    return (
+      lower !== 'thinking' &&
+      lower !== 'context' &&
+      !FALLBACK_THINKING_VALUES.includes(lower) &&
+      !FALLBACK_CONTEXT_VALUES.includes(lower)
+    );
+  });
+  const model = modelTokens.length > 0 ? modelTokens.map(titleModelToken).join(' ') : id;
+  return {
+    id,
+    label: `${id} (not found)`,
+    model,
+    thinking: thinking ? titleModelToken(thinking) : 'Default',
+    context: normalizeFallbackContext(context)
+  };
 }
 
 const selectedModelOption = computed(
-  () => {
-    if (modelSelection.value === 'auto') {
-      const current = modelOptions.value.find((option) => option.current && option.id !== 'auto');
-      if (current) return current;
-    }
-    return modelOptions.value.find((option) => option.id === modelSelection.value) ?? fallbackModelOption(modelSelection.value);
-  }
+  () => modelOptions.value.find((option) => option.id === modelSelection.value) ?? fallbackModelOption(modelSelection.value)
+);
+const bSelectedModelMissing = computed(
+  () => !!modelSelection.value && modelSelection.value !== 'auto' && !modelOptions.value.some((option) => option.id === modelSelection.value)
 );
 
 const effectiveModelOptions = computed(() => {
@@ -2200,6 +2227,9 @@ onUnmounted(() => {
                 </select>
               </label>
             </div>
+            <span v-if="bSelectedModelMissing" class="text-[10px] text-warning">
+              Saved model not found: {{ modelSelection }}
+            </span>
           </div>
         </div>
       </template>
