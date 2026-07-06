@@ -343,6 +343,7 @@ export const db = {
     workspaceId: string;
     tags?: string[] | null;
     agentType?: string | null;
+    modelSelection?: string | null;
   }): Promise<Session> {
     const id = randomUUID();
     const createdAt = new Date().toISOString();
@@ -359,6 +360,7 @@ export const db = {
         tags: tagsJson,
         sessionId: null,
         agentType: data.agentType ?? 'cursor-agent',
+        modelSelection: data.modelSelection ?? 'auto',
         messageJson: '[]',
         workspaceId: data.workspaceId,
         createdAt
@@ -367,10 +369,19 @@ export const db = {
     return row;
   },
 
+  async getLatestSessionByAgentType(agentType: string): Promise<Session | undefined> {
+    const row = await _prisma.session.findFirst({
+      where: { agentType },
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }]
+    });
+    return row ?? undefined;
+  },
+
   async updateSession(
     id: string,
     patch: {
       sessionId?: string | null;
+      modelSelection?: string;
       messageJson?: string;
       lastPreviewText?: string | null;
       lastPreviewRole?: string | null;
@@ -398,6 +409,7 @@ export const db = {
       where: { id },
       data: {
         sessionId: patch.sessionId ?? existingSession.sessionId,
+        modelSelection: patch.modelSelection ?? existingSession.modelSelection,
         messageJson: patch.messageJson ?? existingSession.messageJson,
         ...(patch.lastPreviewText !== undefined && { lastPreviewText: patch.lastPreviewText }),
         ...(patch.lastPreviewRole !== undefined && { lastPreviewRole: patch.lastPreviewRole }),

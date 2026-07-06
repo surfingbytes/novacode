@@ -67,6 +67,7 @@ export interface Session {
   tags: string[] | null;
   sessionId: string | null;
   agentType: AgentType;
+  modelSelection: string;
   /** Present on session detail; omitted on list endpoints to save bandwidth */
   messageJson?: string;
   /** Denormalized last chat line for sidebars (from API list / WebSocket) */
@@ -77,6 +78,14 @@ export interface Session {
   updatedAt: string;
   archived: boolean;
   busy?: boolean;
+}
+
+export interface AgentModelOption {
+  id: string;
+  label: string;
+  model: string;
+  thinking: string;
+  context: string;
 }
 
 export interface WorkspaceRuleFileSummary {

@@ -36,12 +36,15 @@ export async function createSessionWithAgent(
   const agentType: AgentType =
     params.agentType ??
     ((workspace.defaultAgentType as AgentType | null) ?? 'cursor-agent');
+  const latestSameAgentSession = await db.getLatestSessionByAgentType(agentType);
+  const modelSelection = latestSameAgentSession?.modelSelection ?? 'auto';
 
   const session = await db.createSession({
     name,
     tags,
     workspaceId,
-    agentType
+    agentType,
+    modelSelection
   });
 
   // ACP agents create their backend session lazily on the first prompt. Cursor used

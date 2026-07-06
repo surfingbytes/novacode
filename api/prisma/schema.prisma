@@ -64,6 +64,7 @@ model Session {
   tags        Json?     // string[] stored as JSON
   sessionId   String?   @map("session_id")
   agentType   String    @map("agent_type")
+  modelSelection String  @default("auto") @map("model_selection")
   messageJson String    @map("message_json")
   /** Denormalized snippet for session lists (sidebar); updated when chat is saved */
   lastPreviewText String? @map("last_preview_text")
