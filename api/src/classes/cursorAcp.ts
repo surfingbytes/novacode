@@ -164,7 +164,12 @@ async function spawnCursorConnection(cwd: string): Promise<{
   proc: ChildProcess;
 }> {
   const env = { ...process.env, ...config.agentEnv() };
-  const proc = spawn(config.cursorCommand, ['acp'], {
+  const cursorCommand = config.cursorCommand;
+  if (!cursorCommand) {
+    throw new Error('Cursor ACP command is not configured');
+  }
+  console.log('[cursorAcp] spawning Cursor ACP server:', cursorCommand, ['acp']);
+  const proc = spawn(cursorCommand, ['acp'], {
     cwd,
     stdio: ['pipe', 'pipe', 'pipe'],
     env,
