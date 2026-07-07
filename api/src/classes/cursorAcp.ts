@@ -43,11 +43,11 @@ export async function runCursorAcp(
   novaSessionId: string,
   onConfigSync?: SessionConfigSyncHandler
 ): Promise<RunCursorAcpResult> {
-  // `cursor-agent --model <id> acp` — pin the model at startup (the reliable path). Omit for the
-  // `auto` sentinel/empty so cursor uses its own automatic model routing.
+  // `cursor-agent --model <id> acp` — pin the model at startup (the reliable path, since Cursor
+  // ignores runtime config-option model changes). `auto` is a real model id (its own router that
+  // identifies as "auto"), so it must be passed explicitly too — only omit when nothing is selected.
   const model = params.model?.trim();
-  const args =
-    model && model !== 'auto' ? ['--model', model, 'acp'] : ['acp'];
+  const args = model ? ['--model', model, 'acp'] : ['acp'];
 
   return runAcpSubprocessPrompt(
     {
