@@ -459,10 +459,9 @@ function modeIconName(modeId: string): 'plan' | 'debug' | 'multi' | 'ask' | 'age
 }
 const selectedModeIconName = computed(() => modeIconName(selectedModeOption.value.id));
 
-const effectiveModelSelection = computed(() => {
-  if (acpReportedModelId.value) return acpReportedModelId.value;
-  return modelSelection.value || 'auto';
-});
+// The user's selection is authoritative for the model (Cursor can't change it at runtime, so any
+// echoed value reflects a startup default, not a real switch). Always show what the user picked.
+const effectiveModelSelection = computed(() => modelSelection.value || 'auto');
 
 const selectedModelOption = computed(
   () =>
@@ -641,12 +640,12 @@ function applyInboundModeUpdate(modeId: string): void {
   }
 }
 
+// The user's model selection is authoritative — Cursor never changes the model on its own, and it
+// echoes its own default when our pick isn't applied. Record what the agent reports (for a mismatch
+// indicator) but never overwrite/persist the user's chosen model.
 function applyInboundModelUpdate(modelId: string): void {
   acpReportedModelId.value = modelId;
   modelOptions.value = modelOptions.value.map((m) => ({ ...m, current: m.id === modelId }));
-  if (modelSelection.value !== modelId) {
-    void syncModelSelectionFromAgent(modelId);
-  }
 }
 
 async function syncSessionModeFromAgent(modeId: string): Promise<void> {
