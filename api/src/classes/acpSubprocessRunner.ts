@@ -361,6 +361,9 @@ export async function runAcpSubprocessPrompt(
         return { acpSessionId: resolvedSessionId, error: String(err), resolvedModeId, resolvedModelId };
       } finally {
         activeHandlers.delete(resolvedSessionId);
+        // connectWith waits for the transport to close; close the per-turn subprocess
+        // as soon as the ACP prompt request has completed.
+        killProc();
       }
     });
   } catch (err) {
@@ -425,6 +428,7 @@ export async function closeAcpSubprocessSession(params: CloseAcpSessionParams): 
           console.warn(`[${logTag}] deleteSession failed:`, deleteErr);
         }
       }
+      killProc();
     });
   } catch (err) {
     console.warn(`[${logTag}] closeAcpSubprocessSession failed:`, err);
