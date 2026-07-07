@@ -365,6 +365,10 @@ export async function runAcpSubprocessPrompt(
       await applySessionConfig(agent, resolvedSessionId, params.configJson, sessionResponse);
       phase('session:config:done');
 
+      const requestedMode = params.mode?.trim();
+      const requestedModel = params.model?.trim();
+      resolvedModeId = requestedMode && requestedMode !== 'default' ? requestedMode : resolvedModeId;
+      resolvedModelId = requestedModel || resolvedModelId;
       emitSessionConfigSync(onEvent, {
         modeId: resolvedModeId,
         modelId: resolvedModelId,

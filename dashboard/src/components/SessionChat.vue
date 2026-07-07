@@ -246,6 +246,7 @@ const bSavingSessionMode = ref(false);
 const bSavingSessionConfig = ref(false);
 let modelSelectionSaveSeq = 0;
 let sessionModeSaveSeq = 0;
+let pendingPromptModeConfirmation: string | null = null;
 const queuedPrompts = ref<ChatQueueItem[]>([]);
 const lastPromptRequest = ref<{ text: string; imagePaths: string[] } | null>(null);
 const promptStorageKey = computed(() => `sessionPrompt:${props.workspaceId}:${props.sessionId}`);
@@ -533,13 +534,11 @@ function normalizeStoredMode(mode: string | undefined): string {
 }
 
 function syncAcpReportedFromOptions(): void {
-  if (normalizeStoredMode(sessionMode.value) === MODE_SENTINEL) {
-    const current = modeOptions.value.find((m) => m.current);
-    if (current) acpReportedModeId.value = current.id;
+  if (acpReportedModeId.value && !modeOptions.value.some((m) => m.id === acpReportedModeId.value)) {
+    acpReportedModeId.value = null;
   }
-  if (modelSelection.value === 'auto') {
-    const current = modelOptions.value.find((m) => m.current);
-    if (current) acpReportedModelId.value = current.id;
+  if (acpReportedModelId.value && !modelOptions.value.some((m) => m.id === acpReportedModelId.value)) {
+    acpReportedModelId.value = null;
   }
 }
 
@@ -741,6 +740,10 @@ function onAgentConfigChange(configId: string, value: string): void {
 }
 
 function applyInboundModeUpdate(modeId: string): void {
+  if (pendingPromptModeConfirmation) {
+    if (modeId !== pendingPromptModeConfirmation) return;
+    pendingPromptModeConfirmation = null;
+  }
   acpReportedModeId.value = modeId;
   modeOptions.value = modeOptions.value.map((m) => ({ ...m, current: m.id === modeId }));
   if (normalizeStoredMode(sessionMode.value) !== modeId) {
@@ -1812,6 +1815,7 @@ function connectChatWs() {
         streamingThinkingText.value = '';
         streamingUsage.value = null;
         notifiedTodoIds.clear();
+        pendingPromptModeConfirmation = null;
         bIsStreaming.value = false;
         scrollToBottomIfPinned();
         notifyTaskDone(
@@ -1828,10 +1832,12 @@ function connectChatWs() {
         streamingThinkingText.value = '';
         streamingUsage.value = null;
         notifiedTodoIds.clear();
+        pendingPromptModeConfirmation = null;
         bIsStreaming.value = false;
       } else if (msg.type === 'server-shutdown') {
         setChatError('Server disconnected');
         streamingThinkingText.value = '';
+        pendingPromptModeConfirmation = null;
         bIsStreaming.value = false;
       } else if (msg.type === 'claude_limit_detected') {
         // Handle Claude limit detection event
@@ -1887,11 +1893,14 @@ function sendPrompt() {
   clearChatError();
   const imagePaths = pendingImages.value.map((img) => img.serverPath);
   lastPromptRequest.value = { text, imagePaths };
+  const promptMode = displaySessionMode.value;
+  const storedMode = normalizeStoredMode(sessionMode.value);
+  pendingPromptModeConfirmation = storedMode !== MODE_SENTINEL ? promptMode : null;
   webSocket.send(JSON.stringify({
     type: 'prompt',
     text,
     model: modelSelection.value,
-    mode: displaySessionMode.value,
+    mode: promptMode,
     imagePaths
   }));
   promptText.value = '';
