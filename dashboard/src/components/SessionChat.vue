@@ -174,6 +174,7 @@ const bConfigLoading = ref(false);
 const bSavingModelSelection = ref(false);
 const bSavingSessionMode = ref(false);
 const bSavingSessionConfig = ref(false);
+const bShowAllCursorModels = ref(false);
 let modelSelectionSaveSeq = 0;
 let sessionModeSaveSeq = 0;
 const queuedPrompts = ref<ChatQueueItem[]>([]);
@@ -285,6 +286,27 @@ function sortLabelValues(values: string[]): string[] {
 }
 
 const THINKING_ORDER = ['auto', 'default', 'none', 'minimal', 'low', 'medium', 'high', 'max'];
+const MORE_MODEL_OPTION_VALUE = '__more_models__';
+const BASIC_CURSOR_MODEL_NAMES = [
+  'Auto',
+  'Composer 2.5',
+  'Opus 4.8',
+  'GPT 5.5',
+  'Fable 5',
+  'Sonnet 5',
+  'Sonnet 4.6',
+  'Codex 5.3'
+];
+const BASIC_CURSOR_MODEL_THINKING: Record<string, string> = {
+  auto: 'Auto',
+  'composer 2.5': 'Fast',
+  'opus 4.8': 'High',
+  'gpt 5.5': 'Medium',
+  'fable 5': 'High',
+  'sonnet 5': 'High',
+  'sonnet 4.6': 'Medium',
+  'codex 5.3': 'Medium'
+};
 
 function thinkingRank(value: string): number {
   const lower = value.toLowerCase();
@@ -303,6 +325,18 @@ function sortThinkingValues(values: string[]): string[] {
     const rankDiff = thinkingRank(a) - thinkingRank(b);
     return rankDiff || a.localeCompare(b, undefined, { sensitivity: 'base' });
   });
+}
+
+function normalizeModelName(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function pickPreferredValue(values: string[], preferred: string[]): string {
+  for (const want of preferred) {
+    const found = values.find((value) => normalizeModelName(value) === normalizeModelName(want));
+    if (found) return found;
+  }
+  return values[0] ?? preferred[0] ?? 'Default';
 }
 
 function parseContextSize(value: string): number {
@@ -546,6 +580,26 @@ const contextList = computed(() => modelPickerState.value.contextList);
 const selectedContextName = computed(() => modelPickerState.value.selectedContextName);
 const bFastAvailable = computed(() => modelPickerState.value.bFastAvailable);
 const selectedFastValue = computed(() => modelPickerState.value.selectedFastValue);
+const bCursorAgentSession = computed(() => session.value?.agentType === 'cursor-agent');
+const visibleModelList = computed(() => {
+  if (!bCursorAgentSession.value) return modelList.value;
+
+  const modelSet = new Set(modelList.value);
+  const basicModels = BASIC_CURSOR_MODEL_NAMES.filter((model) => modelSet.has(model));
+  const selected = selectedModelName.value;
+  const bSelectedIsBasic = basicModels.includes(selected);
+  const ordered = bShowAllCursorModels.value
+    ? [...basicModels, ...modelList.value.filter((model) => !basicModels.includes(model))]
+    : [...basicModels, ...(selected && !bSelectedIsBasic ? [selected] : [])];
+
+  return uniqueValues(ordered);
+});
+const bHasHiddenModelOptions = computed(
+  () =>
+    bCursorAgentSession.value &&
+    !bShowAllCursorModels.value &&
+    modelList.value.some((model) => !visibleModelList.value.includes(model))
+);
 
 async function loadAvailableModels() {
   const agentType = session.value?.agentType;
@@ -723,6 +777,41 @@ function resolveModelOption(model: string, thinking: string, context: string, fa
   );
 }
 
+function resolveDefaultModelOption(model: string): AgentModelOption | null {
+  const options = effectiveModelOptions.value.filter((option) => option.model === model);
+  if (!options.length) return null;
+
+  const modelKey = normalizeModelName(model);
+  const sortedThinking = sortThinkingValues(uniqueValues(options.map((option) => option.thinking)));
+  const preferredThinking = [
+    BASIC_CURSOR_MODEL_THINKING[modelKey],
+    modelKey === 'auto' ? 'Auto' : 'Default',
+    'Medium',
+    'High'
+  ].filter((value): value is string => Boolean(value));
+  const thinking = pickPreferredValue(sortedThinking, preferredThinking);
+  const contextValues = sortContextValues(
+    uniqueValues(
+      options
+        .filter((option) => option.thinking === thinking)
+        .map((option) => option.context)
+    )
+  );
+  const context = pickPreferredValue(contextValues, [
+    modelKey === 'auto' ? 'Auto' : 'Default',
+    '128K',
+    '1M'
+  ]);
+  const bHasSlowFastVariant = options.some(
+    (option) => option.thinking === thinking && option.context === context && option.fast === false
+  );
+  const bHasFastVariants = options.some(
+    (option) => option.thinking === thinking && option.context === context && option.fast !== null
+  );
+
+  return resolveModelOption(model, thinking, context, bHasFastVariants && bHasSlowFastVariant ? false : null);
+}
+
 async function persistModelSelection(newModelSelection: string) {
   const seq = ++modelSelectionSaveSeq;
   const prev = modelSelection.value;
@@ -750,16 +839,23 @@ async function persistModelSelection(newModelSelection: string) {
 }
 
 function onModelDimensionChange(kind: 'model' | 'thinking' | 'context', value: string): void {
+  if (kind === 'model' && value === MORE_MODEL_OPTION_VALUE) {
+    bShowAllCursorModels.value = true;
+    return;
+  }
+
   const nextModel = kind === 'model' ? value : selectedModelName.value;
-  const nextThinking = kind === 'thinking' ? value : selectedThinkingName.value;
-  const nextContext = kind === 'context' ? value : selectedContextName.value;
-  const next = resolveModelOption(
-    nextModel,
-    nextThinking,
-    nextContext,
-    bFastAvailable.value ? selectedFastValue.value : null
-  );
+  const next =
+    kind === 'model' && bCursorAgentSession.value
+      ? resolveDefaultModelOption(nextModel)
+      : resolveModelOption(
+          nextModel,
+          kind === 'thinking' ? value : selectedThinkingName.value,
+          kind === 'context' ? value : selectedContextName.value,
+          bFastAvailable.value ? selectedFastValue.value : null
+        );
   if (next && next.id !== modelSelection.value) {
+    if (kind === 'model') bShowAllCursorModels.value = false;
     void persistModelSelection(next.id);
   }
 }
@@ -1919,6 +2015,7 @@ watch(
     pendingImages.value = [];
     queuedPrompts.value = [];
     modelOptions.value = [];
+    bShowAllCursorModels.value = false;
 
     const savedPrompt = localStorage.getItem(promptStorageKey.value);
     promptText.value = savedPrompt ?? '';
@@ -2807,8 +2904,11 @@ onUnmounted(() => {
                   class="h-5! min-h-0! w-32 rounded border border-fg/[0.08] bg-transparent px-1.5! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
                   @change="onModelDimensionChange('model', ($event.target as HTMLSelectElement).value)"
                 >
-                  <option v-for="model in modelList" :key="model" :value="model">
+                  <option v-for="model in visibleModelList" :key="model" :value="model">
                     {{ model }}
+                  </option>
+                  <option v-if="bHasHiddenModelOptions" :value="MORE_MODEL_OPTION_VALUE">
+                    More...
                   </option>
                 </select>
               </label>
