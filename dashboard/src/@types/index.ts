@@ -68,6 +68,8 @@ export interface Session {
   sessionId: string | null;
   agentType: AgentType;
   modelSelection: string;
+  sessionMode: string;
+  sessionConfigJson?: Record<string, string> | null;
   /** Present on session detail; omitted on list endpoints to save bandwidth */
   messageJson?: string;
   /** Denormalized last chat line for sidebars (from API list / WebSocket) */
@@ -78,6 +80,22 @@ export interface Session {
   updatedAt: string;
   archived: boolean;
   busy?: boolean;
+}
+
+export interface AgentConfigOption {
+  id: string;
+  label: string;
+  description?: string;
+  category?: string;
+  currentValue?: string;
+  options: Array<{ value: string; label: string; description?: string }>;
+}
+
+export interface AgentModeOption {
+  id: string;
+  label: string;
+  description?: string;
+  current?: boolean;
 }
 
 export interface AgentModelOption {

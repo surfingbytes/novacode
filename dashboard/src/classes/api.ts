@@ -21,7 +21,9 @@ import type {
   AgentType,
   Automation,
   AutomationRun,
-  AgentModelOption
+  AgentModelOption,
+  AgentModeOption,
+  AgentConfigOption
 } from '@/@types/index';
 
 // ---------------------------------- HTTP ----------------------------------
@@ -160,6 +162,16 @@ export const settingsApi = {
     agentType: AgentType
   ): ReturnType<typeof http.get<{ models: AgentModelOption[]; fromCache: boolean }>> =>
     http.get<{ models: AgentModelOption[]; fromCache: boolean }>(`/settings/agent-models/${agentType}`),
+
+  getAgentModes: (
+    agentType: AgentType
+  ): ReturnType<typeof http.get<{ modes: AgentModeOption[]; fromCache: boolean }>> =>
+    http.get<{ modes: AgentModeOption[]; fromCache: boolean }>(`/settings/agent-modes/${agentType}`),
+
+  getAgentConfigOptions: (
+    agentType: AgentType
+  ): ReturnType<typeof http.get<{ options: AgentConfigOption[]; fromCache: boolean }>> =>
+    http.get<{ options: AgentConfigOption[]; fromCache: boolean }>(`/settings/agent-config/${agentType}`),
 
   getAgentCapabilities: (): ReturnType<
     typeof http.get<{
@@ -389,6 +401,8 @@ export const sessionsApi = {
       tags?: string[] | null;
       archived?: boolean;
       modelSelection?: string;
+      sessionMode?: string;
+      sessionConfigJson?: Record<string, string> | null;
     }
   ): ReturnType<typeof http.patch<Session>> =>
     http.patch<Session>(`/workspaces/${workspaceId}/sessions/${sessionId}`, patch),

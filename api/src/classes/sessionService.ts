@@ -1,5 +1,6 @@
 // classes
 import { db } from './database';
+import { MODE_SENTINEL } from './agentModes';
 
 // types
 import type { SessionModel as Session } from '../generated/client/models/Session';
@@ -35,13 +36,15 @@ export async function createSessionWithAgent(
     ((workspace.defaultAgentType as AgentType | null) ?? 'cursor-agent');
   const latestSameAgentSession = await db.getLatestSessionByAgentType(agentType);
   const modelSelection = latestSameAgentSession?.modelSelection ?? 'auto';
+  const sessionMode = latestSameAgentSession?.sessionMode ?? MODE_SENTINEL;
 
   const session = await db.createSession({
     name,
     tags,
     workspaceId,
     agentType,
-    modelSelection
+    modelSelection,
+    sessionMode,
   });
 
   // ACP agents create their backend session lazily on the first prompt. Cursor used

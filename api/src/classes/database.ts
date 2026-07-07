@@ -344,6 +344,8 @@ export const db = {
     tags?: string[] | null;
     agentType?: string | null;
     modelSelection?: string | null;
+    sessionMode?: string | null;
+    sessionConfigJson?: string | null;
   }): Promise<Session> {
     const id = randomUUID();
     const createdAt = new Date().toISOString();
@@ -361,6 +363,8 @@ export const db = {
         sessionId: null,
         agentType: data.agentType ?? 'cursor-agent',
         modelSelection: data.modelSelection ?? 'auto',
+        sessionMode: data.sessionMode ?? 'default',
+        sessionConfigJson: data.sessionConfigJson ?? null,
         messageJson: '[]',
         workspaceId: data.workspaceId,
         createdAt
@@ -382,6 +386,8 @@ export const db = {
     patch: {
       sessionId?: string | null;
       modelSelection?: string;
+      sessionMode?: string;
+      sessionConfigJson?: string | null;
       messageJson?: string;
       lastPreviewText?: string | null;
       lastPreviewRole?: string | null;
@@ -410,6 +416,8 @@ export const db = {
       data: {
         sessionId: patch.sessionId ?? existingSession.sessionId,
         modelSelection: patch.modelSelection ?? existingSession.modelSelection,
+        sessionMode: patch.sessionMode ?? existingSession.sessionMode,
+        ...(patch.sessionConfigJson !== undefined && { sessionConfigJson: patch.sessionConfigJson }),
         messageJson: patch.messageJson ?? existingSession.messageJson,
         ...(patch.lastPreviewText !== undefined && { lastPreviewText: patch.lastPreviewText }),
         ...(patch.lastPreviewRole !== undefined && { lastPreviewRole: patch.lastPreviewRole }),

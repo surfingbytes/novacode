@@ -21,6 +21,8 @@ import { checkMcpClients } from '../classes/mcpConnectivityCheck';
 import { getCursorModels } from '../classes/cursorModels';
 import { getOpenCodeModels, clearOpenCodeModelsCache } from '../classes/openCodeModels';
 import { getAgentModels } from '../classes/agentModels';
+import { getAgentModes } from '../classes/agentModes';
+import { getAgentConfigOptions } from '../classes/agentConfigOptions';
 import { readSshKeyMaterial } from '../classes/sshKey';
 import { cursorAuthenticated, openCodeAuthenticated, codexAuthenticated } from './agentAuth';
 
@@ -248,6 +250,78 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.status(400).send({ error: 'Unsupported agent type' });
       }
       return getAgentModels(agentType);
+    }
+  );
+
+  const AgentModeOptionSchema = Type.Object({
+    id: Type.String(),
+    label: Type.String(),
+    description: Type.Optional(Type.String()),
+    current: Type.Optional(Type.Boolean())
+  });
+
+  // GET /api/settings/agent-modes/:agentType - normalized mode options for chat controls
+  fastifyInstance.get(
+    '/api/settings/agent-modes/:agentType',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        params: Type.Object({ agentType: Type.String() }),
+        response: {
+          200: Type.Object({
+            modes: Type.Array(AgentModeOptionSchema),
+            fromCache: Type.Boolean()
+          }),
+          400: Type.Object({ error: Type.String() })
+        }
+      }
+    },
+    async (request, reply) => {
+      const { agentType } = request.params;
+      if (!isAgentType(agentType)) {
+        return reply.status(400).send({ error: 'Unsupported agent type' });
+      }
+      return getAgentModes(agentType);
+    }
+  );
+
+  const AgentConfigOptionSchema = Type.Object({
+    id: Type.String(),
+    label: Type.String(),
+    description: Type.Optional(Type.String()),
+    category: Type.Optional(Type.String()),
+    currentValue: Type.Optional(Type.String()),
+    options: Type.Array(
+      Type.Object({
+        value: Type.String(),
+        label: Type.String(),
+        description: Type.Optional(Type.String())
+      })
+    )
+  });
+
+  // GET /api/settings/agent-config/:agentType - effort, fast mode, etc. (not mode/model)
+  fastifyInstance.get(
+    '/api/settings/agent-config/:agentType',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        params: Type.Object({ agentType: Type.String() }),
+        response: {
+          200: Type.Object({
+            options: Type.Array(AgentConfigOptionSchema),
+            fromCache: Type.Boolean()
+          }),
+          400: Type.Object({ error: Type.String() })
+        }
+      }
+    },
+    async (request, reply) => {
+      const { agentType } = request.params;
+      if (!isAgentType(agentType)) {
+        return reply.status(400).send({ error: 'Unsupported agent type' });
+      }
+      return getAgentConfigOptions(agentType);
     }
   );
 

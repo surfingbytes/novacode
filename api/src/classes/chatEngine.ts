@@ -13,6 +13,8 @@ import { runCursorAcp, cancelCursorAcp } from './cursorAcp';
 import { runOpenCodeAcp, cancelOpenCodeAcp } from './openCodeAcp';
 import { runCodexAcp, cancelCodexAcp } from './codexAcp';
 import { sendTaskDonePush } from './push';
+import { normalizeSessionMode } from './sessionMode';
+import type { SessionConfigSyncHandler } from './acpSubprocessRunner';
 import { computeLastListPreview } from './chatPreview';
 import { extractStreamNotificationPreview } from './chatStreamPreviewFromEvents';
 import { broadcastSessionListUpsert } from './sessionListBroadcast';
@@ -212,6 +214,22 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
   }
 
   const agentType: AgentType = (session.agentType as AgentType | null) ?? 'claude';
+  const sessionMode = normalizeSessionMode(session.sessionMode);
+  let sessionConfig: Record<string, string> = {};
+  if (session.sessionConfigJson) {
+    try {
+      const parsed = JSON.parse(session.sessionConfigJson) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        sessionConfig = Object.fromEntries(
+          Object.entries(parsed as Record<string, unknown>).filter(
+            (entry): entry is [string, string] => typeof entry[1] === 'string'
+          )
+        );
+      }
+    } catch {
+      sessionConfig = {};
+    }
+  }
 
   if (agentType !== 'claude' && agentType !== 'mistral-vibe' && agentType !== 'cursor-agent' && agentType !== 'open-code' && agentType !== 'codex') {
     return { error: `Agent type '${agentType}' is not yet supported via ACP. Coming soon.` };
@@ -310,6 +328,47 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
     broadcast((sub) => sub.onStream(line));
   };
 
+  const onConfigSync: SessionConfigSyncHandler = (sync) => {
+    emitSessionConfigSync(onEvent, sync);
+    void (async () => {
+      const patch: {
+        sessionMode?: string;
+        modelSelection?: string;
+        sessionConfigJson?: string;
+      } = {};
+      if (sync.modeId && sync.modeId !== sessionMode) {
+        patch.sessionMode = sync.modeId;
+      }
+      const currentModel = model ?? session.modelSelection ?? 'auto';
+      if (sync.modelId && sync.modelId !== currentModel) {
+        patch.modelSelection = sync.modelId;
+      }
+      if (sync.config && Object.keys(sync.config).length > 0) {
+        const merged = { ...sessionConfig, ...sync.config };
+        const mergedJson = JSON.stringify(merged);
+        if (mergedJson !== session.sessionConfigJson) {
+          patch.sessionConfigJson = mergedJson;
+        }
+      }
+      if (Object.keys(patch).length === 0) return;
+      try {
+        await db.updateSession(sessionId, patch);
+        const fresh = await db.getSession(sessionId);
+        if (fresh) broadcastSessionListUpsert(fresh.workspaceId, fresh);
+      } catch (err) {
+        console.warn('[chatEngine] Failed to persist ACP config sync:', err);
+      }
+    })();
+  };
+
+  function emitSessionConfigSync(
+    emit: (line: string) => void,
+    sync: { modeId?: string; modelId?: string; config?: Record<string, string> }
+  ): void {
+    if (!sync.modeId && !sync.modelId && !sync.config) return;
+    emit(JSON.stringify({ type: 'session_config_sync', ...sync }));
+  }
+
   // Run agent via ACP in background (non-blocking)
   void (async () => {
     console.log('[chatEngine] dispatching to agent via ACP', {
@@ -323,27 +382,52 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
 
     if (agentType === 'mistral-vibe') {
       result = await runVibeAcp(
-        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt },
+        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt, mode: sessionMode },
         onEvent,
-        sessionId
+        sessionId,
+        onConfigSync
       );
     } else if (agentType === 'cursor-agent') {
       result = await runCursorAcp(
-        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt, model },
+        {
+          acpSessionId: currentAcpSessionId,
+          cwd: workspacePath,
+          promptText: agentPrompt,
+          model,
+          mode: sessionMode,
+          configJson: sessionConfig,
+        },
         onEvent,
-        sessionId
+        sessionId,
+        onConfigSync
       );
     } else if (agentType === 'open-code') {
       result = await runOpenCodeAcp(
-        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt, model },
+        {
+          acpSessionId: currentAcpSessionId,
+          cwd: workspacePath,
+          promptText: agentPrompt,
+          model,
+          mode: sessionMode,
+          configJson: sessionConfig,
+        },
         onEvent,
-        sessionId
+        sessionId,
+        onConfigSync
       );
     } else if (agentType === 'codex') {
       result = await runCodexAcp(
-        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt, model },
+        {
+          acpSessionId: currentAcpSessionId,
+          cwd: workspacePath,
+          promptText: agentPrompt,
+          model,
+          mode: sessionMode,
+          configJson: sessionConfig,
+        },
         onEvent,
-        sessionId
+        sessionId,
+        onConfigSync
       );
     } else {
       result = await runClaudeAcp(
@@ -352,9 +436,12 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
           cwd: workspacePath,
           promptText: agentPrompt,
           claudeToken,
+          mode: sessionMode,
+          configJson: sessionConfig,
           onSessionId: (id) => { currentAcpSessionId = id; },
         },
-        onEvent
+        onEvent,
+        onConfigSync
       );
     }
 
