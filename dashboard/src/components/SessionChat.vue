@@ -287,26 +287,21 @@ function sortLabelValues(values: string[]): string[] {
 
 const THINKING_ORDER = ['auto', 'default', 'none', 'minimal', 'low', 'medium', 'high', 'max'];
 const MORE_MODEL_OPTION_VALUE = '__more_models__';
-const BASIC_CURSOR_MODEL_NAMES = [
-  'Auto',
-  'Composer 2.5',
-  'Opus 4.8',
-  'GPT 5.5',
-  'Fable 5',
-  'Sonnet 5',
-  'Sonnet 4.6',
-  'Codex 5.3'
+const CURSOR_MODEL_VALUE_PREFIX = 'model:';
+const CURSOR_PRESET_VALUE_PREFIX = 'preset:';
+const CURSOR_CURRENT_VALUE_PREFIX = 'current:';
+const BASIC_CURSOR_MODEL_PRESETS = [
+  { label: 'Auto', thinking: 'Auto', modelNames: ['Auto'] },
+  { label: 'Composer 2.5', thinking: 'Fast', modelNames: ['Composer 2.5'] },
+  { label: 'Opus 4.8', thinking: 'High', modelNames: ['Claude Opus 4 8'] },
+  { label: 'GPT 5.5', thinking: 'Medium', modelNames: ['GPT 5.5'] },
+  { label: 'Fable 5', thinking: 'High', modelNames: ['Claude Fable 5'] },
+  { label: 'Sonnet 5', thinking: 'High', modelNames: ['Claude Sonnet 5'] },
+  { label: 'Sonnet 4.6', thinking: 'Medium', modelNames: ['Claude 4.6 Sonnet'] },
+  { label: 'Codex 5.3', thinking: 'Medium', modelNames: ['GPT 5.3 Codex'] }
 ];
-const BASIC_CURSOR_MODEL_THINKING: Record<string, string> = {
-  auto: 'Auto',
-  'composer 2.5': 'Fast',
-  'opus 4.8': 'High',
-  'gpt 5.5': 'Medium',
-  'fable 5': 'High',
-  'sonnet 5': 'High',
-  'sonnet 4.6': 'Medium',
-  'codex 5.3': 'Medium'
-};
+type CursorModelPreset = (typeof BASIC_CURSOR_MODEL_PRESETS)[number];
+type ModelSelectOption = { value: string; label: string };
 
 function thinkingRank(value: string): number {
   const lower = value.toLowerCase();
@@ -329,6 +324,30 @@ function sortThinkingValues(values: string[]): string[] {
 
 function normalizeModelName(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function cursorPresetValue(label: string): string {
+  return `${CURSOR_PRESET_VALUE_PREFIX}${label}`;
+}
+
+function cursorCurrentValue(id: string): string {
+  return `${CURSOR_CURRENT_VALUE_PREFIX}${id}`;
+}
+
+function cursorModelValue(model: string): string {
+  return `${CURSOR_MODEL_VALUE_PREFIX}${model}`;
+}
+
+function optionMatchesCursorPreset(option: AgentModelOption, preset: CursorModelPreset): boolean {
+  return preset.modelNames.includes(option.model);
+}
+
+function findCursorPresetForOption(option: AgentModelOption): CursorModelPreset | null {
+  return BASIC_CURSOR_MODEL_PRESETS.find((preset) => optionMatchesCursorPreset(option, preset)) ?? null;
+}
+
+function findCursorPresetByLabel(label: string): CursorModelPreset | null {
+  return BASIC_CURSOR_MODEL_PRESETS.find((preset) => preset.label === label) ?? null;
 }
 
 function pickPreferredValue(values: string[], preferred: string[]): string {
@@ -581,24 +600,70 @@ const selectedContextName = computed(() => modelPickerState.value.selectedContex
 const bFastAvailable = computed(() => modelPickerState.value.bFastAvailable);
 const selectedFastValue = computed(() => modelPickerState.value.selectedFastValue);
 const bCursorAgentSession = computed(() => session.value?.agentType === 'cursor-agent');
-const visibleModelList = computed(() => {
-  if (!bCursorAgentSession.value) return modelList.value;
+const cursorPresetOptions = computed<ModelSelectOption[]>(() =>
+  BASIC_CURSOR_MODEL_PRESETS.filter((preset) =>
+    effectiveModelOptions.value.some((option) => optionMatchesCursorPreset(option, preset))
+  ).map((preset) => ({ value: cursorPresetValue(preset.label), label: preset.label }))
+);
+const selectedCursorPreset = computed(() => findCursorPresetForOption(selectedModelOption.value));
+const modelSelectValue = computed(() => {
+  if (!bCursorAgentSession.value) return selectedModelName.value;
 
-  const modelSet = new Set(modelList.value);
-  const basicModels = BASIC_CURSOR_MODEL_NAMES.filter((model) => modelSet.has(model));
-  const selected = selectedModelName.value;
-  const bSelectedIsBasic = basicModels.includes(selected);
-  const ordered = bShowAllCursorModels.value
-    ? [...basicModels, ...modelList.value.filter((model) => !basicModels.includes(model))]
-    : [...basicModels, ...(selected && !bSelectedIsBasic ? [selected] : [])];
+  const preset = selectedCursorPreset.value;
+  const defaultOption = preset ? resolveDefaultCursorModelOption(preset) : null;
+  if (preset && defaultOption?.id === selectedModelOption.value.id) {
+    return cursorPresetValue(preset.label);
+  }
+  if (preset) {
+    return cursorCurrentValue(selectedModelOption.value.id);
+  }
+  return cursorModelValue(selectedModelName.value);
+});
+const visibleModelOptions = computed<ModelSelectOption[]>(() => {
+  if (!bCursorAgentSession.value) {
+    return modelList.value.map((model) => ({ value: model, label: model }));
+  }
 
-  return uniqueValues(ordered);
+  const options = [...cursorPresetOptions.value];
+  const selectedValue = modelSelectValue.value;
+  if (
+    selectedValue.startsWith(CURSOR_CURRENT_VALUE_PREFIX) &&
+    !options.some((option) => option.value === selectedValue)
+  ) {
+    const current = selectedModelOption.value;
+    const context = current.context === 'Default' ? '' : `, ${current.context}`;
+    options.push({
+      value: selectedValue,
+      label: `${current.model} (${current.thinking}${context})`
+    });
+  } else if (
+    selectedValue.startsWith(CURSOR_MODEL_VALUE_PREFIX) &&
+    !options.some((option) => option.value === selectedValue)
+  ) {
+    options.push({ value: selectedValue, label: selectedModelName.value });
+  }
+
+  if (bShowAllCursorModels.value) {
+    const presetModelNames = new Set(
+      BASIC_CURSOR_MODEL_PRESETS.flatMap((preset) => preset.modelNames)
+    );
+    for (const model of modelList.value) {
+      if (presetModelNames.has(model)) continue;
+      const value = cursorModelValue(model);
+      if (!options.some((option) => option.value === value)) {
+        options.push({ value, label: model });
+      }
+    }
+  }
+
+  return options;
 });
 const bHasHiddenModelOptions = computed(
   () =>
     bCursorAgentSession.value &&
     !bShowAllCursorModels.value &&
-    modelList.value.some((model) => !visibleModelList.value.includes(model))
+    (modelList.value.length > cursorPresetOptions.value.length ||
+      effectiveModelOptions.value.some((option) => !findCursorPresetForOption(option)))
 );
 
 async function loadAvailableModels() {
@@ -725,29 +790,6 @@ async function syncSessionModeFromAgent(modeId: string): Promise<void> {
   }
 }
 
-async function syncModelSelectionFromAgent(modelId: string): Promise<void> {
-  const seq = ++modelSelectionSaveSeq;
-  const prev = modelSelection.value;
-  const prevSession = session.value;
-  modelSelection.value = modelId;
-  if (session.value) {
-    session.value = { ...session.value, modelSelection: modelId };
-  }
-  try {
-    const { data: updated } = await sessionsApi.update(props.workspaceId, props.sessionId, {
-      modelSelection: modelId
-    });
-    if (seq !== modelSelectionSaveSeq) return;
-    session.value = updated;
-    modelSelection.value = updated.modelSelection ?? modelId;
-    acpReportedModelId.value = null;
-  } catch {
-    if (seq !== modelSelectionSaveSeq) return;
-    modelSelection.value = prev;
-    session.value = prevSession;
-  }
-}
-
 function applyInboundConfigUpdate(config: Record<string, string>): void {
   for (const [id, value] of Object.entries(config)) {
     const opt = agentConfigOptions.value.find((o) => o.id === id);
@@ -777,14 +819,53 @@ function resolveModelOption(model: string, thinking: string, context: string, fa
   );
 }
 
+function resolveBestModelOption(options: AgentModelOption[], preferredThinking: string[]): AgentModelOption | null {
+  const scored = options
+    .map((option) => {
+      const thinkingIndex = preferredThinking.findIndex(
+        (thinking) => normalizeModelName(thinking) === normalizeModelName(option.thinking)
+      );
+      const bThinkingMatched = thinkingIndex >= 0;
+      const bDefaultContext = normalizeModelName(option.context) === 'default';
+      const bAutoContext = normalizeModelName(option.context) === 'auto';
+      const bSlowFast = option.fast === false;
+      return {
+        option,
+        score:
+          (bThinkingMatched ? 10_000 - thinkingIndex * 100 : 0) +
+          (bDefaultContext || bAutoContext ? 1_000 : 0) +
+          (bSlowFast ? 5 : 0) -
+          parseContextSize(option.context) / 1_000_000_000_000
+      };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  return scored[0]?.option ?? null;
+}
+
+function resolveDefaultCursorModelOption(preset: CursorModelPreset): AgentModelOption | null {
+  const options = effectiveModelOptions.value.filter((option) => optionMatchesCursorPreset(option, preset));
+  if (!options.length) return null;
+
+  const preferredThinking = [
+    preset.thinking,
+    preset.label === 'Auto' ? 'Auto' : 'Default',
+    'Medium',
+    'High'
+  ].filter((value): value is string => Boolean(value));
+
+  return resolveBestModelOption(options, preferredThinking);
+}
+
 function resolveDefaultModelOption(model: string): AgentModelOption | null {
   const options = effectiveModelOptions.value.filter((option) => option.model === model);
   if (!options.length) return null;
 
   const modelKey = normalizeModelName(model);
   const sortedThinking = sortThinkingValues(uniqueValues(options.map((option) => option.thinking)));
+  const preset = findCursorPresetByLabel(model);
   const preferredThinking = [
-    BASIC_CURSOR_MODEL_THINKING[modelKey],
+    preset?.thinking,
     modelKey === 'auto' ? 'Auto' : 'Default',
     'Medium',
     'High'
@@ -838,24 +919,60 @@ async function persistModelSelection(newModelSelection: string) {
   }
 }
 
-function onModelDimensionChange(kind: 'model' | 'thinking' | 'context', value: string): void {
-  if (kind === 'model' && value === MORE_MODEL_OPTION_VALUE) {
+function reopenModelSelect(selectEl: HTMLSelectElement): void {
+  selectEl.focus();
+  try {
+    selectEl.showPicker?.();
+  } catch {
+    // Some browsers only allow showPicker during the original user gesture.
+  }
+}
+
+function onModelSelectChange(value: string, selectEl: HTMLSelectElement): void {
+  if (value === MORE_MODEL_OPTION_VALUE) {
     bShowAllCursorModels.value = true;
+    void nextTick(() => reopenModelSelect(selectEl));
     return;
   }
 
-  const nextModel = kind === 'model' ? value : selectedModelName.value;
-  const next =
-    kind === 'model' && bCursorAgentSession.value
-      ? resolveDefaultModelOption(nextModel)
-      : resolveModelOption(
-          nextModel,
-          kind === 'thinking' ? value : selectedThinkingName.value,
-          kind === 'context' ? value : selectedContextName.value,
-          bFastAvailable.value ? selectedFastValue.value : null
-        );
+  if (bCursorAgentSession.value && value.startsWith(CURSOR_PRESET_VALUE_PREFIX)) {
+    const preset = findCursorPresetByLabel(value.slice(CURSOR_PRESET_VALUE_PREFIX.length));
+    const next = preset ? resolveDefaultCursorModelOption(preset) : null;
+    if (next && next.id !== modelSelection.value) {
+      bShowAllCursorModels.value = false;
+      void persistModelSelection(next.id);
+    }
+    return;
+  }
+
+  if (bCursorAgentSession.value && value.startsWith(CURSOR_CURRENT_VALUE_PREFIX)) {
+    return;
+  }
+
+  const model = bCursorAgentSession.value && value.startsWith(CURSOR_MODEL_VALUE_PREFIX)
+    ? value.slice(CURSOR_MODEL_VALUE_PREFIX.length)
+    : value;
+  const next = bCursorAgentSession.value ? resolveDefaultModelOption(model) : resolveModelOption(
+    model,
+    selectedThinkingName.value,
+    selectedContextName.value,
+    bFastAvailable.value ? selectedFastValue.value : null
+  );
   if (next && next.id !== modelSelection.value) {
-    if (kind === 'model') bShowAllCursorModels.value = false;
+    bShowAllCursorModels.value = false;
+    void persistModelSelection(next.id);
+  }
+}
+
+function onModelDimensionChange(kind: 'thinking' | 'context', value: string): void {
+  const nextModel = selectedModelName.value;
+  const next = resolveModelOption(
+    nextModel,
+    kind === 'thinking' ? value : selectedThinkingName.value,
+    kind === 'context' ? value : selectedContextName.value,
+    bFastAvailable.value ? selectedFastValue.value : null
+  );
+  if (next && next.id !== modelSelection.value) {
     void persistModelSelection(next.id);
   }
 }
@@ -2899,13 +3016,13 @@ onUnmounted(() => {
               <label class="flex min-w-0 items-center gap-1">
                 <span class="shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted">Model</span>
                 <select
-                  :value="selectedModelName"
+                  :value="modelSelectValue"
                   :disabled="bIsStreaming || bModelsLoading || bSavingModelSelection"
                   class="h-5! min-h-0! w-32 rounded border border-fg/[0.08] bg-transparent px-1.5! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
-                  @change="onModelDimensionChange('model', ($event.target as HTMLSelectElement).value)"
+                  @change="onModelSelectChange(($event.target as HTMLSelectElement).value, $event.target as HTMLSelectElement)"
                 >
-                  <option v-for="model in visibleModelList" :key="model" :value="model">
-                    {{ model }}
+                  <option v-for="model in visibleModelOptions" :key="model.value" :value="model.value">
+                    {{ model.label }}
                   </option>
                   <option v-if="bHasHiddenModelOptions" :value="MORE_MODEL_OPTION_VALUE">
                     More...
