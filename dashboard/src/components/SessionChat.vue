@@ -1585,7 +1585,11 @@ async function fetchSession() {
     sessionConfig.value = response.data.sessionConfigJson ?? {};
     acpReportedModeId.value = null;
     acpReportedModelId.value = null;
-    await Promise.all([loadAvailableModels(), loadAvailableModes(), loadAgentConfigOptions()]);
+    void Promise.allSettled([
+      loadAvailableModels(),
+      loadAvailableModes(),
+      loadAgentConfigOptions()
+    ]);
   } catch (e) {
     error.value = 'Failed to load session';
     console.error('Failed to fetch session:', e);
