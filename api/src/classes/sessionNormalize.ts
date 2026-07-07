@@ -1,27 +1,43 @@
 /** API/WebSocket: session.tags stored as JSON array; expose as string[] | null. */
-export function normalizeSessionForApi<T extends { tags?: unknown }>(
+export function normalizeSessionForApi<T extends { tags?: unknown; sessionConfigJson?: string | null }>(
   s: T
-): Omit<T, 'tags'> & { tags: string[] | null } {
+): Omit<T, 'tags' | 'sessionConfigJson'> & { tags: string[] | null; sessionConfigJson: Record<string, string> | null } {
   const raw = s.tags;
-  if (!Array.isArray(raw)) {
-    return { ...s, tags: null };
+  let tags: string[] | null = null;
+  if (Array.isArray(raw)) {
+    const seen = new Set<string>();
+    const parsed: string[] = [];
+    for (const x of raw) {
+      if (typeof x !== 'string') continue;
+      const t = x.trim();
+      if (!t) continue;
+      const k = t.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      parsed.push(t);
+    }
+    tags = parsed.length > 0 ? parsed : null;
   }
-  const seen = new Set<string>();
-  const tags: string[] = [];
-  for (const x of raw) {
-    if (typeof x !== 'string') {
-      continue;
+
+  let sessionConfigJson: Record<string, string> | null = null;
+  if (s.sessionConfigJson) {
+    try {
+      const parsed = JSON.parse(s.sessionConfigJson) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        sessionConfigJson = Object.fromEntries(
+          Object.entries(parsed as Record<string, unknown>).filter(
+            (entry): entry is [string, string] => typeof entry[1] === 'string'
+          )
+        );
+      }
+    } catch {
+      sessionConfigJson = null;
     }
-    const t = x.trim();
-    if (!t) {
-      continue;
-    }
-    const k = t.toLowerCase();
-    if (seen.has(k)) {
-      continue;
-    }
-    seen.add(k);
-    tags.push(t);
   }
-  return { ...s, tags: tags.length > 0 ? tags : null };
+
+  const { sessionConfigJson: _omit, ...rest } = s;
+  return { ...rest, tags, sessionConfigJson } as Omit<T, 'tags' | 'sessionConfigJson'> & {
+    tags: string[] | null;
+    sessionConfigJson: Record<string, string> | null;
+  };
 }

@@ -14,13 +14,57 @@ import type {
   CreateTerminalRequest,
 } from '@agentclientprotocol/sdk';
 
-export type AcpEventHandler = (line: string) => void;
+// classes
+import { applySessionMode, applySessionConfig } from './acpSessionHelpers';
+import type { AcpSessionResponse } from './acpSessionHelpers';
+import type { SessionConfigSyncHandler } from './acpSubprocessRunner';
 
-// --------------------------------------------- Shared ACP proxy infrastructure ---------------------------------------------
+export type AcpEventHandler = (line: string) => void;
 // Re-used by any ACP agent added later (Mistral, etc.).
 
 // Routes streaming notifications per ACP session ID to the active prompt's handler.
 const activeHandlers = new Map<string, AcpEventHandler>();
+const activeConfigSyncHandlers = new Map<string, SessionConfigSyncHandler>();
+
+function emitClaudeConfigSync(
+  sessionId: string,
+  sync: { modeId?: string; modelId?: string; config?: Record<string, string> }
+): void {
+  const handler = activeHandlers.get(sessionId);
+  const syncHandler = activeConfigSyncHandlers.get(sessionId);
+  if (syncHandler) syncHandler(sync);
+  if (handler && (sync.modeId || sync.modelId || sync.config)) {
+    handler(JSON.stringify({ type: 'session_config_sync', ...sync }));
+  }
+}
+
+function extractClaudeConfigSync(
+  update: SessionNotification['update'],
+  sessionId: string
+): void {
+  if (update.sessionUpdate === 'current_mode_update') {
+    emitClaudeConfigSync(sessionId, { modeId: update.currentModeId });
+    return;
+  }
+  if (update.sessionUpdate === 'config_option_update') {
+    const modelOpt = update.configOptions.find((o) => o.category === 'model' || o.id === 'model');
+    const sync: { modelId?: string; config?: Record<string, string> } = {};
+    if (modelOpt?.type === 'select' && 'currentValue' in modelOpt && typeof modelOpt.currentValue === 'string') {
+      sync.modelId = modelOpt.currentValue;
+    }
+    const config: Record<string, string> = {};
+    for (const opt of update.configOptions) {
+      if (opt.type !== 'select') continue;
+      const cat = opt.category ?? opt.id;
+      if (cat === 'mode' || cat === 'model' || opt.id === 'mode' || opt.id === 'model') continue;
+      if ('currentValue' in opt && typeof opt.currentValue === 'string') {
+        config[opt.id] = opt.currentValue;
+      }
+    }
+    if (Object.keys(config).length > 0) sync.config = config;
+    if (sync.modelId || sync.config) emitClaudeConfigSync(sessionId, sync);
+  }
+}
 
 // Auto-approve all tool permissions — agent runs in a trusted backend context.
 async function handlePermissionRequest(
@@ -39,6 +83,7 @@ async function handlePermissionRequest(
 // Notifications are forwarded as raw JSON — the frontend parses them natively.
 const acpClientProxy = {
   sessionUpdate: async (notification: SessionNotification): Promise<void> => {
+    extractClaudeConfigSync(notification.update, notification.sessionId);
     const handler = activeHandlers.get(notification.sessionId);
     if (handler) {
       handler(JSON.stringify(notification));
@@ -53,10 +98,6 @@ const acpClientProxy = {
   },
   createTerminal: async (_params: CreateTerminalRequest): Promise<never> => {
     throw new Error('[claudeAcp] createTerminal not supported in embedded mode');
-  },
-  extNotification: async (_method: string, _params: Record<string, unknown>): Promise<void> => {},
-  get closed(): Promise<void> {
-    return new Promise<void>(() => {}); // never resolves — connection stays open
   },
 } satisfies Partial<AgentSideConnection>;
 
@@ -88,6 +129,8 @@ export interface RunClaudeAcpParams {
   promptText: string;
   /** Optional OAuth token forwarded as CLAUDE_CODE_OAUTH_TOKEN. */
   claudeToken?: string | null;
+  mode?: string;
+  configJson?: Record<string, string>;
   /** Called with the resolved session ID before the prompt starts — used to keep cancel state in sync. */
   onSessionId?: (id: string) => void;
 }
@@ -101,9 +144,10 @@ export interface RunClaudeAcpResult {
 
 export async function runClaudeAcp(
   params: RunClaudeAcpParams,
-  onEvent: AcpEventHandler
+  onEvent: AcpEventHandler,
+  onConfigSync?: SessionConfigSyncHandler
 ): Promise<RunClaudeAcpResult> {
-  const { acpSessionId, cwd, promptText, claudeToken, onSessionId } = params;
+  const { acpSessionId, cwd, promptText, claudeToken, mode, configJson, onSessionId } = params;
 
   if (claudeToken) {
     process.env['CLAUDE_CODE_OAUTH_TOKEN'] = claudeToken;
@@ -111,23 +155,43 @@ export async function runClaudeAcp(
 
   const agent = await getSharedAgent();
   let resolvedSessionId: string;
+  let sessionResponse: AcpSessionResponse;
 
   if (!acpSessionId) {
-    const resp = await agent.newSession({ cwd, mcpServers: [] });
-    resolvedSessionId = resp.sessionId;
+    const created = await agent.newSession({ cwd, mcpServers: [] });
+    sessionResponse = created;
+    resolvedSessionId = created.sessionId;
   } else {
     try {
-      await agent.resumeSession({ sessionId: acpSessionId, cwd, mcpServers: [] });
+      sessionResponse = await agent.resumeSession({ sessionId: acpSessionId, cwd, mcpServers: [] });
       resolvedSessionId = acpSessionId;
     } catch {
-      // Session expired — start fresh
-      const resp = await agent.newSession({ cwd, mcpServers: [] });
-      resolvedSessionId = resp.sessionId;
+      const created = await agent.newSession({ cwd, mcpServers: [] });
+      sessionResponse = created;
+      resolvedSessionId = created.sessionId;
     }
+  }
+
+  await applySessionMode(agent, resolvedSessionId, mode, sessionResponse);
+  await applySessionConfig(agent, resolvedSessionId, configJson, sessionResponse);
+
+  const resolvedModeId = sessionResponse.modes?.currentModeId;
+  const modelOpt = sessionResponse.configOptions?.find(
+    (o) => o.category === 'model' || o.id === 'model'
+  );
+  const resolvedModelId =
+    modelOpt?.type === 'select' &&
+    'currentValue' in modelOpt &&
+    typeof modelOpt.currentValue === 'string'
+      ? modelOpt.currentValue
+      : undefined;
+  if (resolvedModeId || resolvedModelId) {
+    emitClaudeConfigSync(resolvedSessionId, { modeId: resolvedModeId, modelId: resolvedModelId });
   }
 
   onSessionId?.(resolvedSessionId);
   activeHandlers.set(resolvedSessionId, onEvent);
+  if (onConfigSync) activeConfigSyncHandlers.set(resolvedSessionId, onConfigSync);
   try {
     const resp = await agent.prompt({
       sessionId: resolvedSessionId,
@@ -138,6 +202,7 @@ export async function runClaudeAcp(
     return { acpSessionId: resolvedSessionId, error: String(err) };
   } finally {
     activeHandlers.delete(resolvedSessionId);
+    activeConfigSyncHandlers.delete(resolvedSessionId);
   }
 }
 

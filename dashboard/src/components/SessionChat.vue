@@ -24,7 +24,7 @@ import { notifyTaskDone, notifyTodoCompleted } from '@/lib/notifications';
 import { useWorkspacesStore } from '@/stores/workspaces';
 
 // types
-import type { AgentModelOption, ChatMessage, ChatQueueItem, ChatWsServerMessage, Session } from '@/@types/index';
+import type { AgentConfigOption, AgentModeOption, AgentModelOption, ChatMessage, ChatQueueItem, ChatWsServerMessage, Session } from '@/@types/index';
 import { APP_NAV_TOGGLE_KEY } from '@/constants/layout';
 
 marked.setOptions({ breaks: true, gfm: true });
@@ -206,6 +206,10 @@ const fileInputEl = ref<HTMLInputElement | null>(null);
 const lightboxSrc = ref<string | null>(null);
 const bShowScrollToBottom = ref(false);
 const modelSelection = ref<string>('auto');
+const MODE_SENTINEL = 'default';
+const sessionMode = ref<string>(MODE_SENTINEL);
+const acpReportedModeId = ref<string | null>(null);
+const acpReportedModelId = ref<string | null>(null);
 
 const HIDE_THINKING_LS_KEY = 'nova:chat:hideThinkingOutput';
 
@@ -219,8 +223,15 @@ function readHideThinkingFromLs(): boolean {
 
 const hideThinkingOutput = ref(readHideThinkingFromLs());
 const modelOptions = ref<AgentModelOption[]>([]);
+const modeOptions = ref<AgentModeOption[]>([]);
+const agentConfigOptions = ref<AgentConfigOption[]>([]);
+const sessionConfig = ref<Record<string, string>>({});
 const bModelsLoading = ref(false);
+const bModesLoading = ref(false);
+const bConfigLoading = ref(false);
 const bSavingModelSelection = ref(false);
+const bSavingSessionMode = ref(false);
+const bSavingSessionConfig = ref(false);
 const queuedPrompts = ref<ChatQueueItem[]>([]);
 const lastPromptRequest = ref<{ text: string; imagePaths: string[] } | null>(null);
 const promptStorageKey = computed(() => `sessionPrompt:${props.workspaceId}:${props.sessionId}`);
@@ -412,8 +423,39 @@ function fallbackModelOption(id: string): AgentModelOption {
   };
 }
 
+function normalizeStoredMode(mode: string | undefined): string {
+  if (!mode) return MODE_SENTINEL;
+  return mode;
+}
+
+function syncAcpReportedFromOptions(): void {
+  if (normalizeStoredMode(sessionMode.value) === MODE_SENTINEL) {
+    const current = modeOptions.value.find((m) => m.current);
+    if (current) acpReportedModeId.value = current.id;
+  }
+  if (modelSelection.value === 'auto') {
+    const current = modelOptions.value.find((m) => m.current);
+    if (current) acpReportedModelId.value = current.id;
+  }
+}
+
+const displaySessionMode = computed(() => {
+  if (acpReportedModeId.value) return acpReportedModeId.value;
+  const stored = normalizeStoredMode(sessionMode.value);
+  if (stored !== MODE_SENTINEL) return stored;
+  return modeOptions.value.find((m) => m.current)?.id ?? MODE_SENTINEL;
+});
+
+const effectiveModelSelection = computed(() => {
+  if (acpReportedModelId.value) return acpReportedModelId.value;
+  if (modelSelection.value !== 'auto') return modelSelection.value;
+  return modelOptions.value.find((m) => m.current)?.id ?? 'auto';
+});
+
 const selectedModelOption = computed(
-  () => modelOptions.value.find((option) => option.id === modelSelection.value) ?? fallbackModelOption(modelSelection.value)
+  () =>
+    modelOptions.value.find((option) => option.id === effectiveModelSelection.value) ??
+    fallbackModelOption(effectiveModelSelection.value)
 );
 const bSelectedModelMissing = computed(
   () => !!modelSelection.value && modelSelection.value !== 'auto' && !modelOptions.value.some((option) => option.id === modelSelection.value)
@@ -475,6 +517,143 @@ async function loadAvailableModels() {
   }
 }
 
+async function loadAvailableModes() {
+  const agentType = session.value?.agentType;
+  if (!agentType) return;
+  bModesLoading.value = true;
+  try {
+    const { data } = await settingsApi.getAgentModes(agentType);
+    modeOptions.value = data.modes.length > 0
+      ? data.modes
+      : [{ id: MODE_SENTINEL, label: 'Default' }];
+    syncAcpReportedFromOptions();
+  } catch {
+    modeOptions.value = [{ id: MODE_SENTINEL, label: 'Default' }];
+  } finally {
+    bModesLoading.value = false;
+  }
+}
+
+async function loadAgentConfigOptions() {
+  const agentType = session.value?.agentType;
+  if (!agentType) return;
+  bConfigLoading.value = true;
+  try {
+    const { data } = await settingsApi.getAgentConfigOptions(agentType);
+    agentConfigOptions.value = data.options;
+    for (const opt of data.options) {
+      if (!sessionConfig.value[opt.id] && opt.currentValue) {
+        sessionConfig.value = { ...sessionConfig.value, [opt.id]: opt.currentValue };
+      }
+    }
+  } catch {
+    agentConfigOptions.value = [];
+  } finally {
+    bConfigLoading.value = false;
+  }
+}
+
+function agentConfigDisplayValue(option: AgentConfigOption): string {
+  return sessionConfig.value[option.id] ?? option.currentValue ?? option.options[0]?.value ?? '';
+}
+
+async function persistSessionConfig(next: Record<string, string>) {
+  const prev = { ...sessionConfig.value };
+  const prevSession = session.value;
+  sessionConfig.value = next;
+  if (session.value) {
+    session.value = { ...session.value, sessionConfigJson: next };
+  }
+  bSavingSessionConfig.value = true;
+  try {
+    const { data: updated } = await sessionsApi.update(props.workspaceId, props.sessionId, {
+      sessionConfigJson: next
+    });
+    session.value = updated;
+    sessionConfig.value = updated.sessionConfigJson ?? next;
+  } catch {
+    sessionConfig.value = prev;
+    session.value = prevSession;
+  } finally {
+    bSavingSessionConfig.value = false;
+  }
+}
+
+function onAgentConfigChange(configId: string, value: string): void {
+  if (!value) return;
+  const next = { ...sessionConfig.value, [configId]: value };
+  if (next[configId] === sessionConfig.value[configId]) return;
+  void persistSessionConfig(next);
+}
+
+function applyInboundModeUpdate(modeId: string): void {
+  acpReportedModeId.value = modeId;
+  modeOptions.value = modeOptions.value.map((m) => ({ ...m, current: m.id === modeId }));
+  if (normalizeStoredMode(sessionMode.value) !== modeId) {
+    void syncSessionModeFromAgent(modeId);
+  }
+}
+
+function applyInboundModelUpdate(modelId: string): void {
+  acpReportedModelId.value = modelId;
+  modelOptions.value = modelOptions.value.map((m) => ({ ...m, current: m.id === modelId }));
+  if (modelSelection.value !== modelId) {
+    void syncModelSelectionFromAgent(modelId);
+  }
+}
+
+async function syncSessionModeFromAgent(modeId: string): Promise<void> {
+  const prev = sessionMode.value;
+  const prevSession = session.value;
+  sessionMode.value = modeId;
+  if (session.value) {
+    session.value = { ...session.value, sessionMode: modeId };
+  }
+  try {
+    const { data: updated } = await sessionsApi.update(props.workspaceId, props.sessionId, {
+      sessionMode: modeId
+    });
+    session.value = updated;
+    sessionMode.value = normalizeStoredMode(updated.sessionMode);
+    acpReportedModeId.value = null;
+  } catch {
+    sessionMode.value = prev;
+    session.value = prevSession;
+  }
+}
+
+async function syncModelSelectionFromAgent(modelId: string): Promise<void> {
+  const prev = modelSelection.value;
+  const prevSession = session.value;
+  modelSelection.value = modelId;
+  if (session.value) {
+    session.value = { ...session.value, modelSelection: modelId };
+  }
+  try {
+    const { data: updated } = await sessionsApi.update(props.workspaceId, props.sessionId, {
+      modelSelection: modelId
+    });
+    session.value = updated;
+    modelSelection.value = updated.modelSelection ?? modelId;
+    acpReportedModelId.value = null;
+  } catch {
+    modelSelection.value = prev;
+    session.value = prevSession;
+  }
+}
+
+function applyInboundConfigUpdate(config: Record<string, string>): void {
+  for (const [id, value] of Object.entries(config)) {
+    const opt = agentConfigOptions.value.find((o) => o.id === id);
+    if (opt) {
+      opt.currentValue = value;
+    }
+    if (!sessionConfig.value[id]) {
+      sessionConfig.value = { ...sessionConfig.value, [id]: value };
+    }
+  }
+}
+
 function resolveModelOption(model: string, thinking: string, context: string): AgentModelOption | null {
   return (
     effectiveModelOptions.value.find(
@@ -517,6 +696,36 @@ function onModelDimensionChange(kind: 'model' | 'thinking' | 'context', value: s
   const next = resolveModelOption(nextModel, nextThinking, nextContext);
   if (next && next.id !== modelSelection.value) {
     void persistModelSelection(next.id);
+  }
+}
+
+async function persistSessionMode(newSessionMode: string) {
+  const prev = sessionMode.value;
+  const prevSession = session.value;
+  sessionMode.value = newSessionMode;
+  if (session.value) {
+    session.value = { ...session.value, sessionMode: newSessionMode };
+  }
+  bSavingSessionMode.value = true;
+  try {
+    const { data: updated } = await sessionsApi.update(props.workspaceId, props.sessionId, {
+      sessionMode: newSessionMode
+    });
+    session.value = updated;
+    sessionMode.value = updated.sessionMode ?? newSessionMode;
+  } catch {
+    sessionMode.value = prev;
+    session.value = prevSession;
+  } finally {
+    bSavingSessionMode.value = false;
+  }
+}
+
+function onSessionModeChange(value: string): void {
+  const normalized = value || MODE_SENTINEL;
+  acpReportedModeId.value = normalized === MODE_SENTINEL ? null : normalized;
+  if (normalized !== normalizeStoredMode(sessionMode.value)) {
+    void persistSessionMode(normalized);
   }
 }
 
@@ -764,6 +973,32 @@ function processAcpUpdate(
     }
     return;
   }
+
+  if (sessionUpdate === 'current_mode_update') {
+    const modeId = update.currentModeId as string | undefined;
+    if (modeId) applyInboundModeUpdate(modeId);
+    return;
+  }
+
+  if (sessionUpdate === 'config_option_update') {
+    const rawOpts = update.configOptions as
+      | Array<{ id: string; category?: string; type: string; currentValue?: string }>
+      | undefined;
+    if (!rawOpts?.length) return;
+    const modelOpt = rawOpts.find((o) => o.category === 'model' || o.id === 'model');
+    if (modelOpt?.type === 'select' && typeof modelOpt.currentValue === 'string') {
+      applyInboundModelUpdate(modelOpt.currentValue);
+    }
+    const config: Record<string, string> = {};
+    for (const opt of rawOpts) {
+      if (opt.type !== 'select') continue;
+      const cat = opt.category ?? opt.id;
+      if (cat === 'mode' || cat === 'model' || opt.id === 'mode' || opt.id === 'model') continue;
+      if (typeof opt.currentValue === 'string') config[opt.id] = opt.currentValue;
+    }
+    if (Object.keys(config).length > 0) applyInboundConfigUpdate(config);
+    return;
+  }
 }
 
 function getToolSummary(toolCallName: string, toolCallObj: Record<string, unknown>): string {
@@ -883,6 +1118,19 @@ function processEventLine(
   try {
     event = JSON.parse(line);
   } catch {
+    return;
+  }
+
+  if (event.type === 'session_config_sync') {
+    const modeId = typeof event.modeId === 'string' ? event.modeId : undefined;
+    const modelId = typeof event.modelId === 'string' ? event.modelId : undefined;
+    const config =
+      event.config && typeof event.config === 'object' && !Array.isArray(event.config)
+        ? (event.config as Record<string, string>)
+        : undefined;
+    if (modeId) applyInboundModeUpdate(modeId);
+    if (modelId) applyInboundModelUpdate(modelId);
+    if (config) applyInboundConfigUpdate(config);
     return;
   }
 
@@ -1485,7 +1733,11 @@ async function fetchSession() {
     const response = await sessionsApi.get(props.workspaceId, props.sessionId);
     session.value = response.data;
     modelSelection.value = response.data.modelSelection ?? 'auto';
-    await loadAvailableModels();
+    sessionMode.value = normalizeStoredMode(response.data.sessionMode);
+    sessionConfig.value = response.data.sessionConfigJson ?? {};
+    acpReportedModeId.value = null;
+    acpReportedModelId.value = null;
+    await Promise.all([loadAvailableModels(), loadAvailableModes(), loadAgentConfigOptions()]);
   } catch (e) {
     error.value = 'Failed to load session';
     console.error('Failed to fetch session:', e);
@@ -2346,18 +2598,37 @@ onUnmounted(() => {
             </button>
           </div>
           <div class="px-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] leading-none">
-            <label
-              class="flex cursor-pointer items-center gap-1.5 text-text-muted hover:text-text-primary"
-            >
-              <input
-                type="checkbox"
-                class="h-3 w-3 shrink-0 rounded border-fg/[0.2] text-primary focus:ring-primary/40"
-                :checked="!hideThinkingOutput"
-                @change="onShowThinkingToggle(($event.target as HTMLInputElement).checked)"
-              />
-              <span>Show thinking process</span>
-            </label>
             <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <label class="flex min-w-0 items-center gap-1">
+                <span class="shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted">Mode</span>
+                <select
+                  :value="displaySessionMode"
+                  :disabled="bIsStreaming || bModesLoading || bSavingSessionMode"
+                  class="h-5! min-h-0! w-24 rounded border border-fg/[0.08] bg-transparent px-1.5! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
+                  @change="onSessionModeChange(($event.target as HTMLSelectElement).value)"
+                >
+                  <option v-for="mode in modeOptions" :key="mode.id" :value="mode.id">
+                    {{ mode.label }}
+                  </option>
+                </select>
+              </label>
+              <label
+                v-for="cfg in agentConfigOptions"
+                :key="cfg.id"
+                class="flex min-w-0 items-center gap-1"
+              >
+                <span class="shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted">{{ cfg.label }}</span>
+                <select
+                  :value="agentConfigDisplayValue(cfg)"
+                  :disabled="bIsStreaming || bConfigLoading || bSavingSessionConfig"
+                  class="h-5! min-h-0! w-24 rounded border border-fg/[0.08] bg-transparent px-1.5! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
+                  @change="onAgentConfigChange(cfg.id, ($event.target as HTMLSelectElement).value)"
+                >
+                  <option v-for="opt in cfg.options" :key="opt.value" :value="opt.value">
+                    {{ opt.label }}
+                  </option>
+                </select>
+              </label>
               <label class="flex min-w-0 items-center gap-1">
                 <span class="shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted">Model</span>
                 <select
@@ -2398,7 +2669,18 @@ onUnmounted(() => {
                 </select>
               </label>
             </div>
-            <span v-if="bSelectedModelMissing" class="text-[10px] text-warning">
+            <label
+              class="ml-auto flex cursor-pointer items-center gap-1.5 text-text-muted hover:text-text-primary"
+            >
+              <input
+                type="checkbox"
+                class="h-3 w-3 shrink-0 rounded border-fg/[0.2] text-primary focus:ring-primary/40"
+                :checked="!hideThinkingOutput"
+                @change="onShowThinkingToggle(($event.target as HTMLInputElement).checked)"
+              />
+              <span>Show thinking process</span>
+            </label>
+            <span v-if="bSelectedModelMissing" class="w-full text-[10px] text-warning">
               Saved model not found: {{ modelSelection }}
             </span>
           </div>

@@ -6,7 +6,8 @@ import { db, normalizeTagStringList } from '../classes/database';
 import { normalizeSessionForApi } from '../classes/sessionNormalize';
 import { jwtPreHandler } from '../classes/auth';
 import { createSessionWithAgent } from '../classes/sessionService';
-import { getActiveSessionIds } from './chat';
+import { closeAcpSessionForNovaSession } from '../classes/acpSessionClose';
+import { getActiveSessionIds, cancelRun } from './chat';
 import { deleteSessionImages } from './images';
 import {
   broadcastWorkspaceSessionDeleted,
@@ -166,6 +167,8 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         tags?: string[] | string | null;
         archived?: boolean;
         modelSelection?: string;
+        sessionMode?: string;
+        sessionConfigJson?: Record<string, string> | null;
       };
       const session = await db.getSession(sessionId);
       if (!session || session.workspaceId !== workspaceId) {
@@ -176,6 +179,8 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         tags?: string[] | null;
         archived?: boolean;
         modelSelection?: string;
+        sessionMode?: string;
+        sessionConfigJson?: string | null;
       } = {};
       if (body.name !== undefined) {
         patch.name = body.name;
@@ -188,6 +193,13 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       }
       if (body.modelSelection !== undefined) {
         patch.modelSelection = body.modelSelection;
+      }
+      if (body.sessionMode !== undefined) {
+        patch.sessionMode = body.sessionMode;
+      }
+      if (body.sessionConfigJson !== undefined) {
+        patch.sessionConfigJson =
+          body.sessionConfigJson === null ? null : JSON.stringify(body.sessionConfigJson);
       }
       const updated = await db.updateSession(sessionId, patch);
       if (!updated) {
@@ -210,6 +222,10 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       const { ids } = request.body as { ids: string[] };
       if (!Array.isArray(ids) || ids.length === 0) {
         return reply.status(400).send({ error: 'ids must be a non-empty array' });
+      }
+      for (const id of ids) {
+        cancelRun(id);
+        await closeAcpSessionForNovaSession(id);
       }
       const count = await db.deleteManySessions(ids, workspaceId);
       // clean up uploaded images for each session (non-critical)
@@ -250,6 +266,8 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       if (!session || session.workspaceId !== workspaceId) {
         return reply.status(404).send({ error: 'Session not found' });
       }
+      cancelRun(sessionId);
+      await closeAcpSessionForNovaSession(sessionId);
       const success = await db.deleteSession(sessionId);
       if (!success) {
         return reply.status(500).send({ error: 'Failed to delete session' });

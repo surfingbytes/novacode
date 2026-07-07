@@ -25,6 +25,8 @@ export function getActiveSessionIds(): Set<string> {
   return _getActiveSessionIds();
 }
 
+export { cancelRun };
+
 const HISTORY_PAGE_SIZE = 50;
 const chatSessionClients = new Map<string, Set<WebSocket>>();
 const queueWorkers = new Set<string>();
