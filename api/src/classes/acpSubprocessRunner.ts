@@ -171,14 +171,15 @@ function buildClientApp(
 
   if (cursorExtensions) {
     // Cursor ACP extension methods are not in the core ClientRequestMethod union.
+    const parseUnknown = (params: unknown): unknown => params;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const extApp = app as any;
     extApp
-      .onRequest('cursor/ask_question', async () => ({
+      .onRequest('cursor/ask_question', parseUnknown, async () => ({
         outcome: { outcome: 'skipped', reason: 'Nova Code does not support interactive questions yet.' },
       }))
-      .onRequest('cursor/create_plan', async () => ({ outcome: { outcome: 'accepted' } }))
-      .onRequest('cursor/update_todos', async ({ params }: { params: unknown }) => ({
+      .onRequest('cursor/create_plan', parseUnknown, async () => ({ outcome: { outcome: 'accepted' } }))
+      .onRequest('cursor/update_todos', parseUnknown, async ({ params }: { params: unknown }) => ({
         outcome: {
           outcome: 'accepted',
           todos: Array.isArray((params as { todos?: unknown }).todos)
@@ -186,8 +187,8 @@ function buildClientApp(
             : [],
         },
       }))
-      .onRequest('cursor/task', async () => ({ outcome: { outcome: 'completed' } }))
-      .onRequest('cursor/generate_image', async () => ({
+      .onRequest('cursor/task', parseUnknown, async () => ({ outcome: { outcome: 'completed' } }))
+      .onRequest('cursor/generate_image', parseUnknown, async () => ({
         outcome: { outcome: 'rejected', reason: 'Nova Code does not support image generation yet.' },
       }));
   }
@@ -209,6 +210,18 @@ function acpAgent(ctx: ClientContext) {
   };
 }
 
+function createPhaseLogger(logTag: string, novaSessionId: string) {
+  let last = Date.now();
+  return (phase: string): void => {
+    const now = Date.now();
+    console.log(`[${logTag}] ${phase}`, {
+      novaSessionId,
+      elapsedMs: now - last,
+    });
+    last = now;
+  };
+}
+
 export async function runAcpSubprocessPrompt(
   params: AcpSubprocessRunParams,
   onEvent: AcpEventHandler,
@@ -216,10 +229,12 @@ export async function runAcpSubprocessPrompt(
 ): Promise<AcpSubprocessRunResult> {
   const { command, args, cwd, novaSessionId, acpSessionId, promptText, logTag } = params;
   const env = { ...process.env, ...config.agentEnv() };
+  const phase = createPhaseLogger(logTag, novaSessionId);
 
   let proc: ChildProcess;
   try {
     proc = spawn(command, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], env });
+    phase('spawned');
   } catch (err) {
     return { acpSessionId: acpSessionId ?? '', error: String(err) };
   }
@@ -279,6 +294,7 @@ export async function runAcpSubprocessPrompt(
       ctxRef = ctx;
       const agent = acpAgent(ctx);
 
+      phase('initialize:start');
       await ctx.request(methods.agent.initialize, {
         protocolVersion: PROTOCOL_VERSION,
         clientInfo: { name: 'nova-code', version: '1.0.0' },
@@ -286,6 +302,7 @@ export async function runAcpSubprocessPrompt(
           ? { fs: { readTextFile: false, writeTextFile: false }, terminal: false }
           : { session: { configOptions: { boolean: true } } },
       });
+      phase('initialize:done');
 
       let resolvedSessionId: string;
       let sessionResponse: AcpSessionResponse;
@@ -293,30 +310,36 @@ export async function runAcpSubprocessPrompt(
       let resolvedModelId: string | undefined;
 
       if (!acpSessionId) {
+        phase('session:new:start');
         const created = (await ctx.request(methods.agent.session.new, {
           cwd,
           mcpServers: [],
         })) as NewSessionResponse;
         sessionResponse = created;
         resolvedSessionId = created.sessionId;
+        phase('session:new:done');
       } else {
         activeHandlers.set(acpSessionId, () => {});
         try {
+          phase('session:load:start');
           sessionResponse = (await ctx.request(methods.agent.session.load, {
             sessionId: acpSessionId,
             cwd,
             mcpServers: [],
           })) as LoadSessionResponse;
           resolvedSessionId = acpSessionId;
+          phase('session:load:done');
         } catch (err) {
           console.warn(`[${logTag}] loadSession failed, starting fresh session:`, err);
           activeHandlers.delete(acpSessionId);
+          phase('session:new:start');
           const created = (await ctx.request(methods.agent.session.new, {
             cwd,
             mcpServers: [],
           })) as NewSessionResponse;
           sessionResponse = created;
           resolvedSessionId = created.sessionId;
+          phase('session:new:done');
         }
         activeHandlers.delete(acpSessionId);
       }
@@ -336,9 +359,11 @@ export async function runAcpSubprocessPrompt(
         resolvedModelId = modelOption.currentValue;
       }
 
+      phase('session:config:start');
       await applySessionMode(agent, resolvedSessionId, params.mode, sessionResponse);
       await applySessionModel(agent, resolvedSessionId, params.model, sessionResponse);
       await applySessionConfig(agent, resolvedSessionId, params.configJson, sessionResponse);
+      phase('session:config:done');
 
       emitSessionConfigSync(onEvent, {
         modeId: resolvedModeId,
@@ -347,10 +372,12 @@ export async function runAcpSubprocessPrompt(
 
       activeHandlers.set(resolvedSessionId, onEvent);
       try {
+        phase('session:prompt:start');
         const resp = (await ctx.request(methods.agent.session.prompt, {
           sessionId: resolvedSessionId,
           prompt: [{ type: 'text', text: promptText }],
         })) as { stopReason?: string };
+        phase('session:prompt:done');
         return {
           acpSessionId: resolvedSessionId,
           stopReason: resp.stopReason,

@@ -18,6 +18,25 @@ export interface AcpSessionConfigClient {
   }): Promise<unknown>;
 }
 
+const SESSION_CONFIG_APPLY_TIMEOUT_MS = 2_500;
+
+async function withApplyTimeout<T>(label: string, promise: Promise<T>): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`${label} timed out after ${SESSION_CONFIG_APPLY_TIMEOUT_MS}ms`)),
+          SESSION_CONFIG_APPLY_TIMEOUT_MS
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 function isSelectConfigOption(
   option: SessionConfigOption
 ): option is SessionConfigOption & { type: 'select' } {
@@ -63,7 +82,10 @@ export async function applySessionMode(
   const availableModeIds = sessionResponse.modes?.availableModes?.map((m) => m.id) ?? [];
   if (availableModeIds.includes(trimmed) && conn.setSessionMode) {
     try {
-      await conn.setSessionMode({ sessionId, modeId: trimmed });
+      await withApplyTimeout(
+        `setSessionMode(${trimmed})`,
+        conn.setSessionMode({ sessionId, modeId: trimmed })
+      );
       return;
     } catch (err) {
       console.warn('[acpSessionHelpers] setSessionMode failed (non-fatal):', err);
@@ -77,11 +99,14 @@ export async function applySessionMode(
   if (!values.includes(trimmed) && modeOption.id !== 'mode') return;
 
   try {
-    await conn.setSessionConfigOption({
-      sessionId,
-      configId: modeOption.id,
-      value: trimmed,
-    });
+    await withApplyTimeout(
+      `setSessionConfigOption(${modeOption.id})`,
+      conn.setSessionConfigOption({
+        sessionId,
+        configId: modeOption.id,
+        value: trimmed,
+      })
+    );
   } catch (err) {
     console.warn('[acpSessionHelpers] setSessionConfigOption(mode) failed (non-fatal):', err);
   }
@@ -103,11 +128,14 @@ export async function applySessionModel(
   if (values.length > 0 && !values.includes(trimmed)) return;
 
   try {
-    await conn.setSessionConfigOption({
-      sessionId,
-      configId: modelOption.id,
-      value: trimmed,
-    });
+    await withApplyTimeout(
+      `setSessionConfigOption(${modelOption.id})`,
+      conn.setSessionConfigOption({
+        sessionId,
+        configId: modelOption.id,
+        value: trimmed,
+      })
+    );
   } catch (err) {
     console.warn('[acpSessionHelpers] setSessionConfigOption(model) failed (non-fatal):', err);
   }
@@ -134,7 +162,10 @@ export async function applySessionConfig(
     }
 
     try {
-      await conn.setSessionConfigOption({ sessionId, configId, value: trimmed });
+      await withApplyTimeout(
+        `setSessionConfigOption(${configId})`,
+        conn.setSessionConfigOption({ sessionId, configId, value: trimmed })
+      );
     } catch (err) {
       console.warn(`[acpSessionHelpers] setSessionConfigOption(${configId}) failed (non-fatal):`, err);
     }
