@@ -187,6 +187,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     model: Type.String(),
     thinking: Type.String(),
     context: Type.String(),
+    fast: Type.Union([Type.Boolean(), Type.Null()]),
     current: Type.Optional(Type.Boolean())
   });
 
