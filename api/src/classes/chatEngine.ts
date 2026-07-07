@@ -102,6 +102,7 @@ export interface DispatchPromptOpts {
   sessionId: string;
   text: string;
   model?: string;
+  mode?: string;
   imagePaths?: string[];
   subscriber: ChatSubscriber;
 }
@@ -202,7 +203,7 @@ async function buildWorkspaceRulesPrefix(workspacePath: string): Promise<string>
 }
 
 export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?: string }> {
-  const { sessionId, text, model, imagePaths = [], subscriber } = opts;
+  const { sessionId, text, model, mode, imagePaths = [], subscriber } = opts;
 
   if (activeRuns.has(sessionId)) {
     return { error: 'Agent is busy' };
@@ -214,7 +215,7 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
   }
 
   const agentType: AgentType = (session.agentType as AgentType | null) ?? 'claude';
-  const sessionMode = normalizeSessionMode(session.sessionMode);
+  const sessionMode = normalizeSessionMode(mode ?? session.sessionMode);
   let sessionConfig: Record<string, string> = {};
   if (session.sessionConfigJson) {
     try {
@@ -563,6 +564,7 @@ export function dispatchPromptAndWait(opts: {
       sessionId: opts.sessionId,
       text: opts.text,
       model: opts.model ?? 'auto',
+      mode: 'default',
       subscriber,
     }).then((result) => {
       if (result.error) {
@@ -612,6 +614,7 @@ export async function checkClaudeAutoContinue(): Promise<void> {
           sessionId: session.id,
           text: 'continue',
           model: 'auto',
+          mode: session.sessionMode,
           subscriber: mockSubscriber,
         });
 

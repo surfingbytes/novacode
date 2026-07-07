@@ -226,6 +226,7 @@ export interface ChatQueueItem {
   sessionId: string;
   text: string;
   model: string;
+  mode: string;
   imagePaths?: string[];
   createdAt: string;
 }
@@ -235,6 +236,8 @@ export interface ChatWsClientMessage {
   text?: string;
   /** Model id (e.g. 'auto', 'gpt-5.3-codex'). Default 'auto'. */
   model?: string;
+  /** Session mode id for this prompt. */
+  mode?: string;
   offset?: number;
   imagePaths?: string[];
   queueItemId?: string;

@@ -70,6 +70,7 @@ function toChatQueueItem(row: {
   sessionId: string;
   text: string;
   model: string;
+  mode: string;
   imagePaths: string | null;
   createdAt: string;
 }): ChatQueueItem {
@@ -78,6 +79,7 @@ function toChatQueueItem(row: {
     sessionId: row.sessionId,
     text: row.text,
     model: row.model,
+    mode: row.mode,
     imagePaths: row.imagePaths ? (JSON.parse(row.imagePaths) as string[]) : undefined,
     createdAt: row.createdAt
   };
@@ -443,6 +445,7 @@ export const db = {
     sessionId: string;
     text: string;
     model: string;
+    mode: string;
     imagePaths?: string[];
   }): Promise<ChatQueueItem> {
     const id = randomUUID();
@@ -459,6 +462,7 @@ export const db = {
           sessionId: data.sessionId,
           text: data.text,
           model: data.model,
+          mode: data.mode,
           imagePaths: JSON.stringify(data.imagePaths ?? []),
           position,
           createdAt

@@ -119,7 +119,7 @@ export async function applySessionModel(
   sessionResponse: AcpSessionResponse
 ): Promise<void> {
   const trimmed = model?.trim();
-  if (!trimmed || trimmed === 'auto') return;
+  if (!trimmed) return;
 
   const modelOption = findConfigOptionByCategory(sessionResponse.configOptions, 'model');
   if (!modelOption || !conn.setSessionConfigOption) return;
