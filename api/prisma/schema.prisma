@@ -88,6 +88,7 @@ model SessionPromptQueue {
   session    Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   text       String
   model      String  @default("auto")
+  mode       String  @default("default") @map("session_mode")
   imagePaths String? @map("image_paths_json")
   position   Int
   createdAt  String  @map("created_at")

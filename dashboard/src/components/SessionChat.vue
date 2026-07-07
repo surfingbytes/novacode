@@ -244,6 +244,8 @@ const bConfigLoading = ref(false);
 const bSavingModelSelection = ref(false);
 const bSavingSessionMode = ref(false);
 const bSavingSessionConfig = ref(false);
+let modelSelectionSaveSeq = 0;
+let sessionModeSaveSeq = 0;
 const queuedPrompts = ref<ChatQueueItem[]>([]);
 const lastPromptRequest = ref<{ text: string; imagePaths: string[] } | null>(null);
 const promptStorageKey = computed(() => `sessionPrompt:${props.workspaceId}:${props.sessionId}`);
@@ -386,6 +388,50 @@ function uniqueValues(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))];
 }
 
+function sortLabelValues(values: string[]): string[] {
+  return [...values].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+}
+
+const THINKING_ORDER = ['auto', 'default', 'none', 'minimal', 'low', 'medium', 'high', 'max'];
+
+function thinkingRank(value: string): number {
+  const lower = value.toLowerCase();
+  const direct = THINKING_ORDER.indexOf(lower);
+  if (direct >= 0) return direct;
+  if (lower.includes('minimal')) return THINKING_ORDER.indexOf('minimal');
+  if (lower.includes('low')) return THINKING_ORDER.indexOf('low');
+  if (lower.includes('medium')) return THINKING_ORDER.indexOf('medium');
+  if (lower.includes('high')) return THINKING_ORDER.indexOf('high');
+  if (lower.includes('max')) return THINKING_ORDER.indexOf('max');
+  return THINKING_ORDER.length;
+}
+
+function sortThinkingValues(values: string[]): string[] {
+  return [...values].sort((a, b) => {
+    const rankDiff = thinkingRank(a) - thinkingRank(b);
+    return rankDiff || a.localeCompare(b, undefined, { sensitivity: 'base' });
+  });
+}
+
+function parseContextSize(value: string): number {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'auto' || normalized === 'default') return 0;
+  const match = normalized.match(/^(\d+(?:\.\d+)?)\s*([km])?$/);
+  if (!match) return Number.POSITIVE_INFINITY;
+  const amount = Number(match[1]);
+  const unit = match[2];
+  if (unit === 'm') return amount * 1_000_000;
+  if (unit === 'k') return amount * 1_000;
+  return amount;
+}
+
+function sortContextValues(values: string[]): string[] {
+  return [...values].sort((a, b) => {
+    const sizeDiff = parseContextSize(a) - parseContextSize(b);
+    return sizeDiff || a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+  });
+}
+
 const FALLBACK_THINKING_VALUES = ['minimal', 'low', 'medium', 'high', 'max', 'fast', 'none'];
 const FALLBACK_CONTEXT_VALUES = ['32k', '64k', '128k', '200k', '256k', '1m', '2m'];
 
@@ -501,12 +547,12 @@ const displaySessionMode = computed(() => {
   if (acpReportedModeId.value) return acpReportedModeId.value;
   const stored = normalizeStoredMode(sessionMode.value);
   if (stored !== MODE_SENTINEL) return stored;
-  return modeOptions.value.find((m) => m.current)?.id ?? MODE_SENTINEL;
+  return modeOptions.value.find((m) => m.current)?.id ?? modeOptions.value[0]?.id ?? MODE_SENTINEL;
 });
 const selectedModeOption = computed(
   () =>
     modeOptions.value.find((option) => option.id === displaySessionMode.value) ??
-    modeOptions.value.find((option) => option.id === MODE_SENTINEL) ?? {
+    modeOptions.value[0] ?? {
       id: MODE_SENTINEL,
       label: 'Default'
     }
@@ -552,21 +598,25 @@ const modelPickerState = computed(() => {
   const options = effectiveModelOptions.value;
   const current = selectedModelOption.value;
 
-  const modelList = uniqueValues(options.map((option) => option.model));
+  const modelList = sortLabelValues(uniqueValues(options.map((option) => option.model)));
   const selectedModelName = current.model;
-  const thinkingList = uniqueValues(
-    options
-      .filter((option) => option.model === selectedModelName)
-      .map((option) => option.thinking)
+  const thinkingList = sortThinkingValues(
+    uniqueValues(
+      options
+        .filter((option) => option.model === selectedModelName)
+        .map((option) => option.thinking)
+    )
   );
   const selectedThinkingName =
     current.model === selectedModelName ? current.thinking : thinkingList[0] ?? 'Default';
-  const contextList = uniqueValues(
-    options
-      .filter(
-        (option) => option.model === selectedModelName && option.thinking === selectedThinkingName
-      )
-      .map((option) => option.context)
+  const contextList = sortContextValues(
+    uniqueValues(
+      options
+        .filter(
+          (option) => option.model === selectedModelName && option.thinking === selectedThinkingName
+        )
+        .map((option) => option.context)
+    )
   );
   const selectedContextName =
     current.model === selectedModelName && current.thinking === selectedThinkingName
@@ -629,9 +679,7 @@ async function loadAvailableModes() {
   bModesLoading.value = true;
   try {
     const { data } = await settingsApi.getAgentModes(agentType);
-    modeOptions.value = data.modes.length > 0
-      ? data.modes
-      : [{ id: MODE_SENTINEL, label: 'Default' }];
+    modeOptions.value = data.modes.length > 0 ? data.modes : [{ id: MODE_SENTINEL, label: 'Default' }];
     syncAcpReportedFromOptions();
   } catch {
     modeOptions.value = [{ id: MODE_SENTINEL, label: 'Default' }];
@@ -709,6 +757,7 @@ function applyInboundModelUpdate(modelId: string): void {
 }
 
 async function syncSessionModeFromAgent(modeId: string): Promise<void> {
+  const seq = ++sessionModeSaveSeq;
   const prev = sessionMode.value;
   const prevSession = session.value;
   sessionMode.value = modeId;
@@ -719,16 +768,19 @@ async function syncSessionModeFromAgent(modeId: string): Promise<void> {
     const { data: updated } = await sessionsApi.update(props.workspaceId, props.sessionId, {
       sessionMode: modeId
     });
+    if (seq !== sessionModeSaveSeq) return;
     session.value = updated;
     sessionMode.value = normalizeStoredMode(updated.sessionMode);
     acpReportedModeId.value = null;
   } catch {
+    if (seq !== sessionModeSaveSeq) return;
     sessionMode.value = prev;
     session.value = prevSession;
   }
 }
 
 async function syncModelSelectionFromAgent(modelId: string): Promise<void> {
+  const seq = ++modelSelectionSaveSeq;
   const prev = modelSelection.value;
   const prevSession = session.value;
   modelSelection.value = modelId;
@@ -739,10 +791,12 @@ async function syncModelSelectionFromAgent(modelId: string): Promise<void> {
     const { data: updated } = await sessionsApi.update(props.workspaceId, props.sessionId, {
       modelSelection: modelId
     });
+    if (seq !== modelSelectionSaveSeq) return;
     session.value = updated;
     modelSelection.value = updated.modelSelection ?? modelId;
     acpReportedModelId.value = null;
   } catch {
+    if (seq !== modelSelectionSaveSeq) return;
     modelSelection.value = prev;
     session.value = prevSession;
   }
@@ -778,8 +832,10 @@ function resolveModelOption(model: string, thinking: string, context: string, fa
 }
 
 async function persistModelSelection(newModelSelection: string) {
+  const seq = ++modelSelectionSaveSeq;
   const prev = modelSelection.value;
   const prevSession = session.value;
+  acpReportedModelId.value = null;
   modelSelection.value = newModelSelection;
   if (session.value) {
     session.value = { ...session.value, modelSelection: newModelSelection };
@@ -789,13 +845,15 @@ async function persistModelSelection(newModelSelection: string) {
     const { data: updated } = await sessionsApi.update(props.workspaceId, props.sessionId, {
       modelSelection: newModelSelection
     });
+    if (seq !== modelSelectionSaveSeq) return;
     session.value = updated;
     modelSelection.value = updated.modelSelection ?? newModelSelection;
   } catch {
+    if (seq !== modelSelectionSaveSeq) return;
     modelSelection.value = prev;
     session.value = prevSession;
   } finally {
-    bSavingModelSelection.value = false;
+    if (seq === modelSelectionSaveSeq) bSavingModelSelection.value = false;
   }
 }
 
@@ -827,6 +885,7 @@ function onModelFastChange(checked: boolean): void {
 }
 
 async function persistSessionMode(newSessionMode: string) {
+  const seq = ++sessionModeSaveSeq;
   const prev = sessionMode.value;
   const prevSession = session.value;
   sessionMode.value = newSessionMode;
@@ -838,19 +897,21 @@ async function persistSessionMode(newSessionMode: string) {
     const { data: updated } = await sessionsApi.update(props.workspaceId, props.sessionId, {
       sessionMode: newSessionMode
     });
+    if (seq !== sessionModeSaveSeq) return;
     session.value = updated;
     sessionMode.value = updated.sessionMode ?? newSessionMode;
   } catch {
+    if (seq !== sessionModeSaveSeq) return;
     sessionMode.value = prev;
     session.value = prevSession;
   } finally {
-    bSavingSessionMode.value = false;
+    if (seq === sessionModeSaveSeq) bSavingSessionMode.value = false;
   }
 }
 
 function onSessionModeChange(value: string): void {
   const normalized = value || MODE_SENTINEL;
-  acpReportedModeId.value = normalized === MODE_SENTINEL ? null : normalized;
+  acpReportedModeId.value = null;
   if (normalized !== normalizeStoredMode(sessionMode.value)) {
     void persistSessionMode(normalized);
   }
@@ -1826,7 +1887,13 @@ function sendPrompt() {
   clearChatError();
   const imagePaths = pendingImages.value.map((img) => img.serverPath);
   lastPromptRequest.value = { text, imagePaths };
-  webSocket.send(JSON.stringify({ type: 'prompt', text, model: modelSelection.value, imagePaths }));
+  webSocket.send(JSON.stringify({
+    type: 'prompt',
+    text,
+    model: modelSelection.value,
+    mode: displaySessionMode.value,
+    imagePaths
+  }));
   promptText.value = '';
   pendingImages.value = [];
 

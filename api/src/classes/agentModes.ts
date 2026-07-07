@@ -22,8 +22,7 @@ export interface AgentModeOption {
 
 const STATIC_AGENT_MODES: Record<AgentType, AgentModeOption[]> = {
   'cursor-agent': [
-    { id: MODE_SENTINEL, label: 'Default', description: 'Use agent default mode' },
-    { id: 'agent', label: 'Agent', description: 'Full tool access' },
+    { id: 'agent', label: 'Agent', description: 'Full tool access', current: true },
     { id: 'plan', label: 'Plan', description: 'Planning, read-only' },
     { id: 'ask', label: 'Ask', description: 'Q&A, read-only' },
   ],
@@ -155,17 +154,16 @@ function modesFromSessionResponse(
   }
   const unique = [...deduped.values()];
 
-  const hasSentinel = unique.some((m) => m.id === MODE_SENTINEL);
-  const withSentinel = hasSentinel
-    ? unique
-    : [{ id: MODE_SENTINEL, label: 'Default', description: 'Use agent default mode' }, ...unique];
-
-  if (!withSentinel.some((m) => m.current) && currentModeId) {
-    const match = withSentinel.find((m) => m.id === currentModeId);
+  if (!unique.some((m) => m.current) && currentModeId) {
+    const match = unique.find((m) => m.id === currentModeId);
     if (match) match.current = true;
   }
 
-  return withSentinel;
+  if (!unique.some((m) => m.current) && unique[0]) {
+    unique[0].current = true;
+  }
+
+  return unique;
 }
 
 async function probeAgentModes(agentType: AgentType): Promise<AgentModeOption[]> {
@@ -237,5 +235,5 @@ export async function getAgentModes(agentType: AgentType): Promise<{ modes: Agen
 /** UI value: show ACP-reported current mode when DB stores the sentinel. */
 export function resolveDisplayModeId(storedMode: string, modes: AgentModeOption[]): string {
   if (storedMode !== MODE_SENTINEL) return storedMode;
-  return modes.find((m) => m.current)?.id ?? MODE_SENTINEL;
+  return modes.find((m) => m.current)?.id ?? modes[0]?.id ?? MODE_SENTINEL;
 }

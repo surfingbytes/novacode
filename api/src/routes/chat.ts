@@ -123,6 +123,7 @@ async function tryProcessQueue(sessionId: string): Promise<void> {
       sessionId,
       text: next.text,
       model: next.model,
+      mode: next.mode,
       imagePaths: next.imagePaths,
       subscriber: sub
     });
@@ -267,6 +268,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
           sessionId: id,
           text,
           model: clientMessage.model ?? session.modelSelection ?? 'auto',
+          mode: clientMessage.mode ?? session.sessionMode ?? 'default',
           imagePaths
         });
         await broadcastQueueUpdate(id);
