@@ -53,6 +53,8 @@ const bDeletingSession = ref(false);
 /** Mobile overflow menu (Edit / Archive / Delete) */
 const bMobileSessionMenuOpen = ref(false);
 const mobileSessionMenuRef = ref<HTMLElement | null>(null);
+const bModeMenuOpen = ref(false);
+const modeMenuRef = ref<HTMLElement | null>(null);
 
 // Claude limit popup state
 const bShowClaudeLimitPopup = ref(false);
@@ -93,16 +95,25 @@ function closeMobileSessionMenu(): void {
   bMobileSessionMenuOpen.value = false;
 }
 
+function closeModeMenu(): void {
+  bModeMenuOpen.value = false;
+}
+
 function handleDocumentClickMobileMenu(e: MouseEvent): void {
-  if (!bMobileSessionMenuOpen.value) return;
-  const el = mobileSessionMenuRef.value;
-  if (el && !el.contains(e.target as Node)) {
+  const target = e.target as Node;
+  const mobileEl = mobileSessionMenuRef.value;
+  if (bMobileSessionMenuOpen.value && mobileEl && !mobileEl.contains(target)) {
     closeMobileSessionMenu();
+  }
+  const modeEl = modeMenuRef.value;
+  if (bModeMenuOpen.value && modeEl && !modeEl.contains(target)) {
+    closeModeMenu();
   }
 }
 
 function handleKeydownMobileMenu(e: KeyboardEvent): void {
   if (e.key === 'Escape' && bMobileSessionMenuOpen.value) closeMobileSessionMenu();
+  if (e.key === 'Escape' && bModeMenuOpen.value) closeModeMenu();
 }
 
 const CATEGORY_COLORS = [
@@ -392,14 +403,15 @@ const selectedModeOption = computed(
       label: 'Default'
     }
 );
-const selectedModeIconName = computed(() => {
-  const id = selectedModeOption.value.id.toLowerCase();
+function modeIconName(modeId: string): 'plan' | 'debug' | 'multi' | 'ask' | 'agent' {
+  const id = modeId.toLowerCase();
   if (id.includes('plan')) return 'plan';
   if (id.includes('debug')) return 'debug';
   if (id.includes('multi')) return 'multi';
   if (id.includes('ask')) return 'ask';
   return 'agent';
-});
+}
+const selectedModeIconName = computed(() => modeIconName(selectedModeOption.value.id));
 
 const effectiveModelSelection = computed(() => {
   if (acpReportedModelId.value) return acpReportedModelId.value;
@@ -734,6 +746,11 @@ function onSessionModeChange(value: string): void {
   if (normalized !== normalizeStoredMode(sessionMode.value)) {
     void persistSessionMode(normalized);
   }
+}
+
+function selectSessionMode(value: string): void {
+  closeModeMenu();
+  onSessionModeChange(value);
 }
 
 function onHideThinkingToggle(checked: boolean): void {
@@ -2558,56 +2575,105 @@ onUnmounted(() => {
             <div
               class="flex flex-1 min-w-0 min-h-[44px] items-end gap-1 rounded-md border border-fg/10 bg-fg/[0.06] pl-1 pr-1 transition-colors focus-within:border-primary/50"
             >
-              <label
-                class="relative mb-[6px] ml-0.5 flex h-7 shrink-0 items-center overflow-hidden rounded-full border border-fg/[0.08] bg-fg/[0.08] text-text-muted transition-colors hover:bg-fg/[0.12] focus-within:border-primary/40 focus-within:text-text-primary"
+              <div
+                ref="modeMenuRef"
+                class="relative mb-[6px] ml-0.5 shrink-0"
                 :title="`Mode: ${selectedModeOption.label}`"
               >
-                <ListChecks
-                  v-if="selectedModeIconName === 'plan'"
-                  :size="14"
-                  :stroke-width="1.8"
-                  class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2"
-                />
-                <Bug
-                  v-else-if="selectedModeIconName === 'debug'"
-                  :size="14"
-                  :stroke-width="1.8"
-                  class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2"
-                />
-                <ListTodo
-                  v-else-if="selectedModeIconName === 'multi'"
-                  :size="14"
-                  :stroke-width="1.8"
-                  class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2"
-                />
-                <MessageSquare
-                  v-else-if="selectedModeIconName === 'ask'"
-                  :size="14"
-                  :stroke-width="1.8"
-                  class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2"
-                />
-                <InfinityIcon
-                  v-else
-                  :size="14"
-                  :stroke-width="1.8"
-                  class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2"
-                />
-                <select
-                  :value="displaySessionMode"
+                <button
+                  type="button"
+                  class="flex h-7 max-w-[136px] items-center gap-1.5 rounded-full border border-fg/[0.08] bg-fg/[0.08] px-2 text-xs font-medium leading-none text-text-primary transition-colors hover:bg-fg/[0.12] focus:border-primary/40 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                   :disabled="bIsStreaming || bModesLoading || bSavingSessionMode"
-                  class="h-7 max-w-[118px] appearance-none truncate border-0 bg-transparent py-0 pl-7 pr-6 text-xs font-medium leading-none text-text-primary outline-none focus:ring-0 disabled:opacity-50"
-                  @change="onSessionModeChange(($event.target as HTMLSelectElement).value)"
+                  :aria-expanded="bModeMenuOpen"
+                  aria-haspopup="menu"
+                  @click.stop="bModeMenuOpen = !bModeMenuOpen"
                 >
-                  <option v-for="mode in modeOptions" :key="mode.id" :value="mode.id">
-                    {{ mode.label }}
-                  </option>
-                </select>
-                <ChevronDown
-                  :size="13"
-                  :stroke-width="1.8"
-                  class="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 opacity-70"
-                />
-              </label>
+                  <ListChecks
+                    v-if="selectedModeIconName === 'plan'"
+                    :size="14"
+                    :stroke-width="1.8"
+                    class="shrink-0"
+                  />
+                  <Bug
+                    v-else-if="selectedModeIconName === 'debug'"
+                    :size="14"
+                    :stroke-width="1.8"
+                    class="shrink-0"
+                  />
+                  <ListTodo
+                    v-else-if="selectedModeIconName === 'multi'"
+                    :size="14"
+                    :stroke-width="1.8"
+                    class="shrink-0"
+                  />
+                  <MessageSquare
+                    v-else-if="selectedModeIconName === 'ask'"
+                    :size="14"
+                    :stroke-width="1.8"
+                    class="shrink-0"
+                  />
+                  <InfinityIcon
+                    v-else
+                    :size="14"
+                    :stroke-width="1.8"
+                    class="shrink-0"
+                  />
+                  <span class="min-w-0 truncate">{{ selectedModeOption.label }}</span>
+                  <ChevronDown
+                    :size="13"
+                    :stroke-width="1.8"
+                    class="shrink-0 opacity-70"
+                  />
+                </button>
+                <div
+                  v-if="bModeMenuOpen"
+                  class="absolute left-0 bottom-full z-50 mb-1 min-w-[128px] overflow-hidden rounded-lg border border-border bg-surface py-1 shadow-lg"
+                  role="menu"
+                  @click.stop
+                >
+                  <button
+                    v-for="mode in modeOptions"
+                    :key="mode.id"
+                    type="button"
+                    class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-text-primary transition-colors hover:bg-fg/[0.08]"
+                    :class="mode.id === displaySessionMode ? 'bg-fg/[0.08]' : ''"
+                    role="menuitem"
+                    @click="selectSessionMode(mode.id)"
+                  >
+                    <ListChecks
+                      v-if="modeIconName(mode.id) === 'plan'"
+                      :size="14"
+                      :stroke-width="1.8"
+                      class="shrink-0 text-text-muted"
+                    />
+                    <Bug
+                      v-else-if="modeIconName(mode.id) === 'debug'"
+                      :size="14"
+                      :stroke-width="1.8"
+                      class="shrink-0 text-text-muted"
+                    />
+                    <ListTodo
+                      v-else-if="modeIconName(mode.id) === 'multi'"
+                      :size="14"
+                      :stroke-width="1.8"
+                      class="shrink-0 text-text-muted"
+                    />
+                    <MessageSquare
+                      v-else-if="modeIconName(mode.id) === 'ask'"
+                      :size="14"
+                      :stroke-width="1.8"
+                      class="shrink-0 text-text-muted"
+                    />
+                    <InfinityIcon
+                      v-else
+                      :size="14"
+                      :stroke-width="1.8"
+                      class="shrink-0 text-text-muted"
+                    />
+                    <span class="min-w-0 truncate">{{ mode.label }}</span>
+                  </button>
+                </div>
+              </div>
               <textarea
                 ref="textareaEl"
                 v-model="promptText"
