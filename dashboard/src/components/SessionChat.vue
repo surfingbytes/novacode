@@ -428,58 +428,64 @@ const effectiveModelOptions = computed(() => {
   return [selected, ...modelOptions.value];
 });
 
-const modelList = computed(() => uniqueValues(effectiveModelOptions.value.map((option) => option.model)));
-const selectedModelName = computed(() => selectedModelOption.value.model);
-const thinkingList = computed(() =>
-  uniqueValues(
-    effectiveModelOptions.value
-      .filter((option) => option.model === selectedModelName.value)
-      .map((option) => option.thinking)
-  )
-);
-const selectedThinkingName = computed(() => {
+const modelPickerState = computed(() => {
+  const options = effectiveModelOptions.value;
   const current = selectedModelOption.value;
-  if (current.model === selectedModelName.value) return current.thinking;
-  return thinkingList.value[0] ?? 'Default';
-});
-const contextList = computed(() =>
-  uniqueValues(
-    effectiveModelOptions.value
+
+  const modelList = uniqueValues(options.map((option) => option.model));
+  const selectedModelName = current.model;
+  const thinkingList = uniqueValues(
+    options
+      .filter((option) => option.model === selectedModelName)
+      .map((option) => option.thinking)
+  );
+  const selectedThinkingName =
+    current.model === selectedModelName ? current.thinking : thinkingList[0] ?? 'Default';
+  const contextList = uniqueValues(
+    options
       .filter(
-        (option) =>
-          option.model === selectedModelName.value && option.thinking === selectedThinkingName.value
+        (option) => option.model === selectedModelName && option.thinking === selectedThinkingName
       )
       .map((option) => option.context)
-  )
-);
-const selectedContextName = computed(() => {
-  const current = selectedModelOption.value;
-  if (current.model === selectedModelName.value && current.thinking === selectedThinkingName.value) {
-    return current.context;
-  }
-  return contextList.value[0] ?? 'Default';
-});
-const bFastAvailable = computed(() =>
-  effectiveModelOptions.value.some(
+  );
+  const selectedContextName =
+    current.model === selectedModelName && current.thinking === selectedThinkingName
+      ? current.context
+      : contextList[0] ?? 'Default';
+  const bFastAvailable = options.some(
     (option) =>
-      option.model === selectedModelName.value &&
-      option.thinking === selectedThinkingName.value &&
-      option.context === selectedContextName.value &&
+      option.model === selectedModelName &&
+      option.thinking === selectedThinkingName &&
+      option.context === selectedContextName &&
       option.fast !== null
-  )
-);
-const selectedFastValue = computed(() => {
-  const current = selectedModelOption.value;
-  if (
-    current.model === selectedModelName.value &&
-    current.thinking === selectedThinkingName.value &&
-    current.context === selectedContextName.value &&
+  );
+  const selectedFastValue =
+    current.model === selectedModelName &&
+    current.thinking === selectedThinkingName &&
+    current.context === selectedContextName &&
     current.fast !== null
-  ) {
-    return current.fast;
-  }
-  return false;
+      ? current.fast
+      : false;
+
+  return {
+    modelList,
+    selectedModelName,
+    thinkingList,
+    selectedThinkingName,
+    contextList,
+    selectedContextName,
+    bFastAvailable,
+    selectedFastValue
+  };
 });
+const modelList = computed(() => modelPickerState.value.modelList);
+const selectedModelName = computed(() => modelPickerState.value.selectedModelName);
+const thinkingList = computed(() => modelPickerState.value.thinkingList);
+const selectedThinkingName = computed(() => modelPickerState.value.selectedThinkingName);
+const contextList = computed(() => modelPickerState.value.contextList);
+const selectedContextName = computed(() => modelPickerState.value.selectedContextName);
+const bFastAvailable = computed(() => modelPickerState.value.bFastAvailable);
+const selectedFastValue = computed(() => modelPickerState.value.selectedFastValue);
 
 async function loadAvailableModels() {
   const agentType = session.value?.agentType;
@@ -769,6 +775,7 @@ interface DisplayItem {
   kind: 'text' | 'tool' | 'todos' | 'plan';
   // text
   text?: string;
+  renderedHtml?: string;
   // tool
   callId?: string;
   toolName?: string;
@@ -779,8 +786,17 @@ interface DisplayItem {
   toolOutput?: string;
   // todos
   todoItems?: TodoDisplayItem[];
+  todoDoneCount?: number;
   // plan (ACP native)
   planEntries?: PlanEntry[];
+  planCompletedCount?: number;
+}
+
+interface DisplayChatMessage {
+  msg: ChatMessage;
+  key: string;
+  items: DisplayItem[];
+  fallbackHtml: string;
 }
 
 // Items being built during a live stream; raw lines saved for DB persistence.
@@ -877,7 +893,7 @@ function getToolIconSvg(icon: string): string {
 function processAcpUpdate(
   update: Record<string, unknown>,
   items: DisplayItem[],
-  opts?: { liveThinking?: boolean }
+  opts?: { liveThinking?: boolean; applyConfigSync?: boolean }
 ): void {
   const sessionUpdate = update.sessionUpdate as string | undefined;
 
@@ -965,7 +981,7 @@ function processAcpUpdate(
   if (sessionUpdate === 'usage_update') {
     const used = update.used as number | undefined;
     const size = update.size as number | undefined;
-    if (typeof used === 'number' && typeof size === 'number') {
+    if (opts?.liveThinking && typeof used === 'number' && typeof size === 'number') {
       streamingUsage.value = {
         used,
         size,
@@ -977,11 +993,12 @@ function processAcpUpdate(
 
   if (sessionUpdate === 'current_mode_update') {
     const modeId = update.currentModeId as string | undefined;
-    if (modeId) applyInboundModeUpdate(modeId);
+    if (modeId && opts?.applyConfigSync !== false) applyInboundModeUpdate(modeId);
     return;
   }
 
   if (sessionUpdate === 'config_option_update') {
+    if (opts?.applyConfigSync === false) return;
     const rawOpts = update.configOptions as
       | Array<{ id: string; category?: string; type: string; currentValue?: string }>
       | undefined;
@@ -1074,7 +1091,7 @@ function mergeAssistantTextIntoDisplayItems(
 function processEventLine(
   line: string,
   items: DisplayItem[],
-  opts?: { liveThinking?: boolean }
+  opts?: { liveThinking?: boolean; applyConfigSync?: boolean }
 ): void {
   let event: Record<string, unknown>;
   try {
@@ -1084,6 +1101,7 @@ function processEventLine(
   }
 
   if (event.type === 'session_config_sync') {
+    if (opts?.applyConfigSync === false) return;
     const modeId = typeof event.modeId === 'string' ? event.modeId : undefined;
     const modelId = typeof event.modelId === 'string' ? event.modelId : undefined;
     const config =
@@ -1234,11 +1252,63 @@ function processEventLine(
   }
 }
 
-function parseEventsToItems(events: string[]): DisplayItem[] {
+function parseEventsToItems(
+  events: string[],
+  opts?: { liveThinking?: boolean; applyConfigSync?: boolean }
+): DisplayItem[] {
   const items: DisplayItem[] = [];
-  for (const line of events) processEventLine(line, items);
+  for (const line of events) processEventLine(line, items, opts);
   return items;
 }
+
+const markdownRenderCache = new Map<string, string>();
+
+function renderMdCached(src: string | undefined): string {
+  if (!src) return '';
+  const cached = markdownRenderCache.get(src);
+  if (cached !== undefined) return cached;
+  const rendered = renderMd(src);
+  if (markdownRenderCache.size > 500) markdownRenderCache.clear();
+  markdownRenderCache.set(src, rendered);
+  return rendered;
+}
+
+function prepareDisplayItem(item: DisplayItem): DisplayItem {
+  if (item.kind === 'text') {
+    return { ...item, renderedHtml: renderMdCached(item.text) };
+  }
+  if (item.kind === 'todos') {
+    return {
+      ...item,
+      todoDoneCount:
+        item.todoItems?.filter((todo) => todo.status === 'TODO_STATUS_COMPLETED').length ?? 0
+    };
+  }
+  if (item.kind === 'plan') {
+    return {
+      ...item,
+      planCompletedCount:
+        item.planEntries?.filter((entry) => entry.status === 'completed').length ?? 0
+    };
+  }
+  return item;
+}
+
+const displayMessages = computed<DisplayChatMessage[]>(() =>
+  messages.value.map((msg, index) => {
+    const items =
+      msg.role === 'assistant'
+        ? parseEventsToItems(msg.events ?? [], { applyConfigSync: false }).map(prepareDisplayItem)
+        : [];
+    return {
+      msg,
+      key: `${msg.createdAt}-${index}`,
+      items,
+      fallbackHtml: items.length === 0 && msg.content ? renderMdCached(msg.content) : ''
+    };
+  })
+);
+const streamingDisplayItems = computed(() => streamingItems.value.map(prepareDisplayItem));
 
 function parseNestedEvent(line: string): Record<string, unknown> | null {
   let event: Record<string, unknown>;
@@ -2001,7 +2071,7 @@ onUnmounted(() => {
             </div>
 
             <!-- History messages -->
-            <template v-for="(msg, i) in messages" :key="i">
+            <template v-for="{ msg, key, items, fallbackHtml } in displayMessages" :key="key">
               <!-- User bubble -->
               <div v-if="msg.role === 'user'" class="flex justify-end">
                 <div class="max-w-[75%] flex flex-col items-end gap-2">
@@ -2026,11 +2096,11 @@ onUnmounted(() => {
 
               <!-- Assistant turn -->
               <template v-else>
-                <template v-for="(item, j) in parseEventsToItems(msg.events ?? [])" :key="j">
+                <template v-for="(item, j) in items" :key="j">
                   <div v-if="item.kind === 'text'" class="flex justify-start">
                     <div
                       class="chat-markdown max-w-[85%] bg-fg/[0.06] text-text-primary px-4 py-2 rounded-2xl rounded-bl-sm text-sm"
-                      v-html="renderMd(item.text)"
+                      v-html="item.renderedHtml"
                       @click="onChatMarkdownImageClick"
                     ></div>
                   </div>
@@ -2041,12 +2111,9 @@ onUnmounted(() => {
                       <div class="flex items-center gap-2 px-3 py-1.5 border-b border-fg/10">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none text-text-muted shrink-0" aria-hidden="true"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2M9 12l2 2 4-4"/></svg>
                         <span class="text-xs font-medium text-text-primary">Todos</span>
-                        <span class="ml-auto text-xs text-text-muted"
-                          >{{
-                            item.todoItems?.filter((t) => t.status === 'TODO_STATUS_COMPLETED')
-                              .length
-                          }}/{{ item.todoItems?.length }}</span
-                        >
+                        <span class="ml-auto text-xs text-text-muted">
+                          {{ item.todoDoneCount }}/{{ item.todoItems?.length }}
+                        </span>
                       </div>
                       <ul class="px-3 py-1.5 space-y-1">
                         <li
@@ -2082,9 +2149,7 @@ onUnmounted(() => {
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none text-text-muted shrink-0" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
                         <span class="text-xs font-medium text-text-primary">Plan</span>
                         <span class="ml-auto text-xs text-text-muted">
-                          {{ item.planEntries?.filter((e) => e.status === 'completed').length }}/{{
-                            item.planEntries?.length
-                          }}
+                          {{ item.planCompletedCount }}/{{ item.planEntries?.length }}
                         </span>
                       </div>
                       <ul class="px-3 py-1.5 space-y-1">
@@ -2155,15 +2220,12 @@ onUnmounted(() => {
                 </template>
                 <!-- Fallback -->
                 <div
-                  v-if="
-                    (parseEventsToItems(msg.events ?? []).length === 0 || !msg.events?.length) &&
-                    msg.content
-                  "
+                  v-if="fallbackHtml"
                   class="flex justify-start"
                 >
                   <div
                     class="chat-markdown max-w-[85%] bg-fg/[0.06] text-text-primary px-4 py-2 rounded-2xl rounded-bl-sm text-sm"
-                    v-html="renderMd(msg.content)"
+                    v-html="fallbackHtml"
                     @click="onChatMarkdownImageClick"
                   ></div>
                 </div>
@@ -2172,11 +2234,11 @@ onUnmounted(() => {
 
             <!-- Live streaming turn -->
             <template v-if="bIsStreaming">
-              <template v-for="(item, j) in streamingItems" :key="'s' + j">
+              <template v-for="(item, j) in streamingDisplayItems" :key="'s' + j">
                 <div v-if="item.kind === 'text'" class="flex justify-start">
                   <div
                     class="chat-markdown max-w-[85%] bg-fg/[0.06] text-text-primary px-4 py-2 rounded-2xl rounded-bl-sm text-sm"
-                    v-html="renderMd(item.text)"
+                    v-html="item.renderedHtml"
                     @click="onChatMarkdownImageClick"
                   ></div>
                 </div>
@@ -2190,12 +2252,9 @@ onUnmounted(() => {
                       <span v-if="item.status === 'running'" class="ml-auto">
                         <svg class="animate-spin text-primary select-none" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
                       </span>
-                      <span v-else class="ml-auto text-xs text-text-muted"
-                        >{{
-                          item.todoItems?.filter((t) => t.status === 'TODO_STATUS_COMPLETED')
-                            .length
-                        }}/{{ item.todoItems?.length }}</span
-                      >
+                      <span v-else class="ml-auto text-xs text-text-muted">
+                        {{ item.todoDoneCount }}/{{ item.todoItems?.length }}
+                      </span>
                     </div>
                     <ul class="px-3 py-1.5 space-y-1">
                       <li
@@ -2231,9 +2290,7 @@ onUnmounted(() => {
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none text-text-muted shrink-0" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
                       <span class="text-xs font-medium text-text-primary">Plan</span>
                       <span class="ml-auto text-xs text-text-muted">
-                        {{ item.planEntries?.filter((e) => e.status === 'completed').length }}/{{
-                          item.planEntries?.length
-                        }}
+                        {{ item.planCompletedCount }}/{{ item.planEntries?.length }}
                       </span>
                     </div>
                     <ul class="px-3 py-1.5 space-y-1">
