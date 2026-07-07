@@ -112,6 +112,11 @@ export async function applySessionMode(
   }
 }
 
+/** Model id without any `[..]` variant suffix, lowercased for tolerant matching. */
+function baseModelId(value: string): string {
+  return value.split('[')[0]!.trim().toLowerCase();
+}
+
 export async function applySessionModel(
   conn: AcpSessionConfigClient,
   sessionId: string,
@@ -122,20 +127,47 @@ export async function applySessionModel(
   if (!trimmed) return;
 
   const modelOption = findConfigOptionByCategory(sessionResponse.configOptions, 'model');
-  if (!modelOption || !conn.setSessionConfigOption) return;
+  if (!modelOption || !conn.setSessionConfigOption) {
+    console.warn('[acpSessionHelpers] no model config option available; cannot apply model', {
+      requested: trimmed,
+    });
+    return;
+  }
 
   const values = flattenSelectValues(modelOption);
-  if (values.length > 0 && !values.includes(trimmed) && trimmed !== 'auto') return;
+  // Resolve to the exact string Cursor accepts: prefer an exact match, then the same base model
+  // id (handles CLI ids vs ACP values that differ only by a `[..]` variant suffix), then `auto`.
+  let target: string | undefined;
+  if (values.includes(trimmed)) {
+    target = trimmed;
+  } else {
+    target = values.find((v) => baseModelId(v) === baseModelId(trimmed));
+  }
+  if (!target && values.length === 0) target = trimmed;
+  if (!target) {
+    console.warn('[acpSessionHelpers] requested model not offered by agent; leaving default', {
+      requested: trimmed,
+      available: values,
+    });
+    return;
+  }
+
+  const currentValue =
+    'currentValue' in modelOption && typeof modelOption.currentValue === 'string'
+      ? modelOption.currentValue
+      : undefined;
+  if (currentValue === target) return;
 
   try {
     await withApplyTimeout(
-      `setSessionConfigOption(${modelOption.id})`,
+      `setSessionConfigOption(${modelOption.id}=${target})`,
       conn.setSessionConfigOption({
         sessionId,
         configId: modelOption.id,
-        value: trimmed,
+        value: target,
       })
     );
+    console.log('[acpSessionHelpers] applied model', { configId: modelOption.id, value: target });
   } catch (err) {
     console.warn('[acpSessionHelpers] setSessionConfigOption(model) failed (non-fatal):', err);
   }

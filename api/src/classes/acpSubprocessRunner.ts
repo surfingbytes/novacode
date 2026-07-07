@@ -46,6 +46,12 @@ export interface AcpSubprocessRunParams {
   logTag: string;
   /** Handle Cursor-specific extension requests via ctx.request(). */
   cursorExtensions?: boolean;
+  /**
+   * Skip applying the model via ACP setSessionConfigOption. Cursor's ACP ignores runtime model
+   * config changes for actual inference (a known cursor-agent bug), so Cursor passes the model as
+   * a `--model` startup arg instead and sets this flag to avoid a redundant/ineffective config write.
+   */
+  skipModelConfigOption?: boolean;
 }
 
 export interface AcpSubprocessRunResult {
@@ -359,9 +365,24 @@ export async function runAcpSubprocessPrompt(
         resolvedModelId = modelOption.currentValue;
       }
 
+      console.log(`[${logTag}] session config discovered`, {
+        requestedMode: params.mode,
+        requestedModel: params.model,
+        currentModeId: sessionResponse.modes?.currentModeId,
+        availableModes: sessionResponse.modes?.availableModes?.map((m) => m.id),
+        configOptions: (sessionResponse.configOptions ?? []).map((o) => ({
+          id: o.id,
+          category: o.category,
+          type: o.type,
+          currentValue: 'currentValue' in o ? o.currentValue : undefined,
+        })),
+      });
+
       phase('session:config:start');
       await applySessionMode(agent, resolvedSessionId, params.mode, sessionResponse);
-      await applySessionModel(agent, resolvedSessionId, params.model, sessionResponse);
+      if (!params.skipModelConfigOption) {
+        await applySessionModel(agent, resolvedSessionId, params.model, sessionResponse);
+      }
       await applySessionConfig(agent, resolvedSessionId, params.configJson, sessionResponse);
       phase('session:config:done');
 

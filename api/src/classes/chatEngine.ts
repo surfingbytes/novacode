@@ -343,10 +343,9 @@ export async function dispatchPrompt(
       if (sync.modeId && sync.modeId !== sessionMode) {
         patch.sessionMode = sync.modeId;
       }
-      const currentModel = model ?? session.modelSelection ?? 'auto';
-      if (sync.modelId && sync.modelId !== currentModel) {
-        patch.modelSelection = sync.modelId;
-      }
+      // Do NOT persist the agent-reported model: the user's selection is authoritative and Cursor
+      // only echoes its startup default (it can't switch models at runtime), so persisting it would
+      // silently overwrite the user's choice (e.g. turn "auto" into "composer-2.5-fast").
       if (sync.config && Object.keys(sync.config).length > 0) {
         const merged = { ...sessionConfig, ...sync.config };
         const mergedJson = JSON.stringify(merged);

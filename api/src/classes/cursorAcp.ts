@@ -1,6 +1,11 @@
 /**
  * Cursor ACP integration — thin wrapper around shared subprocess runner.
- * Model is applied via ACP setSessionConfigOption each turn (not CLI --model).
+ *
+ * Model selection: cursor-agent's ACP ignores runtime model changes made via
+ * `session/set_config_option` for actual inference (confirmed cursor bug — metadata updates but the
+ * backend keeps serving the model the process started with). A fresh `cursor-agent` process is
+ * spawned per prompt turn, so we pin the selected model with the `--model <id>` startup flag, which
+ * is the only reliable mechanism, and skip the ineffective config-option write.
  */
 
 // classes
@@ -38,10 +43,16 @@ export async function runCursorAcp(
   novaSessionId: string,
   onConfigSync?: SessionConfigSyncHandler
 ): Promise<RunCursorAcpResult> {
+  // `cursor-agent --model <id> acp` — pin the model at startup (the reliable path). Omit for the
+  // `auto` sentinel/empty so cursor uses its own automatic model routing.
+  const model = params.model?.trim();
+  const args =
+    model && model !== 'auto' ? ['--model', model, 'acp'] : ['acp'];
+
   return runAcpSubprocessPrompt(
     {
       command: config.cursorCommand,
-      args: ['acp'],
+      args,
       cwd: params.cwd,
       novaSessionId,
       acpSessionId: params.acpSessionId,
@@ -51,6 +62,7 @@ export async function runCursorAcp(
       configJson: params.configJson,
       logTag: 'cursorAcp',
       cursorExtensions: true,
+      skipModelConfigOption: true,
     },
     onEvent,
     onConfigSync
