@@ -104,6 +104,7 @@ export interface AgentModelOption {
   model: string;
   thinking: string;
   context: string;
+  fast: boolean | null;
   current?: boolean;
 }
 

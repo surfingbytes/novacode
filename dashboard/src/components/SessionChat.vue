@@ -3,6 +3,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch, inject } from 'vue';
 import { useRouter } from 'vue-router';
 import { marked } from 'marked';
+import { Bug, ChevronDown, Infinity, ListChecks, ListTodo, MessageSquare } from 'lucide-vue-next';
 
 // components
 import FilesView from '@/components/workspace/FilesComponent.vue';
@@ -384,6 +385,29 @@ function titleModelToken(token: string): string {
   return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
+function prettifyModelId(id: string): string {
+  return id
+    .split(/[/:_\-\s]+/)
+    .filter(Boolean)
+    .map(titleModelToken)
+    .join(' ');
+}
+
+function parseConfiguredModelId(id: string): { baseId: string; config: Record<string, string> } | null {
+  const match = id.match(/^([^\[]+)\[([^\]]+)\]$/);
+  if (!match) return null;
+
+  const config: Record<string, string> = {};
+  for (const part of match[2].split(',')) {
+    const [keyRaw, ...valueParts] = part.split('=');
+    const key = keyRaw?.trim().toLowerCase();
+    const value = valueParts.join('=').trim();
+    if (key && value) config[key] = value;
+  }
+
+  return { baseId: match[1].trim(), config };
+}
+
 function normalizeFallbackContext(value: string | undefined): string {
   if (!value) return 'Default';
   const lower = value.toLowerCase();
@@ -392,9 +416,31 @@ function normalizeFallbackContext(value: string | undefined): string {
   return titleModelToken(value);
 }
 
+function normalizeFallbackFast(value: string | undefined): boolean | null {
+  if (value === undefined) return null;
+  const lower = value.toLowerCase();
+  if (lower === 'true') return true;
+  if (lower === 'false') return false;
+  return null;
+}
+
 function fallbackModelOption(id: string): AgentModelOption {
   if (!id || id === 'auto') {
-    return { id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto' };
+    return { id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto', fast: null };
+  }
+
+  const configured = parseConfiguredModelId(id);
+  if (configured) {
+    return {
+      id,
+      label: id,
+      model: prettifyModelId(configured.baseId),
+      thinking: configured.config['reasoning'] || configured.config['thinking']
+        ? titleModelToken(configured.config['reasoning'] ?? configured.config['thinking'])
+        : 'Default',
+      context: normalizeFallbackContext(configured.config['context']),
+      fast: normalizeFallbackFast(configured.config['fast'])
+    };
   }
 
   const source = id.toLowerCase();
@@ -419,7 +465,8 @@ function fallbackModelOption(id: string): AgentModelOption {
     label: `${id} (not found)`,
     model,
     thinking: thinking ? titleModelToken(thinking) : 'Default',
-    context: normalizeFallbackContext(context)
+    context: normalizeFallbackContext(context),
+    fast: null
   };
 }
 
@@ -445,6 +492,22 @@ const displaySessionMode = computed(() => {
   if (stored !== MODE_SENTINEL) return stored;
   return modeOptions.value.find((m) => m.current)?.id ?? MODE_SENTINEL;
 });
+const selectedModeOption = computed(
+  () =>
+    modeOptions.value.find((option) => option.id === displaySessionMode.value) ??
+    modeOptions.value.find((option) => option.id === MODE_SENTINEL) ?? {
+      id: MODE_SENTINEL,
+      label: 'Default'
+    }
+);
+const selectedModeIcon = computed(() => {
+  const id = selectedModeOption.value.id.toLowerCase();
+  if (id.includes('plan')) return ListChecks;
+  if (id.includes('debug')) return Bug;
+  if (id.includes('multi')) return ListTodo;
+  if (id.includes('ask')) return MessageSquare;
+  return Infinity;
+});
 
 const effectiveModelSelection = computed(() => {
   if (acpReportedModelId.value) return acpReportedModelId.value;
@@ -458,7 +521,11 @@ const selectedModelOption = computed(
     fallbackModelOption(effectiveModelSelection.value)
 );
 const bSelectedModelMissing = computed(
-  () => !!modelSelection.value && modelSelection.value !== 'auto' && !modelOptions.value.some((option) => option.id === modelSelection.value)
+  () =>
+    !!modelSelection.value &&
+    modelSelection.value !== 'auto' &&
+    !parseConfiguredModelId(modelSelection.value) &&
+    !modelOptions.value.some((option) => option.id === modelSelection.value)
 );
 
 const effectiveModelOptions = computed(() => {
@@ -500,6 +567,27 @@ const selectedContextName = computed(() => {
   }
   return contextList.value[0] ?? 'Default';
 });
+const bFastAvailable = computed(() =>
+  effectiveModelOptions.value.some(
+    (option) =>
+      option.model === selectedModelName.value &&
+      option.thinking === selectedThinkingName.value &&
+      option.context === selectedContextName.value &&
+      option.fast !== null
+  )
+);
+const selectedFastValue = computed(() => {
+  const current = selectedModelOption.value;
+  if (
+    current.model === selectedModelName.value &&
+    current.thinking === selectedThinkingName.value &&
+    current.context === selectedContextName.value &&
+    current.fast !== null
+  ) {
+    return current.fast;
+  }
+  return false;
+});
 
 async function loadAvailableModels() {
   const agentType = session.value?.agentType;
@@ -509,9 +597,9 @@ async function loadAvailableModels() {
     const { data } = await settingsApi.getAgentModels(agentType);
     modelOptions.value = data.models.length > 0
       ? data.models
-      : [{ id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto' }];
+      : [{ id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto', fast: null }];
   } catch {
-    modelOptions.value = [{ id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto' }];
+    modelOptions.value = [{ id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto', fast: null }];
   } finally {
     bModelsLoading.value = false;
   }
@@ -654,11 +742,15 @@ function applyInboundConfigUpdate(config: Record<string, string>): void {
   }
 }
 
-function resolveModelOption(model: string, thinking: string, context: string): AgentModelOption | null {
+function resolveModelOption(model: string, thinking: string, context: string, fast?: boolean | null): AgentModelOption | null {
+  const wantsFast = fast !== undefined && fast !== null;
   return (
     effectiveModelOptions.value.find(
       (option) =>
-        option.model === model && option.thinking === thinking && option.context === context
+        option.model === model &&
+        option.thinking === thinking &&
+        option.context === context &&
+        (!wantsFast || option.fast === fast)
     ) ??
     effectiveModelOptions.value.find((option) => option.model === model && option.thinking === thinking) ??
     effectiveModelOptions.value.find((option) => option.model === model) ??
@@ -693,7 +785,24 @@ function onModelDimensionChange(kind: 'model' | 'thinking' | 'context', value: s
   const nextModel = kind === 'model' ? value : selectedModelName.value;
   const nextThinking = kind === 'thinking' ? value : selectedThinkingName.value;
   const nextContext = kind === 'context' ? value : selectedContextName.value;
-  const next = resolveModelOption(nextModel, nextThinking, nextContext);
+  const next = resolveModelOption(
+    nextModel,
+    nextThinking,
+    nextContext,
+    bFastAvailable.value ? selectedFastValue.value : null
+  );
+  if (next && next.id !== modelSelection.value) {
+    void persistModelSelection(next.id);
+  }
+}
+
+function onModelFastChange(checked: boolean): void {
+  const next = resolveModelOption(
+    selectedModelName.value,
+    selectedThinkingName.value,
+    selectedContextName.value,
+    checked
+  );
   if (next && next.id !== modelSelection.value) {
     void persistModelSelection(next.id);
   }
@@ -2561,8 +2670,34 @@ onUnmounted(() => {
           </div>
           <div class="flex items-end gap-2 px-2">
             <div
-              class="flex flex-1 min-w-0 min-h-[44px] items-end gap-0.5 rounded-md border border-fg/10 bg-fg/[0.06] pl-1 pr-1 transition-colors focus-within:border-primary/50"
+              class="flex flex-1 min-w-0 min-h-[44px] items-end gap-1 rounded-md border border-fg/10 bg-fg/[0.06] pl-1 pr-1 transition-colors focus-within:border-primary/50"
             >
+              <label
+                class="relative mb-[6px] ml-0.5 flex h-7 shrink-0 items-center overflow-hidden rounded-full border border-fg/[0.08] bg-fg/[0.08] text-text-muted transition-colors hover:bg-fg/[0.12] focus-within:border-primary/40 focus-within:text-text-primary"
+                :title="`Mode: ${selectedModeOption.label}`"
+              >
+                <component
+                  :is="selectedModeIcon"
+                  :size="14"
+                  :stroke-width="1.8"
+                  class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2"
+                />
+                <select
+                  :value="displaySessionMode"
+                  :disabled="bIsStreaming || bModesLoading || bSavingSessionMode"
+                  class="h-7 max-w-[118px] appearance-none truncate border-0 bg-transparent py-0 pl-7 pr-6 text-xs font-medium leading-none text-text-primary outline-none focus:ring-0 disabled:opacity-50"
+                  @change="onSessionModeChange(($event.target as HTMLSelectElement).value)"
+                >
+                  <option v-for="mode in modeOptions" :key="mode.id" :value="mode.id">
+                    {{ mode.label }}
+                  </option>
+                </select>
+                <ChevronDown
+                  :size="13"
+                  :stroke-width="1.8"
+                  class="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 opacity-70"
+                />
+              </label>
               <textarea
                 ref="textareaEl"
                 v-model="promptText"
@@ -2603,19 +2738,6 @@ onUnmounted(() => {
           </div>
           <div class="px-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] leading-none">
             <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <label class="flex min-w-0 items-center gap-1">
-                <span class="shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted">Mode</span>
-                <select
-                  :value="displaySessionMode"
-                  :disabled="bIsStreaming || bModesLoading || bSavingSessionMode"
-                  class="h-5! min-h-0! w-24 rounded border border-fg/[0.08] bg-transparent px-1.5! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
-                  @change="onSessionModeChange(($event.target as HTMLSelectElement).value)"
-                >
-                  <option v-for="mode in modeOptions" :key="mode.id" :value="mode.id">
-                    {{ mode.label }}
-                  </option>
-                </select>
-              </label>
               <label
                 v-for="cfg in agentConfigOptions"
                 :key="cfg.id"
@@ -2671,6 +2793,19 @@ onUnmounted(() => {
                     {{ context }}
                   </option>
                 </select>
+              </label>
+              <label
+                v-if="bFastAvailable"
+                class="flex min-w-0 cursor-pointer items-center gap-1"
+              >
+                <span class="shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted">Fast</span>
+                <input
+                  type="checkbox"
+                  class="h-3 w-3 shrink-0 rounded border-fg/[0.2] text-primary focus:ring-primary/40 disabled:opacity-50"
+                  :checked="selectedFastValue"
+                  :disabled="bIsStreaming || bModelsLoading || bSavingModelSelection"
+                  @change="onModelFastChange(($event.target as HTMLInputElement).checked)"
+                />
               </label>
             </div>
             <label

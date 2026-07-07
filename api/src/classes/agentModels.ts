@@ -20,6 +20,7 @@ export interface AgentModelOption {
   model: string;
   thinking: string;
   context: string;
+  fast: boolean | null;
   current?: boolean;
 }
 
@@ -41,6 +42,21 @@ function prettifyId(id: string): string {
     .join(' ');
 }
 
+function parseConfiguredModelId(id: string): { baseId: string; config: Record<string, string> } | null {
+  const match = id.match(/^([^\[]+)\[([^\]]+)\]$/);
+  if (!match) return null;
+
+  const config: Record<string, string> = {};
+  for (const part of match[2].split(',')) {
+    const [keyRaw, ...valueParts] = part.split('=');
+    const key = keyRaw?.trim().toLowerCase();
+    const value = valueParts.join('=').trim();
+    if (key && value) config[key] = value;
+  }
+
+  return { baseId: match[1].trim(), config };
+}
+
 function normalizeContext(value: string | undefined): string {
   if (!value) return 'Default';
   const lower = value.toLowerCase();
@@ -54,9 +70,27 @@ function normalizeThinking(value: string | undefined): string {
   return titleToken(value);
 }
 
-function extractDimensions(id: string, label: string): { model: string; thinking: string; context: string } {
+function normalizeFast(value: string | undefined): boolean | null {
+  if (value === undefined) return null;
+  const lower = value.toLowerCase();
+  if (lower === 'true') return true;
+  if (lower === 'false') return false;
+  return null;
+}
+
+function extractDimensions(id: string, label: string): { model: string; thinking: string; context: string; fast: boolean | null } {
   if (id === 'auto') {
-    return { model: 'Auto', thinking: 'Auto', context: 'Auto' };
+    return { model: 'Auto', thinking: 'Auto', context: 'Auto', fast: null };
+  }
+
+  const configured = parseConfiguredModelId(id) ?? parseConfiguredModelId(label);
+  if (configured) {
+    return {
+      model: prettifyId(configured.baseId),
+      thinking: normalizeThinking(configured.config['reasoning'] ?? configured.config['thinking']),
+      context: normalizeContext(configured.config['context']),
+      fast: normalizeFast(configured.config['fast'])
+    };
   }
 
   const source = `${id} ${label}`.toLowerCase();
@@ -77,7 +111,8 @@ function extractDimensions(id: string, label: string): { model: string; thinking
   return {
     model,
     thinking: normalizeThinking(thinking),
-    context: normalizeContext(context)
+    context: normalizeContext(context),
+    fast: null
   };
 }
 
@@ -113,7 +148,7 @@ function parseFlatModelsOutput(stdout: string): Array<{ id: string; label: strin
       continue;
     }
 
-    if (/^[a-z0-9][a-z0-9._:/-]*$/i.test(line)) {
+    if (/^[a-z0-9][a-z0-9._:/,\-[\]=]*$/i.test(line)) {
       models.push({ id: line, label: prettifyId(line) });
     }
   }
