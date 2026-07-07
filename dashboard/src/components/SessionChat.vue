@@ -176,8 +176,6 @@ const bSavingSessionMode = ref(false);
 const bSavingSessionConfig = ref(false);
 let modelSelectionSaveSeq = 0;
 let sessionModeSaveSeq = 0;
-let pendingPromptModeConfirmation: string | null = null;
-let pendingPromptModelConfirmation: string | null = null;
 const queuedPrompts = ref<ChatQueueItem[]>([]);
 const promptStorageKey = computed(() => `sessionPrompt:${props.workspaceId}:${props.sessionId}`);
 const workspaceName = computed(
@@ -422,7 +420,9 @@ function fallbackModelOption(id: string): AgentModelOption {
 }
 
 function normalizeStoredMode(mode: string | undefined): string {
-  if (!mode) return MODE_SENTINEL;
+  // `auto` is the legacy mode sentinel (renamed to `default`); map it so old sessions don't
+  // treat it as a non-existent concrete mode.
+  if (!mode || mode === 'auto') return MODE_SENTINEL;
   return mode;
 }
 
@@ -631,11 +631,9 @@ function onAgentConfigChange(configId: string, value: string): void {
   void persistSessionConfig(next);
 }
 
+// The agent's reported mode/model is the source of truth: always reflect and persist it so the
+// UI can never show a different mode/model than the one the agent is actually running.
 function applyInboundModeUpdate(modeId: string): void {
-  if (pendingPromptModeConfirmation) {
-    if (modeId !== pendingPromptModeConfirmation) return;
-    pendingPromptModeConfirmation = null;
-  }
   acpReportedModeId.value = modeId;
   modeOptions.value = modeOptions.value.map((m) => ({ ...m, current: m.id === modeId }));
   if (normalizeStoredMode(sessionMode.value) !== modeId) {
@@ -644,10 +642,6 @@ function applyInboundModeUpdate(modeId: string): void {
 }
 
 function applyInboundModelUpdate(modelId: string): void {
-  if (pendingPromptModelConfirmation) {
-    if (modelId !== pendingPromptModelConfirmation) return;
-    pendingPromptModelConfirmation = null;
-  }
   acpReportedModelId.value = modelId;
   modelOptions.value = modelOptions.value.map((m) => ({ ...m, current: m.id === modelId }));
   if (modelSelection.value !== modelId) {
@@ -734,7 +728,6 @@ async function persistModelSelection(newModelSelection: string) {
   const seq = ++modelSelectionSaveSeq;
   const prev = modelSelection.value;
   const prevSession = session.value;
-  pendingPromptModelConfirmation = null;
   acpReportedModelId.value = null;
   modelSelection.value = newModelSelection;
   if (session.value) {
@@ -1669,8 +1662,6 @@ function connectChatWs() {
         streamingThinkingText.value = '';
         streamingUsage.value = null;
         notifiedTodoIds.clear();
-        pendingPromptModeConfirmation = null;
-        pendingPromptModelConfirmation = null;
         bIsStreaming.value = false;
         scrollToBottomIfPinned();
         notifyTaskDone(
@@ -1687,14 +1678,10 @@ function connectChatWs() {
         streamingThinkingText.value = '';
         streamingUsage.value = null;
         notifiedTodoIds.clear();
-        pendingPromptModeConfirmation = null;
-        pendingPromptModelConfirmation = null;
         bIsStreaming.value = false;
       } else if (msg.type === 'server-shutdown') {
         chatError.value = 'Server disconnected';
         streamingThinkingText.value = '';
-        pendingPromptModeConfirmation = null;
-        pendingPromptModelConfirmation = null;
         bIsStreaming.value = false;
       } else if (msg.type === 'claude_limit_detected') {
         // Handle Claude limit detection event
@@ -1750,9 +1737,6 @@ function sendPrompt() {
   chatError.value = null;
   const imagePaths = pendingImages.value.map((img) => img.serverPath);
   const promptMode = displaySessionMode.value;
-  const storedMode = normalizeStoredMode(sessionMode.value);
-  pendingPromptModeConfirmation = storedMode !== MODE_SENTINEL ? promptMode : null;
-  pendingPromptModelConfirmation = modelSelection.value || 'auto';
   webSocket.send(JSON.stringify({
     type: 'prompt',
     text,
