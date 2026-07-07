@@ -3,7 +3,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { marked } from 'marked';
-import { Bug, ChevronDown, Infinity, ListChecks, ListTodo, MessageSquare } from 'lucide-vue-next';
+import { Bug, ChevronDown, Infinity as InfinityIcon, ListChecks, ListTodo, MessageSquare } from 'lucide-vue-next';
 
 // components
 import FilesView from '@/components/workspace/FilesComponent.vue';
@@ -392,13 +392,13 @@ const selectedModeOption = computed(
       label: 'Default'
     }
 );
-const selectedModeIcon = computed(() => {
+const selectedModeIconName = computed(() => {
   const id = selectedModeOption.value.id.toLowerCase();
-  if (id.includes('plan')) return ListChecks;
-  if (id.includes('debug')) return Bug;
-  if (id.includes('multi')) return ListTodo;
-  if (id.includes('ask')) return MessageSquare;
-  return Infinity;
+  if (id.includes('plan')) return 'plan';
+  if (id.includes('debug')) return 'debug';
+  if (id.includes('multi')) return 'multi';
+  if (id.includes('ask')) return 'ask';
+  return 'agent';
 });
 
 const effectiveModelSelection = computed(() => {
@@ -2505,8 +2505,32 @@ onUnmounted(() => {
                 class="relative mb-[6px] ml-0.5 flex h-7 shrink-0 items-center overflow-hidden rounded-full border border-fg/[0.08] bg-fg/[0.08] text-text-muted transition-colors hover:bg-fg/[0.12] focus-within:border-primary/40 focus-within:text-text-primary"
                 :title="`Mode: ${selectedModeOption.label}`"
               >
-                <component
-                  :is="selectedModeIcon"
+                <ListChecks
+                  v-if="selectedModeIconName === 'plan'"
+                  :size="14"
+                  :stroke-width="1.8"
+                  class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2"
+                />
+                <Bug
+                  v-else-if="selectedModeIconName === 'debug'"
+                  :size="14"
+                  :stroke-width="1.8"
+                  class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2"
+                />
+                <ListTodo
+                  v-else-if="selectedModeIconName === 'multi'"
+                  :size="14"
+                  :stroke-width="1.8"
+                  class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2"
+                />
+                <MessageSquare
+                  v-else-if="selectedModeIconName === 'ask'"
+                  :size="14"
+                  :stroke-width="1.8"
+                  class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2"
+                />
+                <InfinityIcon
+                  v-else
                   :size="14"
                   :stroke-width="1.8"
                   class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2"
