@@ -125,7 +125,7 @@ export async function applySessionModel(
   if (!modelOption || !conn.setSessionConfigOption) return;
 
   const values = flattenSelectValues(modelOption);
-  if (values.length > 0 && !values.includes(trimmed)) return;
+  if (values.length > 0 && !values.includes(trimmed) && trimmed !== 'auto') return;
 
   try {
     await withApplyTimeout(
