@@ -144,6 +144,7 @@ const messagesEl = ref<HTMLElement | null>(null);
 /** Bottom sentinel inside the scroll area so follow-bottom includes streaming + thinking. */
 const messagesScrollAnchor = ref<HTMLElement | null>(null);
 const textareaEl = ref<HTMLTextAreaElement | null>(null);
+const promptInputBoxRef = ref<HTMLElement | null>(null);
 const fileInputEl = ref<HTMLInputElement | null>(null);
 const lightboxSrc = ref<string | null>(null);
 const bShowScrollToBottom = ref(false);
@@ -2088,7 +2089,8 @@ function onVisibilityChange() {
 
 const PROMPT_SINGLE_LINE_HEIGHT = 32;
 const bPromptMultiline = ref(false);
-let textareaResizeObserver: ResizeObserver | null = null;
+let promptInputResizeObserver: ResizeObserver | null = null;
+let promptInputObservedWidth = 0;
 
 watch(promptText, (val) => {
   const key = promptStorageKey.value;
@@ -2100,29 +2102,76 @@ watch(promptText, (val) => {
   nextTick(() => resizeTextarea());
 });
 
-function resizeTextarea() {
-  const el = textareaEl.value;
-  if (!el) return;
+function measurePromptMultiline(el: HTMLTextAreaElement): boolean {
+  if (promptText.value.includes('\n')) return true;
+
+  const box = promptInputBoxRef.value;
+  if (!box) return false;
+
+  const modeEl = box.querySelector('.prompt-mode') as HTMLElement | null;
+  const attachEl = box.querySelector('.prompt-attach') as HTMLElement | null;
+  const modeWidth = modeEl?.offsetWidth ?? 0;
+  const attachWidth = attachEl?.offsetWidth ?? 36;
+  const boxStyles = getComputedStyle(box);
+  const padL = parseFloat(boxStyles.paddingLeft);
+  const padR = parseFloat(boxStyles.paddingRight);
+  const inlineWidth = box.clientWidth - modeWidth - attachWidth - padL - padR - 8;
+
+  const savedWidth = el.style.width;
+  const savedHeight = el.style.height;
+  el.style.width = `${Math.max(inlineWidth, 0)}px`;
+  el.style.height = 'auto';
+  const naturalHeight = el.scrollHeight;
+  el.style.width = savedWidth;
+  el.style.height = savedHeight;
+
+  return naturalHeight > PROMPT_SINGLE_LINE_HEIGHT + 1;
+}
+
+function applyTextareaHeight(el: HTMLTextAreaElement): void {
   el.style.height = 'auto';
   const height = Math.min(el.scrollHeight, 160);
   el.style.height = `${height}px`;
-  bPromptMultiline.value = height > PROMPT_SINGLE_LINE_HEIGHT + 1;
 }
 
-function observePromptTextarea() {
-  textareaResizeObserver?.disconnect();
-  textareaResizeObserver = null;
+function resizeTextarea() {
   const el = textareaEl.value;
   if (!el) return;
-  textareaResizeObserver = new ResizeObserver(() => resizeTextarea());
-  textareaResizeObserver.observe(el);
+
+  const nextMultiline = measurePromptMultiline(el);
+  const multilineChanged = bPromptMultiline.value !== nextMultiline;
+  bPromptMultiline.value = nextMultiline;
+
+  if (multilineChanged) {
+    nextTick(() => {
+      if (textareaEl.value) applyTextareaHeight(textareaEl.value);
+    });
+    return;
+  }
+
+  applyTextareaHeight(el);
+}
+
+function observePromptInputBox() {
+  promptInputResizeObserver?.disconnect();
+  promptInputResizeObserver = null;
+  const box = promptInputBoxRef.value;
+  if (!box) return;
+  promptInputObservedWidth = box.clientWidth;
+  promptInputResizeObserver = new ResizeObserver((entries) => {
+    const width = entries[0]?.contentRect.width ?? 0;
+    if (Math.abs(width - promptInputObservedWidth) < 1) return;
+    promptInputObservedWidth = width;
+    resizeTextarea();
+  });
+  promptInputResizeObserver.observe(box);
 }
 
 watch(activeTab, (tab) => {
   if (tab === 'chat') {
     nextTick(() => {
       resizeTextarea();
-      observePromptTextarea();
+      observePromptInputBox();
     });
     if (!webSocket) {
       if (wsReconnectTimer !== null) {
@@ -2164,7 +2213,7 @@ watch(
       connectChatWs();
       await nextTick();
       resizeTextarea();
-      observePromptTextarea();
+      observePromptInputBox();
     }
   }
 );
@@ -2187,7 +2236,7 @@ onMounted(async () => {
   if (savedPrompt != null) promptText.value = savedPrompt;
   await nextTick();
   resizeTextarea();
-  observePromptTextarea();
+  observePromptInputBox();
 
   await fetchSession();
   connectChatWs();
@@ -2206,8 +2255,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   wsUnmounted = true;
-  textareaResizeObserver?.disconnect();
-  textareaResizeObserver = null;
+  promptInputResizeObserver?.disconnect();
+  promptInputResizeObserver = null;
   if (chatInputMql) {
     chatInputMql.removeEventListener('change', syncChatInputBreakpoint);
     chatInputMql = null;
@@ -2884,6 +2933,7 @@ onUnmounted(() => {
           </div>
           <div class="flex items-end gap-2 px-2">
             <div
+              ref="promptInputBoxRef"
               class="prompt-input-box flex-1 min-w-0 min-h-[44px] rounded-md border border-fg/10 bg-fg/[0.06] pl-1 pr-1 transition-colors focus-within:border-primary/50"
               :class="{ 'prompt-input-box--multiline': bPromptMultiline }"
             >
