@@ -700,7 +700,11 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
           repo: Type.Optional(Type.String())
         }),
         response: {
-          200: Type.Object({ output: Type.String() }),
+          200: Type.Object({
+            output: Type.String(),
+            upToDate: Type.Boolean(),
+            commitCount: Type.Number()
+          }),
           404: Type.Object({ error: Type.String() }),
           400: Type.Object({ error: Type.String() })
         }
@@ -714,12 +718,17 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         );
         if (!context) return reply.code(404).send({ error: 'Workspace not found' });
 
-        const { stdout, stderr } = await execFileAsync('git', ['pull', '--ff-only'], {
+        const opts = {
           cwd: context.cwd,
           env: gitEnv(context.workspace),
           timeout: 60_000
-        });
-        return { output: (stdout + '\n' + stderr).trim() };
+        };
+        await execFileAsync('git', ['fetch'], opts);
+        const { behindCount } = await getBranchMeta(context.cwd);
+        const { stdout, stderr } = await execFileAsync('git', ['pull', '--ff-only'], opts);
+        const output = (stdout + '\n' + stderr).trim();
+        const upToDate = behindCount === 0;
+        return { output, upToDate, commitCount: upToDate ? 0 : behindCount };
       } catch (err) {
         return reply.code(400).send({ error: gitErrorMessage(err) });
       }
