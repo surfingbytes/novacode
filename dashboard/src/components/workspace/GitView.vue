@@ -70,6 +70,7 @@ const gitActionResult = ref<{ type: 'success' | 'error'; text: string; repo?: st
 const branches = ref<GitBranch[]>([]);
 const bBranchesLoading = ref<boolean>(false);
 const bPulling = ref<boolean>(false);
+const bFetching = ref<boolean>(false);
 const bSwitchingBranch = ref<boolean>(false);
 const bCreatingBranch = ref<boolean>(false);
 const bDiscarding = ref<boolean>(false);
@@ -127,6 +128,7 @@ const canCommit = computed(
     committingRepo.value === null &&
     pushingRepo.value === null &&
     !bPulling.value &&
+    !bFetching.value &&
     !bSwitchingBranch.value &&
     !bCreatingBranch.value &&
     !bDiscarding.value &&
@@ -138,6 +140,7 @@ const canPushSingleRepo = computed(
     pushingRepo.value === null &&
     committingRepo.value === null &&
     !bPulling.value &&
+    !bFetching.value &&
     !bSwitchingBranch.value &&
     !bCreatingBranch.value &&
     !bDiscarding.value &&
@@ -154,6 +157,7 @@ const canCommitActiveRepo = computed((): boolean => {
     committingRepo.value === null &&
     pushingRepo.value === null &&
     !bPulling.value &&
+    !bFetching.value &&
     !bSwitchingBranch.value &&
     !bCreatingBranch.value &&
     !bDiscarding.value &&
@@ -166,6 +170,7 @@ const canPushActiveRepo = computed(
     pushingRepo.value === null &&
     committingRepo.value === null &&
     !bPulling.value &&
+    !bFetching.value &&
     !bSwitchingBranch.value &&
     !bCreatingBranch.value &&
     !bDiscarding.value &&
@@ -184,6 +189,7 @@ const gitOperationInProgress = computed(
     committingRepo.value !== null ||
     pushingRepo.value !== null ||
     bPulling.value ||
+    bFetching.value ||
     bSwitchingBranch.value ||
     bCreatingBranch.value ||
     bDiscarding.value ||
@@ -191,6 +197,9 @@ const gitOperationInProgress = computed(
 );
 const canPullActiveRepo = computed(
   (): boolean => !!activeRepo.value?.upstreamBranch && !gitOperationInProgress.value
+);
+const canFetchActiveRepo = computed(
+  (): boolean => !!activeRepo.value && !gitOperationInProgress.value
 );
 const canSwitchBranch = computed(
   (): boolean =>
@@ -216,6 +225,11 @@ const filteredBranches = computed((): GitBranch[] => {
 });
 const gitActionsMenuItems = computed(
   (): ContextMenuItem[] => [
+    {
+      key: 'fetch',
+      label: 'Fetch',
+      disabled: !canFetchActiveRepo.value
+    },
     {
       key: 'pull',
       label: 'Pull',
@@ -245,6 +259,7 @@ const canGenerateCommitMessage = (targetRepo: string): boolean =>
   committingRepo.value === null &&
   pushingRepo.value === null &&
   !bPulling.value &&
+  !bFetching.value &&
   !bSwitchingBranch.value &&
   !bCreatingBranch.value &&
   !bDiscarding.value &&
@@ -457,6 +472,33 @@ const pullResultMessage = (upToDate: boolean, commitCount: number): string => {
   return `Pulled ${commitCount} commit${commitCount === 1 ? '' : 's'}`;
 };
 
+const fetchResultMessage = (upToDate: boolean, behindCount: number, hasUpstream: boolean): string => {
+  if (!hasUpstream) return 'Fetched from remote';
+  if (upToDate) return 'Already up to date with remote';
+  return `Fetched from remote · ${behindCount} commit${behindCount === 1 ? '' : 's'} behind`;
+};
+
+const fetchActiveRepo = async (): Promise<void> => {
+  const r = activeRepo.value;
+  if (!r || !canFetchActiveRepo.value) return;
+  bShowGitActions.value = false;
+  bGitActionsMenuOpen.value = false;
+  bFetching.value = true;
+  try {
+    const response = await gitApi.fetch(props.workspaceId, r.repo);
+    setGitActionResult(
+      'success',
+      fetchResultMessage(response.data.upToDate, response.data.behindCount, !!r.upstreamBranch),
+      r.repo
+    );
+    await refresh();
+  } catch (e: unknown) {
+    setGitActionResult('error', gitErrorMessage(e, 'Fetch failed'), r.repo);
+  } finally {
+    bFetching.value = false;
+  }
+};
+
 const pullActiveRepo = async (): Promise<void> => {
   const r = activeRepo.value;
   if (!r || !canPullActiveRepo.value) return;
@@ -510,6 +552,10 @@ const openGitActions = (): void => {
 };
 
 const onGitActionPick = (key: string): void => {
+  if (key === 'fetch') {
+    fetchActiveRepo();
+    return;
+  }
   if (key === 'pull') {
     pullActiveRepo();
     return;
@@ -1165,6 +1211,24 @@ onUnmounted((): void => {
             </button>
           </div>
           <div class="px-3 pb-3">
+            <button
+              class="w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-text-primary hover:bg-fg/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              type="button"
+              :disabled="!canFetchActiveRepo"
+              @click="fetchActiveRepo"
+            >
+              <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-fg/[0.05] text-text-muted">
+                <div
+                  v-if="bFetching"
+                  class="w-3.5 h-3.5 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
+                ></div>
+                <RefreshCw v-else :size="16" :stroke-width="1.7" class="select-none" aria-hidden="true" />
+              </span>
+              <span class="min-w-0">
+                <span class="block font-medium">Fetch</span>
+                <span class="block text-xs text-text-muted">Update remote branch info without merging</span>
+              </span>
+            </button>
             <button
               class="w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-text-primary hover:bg-fg/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               type="button"

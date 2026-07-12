@@ -319,6 +319,12 @@ export interface GitPullResponse {
   commitCount: number;
 }
 
+export interface GitFetchResponse {
+  output: string;
+  upToDate: boolean;
+  behindCount: number;
+}
+
 export const gitApi = {
   status: (
     workspaceId: string
@@ -367,6 +373,10 @@ export const gitApi = {
     }),
   pull: (workspaceId: string, repo?: string): ReturnType<typeof http.post<GitPullResponse>> =>
     http.post<GitPullResponse>(`/git/workspace/${workspaceId}/pull`, undefined, {
+      params: { repo }
+    }),
+  fetch: (workspaceId: string, repo?: string): ReturnType<typeof http.post<GitFetchResponse>> =>
+    http.post<GitFetchResponse>(`/git/workspace/${workspaceId}/fetch`, undefined, {
       params: { repo }
     }),
   checkout: (
