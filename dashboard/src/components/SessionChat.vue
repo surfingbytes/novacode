@@ -2238,6 +2238,10 @@ function onVisibilityChange() {
   }
 }
 
+const PROMPT_SINGLE_LINE_HEIGHT = 32;
+const bPromptMultiline = ref(false);
+let textareaResizeObserver: ResizeObserver | null = null;
+
 watch(promptText, (val) => {
   const key = promptStorageKey.value;
   if (!val) {
@@ -2252,16 +2256,33 @@ function resizeTextarea() {
   const el = textareaEl.value;
   if (!el) return;
   el.style.height = 'auto';
-  el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+  const height = Math.min(el.scrollHeight, 160);
+  el.style.height = `${height}px`;
+  bPromptMultiline.value = height > PROMPT_SINGLE_LINE_HEIGHT + 1;
+}
+
+function observePromptTextarea() {
+  textareaResizeObserver?.disconnect();
+  textareaResizeObserver = null;
+  const el = textareaEl.value;
+  if (!el) return;
+  textareaResizeObserver = new ResizeObserver(() => resizeTextarea());
+  textareaResizeObserver.observe(el);
 }
 
 watch(activeTab, (tab) => {
-  if (tab === 'chat' && !webSocket) {
-    if (wsReconnectTimer !== null) {
-      clearTimeout(wsReconnectTimer);
-      wsReconnectTimer = null;
+  if (tab === 'chat') {
+    nextTick(() => {
+      resizeTextarea();
+      observePromptTextarea();
+    });
+    if (!webSocket) {
+      if (wsReconnectTimer !== null) {
+        clearTimeout(wsReconnectTimer);
+        wsReconnectTimer = null;
+      }
+      connectChatWs();
     }
-    connectChatWs();
   }
 });
 
@@ -2293,6 +2314,9 @@ watch(
     await fetchSession();
     if (activeTab.value === 'chat') {
       connectChatWs();
+      await nextTick();
+      resizeTextarea();
+      observePromptTextarea();
     }
   }
 );
@@ -2313,6 +2337,9 @@ onMounted(async () => {
 
   const savedPrompt = localStorage.getItem(promptStorageKey.value);
   if (savedPrompt != null) promptText.value = savedPrompt;
+  await nextTick();
+  resizeTextarea();
+  observePromptTextarea();
 
   await fetchSession();
   connectChatWs();
@@ -2331,6 +2358,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   wsUnmounted = true;
+  textareaResizeObserver?.disconnect();
+  textareaResizeObserver = null;
   if (chatInputMql) {
     chatInputMql.removeEventListener('change', syncChatInputBreakpoint);
     chatInputMql = null;
@@ -3026,11 +3055,13 @@ onUnmounted(() => {
           </div>
           <div class="flex items-end gap-2 px-2">
             <div
-              class="flex flex-1 min-w-0 min-h-[44px] items-end gap-1 rounded-md border border-fg/10 bg-fg/[0.06] pl-1 pr-1 transition-colors focus-within:border-primary/50"
+              class="prompt-input-box flex-1 min-w-0 min-h-[44px] rounded-md border border-fg/10 bg-fg/[0.06] pl-1 pr-1 transition-colors focus-within:border-primary/50"
+              :class="{ 'prompt-input-box--multiline': bPromptMultiline }"
             >
               <div
                 ref="modeMenuRef"
-                class="relative mb-[6px] ml-0.5 shrink-0"
+                class="prompt-mode relative ml-0.5 shrink-0"
+                :class="bPromptMultiline ? 'mb-0.5' : 'mb-[6px]'"
                 :title="`Mode: ${selectedModeOption.label}`"
               >
                 <button
@@ -3134,7 +3165,7 @@ onUnmounted(() => {
                 @paste="onPaste"
                 :placeholder="promptPlaceholder"
                 rows="1"
-                class="flex-1 min-w-0 resize-none self-center bg-transparent text-text-primary placeholder-text-muted text-sm px-2 py-1.5 leading-5 rounded-none border-0 shadow-none focus:outline-none focus:ring-0 box-border"
+                class="prompt-textarea w-full min-w-0 resize-none bg-transparent text-text-primary placeholder-text-muted text-sm px-2 py-1.5 leading-5 rounded-none border-0 shadow-none focus:outline-none focus:ring-0 box-border"
                 style="height: 32px; max-height: 160px; overflow-y: auto"
               ></textarea>
               <button
@@ -3142,7 +3173,7 @@ onUnmounted(() => {
                 @click="onAttachClick"
                 :disabled="bIsStreaming"
                 title="Attach image"
-                class="button is-transparent is-icon h-[36px]! mb-[3px]! px-0! aspect-square! shrink-0"
+                class="prompt-attach button is-transparent is-icon h-[36px]! mb-[3px]! px-0! aspect-square! shrink-0"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
               </button>
@@ -3370,6 +3401,52 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.prompt-input-box {
+  display: grid;
+  align-items: end;
+  gap: 0.25rem;
+  grid-template-columns: auto 1fr auto;
+  grid-template-rows: auto;
+}
+
+.prompt-input-box:not(.prompt-input-box--multiline) .prompt-mode {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.prompt-input-box:not(.prompt-input-box--multiline) .prompt-textarea {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+}
+
+.prompt-input-box:not(.prompt-input-box--multiline) .prompt-attach {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.prompt-input-box--multiline {
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+}
+
+.prompt-input-box--multiline .prompt-textarea {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: start;
+}
+
+.prompt-input-box--multiline .prompt-attach {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: end;
+}
+
+.prompt-input-box--multiline .prompt-mode {
+  grid-column: 1;
+  grid-row: 2;
+}
+
 .lightbox-enter-active,
 .lightbox-leave-active {
   transition: opacity 0.22s ease;
