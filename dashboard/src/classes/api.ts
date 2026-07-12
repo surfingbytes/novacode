@@ -272,6 +272,12 @@ export interface GitBranchesResponse {
   detached: boolean;
 }
 
+export interface GitPullResponse {
+  output: string;
+  upToDate: boolean;
+  commitCount: number;
+}
+
 export const gitApi = {
   status: (
     workspaceId: string
@@ -318,8 +324,8 @@ export const gitApi = {
     http.get<GitBranchesResponse>(`/git/workspace/${workspaceId}/branches`, {
       params: { repo }
     }),
-  pull: (workspaceId: string, repo?: string): ReturnType<typeof http.post<{ output: string }>> =>
-    http.post<{ output: string }>(`/git/workspace/${workspaceId}/pull`, undefined, {
+  pull: (workspaceId: string, repo?: string): ReturnType<typeof http.post<GitPullResponse>> =>
+    http.post<GitPullResponse>(`/git/workspace/${workspaceId}/pull`, undefined, {
       params: { repo }
     }),
   checkout: (

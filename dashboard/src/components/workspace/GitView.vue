@@ -452,6 +452,11 @@ const commitChanges = async (targetRepo: string): Promise<void> => {
   }
 };
 
+const pullResultMessage = (upToDate: boolean, commitCount: number): string => {
+  if (upToDate) return 'Already up to date';
+  return `Pulled ${commitCount} commit${commitCount === 1 ? '' : 's'}`;
+};
+
 const pullActiveRepo = async (): Promise<void> => {
   const r = activeRepo.value;
   if (!r || !canPullActiveRepo.value) return;
@@ -459,8 +464,12 @@ const pullActiveRepo = async (): Promise<void> => {
   bGitActionsMenuOpen.value = false;
   bPulling.value = true;
   try {
-    await gitApi.pull(props.workspaceId, r.repo);
-    setGitActionResult('success', 'Pulled latest changes', r.repo);
+    const response = await gitApi.pull(props.workspaceId, r.repo);
+    setGitActionResult(
+      'success',
+      pullResultMessage(response.data.upToDate, response.data.commitCount),
+      r.repo
+    );
     await refresh();
   } catch (e: unknown) {
     setGitActionResult('error', gitErrorMessage(e, 'Pull failed'), r.repo);
