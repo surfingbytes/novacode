@@ -689,6 +689,51 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
+  // POST /api/git/workspace/:workspaceId/fetch — update remote-tracking refs without merging
+  fastifyInstance.post(
+    '/api/git/workspace/:workspaceId/fetch',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        params: Type.Object({ workspaceId: Type.String() }),
+        querystring: Type.Object({
+          repo: Type.Optional(Type.String())
+        }),
+        response: {
+          200: Type.Object({
+            output: Type.String(),
+            upToDate: Type.Boolean(),
+            behindCount: Type.Number()
+          }),
+          404: Type.Object({ error: Type.String() }),
+          400: Type.Object({ error: Type.String() })
+        }
+      }
+    },
+    async (request, reply) => {
+      try {
+        const context = await resolveWorkspaceGitContext(
+          request.params.workspaceId,
+          request.query.repo ?? ''
+        );
+        if (!context) return reply.code(404).send({ error: 'Workspace not found' });
+
+        const opts = {
+          cwd: context.cwd,
+          env: gitEnv(context.workspace),
+          timeout: 60_000
+        };
+        const { stdout, stderr } = await execFileAsync('git', ['fetch'], opts);
+        const { behindCount, upstreamBranch } = await getBranchMeta(context.cwd);
+        const output = (stdout + '\n' + stderr).trim();
+        const upToDate = !upstreamBranch || behindCount === 0;
+        return { output, upToDate, behindCount };
+      } catch (err) {
+        return reply.code(400).send({ error: gitErrorMessage(err) });
+      }
+    }
+  );
+
   // POST /api/git/workspace/:workspaceId/pull — fast-forward pull current branch
   fastifyInstance.post(
     '/api/git/workspace/:workspaceId/pull',
