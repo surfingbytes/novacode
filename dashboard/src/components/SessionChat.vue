@@ -1198,9 +1198,9 @@ function processAcpUpdate(
   }
 
   if (sessionUpdate === 'agent_thought_chunk') {
-    const content = update.content as { type?: string; text?: string } | undefined;
+    const content = update.content as AgentThoughtChunkContent | undefined;
     if (opts?.liveThinking && !hideThinkingOutput.value && content?.text) {
-      streamingThinkingText.value += content.text;
+      mergeAgentThoughtChunk(content.text, content);
     }
     return;
   }
@@ -1361,6 +1361,61 @@ function isToolResultSuccess(toolCallObj: Record<string, unknown>): boolean {
  * Stream providers mix cumulative snapshots with incremental deltas and may repeat boundary tokens
  * (e.g. send "The shared" then " shared"). Merge without doubling identical or overlapping text.
  */
+function mergeStreamingTextChunks(previousText: string, incomingText: string): string {
+  if (!incomingText || incomingText === previousText) return previousText;
+  if (previousText.startsWith(incomingText)) return previousText;
+  if (incomingText.startsWith(previousText)) return incomingText;
+  if (previousText.endsWith(incomingText)) return previousText;
+  let overlap = 0;
+  const maxOverlap = Math.min(previousText.length, incomingText.length);
+  for (let len = maxOverlap; len > 0; len -= 1) {
+    if (previousText.endsWith(incomingText.slice(0, len))) {
+      overlap = len;
+      break;
+    }
+  }
+  return previousText + incomingText.slice(overlap);
+}
+
+type AgentThoughtChunkContent = {
+  type?: string;
+  text?: string;
+  annotations?: {
+    _meta?: {
+      heartbeat?: boolean;
+      elapsedSeconds?: number;
+    };
+  };
+};
+
+/** Strip cursor-agent-acp elapsed suffix, e.g. "Doing the thing... (12s)" → "Doing the thing..." */
+function agentThoughtStatusBase(text: string): string {
+  return text.replace(/\s\(\d+s\)\s*$/, '');
+}
+
+/**
+ * cursor-agent-acp sends funny progress lines as agent_thought_chunk (see getRandomProcessingText).
+ * Heartbeats replace the previous line; only genuine incremental thought text is appended.
+ */
+function mergeAgentThoughtChunk(text: string, content?: AgentThoughtChunkContent): void {
+  const isHeartbeat = content?.annotations?._meta?.heartbeat === true;
+  const prev = streamingThinkingText.value;
+
+  if (isHeartbeat || !prev) {
+    streamingThinkingText.value = text;
+    return;
+  }
+
+  const textBase = agentThoughtStatusBase(text);
+  const prevBase = agentThoughtStatusBase(prev);
+  if (textBase === prevBase || text.startsWith(prevBase) || prev.startsWith(textBase)) {
+    streamingThinkingText.value = text;
+    return;
+  }
+
+  streamingThinkingText.value = mergeStreamingTextChunks(prev, text);
+}
+
 function mergeAssistantTextIntoDisplayItems(
   assistantText: string,
   items: DisplayItem[]
@@ -1368,22 +1423,7 @@ function mergeAssistantTextIntoDisplayItems(
   const last = items[items.length - 1];
   if (last?.kind === 'text') {
     const prev = last.text ?? '';
-    if (!assistantText || assistantText === prev) return;
-    if (prev.startsWith(assistantText)) return;
-    if (assistantText.startsWith(prev)) {
-      last.text = assistantText;
-      return;
-    }
-    if (prev.endsWith(assistantText)) return;
-    let overlap = 0;
-    const maxOverlap = Math.min(prev.length, assistantText.length);
-    for (let len = maxOverlap; len > 0; len -= 1) {
-      if (prev.endsWith(assistantText.slice(0, len))) {
-        overlap = len;
-        break;
-      }
-    }
-    last.text = prev + assistantText.slice(overlap);
+    last.text = mergeStreamingTextChunks(prev, assistantText);
     return;
   }
   items.push({ kind: 'text', text: assistantText });
@@ -1444,7 +1484,7 @@ function processEventLine(
       event.subtype === 'delta' &&
       typeof event.text === 'string'
     ) {
-      streamingThinkingText.value += event.text;
+      streamingThinkingText.value = mergeStreamingTextChunks(streamingThinkingText.value, event.text);
     }
     return;
   }
