@@ -133,7 +133,8 @@ function categoryColorClass(name: string): string {
   return CATEGORY_COLORS[h % CATEGORY_COLORS.length];
 }
 
-const activeTab = ref<'chat' | 'files' | 'git'>('chat');
+type SessionTab = 'chat' | 'files' | 'git' | 'plan';
+const activeTab = ref<SessionTab>('chat');
 
 // ── Chat state ───────────────────────────────────────────────────────────────
 const messages = ref<ChatMessage[]>([]);
@@ -1063,6 +1064,17 @@ interface PlanEntry {
   status: string;
 }
 
+interface PlanDocument {
+  id: string;
+  title: string;
+  markdown: string;
+  entries: PlanEntry[];
+  completedCount: number;
+  renderedHtml: string;
+  createdAt: string;
+  live: boolean;
+}
+
 interface DisplayItem {
   kind: 'text' | 'tool' | 'todos' | 'plan';
   // text
@@ -1080,8 +1092,12 @@ interface DisplayItem {
   todoItems?: TodoDisplayItem[];
   todoDoneCount?: number;
   // plan (ACP native)
+  planId?: string;
+  planTitle?: string;
+  planMarkdown?: string;
   planEntries?: PlanEntry[];
   planCompletedCount?: number;
+  planRenderedHtml?: string;
 }
 
 interface DisplayChatMessage {
@@ -1105,6 +1121,7 @@ const streamingUsage = ref<{
   cost?: { amount: number; currency: string };
 } | null>(null);
 const expandedToolOutputIds = ref(new Set<string>());
+const selectedPlanId = ref<string | null>(null);
 
 function toggleToolOutput(callId: string): void {
   const next = new Set(expandedToolOutputIds.value);
@@ -1260,12 +1277,16 @@ function processAcpUpdate(
 
   if (sessionUpdate === 'plan') {
     const entries = update.entries as PlanEntry[] | undefined;
-    if (!entries?.length) return;
+    const title = typeof update.title === 'string' ? update.title : undefined;
+    const markdown = typeof update.markdown === 'string' ? update.markdown : undefined;
+    if (!entries?.length && !markdown?.trim()) return;
     const existing = items.find((i) => i.kind === 'plan');
     if (existing) {
-      existing.planEntries = entries;
+      existing.planEntries = entries ?? existing.planEntries;
+      existing.planTitle = title ?? existing.planTitle;
+      existing.planMarkdown = markdown ?? existing.planMarkdown;
     } else {
-      items.push({ kind: 'plan', planEntries: entries });
+      items.push({ kind: 'plan', planEntries: entries ?? [], planTitle: title, planMarkdown: markdown });
     }
     return;
   }
@@ -1627,13 +1648,77 @@ function prepareDisplayItem(item: DisplayItem): DisplayItem {
     };
   }
   if (item.kind === 'plan') {
+    const entries = item.planEntries ?? [];
     return {
       ...item,
-      planCompletedCount:
-        item.planEntries?.filter((entry) => entry.status === 'completed').length ?? 0
+      planCompletedCount: entries.filter((entry) => isPlanEntryCompleted(entry.status)).length,
+      planRenderedHtml: renderMdCached(item.planMarkdown ?? markdownFromPlanEntries(entries))
     };
   }
   return item;
+}
+
+function isPlanEntryCompleted(status: string | undefined): boolean {
+  if (!status) return false;
+  const normalized = status.toLowerCase();
+  return normalized === 'completed' || normalized === 'done' || normalized === 'todo_status_completed';
+}
+
+function isPlanEntryInProgress(status: string | undefined): boolean {
+  if (!status) return false;
+  const normalized = status.toLowerCase();
+  return normalized === 'in_progress' || normalized === 'in-progress' || normalized === 'running' || normalized === 'todo_status_in_progress';
+}
+
+function planStatusIcon(status: string | undefined): 'completed' | 'in_progress' | 'pending' {
+  if (isPlanEntryCompleted(status)) return 'completed';
+  if (isPlanEntryInProgress(status)) return 'in_progress';
+  return 'pending';
+}
+
+function escapePlanEntryContent(content: string): string {
+  return content.replace(/\r\n/g, '\n').trim();
+}
+
+function markdownFromPlanEntries(entries: PlanEntry[]): string {
+  if (entries.length === 0) return '';
+  return entries
+    .map((entry) => {
+      const box = isPlanEntryCompleted(entry.status) ? 'x' : ' ';
+      const content = escapePlanEntryContent(entry.content).replace(/\n/g, '\n  ');
+      return `- [${box}] ${content}`;
+    })
+    .join('\n');
+}
+
+function planTitle(item: DisplayItem, fallbackIndex: number): string {
+  const title = item.planTitle?.trim();
+  if (title) return title;
+  return fallbackIndex === 0 ? 'Plan' : `Plan ${fallbackIndex + 1}`;
+}
+
+function planDocumentFromItem(
+  item: DisplayItem,
+  id: string,
+  fallbackIndex: number,
+  createdAt: string,
+  live: boolean
+): PlanDocument | null {
+  if (item.kind !== 'plan') return null;
+  const entries = item.planEntries ?? [];
+  const markdown = item.planMarkdown?.trim() || markdownFromPlanEntries(entries);
+  if (!markdown && entries.length === 0) return null;
+  const completedCount = entries.filter((entry) => isPlanEntryCompleted(entry.status)).length;
+  return {
+    id,
+    title: planTitle(item, fallbackIndex),
+    markdown,
+    entries,
+    completedCount,
+    renderedHtml: renderMdCached(markdown),
+    createdAt,
+    live
+  };
 }
 
 const displayMessages = computed<DisplayChatMessage[]>(() =>
@@ -1642,6 +1727,12 @@ const displayMessages = computed<DisplayChatMessage[]>(() =>
       msg.role === 'assistant'
         ? parseEventsToItems(msg.events ?? [], { applyConfigSync: false }).map(prepareDisplayItem)
         : [];
+    let planIndex = 0;
+    for (const item of items) {
+      if (item.kind !== 'plan') continue;
+      item.planId = `${msg.createdAt}-${index}-plan-${planIndex}`;
+      planIndex += 1;
+    }
     return {
       msg,
       key: `${msg.createdAt}-${index}`,
@@ -1650,7 +1741,69 @@ const displayMessages = computed<DisplayChatMessage[]>(() =>
     };
   })
 );
-const streamingDisplayItems = computed(() => streamingItems.value.map(prepareDisplayItem));
+const streamingDisplayItems = computed(() => {
+  const items = streamingItems.value.map(prepareDisplayItem);
+  let planIndex = 0;
+  for (const item of items) {
+    if (item.kind !== 'plan') continue;
+    item.planId = `live-plan-${planIndex}`;
+    planIndex += 1;
+  }
+  return items;
+});
+
+const planDocuments = computed<PlanDocument[]>(() => {
+  const docs: PlanDocument[] = [];
+  for (const { msg, items, key } of displayMessages.value) {
+    let planIndex = 0;
+    for (const item of items) {
+      if (item.kind !== 'plan') continue;
+      const doc = planDocumentFromItem(
+        item,
+        item.planId ?? `${key}-plan-${planIndex}`,
+        planIndex,
+        msg.createdAt,
+        false
+      );
+      if (doc) docs.push(doc);
+      planIndex += 1;
+    }
+  }
+  let livePlanIndex = 0;
+  for (const item of streamingDisplayItems.value) {
+    if (item.kind !== 'plan') continue;
+    const doc = planDocumentFromItem(
+      item,
+      item.planId ?? `live-plan-${livePlanIndex}`,
+      livePlanIndex,
+      new Date().toISOString(),
+      true
+    );
+    if (doc) docs.push(doc);
+    livePlanIndex += 1;
+  }
+  return docs;
+});
+
+const selectedPlanDocument = computed<PlanDocument | null>(() => {
+  if (selectedPlanId.value) {
+    const selected = planDocuments.value.find((doc) => doc.id === selectedPlanId.value);
+    if (selected) return selected;
+  }
+  return planDocuments.value[planDocuments.value.length - 1] ?? null;
+});
+
+const bShowPlanTab = computed(() => activeTab.value === 'plan' || planDocuments.value.length > 0);
+
+function openPlan(planId: string | undefined): void {
+  if (planId) selectedPlanId.value = planId;
+  activeTab.value = 'plan';
+}
+
+function closePlanTab(): void {
+  selectedPlanId.value = null;
+  activeTab.value = 'chat';
+}
 
 function parseNestedEvent(line: string): Record<string, unknown> | null {
   let event: Record<string, unknown>;
@@ -1724,6 +1877,13 @@ function notificationPreviewFromStreamingItems(items: DisplayItem[]): string {
       const done = item.todoItems.filter((t) => t.status === 'TODO_STATUS_COMPLETED').length;
       const total = item.todoItems.length;
       return `Todos: ${done}/${total} completed`;
+    }
+    if (item.kind === 'plan') {
+      const total = item.planEntries?.length ?? 0;
+      if (total > 0) {
+        return `Plan: ${item.planCompletedCount ?? 0}/${total} completed`;
+      }
+      return 'Plan ready';
     }
   }
   return '';
@@ -1899,8 +2059,14 @@ function connectChatWs() {
           handleClaudeLimitDetected(controlMessage);
         }
         if (shouldSkipDuplicateVibeEventLine(line)) return;
+        const previousPlanCount = streamingItems.value.filter((item) => item.kind === 'plan').length;
         streamingRawLines.push(line);
         processEventLine(line, streamingItems.value, { liveThinking: true });
+        const nextPlanCount = streamingItems.value.filter((item) => item.kind === 'plan').length;
+        if (nextPlanCount > previousPlanCount) {
+          selectedPlanId.value = `live-plan-${nextPlanCount - 1}`;
+          activeTab.value = 'plan';
+        }
         for (const item of streamingItems.value) {
           if (item.kind !== 'todos' || !item.todoItems) continue;
           for (const t of item.todoItems) {
@@ -2266,6 +2432,8 @@ watch(
     streamingThinkingText.value = '';
     streamingUsage.value = null;
     notifiedTodoIds.clear();
+    selectedPlanId.value = null;
+    if (activeTab.value === 'plan') activeTab.value = 'chat';
     chatError.value = null;
     session.value = null;
     bLoading.value = true;
@@ -2599,33 +2767,27 @@ onUnmounted(() => {
                     <div
                       class="max-w-[85%] w-80 rounded-xl border border-fg/10 bg-fg/[0.03] overflow-hidden"
                     >
-                      <div class="flex items-center gap-2 px-3 py-1.5 border-b border-fg/10">
+                      <div class="flex items-center gap-2 px-3 py-2">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none text-text-muted shrink-0" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
-                        <span class="text-xs font-medium text-text-primary">Plan</span>
-                        <span class="ml-auto text-xs text-text-muted">
-                          {{ item.planCompletedCount }}/{{ item.planEntries?.length }}
-                        </span>
-                      </div>
-                      <ul class="px-3 py-1.5 space-y-1">
-                        <li
-                          v-for="(entry, ei) in item.planEntries"
-                          :key="ei"
-                          class="flex items-start gap-2 text-xs"
+                        <div class="min-w-0 flex-1">
+                          <div class="truncate text-xs font-medium text-text-primary">
+                            {{ item.planTitle ?? 'Plan ready' }}
+                          </div>
+                          <div class="text-[11px] text-text-muted">
+                            <template v-if="item.planEntries?.length">
+                              {{ item.planCompletedCount }}/{{ item.planEntries.length }} completed
+                            </template>
+                            <template v-else>Document ready</template>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          class="shrink-0 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+                          @click="openPlan(item.planId)"
                         >
-                          <svg v-if="entry.status === 'completed'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-green-500 select-none shrink-0 mt-px" aria-hidden="true"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                          <svg v-else-if="entry.status === 'in_progress'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-primary select-none shrink-0 mt-px" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                          <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-text-muted select-none shrink-0 mt-px" aria-hidden="true"><circle cx="12" cy="12" r="10"/></svg>
-                          <span
-                            class="leading-snug"
-                            :class="
-                              entry.status === 'completed'
-                                ? 'text-text-muted line-through'
-                                : 'text-text-primary'
-                            "
-                            >{{ entry.content }}</span
-                          >
-                        </li>
-                      </ul>
+                          Show plan
+                        </button>
+                      </div>
                     </div>
                   </div>
                   <!-- Tool card -->
@@ -2740,35 +2902,27 @@ onUnmounted(() => {
                   <div
                     class="max-w-[85%] w-80 rounded-xl border border-fg/10 bg-fg/[0.03] overflow-hidden"
                   >
-                    <div class="flex items-center gap-2 px-3 py-1.5 border-b border-fg/10">
+                    <div class="flex items-center gap-2 px-3 py-2">
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none text-text-muted shrink-0" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
-                      <span class="text-xs font-medium text-text-primary">Plan</span>
-                      <span class="ml-auto text-xs text-text-muted">
-                        {{ item.planCompletedCount }}/{{ item.planEntries?.length }}
-                      </span>
-                    </div>
-                    <ul class="px-3 py-1.5 space-y-1">
-                      <li
-                        v-for="(entry, ei) in item.planEntries"
-                        :key="ei"
-                        class="flex items-start gap-2 text-xs"
+                      <div class="min-w-0 flex-1">
+                        <div class="truncate text-xs font-medium text-text-primary">
+                          {{ item.planTitle ?? 'Plan ready' }}
+                        </div>
+                        <div class="text-[11px] text-text-muted">
+                          <template v-if="item.planEntries?.length">
+                            {{ item.planCompletedCount }}/{{ item.planEntries.length }} completed
+                          </template>
+                          <template v-else>Document ready</template>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        class="shrink-0 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
+                        @click="openPlan(item.planId)"
                       >
-                        <svg v-if="entry.status === 'completed'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-green-500 select-none shrink-0 mt-px" aria-hidden="true"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                        <svg v-else-if="entry.status === 'in_progress'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-primary animate-pulse select-none shrink-0 mt-px" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                        <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-text-muted select-none shrink-0 mt-px" aria-hidden="true"><circle cx="12" cy="12" r="10"/></svg>
-                        <span
-                          class="leading-snug"
-                          :class="
-                            entry.status === 'completed'
-                              ? 'text-text-muted line-through'
-                              : entry.status === 'in_progress'
-                                ? 'text-text-primary'
-                                : 'text-text-muted/70'
-                          "
-                          >{{ entry.content }}</span
-                        >
-                      </li>
-                    </ul>
+                        Show plan
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <!-- Tool card — live -->
@@ -3246,6 +3400,73 @@ onUnmounted(() => {
         </div>
       </template>
 
+      <!-- Plan -->
+      <div
+        v-else-if="activeTab === 'plan'"
+        class="flex-1 min-h-0 overflow-hidden flex flex-col bg-bg"
+      >
+        <div class="shrink-0 border-b border-fg/10 px-4 md:px-6 py-3 flex items-center gap-3">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-semibold text-text-primary">
+                {{ selectedPlanDocument?.title ?? 'Plan' }}
+              </span>
+              <span
+                v-if="selectedPlanDocument?.live"
+                class="rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+              >
+                Live
+              </span>
+            </div>
+            <div v-if="selectedPlanDocument" class="text-xs text-text-muted">
+              <template v-if="selectedPlanDocument.entries.length">
+                {{ selectedPlanDocument.completedCount }}/{{ selectedPlanDocument.entries.length }} completed
+              </template>
+              <template v-else>Plan document</template>
+            </div>
+          </div>
+
+          <select
+            v-if="planDocuments.length > 1"
+            class="max-w-[12rem] rounded-md border border-fg/15 bg-bg px-2 py-1 text-xs text-text-primary outline-none focus:border-primary"
+            :value="selectedPlanDocument?.id"
+            @change="selectedPlanId = ($event.target as HTMLSelectElement).value"
+          >
+            <option
+              v-for="plan in planDocuments"
+              :key="plan.id"
+              :value="plan.id"
+            >
+              {{ plan.title }}{{ plan.live ? ' (live)' : '' }}
+            </option>
+          </select>
+
+          <button
+            type="button"
+            class="button is-transparent is-icon"
+            title="Close plan"
+            @click="closePlanTab"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        <div class="flex-1 min-h-0 overflow-y-auto px-4 md:px-8 py-6">
+          <div
+            v-if="selectedPlanDocument"
+            class="mx-auto max-w-3xl rounded-2xl border border-fg/10 bg-fg/[0.03] px-5 py-4 md:px-8 md:py-6"
+          >
+            <div
+              class="chat-markdown text-sm text-text-primary"
+              v-html="selectedPlanDocument.renderedHtml"
+            ></div>
+          </div>
+          <div v-else class="h-full flex items-center justify-center text-sm text-text-muted">
+            No plan has been created for this session yet.
+          </div>
+        </div>
+      </div>
+
       <!-- Files -->
       <FilesView
         v-else-if="activeTab === 'files'"
@@ -3278,6 +3499,18 @@ onUnmounted(() => {
           @click="activeTab = 'chat'"
         >
           Chat
+        </button>
+        <button
+          v-if="bShowPlanTab"
+          class="flex-1 md:flex-none px-4 py-3 text-sm md:px-4 md:py-2 md:text-sm font-medium transition-colors border-t-2 md:border-t-0 md:rounded-full inline-flex items-center justify-center gap-1"
+          :class="
+            activeTab === 'plan'
+              ? 'border-primary text-text-primary bg-fg/[0.03]'
+              : 'border-transparent text-text-muted hover:text-text-primary hover:bg-fg/[0.04]'
+          "
+          @click="openPlan(selectedPlanDocument?.id)"
+        >
+          Plan
         </button>
         <button
           class="flex-1 md:flex-none px-4 py-3 text-sm md:px-4 md:py-2 md:text-sm font-medium transition-colors border-t-2 md:border-t-0 md:rounded-full"
