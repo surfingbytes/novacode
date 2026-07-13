@@ -3586,7 +3586,7 @@ onUnmounted(() => {
 
       <!-- Plan -->
       <div
-        v-else-if="activeTab === 'plan'"
+        v-if="activeTab === 'plan'"
         class="flex-1 min-h-0 overflow-hidden flex flex-col bg-bg"
       >
         <div class="shrink-0 border-b border-fg/10 px-4 md:px-6 py-3 flex items-center gap-3">
