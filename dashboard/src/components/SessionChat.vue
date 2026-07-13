@@ -1290,6 +1290,10 @@ function getToolIconSvg(icon: string): string {
   return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 }
 
+function shouldKeepAssistantTextChunk(assistantText: string, items: DisplayItem[]): boolean {
+  return Boolean(assistantText.trim() || items[items.length - 1]?.kind === 'text');
+}
+
 function processAcpUpdate(
   update: Record<string, unknown>,
   items: DisplayItem[],
@@ -1299,7 +1303,11 @@ function processAcpUpdate(
 
   if (sessionUpdate === 'agent_message_chunk') {
     const content = update.content as { type?: string; text?: string } | undefined;
-    if (content?.type === 'text' && content.text?.trim()) {
+    if (
+      content?.type === 'text' &&
+      typeof content.text === 'string' &&
+      shouldKeepAssistantTextChunk(content.text, items)
+    ) {
       mergeAssistantTextIntoDisplayItems(content.text, items);
     }
     return;
@@ -1614,8 +1622,8 @@ function processEventLine(
   }
 
   if (assistantText) {
-    // Skip whitespace-only chunks so we do not render empty markdown bubbles between tool calls.
-    if (!assistantText.trim()) return;
+    // Skip standalone whitespace, but preserve spaces that arrive between streamed text chunks.
+    if (!shouldKeepAssistantTextChunk(assistantText, items)) return;
     mergeAssistantTextIntoDisplayItems(assistantText, items);
   } else if (event.role === 'tool' && typeof event.content === 'string') {
     const toolNameRaw = typeof event.name === 'string' ? event.name : 'tool';
