@@ -160,9 +160,118 @@ function handleSessionNotification(
   onEvent(JSON.stringify(notification));
 }
 
+interface CursorPlanEntry {
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+}
+
+function normalizeCursorPlanStatus(status: unknown): CursorPlanEntry['status'] {
+  if (typeof status !== 'string') {
+    return 'pending';
+  }
+  const normalized = status.toLowerCase().replace(/^todo_status_/, '');
+  if (normalized === 'completed' || normalized === 'done') {
+    return 'completed';
+  }
+  if (normalized === 'in_progress' || normalized === 'in-progress' || normalized === 'running') {
+    return 'in_progress';
+  }
+  return 'pending';
+}
+
+function cursorPlanEntryFromUnknown(value: unknown): CursorPlanEntry | null {
+  if (typeof value === 'string') {
+    const content = value.trim();
+    return content ? { content, status: 'pending' } : null;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const obj = value as Record<string, unknown>;
+  const rawContent = obj.content ?? obj.text ?? obj.title ?? obj.description ?? obj.name;
+  if (typeof rawContent !== 'string') {
+    return null;
+  }
+
+  const content = rawContent.trim();
+  if (!content) {
+    return null;
+  }
+
+  return {
+    content,
+    status: normalizeCursorPlanStatus(obj.status),
+  };
+}
+
+function extractCursorPlanEntries(params: unknown): CursorPlanEntry[] {
+  if (typeof params === 'string' || Array.isArray(params)) {
+    const values = Array.isArray(params) ? params : [params];
+    return values
+      .map(cursorPlanEntryFromUnknown)
+      .filter((entry): entry is CursorPlanEntry => entry !== null);
+  }
+
+  if (!params || typeof params !== 'object') {
+    return [];
+  }
+
+  const obj = params as Record<string, unknown>;
+  for (const key of ['entries', 'steps', 'todos', 'items', 'plan']) {
+    const value = obj[key];
+    if (Array.isArray(value)) {
+      return value
+        .map(cursorPlanEntryFromUnknown)
+        .filter((entry): entry is CursorPlanEntry => entry !== null);
+    }
+  }
+
+  if (obj.plan && typeof obj.plan === 'object') {
+    const nestedEntries = extractCursorPlanEntries(obj.plan);
+    if (nestedEntries.length > 0) {
+      return nestedEntries;
+    }
+  }
+
+  const singleEntry = cursorPlanEntryFromUnknown(obj.plan ?? obj.content ?? obj.text ?? obj.title);
+  return singleEntry ? [singleEntry] : [];
+}
+
+function emitCursorPlanRequest(
+  params: unknown,
+  getSessionId: () => string | null
+): void {
+  const entries = extractCursorPlanEntries(params);
+  if (entries.length === 0) {
+    return;
+  }
+
+  const sessionId = getSessionId();
+  if (!sessionId) {
+    return;
+  }
+
+  const handler = activeHandlers.get(sessionId);
+  if (!handler) {
+    return;
+  }
+
+  handler(
+    JSON.stringify({
+      sessionId,
+      update: {
+        sessionUpdate: 'plan',
+        entries,
+      },
+    })
+  );
+}
+
 function buildClientApp(
   onConfigSync?: SessionConfigSyncHandler,
-  cursorExtensions?: boolean
+  cursorExtensions?: boolean,
+  getActiveSessionId: () => string | null = () => null
 ) {
   let app = client({ name: 'nova-code' })
     .onNotification(methods.client.session.update, ({ params }) => {
@@ -184,7 +293,10 @@ function buildClientApp(
       .onRequest('cursor/ask_question', parseUnknown, async () => ({
         outcome: { outcome: 'skipped', reason: 'Nova Code does not support interactive questions yet.' },
       }))
-      .onRequest('cursor/create_plan', parseUnknown, async () => ({ outcome: { outcome: 'accepted' } }))
+      .onRequest('cursor/create_plan', parseUnknown, async ({ params }: { params: unknown }) => {
+        emitCursorPlanRequest(params, getActiveSessionId);
+        return { outcome: { outcome: 'accepted' } };
+      })
       .onRequest('cursor/update_todos', parseUnknown, async ({ params }: { params: unknown }) => ({
         outcome: {
           outcome: 'accepted',
@@ -250,11 +362,10 @@ export async function runAcpSubprocessPrompt(
     if (text) console.error(`[${logTag}] stderr:`, text);
   });
 
-  const stream = ndJsonStream(nodeWritableToWeb(proc.stdin!), nodeReadableToWeb(proc.stdout!));
-  const app = buildClientApp(onConfigSync, params.cursorExtensions);
-
   let ctxRef: ClientContext | null = null;
   let sessionIdForCancel: string | null = acpSessionId;
+  const stream = ndJsonStream(nodeWritableToWeb(proc.stdin!), nodeReadableToWeb(proc.stdout!));
+  const app = buildClientApp(onConfigSync, params.cursorExtensions, () => sessionIdForCancel);
 
   const killProc = () => {
     try {
