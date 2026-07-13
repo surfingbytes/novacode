@@ -165,6 +165,12 @@ interface CursorPlanEntry {
   status: 'pending' | 'in_progress' | 'completed';
 }
 
+interface CursorPlanPayload {
+  title?: string;
+  markdown?: string;
+  entries: CursorPlanEntry[];
+}
+
 function normalizeCursorPlanStatus(status: unknown): CursorPlanEntry['status'] {
   if (typeof status !== 'string') {
     return 'pending';
@@ -205,6 +211,16 @@ function cursorPlanEntryFromUnknown(value: unknown): CursorPlanEntry | null {
   };
 }
 
+function stringProp(obj: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
 function extractCursorPlanEntries(params: unknown): CursorPlanEntry[] {
   if (typeof params === 'string' || Array.isArray(params)) {
     const values = Array.isArray(params) ? params : [params];
@@ -238,12 +254,40 @@ function extractCursorPlanEntries(params: unknown): CursorPlanEntry[] {
   return singleEntry ? [singleEntry] : [];
 }
 
+function extractCursorPlanPayload(params: unknown): CursorPlanPayload {
+  let entries = extractCursorPlanEntries(params);
+  if (!params || typeof params !== 'object' || Array.isArray(params)) {
+    return {
+      markdown: typeof params === 'string' ? params.trim() : undefined,
+      entries,
+    };
+  }
+
+  const obj = params as Record<string, unknown>;
+  const nestedPlan = obj.plan && typeof obj.plan === 'object' && !Array.isArray(obj.plan)
+    ? (obj.plan as Record<string, unknown>)
+    : null;
+
+  const markdown =
+    stringProp(obj, ['markdown', 'content', 'text', 'description']) ??
+    (nestedPlan ? stringProp(nestedPlan, ['markdown', 'content', 'text', 'description']) : undefined);
+  if (markdown && entries.length === 1 && entries[0]?.content === markdown) {
+    entries = [];
+  }
+
+  return {
+    title: stringProp(obj, ['title', 'name']) ?? (nestedPlan ? stringProp(nestedPlan, ['title', 'name']) : undefined),
+    markdown,
+    entries,
+  };
+}
+
 function emitCursorPlanRequest(
   params: unknown,
   getSessionId: () => string | null
 ): void {
-  const entries = extractCursorPlanEntries(params);
-  if (entries.length === 0) {
+  const plan = extractCursorPlanPayload(params);
+  if (plan.entries.length === 0 && !plan.markdown) {
     return;
   }
 
@@ -262,7 +306,9 @@ function emitCursorPlanRequest(
       sessionId,
       update: {
         sessionUpdate: 'plan',
-        entries,
+        entries: plan.entries,
+        title: plan.title,
+        markdown: plan.markdown,
       },
     })
   );
