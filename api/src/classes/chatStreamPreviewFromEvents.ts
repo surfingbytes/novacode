@@ -172,14 +172,28 @@ function mergeAssistantTextIntoDisplayItems(assistantText: string, items: Displa
   const lastItem = items[items.length - 1];
   if (lastItem?.kind === 'text') {
     const previousText = lastItem.text ?? '';
-    if (assistantText === previousText) {
+    if (!assistantText || assistantText === previousText) {
+      return;
+    }
+    if (previousText.startsWith(assistantText)) {
       return;
     }
     if (assistantText.startsWith(previousText)) {
       lastItem.text = assistantText;
       return;
     }
-    lastItem.text = previousText + assistantText;
+    if (previousText.endsWith(assistantText)) {
+      return;
+    }
+    let overlap = 0;
+    const maxOverlap = Math.min(previousText.length, assistantText.length);
+    for (let len = maxOverlap; len > 0; len -= 1) {
+      if (previousText.endsWith(assistantText.slice(0, len))) {
+        overlap = len;
+        break;
+      }
+    }
+    lastItem.text = previousText + assistantText.slice(overlap);
     return;
   }
   items.push({ kind: 'text', text: assistantText });

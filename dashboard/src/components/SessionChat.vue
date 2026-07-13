@@ -1466,8 +1466,8 @@ function isToolResultSuccess(toolCallObj: Record<string, unknown>): boolean {
 }
 
 /**
- * Mistral Vibe (and some stream shapes) may re-send the full assistant line or duplicate the final
- * chunk; Cursor-style deltas are plain appends. Merge without doubling identical/cumulative text.
+ * Stream providers mix cumulative snapshots with incremental deltas and may repeat boundary tokens
+ * (e.g. send "The shared" then " shared"). Merge without doubling identical or overlapping text.
  */
 type AgentThoughtChunkContent = {
   type?: string;
@@ -1515,12 +1515,22 @@ function mergeAssistantTextIntoDisplayItems(
   const last = items[items.length - 1];
   if (last?.kind === 'text') {
     const prev = last.text ?? '';
-    if (assistantText === prev) return;
+    if (!assistantText || assistantText === prev) return;
+    if (prev.startsWith(assistantText)) return;
     if (assistantText.startsWith(prev)) {
       last.text = assistantText;
       return;
     }
-    last.text = prev + assistantText;
+    if (prev.endsWith(assistantText)) return;
+    let overlap = 0;
+    const maxOverlap = Math.min(prev.length, assistantText.length);
+    for (let len = maxOverlap; len > 0; len -= 1) {
+      if (prev.endsWith(assistantText.slice(0, len))) {
+        overlap = len;
+        break;
+      }
+    }
+    last.text = prev + assistantText.slice(overlap);
     return;
   }
   items.push({ kind: 'text', text: assistantText });
