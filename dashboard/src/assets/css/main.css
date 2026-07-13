@@ -521,9 +521,50 @@ hr {
   overflow-wrap: anywhere;
   word-break: break-word;
 
+  &:has(table) {
+    max-width: 100%;
+  }
+
   img {
     @apply max-w-full cursor-pointer rounded-md;
     height: auto;
+  }
+
+  table {
+    @apply my-2 max-w-full overflow-x-auto rounded-lg border border-fg/10 text-left text-xs;
+    display: block;
+    width: max-content;
+    border-collapse: separate;
+    border-spacing: 0;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  thead {
+    @apply bg-fg/[0.06];
+  }
+
+  th,
+  td {
+    @apply min-w-28 border-b border-r border-fg/10 px-3 py-2 align-top leading-relaxed;
+    word-break: normal;
+    overflow-wrap: break-word;
+  }
+
+  th {
+    @apply font-semibold text-text-primary;
+  }
+
+  td {
+    @apply text-text-primary/90;
+  }
+
+  tr:last-child > td {
+    @apply border-b-0;
+  }
+
+  th:last-child,
+  td:last-child {
+    @apply border-r-0;
   }
 
   pre {
