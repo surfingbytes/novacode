@@ -13,19 +13,75 @@ import { config } from '../classes/config';
 
 const IMAGE_DIR = join(config.configDir, 'prompt-images');
 
-const ALLOWED_MIME: Record<string, string> = {
+const MIME_TO_EXT: Record<string, string> = {
   'image/png': '.png',
   'image/jpeg': '.jpg',
   'image/gif': '.gif',
-  'image/webp': '.webp'
+  'image/webp': '.webp',
+  'text/plain': '.txt',
+  'text/markdown': '.md',
+  'application/json': '.json',
+  'application/pdf': '.pdf',
+  'text/csv': '.csv',
+  'text/html': '.html',
+  'text/css': '.css',
+  'text/javascript': '.js',
+  'application/javascript': '.js',
+  'application/typescript': '.ts',
+  'application/xml': '.xml',
+  'text/xml': '.xml',
+  'application/yaml': '.yaml',
+  'text/yaml': '.yaml',
+  'application/x-yaml': '.yaml',
 };
 
-const CONTENT_TYPES: Record<string, string> = {
+const EXT_TO_CONTENT_TYPE: Record<string, string> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
   '.gif': 'image/gif',
-  '.webp': 'image/webp'
+  '.webp': 'image/webp',
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.json': 'application/json',
+  '.pdf': 'application/pdf',
+  '.csv': 'text/csv',
+  '.html': 'text/html',
+  '.htm': 'text/html',
+  '.css': 'text/css',
+  '.js': 'text/javascript',
+  '.mjs': 'text/javascript',
+  '.ts': 'application/typescript',
+  '.tsx': 'application/typescript',
+  '.jsx': 'text/javascript',
+  '.vue': 'text/plain',
+  '.py': 'text/plain',
+  '.sh': 'text/plain',
+  '.bash': 'text/plain',
+  '.zsh': 'text/plain',
+  '.sql': 'text/plain',
+  '.log': 'text/plain',
+  '.yaml': 'application/yaml',
+  '.yml': 'application/yaml',
+  '.xml': 'application/xml',
+  '.toml': 'text/plain',
+  '.ini': 'text/plain',
+  '.env': 'text/plain',
 };
+
+const ALLOWED_EXTENSIONS = new Set(Object.keys(EXT_TO_CONTENT_TYPE));
+
+function resolveExtension(mimeType: string, filename?: string): string | null {
+  const fromName = filename ? extname(filename).toLowerCase() : '';
+  if (fromName && ALLOWED_EXTENSIONS.has(fromName)) {
+    return fromName;
+  }
+  const fromMime = MIME_TO_EXT[mimeType];
+  if (fromMime) {
+    return fromMime;
+  }
+  return null;
+}
 
 // --------------------------------------------- Helpers ---------------------------------------------
 
@@ -43,22 +99,22 @@ export async function deleteSessionImages(sessionId: string): Promise<void> {
 // --------------------------------------------- Routes ---------------------------------------------
 
 export async function imageRoutes(fastify: FastifyInstance): Promise<void> {
-  // POST /api/sessions/:sessionId/images — upload a base64-encoded image
+  // POST /api/sessions/:sessionId/images — upload a base64-encoded attachment
   fastify.post(
     '/api/sessions/:sessionId/images',
     { preHandler: jwtPreHandler },
     async (request, reply) => {
       const { sessionId } = request.params as { sessionId: string };
-      const body = request.body as { data: string; mimeType: string };
+      const body = request.body as { data: string; mimeType: string; filename?: string };
 
       const session = await db.getSession(sessionId);
       if (!session) {
         return reply.status(404).send({ error: 'Session not found' });
       }
 
-      const ext = ALLOWED_MIME[body.mimeType];
+      const ext = resolveExtension(body.mimeType, body.filename);
       if (!ext) {
-        return reply.status(400).send({ error: 'Unsupported image type' });
+        return reply.status(400).send({ error: 'Unsupported file type' });
       }
 
       const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`;
@@ -111,7 +167,7 @@ export async function imageRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: 'Image not found' });
       }
 
-      const contentType = CONTENT_TYPES[extname(safeName).toLowerCase()] ?? 'application/octet-stream';
+      const contentType = EXT_TO_CONTENT_TYPE[extname(safeName).toLowerCase()] ?? 'application/octet-stream';
       const data = await readFile(filePath);
       return reply.header('Content-Type', contentType).send(data);
     }

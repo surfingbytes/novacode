@@ -22,7 +22,7 @@ function lastFromMessages(messages: ChatMessage[]): { text: string; role: 'user'
   if (last.role === 'user') {
     const text = last.content?.trim() ?? '';
     if (last.imagePaths && last.imagePaths.length > 0 && !text) {
-      return { text: truncatePreview('Photo'), role: 'user' };
+      return { text: truncatePreview('Attachment'), role: 'user' };
     }
     if (!text) {
       return null;
