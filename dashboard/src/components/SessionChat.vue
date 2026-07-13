@@ -174,15 +174,27 @@ const promptPlaceholder = computed(() => {
   return 'Type a message…';
 });
 
-// ── Image attachments ─────────────────────────────────────────────────────────
-interface PendingImage {
+// ── Attachments ───────────────────────────────────────────────────────────────
+interface PendingAttachment {
   filename: string;
+  displayName: string;
   dataUrl: string;
   serverPath: string;
+  isImage: boolean;
 }
 
-const pendingImages = ref<PendingImage[]>([]);
+const pendingImages = ref<PendingAttachment[]>([]);
 const bUploadingImage = ref(false);
+
+const IMAGE_PATH_RE = /\.(png|jpe?g|gif|webp)$/i;
+
+function isImageAttachmentPath(path: string): boolean {
+  return IMAGE_PATH_RE.test(path);
+}
+
+function attachmentDisplayName(path: string): string {
+  return path.split('/').pop() ?? path;
+}
 
 function imageApiUrl(serverPath: string): string {
   // serverPath is <configDir>/prompt-images/<sessionId>/<filename>
@@ -202,17 +214,30 @@ function onChatMarkdownImageClick(e: MouseEvent): void {
   if (src) lightboxSrc.value = src;
 }
 
-function uploadImageFile(file: File): void {
+function uploadAttachmentFile(file: File): void {
   const reader = new FileReader();
   reader.onload = async (ev) => {
     const dataUrl = ev.target?.result as string;
     const base64 = dataUrl.split(',')[1];
+    const isImage = file.type.startsWith('image/') || isImageAttachmentPath(file.name);
     bUploadingImage.value = true;
     try {
-      const { data } = await sessionsApi.uploadImage(props.sessionId, base64, file.type);
-      pendingImages.value.push({ filename: data.filename, dataUrl, serverPath: data.path });
+      const mimeType = file.type || 'application/octet-stream';
+      const { data } = await sessionsApi.uploadImage(
+        props.sessionId,
+        base64,
+        mimeType,
+        file.name
+      );
+      pendingImages.value.push({
+        filename: data.filename,
+        displayName: file.name,
+        dataUrl: isImage ? dataUrl : '',
+        serverPath: data.path,
+        isImage
+      });
     } catch {
-      chatError.value = 'Failed to upload image';
+      chatError.value = 'Failed to upload file';
     } finally {
       bUploadingImage.value = false;
     }
@@ -230,7 +255,7 @@ async function onPaste(e: ClipboardEvent) {
     const file = item.getAsFile();
     if (!file) continue;
     hasImage = true;
-    if (file) uploadImageFile(file);
+    if (file) uploadAttachmentFile(file);
   }
 
   if (hasImage) e.preventDefault();
@@ -245,8 +270,7 @@ function onFileChange(e: Event) {
   const files = input.files;
   if (!files || files.length === 0) return;
   for (const file of Array.from(files)) {
-    if (!file.type.startsWith('image/')) continue;
-    uploadImageFile(file);
+    uploadAttachmentFile(file);
   }
   // allow selecting the same file again
   input.value = '';
@@ -1527,14 +1551,26 @@ onUnmounted(() => {
               <div v-if="msg.role === 'user'" class="flex justify-end">
                 <div class="max-w-[75%] flex flex-col items-end gap-2">
                   <div v-if="msg.imagePaths?.length" class="flex flex-wrap gap-2 justify-end">
-                    <img
-                      v-for="(imgPath, j) in msg.imagePaths"
-                      :key="j"
-                      :src="msg.imageDataUrls?.[j] ?? imageApiUrl(imgPath)"
-                      class="max-h-48 max-w-[12rem] rounded-xl object-cover border border-fg/10 cursor-pointer"
-                      title="View full size"
-                      @click="lightboxSrc = msg.imageDataUrls?.[j] ?? imageApiUrl(imgPath)"
-                    />
+                    <template v-for="(imgPath, j) in msg.imagePaths" :key="j">
+                      <img
+                        v-if="isImageAttachmentPath(imgPath)"
+                        :src="msg.imageDataUrls?.[j] ?? imageApiUrl(imgPath)"
+                        class="max-h-48 max-w-[12rem] rounded-xl object-cover border border-fg/10 cursor-pointer"
+                        title="View full size"
+                        @click="lightboxSrc = msg.imageDataUrls?.[j] ?? imageApiUrl(imgPath)"
+                      />
+                      <a
+                        v-else
+                        :href="imageApiUrl(imgPath)"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="inline-flex max-w-[12rem] items-center gap-1.5 rounded-xl border border-fg/10 bg-fg/[0.06] px-3 py-2 text-xs text-text-primary hover:bg-fg/[0.1]"
+                        :title="attachmentDisplayName(imgPath)"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-text-muted" aria-hidden="true"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                        <span class="truncate">{{ attachmentDisplayName(imgPath) }}</span>
+                      </a>
+                    </template>
                   </div>
                   <div
                     v-if="msg.content"
@@ -1967,7 +2003,7 @@ onUnmounted(() => {
                     {{ item.text || '(Images only)' }}
                   </div>
                   <div v-if="item.imagePaths?.length" class="text-[11px] text-text-muted mt-0.5">
-                    {{ item.imagePaths.length }} image{{ item.imagePaths.length === 1 ? '' : 's' }}
+                    {{ item.imagePaths.length }} attachment{{ item.imagePaths.length === 1 ? '' : 's' }}
                   </div>
                 </div>
                 <button
@@ -1989,18 +2025,27 @@ onUnmounted(() => {
               </div>
             </div>
           </div>
-          <!-- Pending image previews -->
+          <!-- Pending attachment previews -->
           <div
             v-if="pendingImages.length > 0 || bUploadingImage"
             class="flex flex-wrap gap-2 pb-1 px-2"
           >
-            <div v-for="(img, i) in pendingImages" :key="i" class="relative shrink-0">
+            <div v-for="(attachment, i) in pendingImages" :key="i" class="relative shrink-0">
               <img
-                :src="img.dataUrl"
+                v-if="attachment.isImage"
+                :src="attachment.dataUrl"
                 class="h-16 w-16 object-cover rounded-lg border border-fg/10 cursor-pointer"
                 title="View full size"
-                @click="lightboxSrc = img.dataUrl"
+                @click="lightboxSrc = attachment.dataUrl"
               />
+              <div
+                v-else
+                class="flex h-16 max-w-[10rem] items-center gap-1.5 rounded-lg border border-fg/10 bg-fg/[0.06] px-2 text-xs text-text-primary"
+                :title="attachment.displayName"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-text-muted" aria-hidden="true"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <span class="truncate">{{ attachment.displayName }}</span>
+              </div>
               <button
                 type="button"
                 @click.stop="pendingImages.splice(i, 1)"
@@ -2044,7 +2089,7 @@ onUnmounted(() => {
                 type="button"
                 @click="onAttachClick"
                 :disabled="bIsStreaming"
-                title="Attach image"
+                title="Attach file"
                 class="button is-transparent is-icon h-[36px]! mb-[3px]! px-0! aspect-square! shrink-0"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
@@ -2053,7 +2098,6 @@ onUnmounted(() => {
             <input
               ref="fileInputEl"
               type="file"
-              accept="image/*"
               multiple
               class="hidden"
               @change="onFileChange"

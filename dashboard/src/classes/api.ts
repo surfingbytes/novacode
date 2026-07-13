@@ -408,11 +408,13 @@ export const sessionsApi = {
   uploadImage: (
     sessionId: string,
     data: string,
-    mimeType: string
+    mimeType: string,
+    filename?: string
   ): ReturnType<typeof http.post<{ path: string; filename: string }>> =>
     http.post<{ path: string; filename: string }>(`/sessions/${sessionId}/images`, {
       data,
-      mimeType
+      mimeType,
+      ...(filename ? { filename } : {})
     }),
 
   imageUrl: (sessionId: string, filename: string): string => {

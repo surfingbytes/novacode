@@ -26,7 +26,7 @@ export function computeLastListPreview(
   if (last.role === 'user') {
     const text = last.content?.trim() ?? '';
     if (last.imagePaths && last.imagePaths.length > 0 && !text) {
-      return { lastPreviewText: truncatePreview('Photo'), lastPreviewRole: 'user' };
+      return { lastPreviewText: truncatePreview('Attachment'), lastPreviewRole: 'user' };
     }
     if (!text) {
       return null;
