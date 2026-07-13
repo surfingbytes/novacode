@@ -2241,8 +2241,25 @@ function onVisibilityChange() {
 
 const PROMPT_SINGLE_LINE_HEIGHT = 32;
 const bPromptMultiline = ref(false);
+/** Mobile portrait — tight horizontal space uses stacked prompt controls when text wraps */
+const bPromptCompactLayout = ref(false);
+let promptCompactMql: MediaQueryList | null = null;
 let promptInputResizeObserver: ResizeObserver | null = null;
 let promptInputObservedWidth = 0;
+
+const bPromptUseCompactMultiline = computed(
+  () => bPromptCompactLayout.value && bPromptMultiline.value
+);
+
+function syncPromptLayoutBreakpoint(): void {
+  const wasCompact = bPromptCompactLayout.value;
+  bPromptCompactLayout.value =
+    promptCompactMql?.matches ??
+    window.matchMedia('(max-width: 767px) and (orientation: portrait)').matches;
+  if (wasCompact !== bPromptCompactLayout.value) {
+    nextTick(() => resizeTextarea());
+  }
+}
 
 watch(promptText, (val) => {
   const key = promptStorageKey.value;
@@ -2255,6 +2272,7 @@ watch(promptText, (val) => {
 });
 
 function measurePromptMultiline(el: HTMLTextAreaElement): boolean {
+  if (!bPromptCompactLayout.value) return false;
   if (promptText.value.includes('\n')) return true;
 
   const box = promptInputBoxRef.value;
@@ -2272,7 +2290,7 @@ function measurePromptMultiline(el: HTMLTextAreaElement): boolean {
   const savedWidth = el.style.width;
   const savedHeight = el.style.height;
   el.style.width = `${Math.max(inlineWidth, 0)}px`;
-  el.style.height = 'auto';
+  el.style.height = '0px';
   const naturalHeight = el.scrollHeight;
   el.style.width = savedWidth;
   el.style.height = savedHeight;
@@ -2281,8 +2299,8 @@ function measurePromptMultiline(el: HTMLTextAreaElement): boolean {
 }
 
 function applyTextareaHeight(el: HTMLTextAreaElement): void {
-  el.style.height = 'auto';
-  const height = Math.min(el.scrollHeight, 160);
+  el.style.height = '0px';
+  const height = Math.min(Math.max(el.scrollHeight, PROMPT_SINGLE_LINE_HEIGHT), 160);
   el.style.height = `${height}px`;
 }
 
@@ -2296,7 +2314,9 @@ function resizeTextarea() {
 
   if (multilineChanged) {
     nextTick(() => {
-      if (textareaEl.value) applyTextareaHeight(textareaEl.value);
+      requestAnimationFrame(() => {
+        if (textareaEl.value) applyTextareaHeight(textareaEl.value);
+      });
     });
     return;
   }
@@ -2383,6 +2403,9 @@ onMounted(async () => {
   chatInputMql = window.matchMedia('(min-width: 768px)');
   syncChatInputBreakpoint();
   chatInputMql.addEventListener('change', syncChatInputBreakpoint);
+  promptCompactMql = window.matchMedia('(max-width: 767px) and (orientation: portrait)');
+  syncPromptLayoutBreakpoint();
+  promptCompactMql.addEventListener('change', syncPromptLayoutBreakpoint);
 
   const savedPrompt = localStorage.getItem(promptStorageKey.value);
   if (savedPrompt != null) promptText.value = savedPrompt;
@@ -2412,6 +2435,10 @@ onUnmounted(() => {
   if (chatInputMql) {
     chatInputMql.removeEventListener('change', syncChatInputBreakpoint);
     chatInputMql = null;
+  }
+  if (promptCompactMql) {
+    promptCompactMql.removeEventListener('change', syncPromptLayoutBreakpoint);
+    promptCompactMql = null;
   }
   disconnectChatWs();
   document.removeEventListener('visibilitychange', onVisibilityChange);
@@ -3106,12 +3133,12 @@ onUnmounted(() => {
             <div
               ref="promptInputBoxRef"
               class="prompt-input-box flex-1 min-w-0 min-h-[44px] rounded-md border border-fg/10 bg-fg/[0.06] pl-1 pr-1 transition-colors focus-within:border-primary/50"
-              :class="{ 'prompt-input-box--multiline': bPromptMultiline }"
+              :class="{ 'prompt-input-box--multiline': bPromptUseCompactMultiline }"
             >
               <div
                 ref="modeMenuRef"
                 class="prompt-mode relative ml-0.5 shrink-0"
-                :class="bPromptMultiline ? 'mb-0.5' : 'mb-[6px]'"
+                :class="bPromptUseCompactMultiline ? 'mb-0.5' : 'mb-[6px]'"
                 :title="`Mode: ${selectedModeOption.label}`"
               >
                 <button
@@ -3223,7 +3250,8 @@ onUnmounted(() => {
                 @click="onAttachClick"
                 :disabled="bIsStreaming"
                 title="Attach image"
-                class="prompt-attach button is-transparent is-icon h-[36px]! mb-[3px]! px-0! aspect-square! shrink-0"
+                class="prompt-attach button is-transparent is-icon h-[36px]! px-0! aspect-square! shrink-0"
+                :class="bPromptUseCompactMultiline ? 'mb-0.5' : 'mb-[3px]'"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
               </button>
@@ -3476,25 +3504,25 @@ onUnmounted(() => {
 }
 
 .prompt-input-box--multiline {
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto 1fr auto;
   grid-template-rows: auto auto;
 }
 
 .prompt-input-box--multiline .prompt-textarea {
-  grid-column: 1;
+  grid-column: 1 / -1;
   grid-row: 1;
   align-self: start;
-}
-
-.prompt-input-box--multiline .prompt-attach {
-  grid-column: 2;
-  grid-row: 1;
-  align-self: end;
 }
 
 .prompt-input-box--multiline .prompt-mode {
   grid-column: 1;
   grid-row: 2;
+}
+
+.prompt-input-box--multiline .prompt-attach {
+  grid-column: 3;
+  grid-row: 2;
+  align-self: end;
 }
 
 .lightbox-enter-active,
