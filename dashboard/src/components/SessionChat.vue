@@ -1697,16 +1697,105 @@ function planTitle(item: DisplayItem, fallbackIndex: number): string {
   return fallbackIndex === 0 ? 'Plan' : `Plan ${fallbackIndex + 1}`;
 }
 
+interface PlanMarkdownCandidate {
+  markdown: string;
+  normalized: string;
+  index: number;
+}
+
+function normalizePlanSearchText(value: string | undefined): string {
+  return (value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function firstMarkdownHeading(markdown: string): string {
+  const heading = markdown.match(/^#{1,3}\s+(.+)$/m)?.[1]?.trim();
+  return heading ?? '';
+}
+
+function looksLikeFullPlanMarkdown(markdown: string | undefined): markdown is string {
+  if (!markdown?.trim()) return false;
+  const text = markdown.trim();
+  const headingCount = (text.match(/^#{1,3}\s+/gm) ?? []).length;
+  const hasPlanSections =
+    /^#{1,3}\s+(goal|required order|step\s+\d+|implementation|validation|test plan)\b/im.test(text);
+  return headingCount >= 2 || (headingCount >= 1 && hasPlanSections);
+}
+
+function collectPlanMarkdownCandidates(
+  history: DisplayChatMessage[],
+  liveItems: DisplayItem[]
+): PlanMarkdownCandidate[] {
+  const candidates: PlanMarkdownCandidate[] = [];
+  let index = 0;
+  for (const { items } of history) {
+    for (const item of items) {
+      if (item.kind !== 'text' || !looksLikeFullPlanMarkdown(item.text)) continue;
+      candidates.push({
+        markdown: item.text.trim(),
+        normalized: normalizePlanSearchText(`${firstMarkdownHeading(item.text)} ${item.text}`),
+        index,
+      });
+      index += 1;
+    }
+  }
+  for (const item of liveItems) {
+    if (item.kind !== 'text' || !looksLikeFullPlanMarkdown(item.text)) continue;
+    candidates.push({
+      markdown: item.text.trim(),
+      normalized: normalizePlanSearchText(`${firstMarkdownHeading(item.text)} ${item.text}`),
+      index,
+    });
+    index += 1;
+  }
+  return candidates;
+}
+
+function scorePlanMarkdownCandidate(item: DisplayItem, candidate: PlanMarkdownCandidate): number {
+  const titleTokens = normalizePlanSearchText(item.planTitle)
+    .split(' ')
+    .filter((token) => token.length >= 3);
+  const entryTokens = (item.planEntries ?? [])
+    .slice(0, 3)
+    .flatMap((entry) =>
+      normalizePlanSearchText(entry.content)
+        .split(' ')
+        .filter((token) => token.length >= 4)
+        .slice(0, 4)
+    );
+  const tokens = [...titleTokens, ...entryTokens];
+  if (tokens.length === 0) return candidate.index;
+  const matches = tokens.filter((token) => candidate.normalized.includes(token)).length;
+  return matches * 1000 + candidate.index;
+}
+
+function bestPlanMarkdownFallback(
+  item: DisplayItem,
+  candidates: PlanMarkdownCandidate[]
+): string | undefined {
+  if (item.planMarkdown?.trim() || candidates.length === 0) return undefined;
+  let best: PlanMarkdownCandidate | null = null;
+  let bestScore = -1;
+  for (const candidate of candidates) {
+    const score = scorePlanMarkdownCandidate(item, candidate);
+    if (score > bestScore) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+  return best && bestScore > 0 ? best.markdown : undefined;
+}
+
 function planDocumentFromItem(
   item: DisplayItem,
   id: string,
   fallbackIndex: number,
   createdAt: string,
-  live: boolean
+  live: boolean,
+  fallbackMarkdown?: string
 ): PlanDocument | null {
   if (item.kind !== 'plan') return null;
   const entries = item.planEntries ?? [];
-  const markdown = item.planMarkdown?.trim() || markdownFromPlanEntries(entries);
+  const markdown = item.planMarkdown?.trim() || fallbackMarkdown?.trim() || markdownFromPlanEntries(entries);
   if (!markdown && entries.length === 0) return null;
   const completedCount = entries.filter((entry) => isPlanEntryCompleted(entry.status)).length;
   return {
@@ -1754,6 +1843,7 @@ const streamingDisplayItems = computed(() => {
 
 const planDocuments = computed<PlanDocument[]>(() => {
   const docs: PlanDocument[] = [];
+  const markdownCandidates = collectPlanMarkdownCandidates(displayMessages.value, streamingDisplayItems.value);
   for (const { msg, items, key } of displayMessages.value) {
     let planIndex = 0;
     for (const item of items) {
@@ -1763,7 +1853,8 @@ const planDocuments = computed<PlanDocument[]>(() => {
         item.planId ?? `${key}-plan-${planIndex}`,
         planIndex,
         msg.createdAt,
-        false
+        false,
+        bestPlanMarkdownFallback(item, markdownCandidates)
       );
       if (doc) docs.push(doc);
       planIndex += 1;
@@ -1777,7 +1868,8 @@ const planDocuments = computed<PlanDocument[]>(() => {
       item.planId ?? `live-plan-${livePlanIndex}`,
       livePlanIndex,
       new Date().toISOString(),
-      true
+      true,
+      bestPlanMarkdownFallback(item, markdownCandidates)
     );
     if (doc) docs.push(doc);
     livePlanIndex += 1;
