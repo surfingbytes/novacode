@@ -3778,12 +3778,47 @@ onUnmounted(() => {
         <div class="flex-1 min-h-0 overflow-y-auto px-4 md:px-8 py-6">
           <div
             v-if="selectedPlanDocument"
-            class="mx-auto max-w-3xl rounded-2xl border border-fg/10 bg-fg/[0.03] px-5 py-4 md:px-8 md:py-6"
+            class="mx-auto flex max-w-3xl flex-col gap-4"
           >
+            <div class="rounded-2xl border border-fg/10 bg-fg/[0.03] px-5 py-4 md:px-8 md:py-6">
+              <div
+                class="chat-markdown plan-markdown text-sm text-text-primary"
+                v-html="selectedPlanDocument.renderedHtml"
+              ></div>
+            </div>
             <div
-              class="chat-markdown text-sm text-text-primary"
-              v-html="selectedPlanDocument.renderedHtml"
-            ></div>
+              v-if="selectedPlanDocument.entries.length"
+              class="rounded-2xl border border-fg/10 bg-fg/[0.03] overflow-hidden"
+            >
+              <div class="flex items-center gap-2 border-b border-fg/10 px-4 py-2.5">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none text-text-muted shrink-0" aria-hidden="true"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2M9 12l2 2 4-4"/></svg>
+                <span class="text-xs font-medium text-text-primary">Todos</span>
+                <span class="ml-auto text-xs text-text-muted">
+                  {{ selectedPlanDocument.completedCount }}/{{ selectedPlanDocument.entries.length }}
+                </span>
+              </div>
+              <ul class="space-y-1.5 px-4 py-3">
+                <li
+                  v-for="(entry, index) in selectedPlanDocument.entries"
+                  :key="`${selectedPlanDocument.id}-todo-${index}`"
+                  class="flex items-start gap-2 text-xs"
+                >
+                  <svg v-if="planStatusIcon(entry.status) === 'completed'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-green-500 select-none shrink-0 mt-px" aria-hidden="true"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                  <svg v-else-if="planStatusIcon(entry.status) === 'in_progress'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-primary select-none shrink-0 mt-px" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                  <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-text-muted select-none shrink-0 mt-px" aria-hidden="true"><circle cx="12" cy="12" r="10"/></svg>
+                  <span
+                    class="leading-snug"
+                    :class="
+                      isPlanEntryCompleted(entry.status)
+                        ? 'text-text-muted line-through'
+                        : 'text-text-primary'
+                    "
+                  >
+                    {{ entry.content }}
+                  </span>
+                </li>
+              </ul>
+            </div>
           </div>
           <div v-else class="h-full flex items-center justify-center text-sm text-text-muted">
             No plan has been created for this session yet.
@@ -4039,6 +4074,90 @@ onUnmounted(() => {
   width: 2rem !important;
   min-width: 2rem !important;
   height: 2rem !important;
+}
+
+.plan-markdown {
+  line-height: 1.65;
+}
+
+.plan-markdown :deep(h1),
+.plan-markdown :deep(h2),
+.plan-markdown :deep(h3) {
+  color: var(--color-text-primary);
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.plan-markdown :deep(h1) {
+  margin: 0 0 1rem;
+  font-size: 1.5rem;
+}
+
+.plan-markdown :deep(h2) {
+  margin: 1.5rem 0 0.65rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid color-mix(in srgb, var(--color-fg) 10%, transparent);
+  font-size: 1.125rem;
+}
+
+.plan-markdown :deep(h3) {
+  margin: 1.15rem 0 0.5rem;
+  font-size: 0.98rem;
+}
+
+.plan-markdown :deep(p),
+.plan-markdown :deep(ul),
+.plan-markdown :deep(ol),
+.plan-markdown :deep(blockquote),
+.plan-markdown :deep(pre) {
+  margin: 0.65rem 0;
+}
+
+.plan-markdown :deep(ul),
+.plan-markdown :deep(ol) {
+  padding-left: 1.25rem;
+}
+
+.plan-markdown :deep(ul) {
+  list-style: disc;
+}
+
+.plan-markdown :deep(ol) {
+  list-style: decimal;
+}
+
+.plan-markdown :deep(li) {
+  margin: 0.35rem 0;
+  padding-left: 0.15rem;
+}
+
+.plan-markdown :deep(strong) {
+  color: var(--color-text-primary);
+  font-weight: 700;
+}
+
+.plan-markdown :deep(blockquote) {
+  border-left: 3px solid color-mix(in srgb, var(--color-fg) 18%, transparent);
+  padding-left: 0.9rem;
+  color: var(--color-text-muted);
+}
+
+.plan-markdown :deep(code) {
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--color-fg) 8%, transparent);
+  padding: 0.1rem 0.3rem;
+  font-size: 0.86em;
+}
+
+.plan-markdown :deep(pre) {
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--color-fg) 6%, transparent);
+  padding: 0.85rem 1rem;
+}
+
+.plan-markdown :deep(pre code) {
+  background: transparent;
+  padding: 0;
 }
 
 @keyframes send-hourglass-flip {
