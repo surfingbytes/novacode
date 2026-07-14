@@ -61,6 +61,12 @@ export interface Workspace {
   archived: boolean;
 }
 
+export interface PlanDocumentSummary {
+  sessionId: string;
+  title: string;
+  markdown: string;
+}
+
 export interface Session {
   id: string;
   name: string;
@@ -72,6 +78,8 @@ export interface Session {
   sessionConfigJson?: Record<string, string> | null;
   /** Present on session detail; omitted on list endpoints to save bandwidth */
   messageJson?: string;
+  /** Real Cursor plan documents from .cursor/plans, present on session detail when available */
+  planDocuments?: PlanDocumentSummary[];
   /** Denormalized last chat line for sidebars (from API list / WebSocket) */
   lastPreviewText?: string | null;
   lastPreviewRole?: 'user' | 'assistant' | null;

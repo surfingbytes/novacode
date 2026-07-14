@@ -25,7 +25,7 @@ import { notifyTaskDone, notifyTodoCompleted } from '@/lib/notifications';
 import { useWorkspacesStore } from '@/stores/workspaces';
 
 // types
-import type { AgentConfigOption, AgentModeOption, AgentModelOption, ChatMessage, ChatQueueItem, ChatWsServerMessage, Session } from '@/@types/index';
+import type { AgentConfigOption, AgentModeOption, AgentModelOption, ChatMessage, ChatQueueItem, ChatWsServerMessage, PlanDocumentSummary, Session } from '@/@types/index';
 import { APP_NAV_TOGGLE_KEY } from '@/constants/layout';
 
 marked.setOptions({ breaks: true, gfm: true });
@@ -1225,6 +1225,7 @@ interface DisplayItem {
   todoDoneCount?: number;
   // plan (ACP native)
   planId?: string;
+  planSourceSessionId?: string;
   planTitle?: string;
   planMarkdown?: string;
   planEntries?: PlanEntry[];
@@ -1338,7 +1339,7 @@ function shouldKeepAssistantTextChunk(assistantText: string, items: DisplayItem[
 function processAcpUpdate(
   update: Record<string, unknown>,
   items: DisplayItem[],
-  opts?: { liveThinking?: boolean; applyConfigSync?: boolean }
+  opts?: { liveThinking?: boolean; applyConfigSync?: boolean; sourceSessionId?: string }
 ): void {
   const sessionUpdate = update.sessionUpdate as string | undefined;
 
@@ -1423,10 +1424,17 @@ function processAcpUpdate(
     const existing = items.find((i) => i.kind === 'plan');
     if (existing) {
       existing.planEntries = entries ?? existing.planEntries;
+      existing.planSourceSessionId = opts?.sourceSessionId ?? existing.planSourceSessionId;
       existing.planTitle = title ?? existing.planTitle;
       existing.planMarkdown = markdown ?? existing.planMarkdown;
     } else {
-      items.push({ kind: 'plan', planEntries: entries ?? [], planTitle: title, planMarkdown: markdown });
+      items.push({
+        kind: 'plan',
+        planSourceSessionId: opts?.sourceSessionId,
+        planEntries: entries ?? [],
+        planTitle: title,
+        planMarkdown: markdown
+      });
     }
     return;
   }
@@ -1619,7 +1627,10 @@ function processEventLine(
 
   // ── ACP native format (any ACP agent: Claude, Mistral, …) ──────────────────
   if (typeof event.sessionId === 'string' && event.update && typeof event.update === 'object') {
-    processAcpUpdate(event.update as Record<string, unknown>, items, opts);
+    processAcpUpdate(event.update as Record<string, unknown>, items, {
+      ...opts,
+      sourceSessionId: event.sessionId
+    });
     return;
   }
 
@@ -1847,14 +1858,20 @@ function normalizePlanSearchText(value: string | undefined): string {
   return (value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
+function unwrapMarkdownFence(markdown: string): string {
+  const trimmed = markdown.trim();
+  const match = trimmed.match(/^```(?:md|markdown)?\s*\n([\s\S]*?)\n```$/i);
+  return (match?.[1] ?? trimmed).trim();
+}
+
 function firstMarkdownHeading(markdown: string): string {
-  const heading = markdown.match(/^#{1,3}\s+(.+)$/m)?.[1]?.trim();
+  const heading = unwrapMarkdownFence(markdown).match(/^#{1,3}\s+(.+)$/m)?.[1]?.trim();
   return heading ?? '';
 }
 
 function looksLikeFullPlanMarkdown(markdown: string | undefined): markdown is string {
   if (!markdown?.trim()) return false;
-  const text = markdown.trim();
+  const text = unwrapMarkdownFence(markdown);
   const headingCount = (text.match(/^#{1,3}\s+/gm) ?? []).length;
   const hasPlanSections =
     /^#{1,3}\s+(goal|required order|step\s+\d+|implementation|validation|test plan)\b/im.test(text);
@@ -1870,9 +1887,10 @@ function collectPlanMarkdownCandidates(
   for (const { items } of history) {
     for (const item of items) {
       if (item.kind !== 'text' || !looksLikeFullPlanMarkdown(item.text)) continue;
+      const markdown = unwrapMarkdownFence(item.text);
       candidates.push({
-        markdown: item.text.trim(),
-        normalized: normalizePlanSearchText(`${firstMarkdownHeading(item.text)} ${item.text}`),
+        markdown,
+        normalized: normalizePlanSearchText(`${firstMarkdownHeading(markdown)} ${markdown}`),
         index,
       });
       index += 1;
@@ -1880,14 +1898,32 @@ function collectPlanMarkdownCandidates(
   }
   for (const item of liveItems) {
     if (item.kind !== 'text' || !looksLikeFullPlanMarkdown(item.text)) continue;
+    const markdown = unwrapMarkdownFence(item.text);
     candidates.push({
-      markdown: item.text.trim(),
-      normalized: normalizePlanSearchText(`${firstMarkdownHeading(item.text)} ${item.text}`),
+      markdown,
+      normalized: normalizePlanSearchText(`${firstMarkdownHeading(markdown)} ${markdown}`),
       index,
     });
     index += 1;
   }
   return candidates;
+}
+
+function planMarkdownCandidatesFromDocuments(
+  documents: PlanDocumentSummary[] | undefined,
+  sourceSessionId: string | undefined
+): PlanMarkdownCandidate[] {
+  if (!sourceSessionId || !documents?.length) return [];
+  return documents
+    .filter((doc) => doc.sessionId === sourceSessionId && looksLikeFullPlanMarkdown(doc.markdown))
+    .map((doc, index) => {
+      const markdown = unwrapMarkdownFence(doc.markdown);
+      return {
+        markdown,
+        normalized: normalizePlanSearchText(`${doc.title} ${firstMarkdownHeading(markdown)} ${markdown}`),
+        index,
+      };
+    });
 }
 
 function scorePlanMarkdownCandidate(item: DisplayItem, candidate: PlanMarkdownCandidate): number {
@@ -1983,33 +2019,45 @@ const streamingDisplayItems = computed(() => {
 
 const planDocuments = computed<PlanDocument[]>(() => {
   const docs: PlanDocument[] = [];
-  const markdownCandidates = collectPlanMarkdownCandidates(displayMessages.value, streamingDisplayItems.value);
+  const filePlanDocuments = session.value?.planDocuments;
   for (const { msg, items, key } of displayMessages.value) {
+    const messageMarkdownCandidates = collectPlanMarkdownCandidates([{ msg, items, key, fallbackHtml: '' }], []);
     let planIndex = 0;
     for (const item of items) {
       if (item.kind !== 'plan') continue;
+      const fileMarkdownCandidates = planMarkdownCandidatesFromDocuments(
+        filePlanDocuments,
+        item.planSourceSessionId
+      );
       const doc = planDocumentFromItem(
         item,
         item.planId ?? `${key}-plan-${planIndex}`,
         planIndex,
         msg.createdAt,
         false,
-        bestPlanMarkdownFallback(item, markdownCandidates)
+        bestPlanMarkdownFallback(item, fileMarkdownCandidates) ??
+          bestPlanMarkdownFallback(item, messageMarkdownCandidates)
       );
       if (doc) docs.push(doc);
       planIndex += 1;
     }
   }
   let livePlanIndex = 0;
+  const liveMarkdownCandidates = collectPlanMarkdownCandidates([], streamingDisplayItems.value);
   for (const item of streamingDisplayItems.value) {
     if (item.kind !== 'plan') continue;
+    const fileMarkdownCandidates = planMarkdownCandidatesFromDocuments(
+      filePlanDocuments,
+      item.planSourceSessionId
+    );
     const doc = planDocumentFromItem(
       item,
       item.planId ?? `live-plan-${livePlanIndex}`,
       livePlanIndex,
       new Date().toISOString(),
       true,
-      bestPlanMarkdownFallback(item, markdownCandidates)
+      bestPlanMarkdownFallback(item, fileMarkdownCandidates) ??
+        bestPlanMarkdownFallback(item, liveMarkdownCandidates)
     );
     if (doc) docs.push(doc);
     livePlanIndex += 1;
