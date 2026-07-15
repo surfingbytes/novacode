@@ -3815,17 +3815,18 @@ onUnmounted(() => {
             </button>
           </div>
           <div class="px-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] leading-none">
-            <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <div class="flex min-w-0 flex-nowrap items-center gap-1.5 sm:gap-3">
               <label
                 v-for="cfg in agentConfigOptions"
                 :key="cfg.id"
                 class="flex min-w-0 items-center gap-1"
               >
-                <span class="shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted">{{ cfg.label }}</span>
+                <span class="hidden shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted sm:inline">{{ cfg.label }}</span>
                 <select
                   :value="agentConfigDisplayValue(cfg)"
                   :disabled="bIsStreaming || bConfigLoading || bSavingSessionConfig"
-                  class="h-5! min-h-0! w-24 rounded border border-fg/[0.08] bg-transparent px-1.5! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
+                  :aria-label="cfg.label"
+                  class="h-5! min-h-0! w-[4.25rem] rounded border border-fg/[0.08] bg-transparent px-1! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50 sm:w-24 sm:px-1.5!"
                   @change="onAgentConfigChange(cfg.id, ($event.target as HTMLSelectElement).value)"
                 >
                   <option v-for="opt in cfg.options" :key="opt.value" :value="opt.value">
@@ -3834,11 +3835,12 @@ onUnmounted(() => {
                 </select>
               </label>
               <label class="flex min-w-0 items-center gap-1">
-                <span class="shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted">Model</span>
+                <span class="hidden shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted sm:inline">Model</span>
                 <select
                   :value="modelSelectValue"
                   :disabled="bIsStreaming || bModelsLoading || bSavingModelSelection"
-                  class="h-5! min-h-0! w-32 rounded border border-fg/[0.08] bg-transparent px-1.5! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
+                  aria-label="Model"
+                  class="h-5! min-h-0! w-[5.25rem] rounded border border-fg/[0.08] bg-transparent px-1! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50 sm:w-32 sm:px-1.5!"
                   @change="onModelSelectChange(($event.target as HTMLSelectElement).value, $event.target as HTMLSelectElement)"
                 >
                   <option v-for="model in visibleModelOptions" :key="model.value" :value="model.value">
@@ -3850,11 +3852,12 @@ onUnmounted(() => {
                 </select>
               </label>
               <label class="flex min-w-0 items-center gap-1">
-                <span class="shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted">Thinking</span>
+                <span class="hidden shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted sm:inline">Thinking</span>
                 <select
                   :value="selectedThinkingName"
                   :disabled="bIsStreaming || bModelsLoading || bSavingModelSelection"
-                  class="h-5! min-h-0! w-24 rounded border border-fg/[0.08] bg-transparent px-1.5! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
+                  aria-label="Thinking"
+                  class="h-5! min-h-0! w-[4.25rem] rounded border border-fg/[0.08] bg-transparent px-1! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50 sm:w-24 sm:px-1.5!"
                   @change="onModelDimensionChange('thinking', ($event.target as HTMLSelectElement).value)"
                 >
                   <option v-for="thinking in thinkingList" :key="thinking" :value="thinking">
@@ -3863,11 +3866,12 @@ onUnmounted(() => {
                 </select>
               </label>
               <label class="flex min-w-0 items-center gap-1">
-                <span class="shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted">Context</span>
+                <span class="hidden shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted sm:inline">Context</span>
                 <select
                   :value="selectedContextName"
                   :disabled="bIsStreaming || bModelsLoading || bSavingModelSelection"
-                  class="h-5! min-h-0! w-24 rounded border border-fg/[0.08] bg-transparent px-1.5! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50"
+                  aria-label="Context"
+                  class="h-5! min-h-0! w-[4.25rem] rounded border border-fg/[0.08] bg-transparent px-1! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50 sm:w-24 sm:px-1.5!"
                   @change="onModelDimensionChange('context', ($event.target as HTMLSelectElement).value)"
                 >
                   <option v-for="context in contextList" :key="context" :value="context">
@@ -3877,7 +3881,7 @@ onUnmounted(() => {
               </label>
               <label
                 v-if="bFastAvailable"
-                class="flex min-w-0 cursor-pointer items-center gap-1"
+                class="flex min-w-0 shrink-0 cursor-pointer items-center gap-1"
               >
                 <span class="shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted">Fast</span>
                 <input
