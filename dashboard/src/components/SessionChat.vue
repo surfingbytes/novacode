@@ -3708,8 +3708,33 @@ onUnmounted(() => {
                 />
               </label>
             </div>
+            <button
+              type="button"
+              class="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:text-text-primary sm:hidden"
+              :class="!hideThinkingOutput ? 'text-yellow-400 hover:text-yellow-300' : 'text-text-muted'"
+              :aria-pressed="!hideThinkingOutput"
+              :aria-label="hideThinkingOutput ? 'Show thinking process' : 'Hide thinking process'"
+              :title="hideThinkingOutput ? 'Show thinking process' : 'Hide thinking process'"
+              @click="onHideThinkingToggle(!hideThinkingOutput)"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M9 18h6" />
+                <path d="M10 22h4" />
+                <path d="M8.5 14.5A6 6 0 1 1 15.5 14.5c-.8.7-1.3 1.6-1.5 2.5h-4c-.2-.9-.7-1.8-1.5-2.5Z" />
+              </svg>
+            </button>
             <label
-              class="ml-auto flex cursor-pointer items-center gap-1.5 text-text-muted hover:text-text-primary"
+              class="ml-auto hidden cursor-pointer items-center gap-1.5 text-text-muted hover:text-text-primary sm:flex"
             >
               <input
                 type="checkbox"
