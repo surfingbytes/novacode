@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue';
 
 // components
 import TagChipsInput from '@/components/input/TagChipsInput.vue';
+import AgentModelPicker from '@/components/AgentModelPicker.vue';
 
 // classes
 import { settingsApi } from '@/classes/api';
@@ -288,18 +289,15 @@ watch(agentType, () => {
             <!-- Model selection -->
             <div v-if="showModelSelection" class="flex flex-col gap-1.5">
               <label class="text-xs font-medium text-text-muted">
-                Model <span class="font-normal opacity-60">(optional)</span>
+                Model
               </label>
-              <select
+              <AgentModelPicker
                 v-model="modelSelection"
-                class="w-full text-sm px-3 py-2.5 rounded-lg border border-fg/[0.12] bg-fg/[0.04] text-text-primary focus:outline-none focus:border-primary/50 transition-colors disabled:opacity-50"
+                :agent-type="agentType"
+                :model-options="modelOptions"
                 :disabled="loading || bLoadingModels"
-              >
-                <option value="">Use latest/default for this agent</option>
-                <option v-for="option in modelOptions" :key="option.id" :value="option.id">
-                  {{ option.label }}
-                </option>
-              </select>
+                variant="modal"
+              />
             </div>
 
             <p v-if="error" class="text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded-lg px-3 py-2">

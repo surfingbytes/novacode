@@ -11,6 +11,7 @@ import GitView from '@/components/workspace/GitView.vue';
 import ConfirmModal from '@/components/ConfirmModal.vue';
 import SessionEditModal from '@/components/SessionEditModal.vue';
 import ClaudeLimitPopup from '@/components/ClaudeLimitPopup.vue';
+import AgentModelPicker from '@/components/AgentModelPicker.vue';
 
 // classes
 import {
@@ -1175,6 +1176,12 @@ function onModelFastChange(checked: boolean): void {
   }
 }
 
+function onSharedModelPickerUpdate(nextModelSelection: string): void {
+  if (nextModelSelection && nextModelSelection !== modelSelection.value) {
+    void persistModelSelection(nextModelSelection);
+  }
+}
+
 async function persistSessionMode(newSessionMode: string) {
   const seq = ++sessionModeSaveSeq;
   const prev = sessionMode.value;
@@ -1908,6 +1915,7 @@ function stripMarkdownSyntax(value: string): string {
 function entriesFromPlanMarkdown(markdown: string): PlanEntry[] {
   const lines = unwrapMarkdownFence(markdown).replace(/\r\n/g, '\n').split('\n');
   const entries: PlanEntry[] = [];
+  const numberedEntries: PlanEntry[] = [];
   let inFence = false;
   let fenceMarker: '`' | '~' | null = null;
 
@@ -1930,14 +1938,53 @@ function entriesFromPlanMarkdown(markdown: string): PlanEntry[] {
     const headingMatch = line.match(/^#{1,4}\s+(?:\d+[\.)]\s*)?(.+)$/);
     const orderedMatch = line.match(/^\s{0,3}\d+[\.)]\s+(.+)$/);
     const taskMatch = line.match(/^\s{0,3}[-*]\s+\[[ xX]\]\s+(.+)$/);
+    const bNumberedEntry = Boolean(orderedMatch || /^#{1,4}\s+\d+[\.)]\s+/.test(line));
     const rawContent = headingMatch?.[1] ?? orderedMatch?.[1] ?? taskMatch?.[1];
     const content = rawContent ? stripMarkdownSyntax(rawContent) : '';
     if (content && !entries.some((entry) => entry.content === content)) {
-      entries.push({ content, status: 'pending' });
+      const entry = { content, status: 'pending' };
+      entries.push(entry);
+      if (bNumberedEntry) numberedEntries.push(entry);
     }
   }
 
-  return entries;
+  return numberedEntries.length ? numberedEntries : entries;
+}
+
+function normalizePlanEntryText(value: string): string {
+  return stripMarkdownSyntax(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function renderPlanMarkdownWithActions(markdown: string, entries: PlanEntry[]): string {
+  const html = renderMdCached(markdown);
+  if (!entries.length || typeof document === 'undefined') return html;
+
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  const entryKeys = entries.map((entry) => normalizePlanEntryText(entry.content));
+  const usedIndexes = new Set<number>();
+  const candidates = Array.from(template.content.querySelectorAll('h1, h2, h3, h4, li'));
+
+  for (const el of candidates) {
+    const text = normalizePlanEntryText(el.textContent ?? '');
+    if (!text) continue;
+    const index = entryKeys.findIndex((entryKey, candidateIndex) => {
+      if (usedIndexes.has(candidateIndex) || !entryKey) return false;
+      return text.includes(entryKey) || entryKey.includes(text);
+    });
+    if (index < 0) continue;
+    usedIndexes.add(index);
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'plan-start-session-btn';
+    button.dataset.planEntryIndex = String(index);
+    button.textContent = 'Start session';
+    el.classList.add('plan-point-with-action');
+    el.appendChild(button);
+  }
+
+  return template.innerHTML;
 }
 
 function planTitle(item: DisplayItem, fallbackIndex: number): string {
@@ -2086,7 +2133,7 @@ function planDocumentFromItem(
     entries,
     startableEntries,
     completedCount,
-    renderedHtml: renderMdCached(markdown),
+    renderedHtml: renderPlanMarkdownWithActions(markdown, startableEntries),
     createdAt,
     live
   };
@@ -2266,6 +2313,20 @@ function startSessionFromPlanEntry(plan: PlanDocument, entry: PlanEntry, index: 
     defaultAgentType: session.value?.agentType,
     defaultModelSelection: modelSelection.value,
   });
+}
+
+function onPlanMarkdownClick(event: MouseEvent): void {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const button = target.closest<HTMLButtonElement>('[data-plan-entry-index]');
+  if (!button) return;
+
+  const plan = selectedPlanDocument.value;
+  const index = Number(button.dataset.planEntryIndex);
+  const entry = Number.isFinite(index) ? plan?.startableEntries[index] : undefined;
+  if (plan && entry) {
+    startSessionFromPlanEntry(plan, entry, index);
+  }
 }
 
 function parseNestedEvent(line: string): Record<string, unknown> | null {
@@ -3834,64 +3895,14 @@ onUnmounted(() => {
                   </option>
                 </select>
               </label>
-              <label class="flex min-w-0 items-center gap-1">
-                <span class="hidden shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted sm:inline">Model</span>
-                <select
-                  :value="modelSelectValue"
-                  :disabled="bIsStreaming || bModelsLoading || bSavingModelSelection"
-                  aria-label="Model"
-                  class="h-5! min-h-0! w-[5.25rem] rounded border border-fg/[0.08] bg-transparent px-1! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50 sm:w-32 sm:px-1.5!"
-                  @change="onModelSelectChange(($event.target as HTMLSelectElement).value, $event.target as HTMLSelectElement)"
-                >
-                  <option v-for="model in visibleModelOptions" :key="model.value" :value="model.value">
-                    {{ model.label }}
-                  </option>
-                  <option v-if="bHasHiddenModelOptions" :value="MORE_MODEL_OPTION_VALUE">
-                    More...
-                  </option>
-                </select>
-              </label>
-              <label class="flex min-w-0 items-center gap-1">
-                <span class="hidden shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted sm:inline">Thinking</span>
-                <select
-                  :value="selectedThinkingName"
-                  :disabled="bIsStreaming || bModelsLoading || bSavingModelSelection"
-                  aria-label="Thinking"
-                  class="h-5! min-h-0! w-[4.25rem] rounded border border-fg/[0.08] bg-transparent px-1! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50 sm:w-24 sm:px-1.5!"
-                  @change="onModelDimensionChange('thinking', ($event.target as HTMLSelectElement).value)"
-                >
-                  <option v-for="thinking in thinkingList" :key="thinking" :value="thinking">
-                    {{ thinking }}
-                  </option>
-                </select>
-              </label>
-              <label class="flex min-w-0 items-center gap-1">
-                <span class="hidden shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted sm:inline">Context</span>
-                <select
-                  :value="selectedContextName"
-                  :disabled="bIsStreaming || bModelsLoading || bSavingModelSelection"
-                  aria-label="Context"
-                  class="h-5! min-h-0! w-[4.25rem] rounded border border-fg/[0.08] bg-transparent px-1! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50 sm:w-24 sm:px-1.5!"
-                  @change="onModelDimensionChange('context', ($event.target as HTMLSelectElement).value)"
-                >
-                  <option v-for="context in contextList" :key="context" :value="context">
-                    {{ context }}
-                  </option>
-                </select>
-              </label>
-              <label
-                v-if="bFastAvailable"
-                class="flex min-w-0 shrink-0 cursor-pointer items-center gap-1"
-              >
-                <span class="shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted">Fast</span>
-                <input
-                  type="checkbox"
-                  class="h-3 w-3 shrink-0 rounded border-fg/[0.2] text-primary focus:ring-primary/40 disabled:opacity-50"
-                  :checked="selectedFastValue"
-                  :disabled="bIsStreaming || bModelsLoading || bSavingModelSelection"
-                  @change="onModelFastChange(($event.target as HTMLInputElement).checked)"
-                />
-              </label>
+              <AgentModelPicker
+                :model-value="modelSelection"
+                :agent-type="session?.agentType"
+                :model-options="modelOptions"
+                :disabled="bIsStreaming || bModelsLoading || bSavingModelSelection"
+                variant="compact"
+                @update:model-value="onSharedModelPickerUpdate"
+              />
             </div>
             <button
               type="button"
@@ -4029,6 +4040,7 @@ onUnmounted(() => {
               <div
                 class="chat-markdown plan-markdown text-sm text-text-primary"
                 v-html="selectedPlanDocument.renderedHtml"
+                @click="onPlanMarkdownClick"
               ></div>
             </div>
             <div
@@ -4382,6 +4394,29 @@ onUnmounted(() => {
 .plan-markdown :deep(li) {
   margin: 0.35rem 0;
   padding-left: 0.15rem;
+}
+
+.plan-markdown :deep(.plan-point-with-action) {
+  scroll-margin-top: 1rem;
+}
+
+.plan-markdown :deep(.plan-start-session-btn) {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
+  border-radius: 0.45rem;
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  padding: 0.2rem 0.45rem;
+  color: var(--color-primary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.plan-markdown :deep(.plan-start-session-btn:hover) {
+  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
 }
 
 .plan-markdown :deep(strong) {
