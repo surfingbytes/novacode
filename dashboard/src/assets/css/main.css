@@ -537,6 +537,39 @@ hr {
     max-width: 100%;
   }
 
+  p,
+  ul,
+  ol,
+  blockquote,
+  pre {
+    margin: 0.65rem 0;
+  }
+
+  > :first-child {
+    margin-top: 0;
+  }
+
+  > :last-child {
+    margin-bottom: 0;
+  }
+
+  ul,
+  ol {
+    padding-left: 1.25rem;
+  }
+
+  ul {
+    list-style: disc;
+  }
+
+  ol {
+    list-style: decimal;
+  }
+
+  li {
+    margin: 0.25rem 0;
+  }
+
   img {
     @apply max-w-full cursor-pointer rounded-md;
     height: auto;

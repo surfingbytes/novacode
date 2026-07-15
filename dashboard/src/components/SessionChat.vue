@@ -127,11 +127,45 @@ const sessionTagSuggestions = computed(() => {
 });
 
 // -------------------------------------------------- Methods --------------------------------------------------
+function normalizeMarkdownForRendering(src: string): string {
+  const lines = src.replace(/\r\n/g, '\n').split('\n');
+  let openFence: { marker: '`' | '~'; length: number } | null = null;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const fence = fenceMatch[1];
+      const marker = fence[0] as '`' | '~';
+      if (!openFence) {
+        openFence = { marker, length: fence.length };
+      } else if (marker === openFence.marker && fence.length >= openFence.length) {
+        openFence = null;
+      }
+      continue;
+    }
+
+    if (!openFence) continue;
+
+    const partialClose = line.match(/^ {0,3}(`{1,2}|~{1,2})\s*$/);
+    if (partialClose?.[1]?.[0] === openFence.marker) {
+      lines[i] = openFence.marker.repeat(Math.max(3, openFence.length));
+      openFence = null;
+    }
+  }
+
+  if (openFence) {
+    lines.push(openFence.marker.repeat(Math.max(3, openFence.length)));
+  }
+
+  return lines.join('\n');
+}
+
 function renderMd(src: string | undefined): string {
   if (!src) {
     return '';
   }
-  return marked.parse(src, { async: false }) as string;
+  return marked.parse(normalizeMarkdownForRendering(src), { async: false }) as string;
 }
 
 function setChatError(message: string, code?: AgentErrorCode | null): void {
