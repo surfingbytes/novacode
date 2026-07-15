@@ -2186,11 +2186,6 @@ function openPlan(planId: string | undefined): void {
   activeTab.value = 'plan';
 }
 
-function closePlanTab(): void {
-  selectedPlanId.value = null;
-  activeTab.value = 'chat';
-}
-
 function safeDownloadName(value: string): string {
   const base = value
     .trim()
@@ -3956,7 +3951,7 @@ onUnmounted(() => {
           <div
             v-if="selectedPlanDocument"
             ref="planActionsMenuRef"
-            class="relative inline-flex shrink-0"
+            class="relative ml-auto inline-flex shrink-0"
           >
             <button
               type="button"
@@ -3994,15 +3989,6 @@ onUnmounted(() => {
               </button>
             </div>
           </div>
-
-          <button
-            type="button"
-            class="button is-transparent is-icon"
-            title="Close plan"
-            @click="closePlanTab"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
-          </button>
         </div>
 
         <div class="flex-1 min-h-0 overflow-y-auto px-4 md:px-8 py-6">
