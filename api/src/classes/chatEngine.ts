@@ -18,6 +18,10 @@ import type { SessionConfigSyncHandler } from './acpSubprocessRunner';
 import { computeLastListPreview } from './chatPreview';
 import { extractStreamNotificationPreview } from './chatStreamPreviewFromEvents';
 import { broadcastSessionListUpsert } from './sessionListBroadcast';
+import {
+  buildLinkedPlanContextPrefix,
+  extractLinkedPlanContextFromConfig,
+} from './linkedPlanContext';
 
 // types
 import type { ChatMessage, AgentType } from '../@types/index';
@@ -216,21 +220,8 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
 
   const agentType: AgentType = (session.agentType as AgentType | null) ?? 'claude';
   const sessionMode = normalizeSessionMode(mode ?? session.sessionMode);
-  let sessionConfig: Record<string, string> = {};
-  if (session.sessionConfigJson) {
-    try {
-      const parsed = JSON.parse(session.sessionConfigJson) as unknown;
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        sessionConfig = Object.fromEntries(
-          Object.entries(parsed as Record<string, unknown>).filter(
-            (entry): entry is [string, string] => typeof entry[1] === 'string'
-          )
-        );
-      }
-    } catch {
-      sessionConfig = {};
-    }
-  }
+  const { linkedPlanContext, agentConfig: sessionConfig } =
+    extractLinkedPlanContextFromConfig(session.sessionConfigJson);
 
   if (agentType !== 'claude' && agentType !== 'mistral-vibe' && agentType !== 'cursor-agent' && agentType !== 'open-code' && agentType !== 'codex') {
     return { error: `Agent type '${agentType}' is not yet supported via ACP. Coming soon.` };
@@ -285,7 +276,16 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
 
   // Resolve workspace rules prefix
   const rulesPrefix = await buildWorkspaceRulesPrefix(workspacePath);
-  const agentPrompt = rulesPrefix ? `${rulesPrefix}\n\nUser request:\n${effectiveText}` : effectiveText;
+  const linkedPlanPrefix = currentMessages.length === 1
+    ? await buildLinkedPlanContextPrefix(linkedPlanContext)
+    : '';
+  const contextPrefixes = [
+    rulesPrefix,
+    linkedPlanPrefix,
+  ].filter((section) => section.trim());
+  const agentPrompt = contextPrefixes.length > 0
+    ? `${contextPrefixes.join('\n\n---\n\n')}\n\n---\n\nUser request:\n${effectiveText}`
+    : effectiveText;
 
   // Get Claude OAuth token (only needed for claude agent type)
   const user = await db.getFirstUser();

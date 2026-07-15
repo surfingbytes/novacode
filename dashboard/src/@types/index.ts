@@ -62,9 +62,22 @@ export interface Workspace {
 }
 
 export interface PlanDocumentSummary {
+  id: string;
   sessionId: string;
   title: string;
   markdown: string;
+}
+
+export type LinkedPlanContextMode = 'target-only' | 'full';
+
+export interface LinkedPlanContext {
+  sourceSessionId: string;
+  sourceAcpSessionId: string;
+  planId: string;
+  planTitle: string;
+  entryIndex: number;
+  entryContent: string;
+  contextMode: LinkedPlanContextMode;
 }
 
 export interface Session {

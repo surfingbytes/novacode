@@ -19,7 +19,7 @@ import { notifyTaskDone, notifyTodoCompleted } from '@/lib/notifications';
 // stores
 import { useWorkspacesStore } from '@/stores/workspaces';
 
-import type { AgentConfigOption, AgentModeOption, AgentModelOption, ChatMessage, ChatQueueItem, ChatWsServerMessage, PlanDocumentSummary, Session } from '@/@types/index';
+import type { AgentConfigOption, AgentModeOption, AgentModelOption, ChatMessage, ChatQueueItem, ChatWsServerMessage, LinkedPlanContext, PlanDocumentSummary, Session } from '@/@types/index';
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -34,6 +34,13 @@ const props = defineProps<{
 // -------------------------------------------------- Emits --------------------------------------------------
 const emit = defineEmits<{
   (e: 'toggle-sidebar'): void;
+  (e: 'start-plan-session', payload: {
+    defaultName: string;
+    draftPrompt: string;
+    linkedPlanContext?: LinkedPlanContext;
+    defaultAgentType?: Session['agentType'];
+    defaultModelSelection?: string;
+  }): void;
 }>();
 
 // -------------------------------------------------- Store --------------------------------------------------
@@ -1065,6 +1072,8 @@ interface PlanEntry {
 
 interface PlanDocument {
   id: string;
+  backendPlanId?: string;
+  planSourceSessionId?: string;
   title: string;
   markdown: string;
   entries: PlanEntry[];
@@ -1711,6 +1720,8 @@ interface PlanMarkdownCandidate {
   markdown: string;
   normalized: string;
   index: number;
+  planId?: string;
+  sourceSessionId?: string;
 }
 
 function normalizePlanSearchText(value: string | undefined): string {
@@ -1781,6 +1792,8 @@ function planMarkdownCandidatesFromDocuments(
         markdown,
         normalized: normalizePlanSearchText(`${doc.title} ${firstMarkdownHeading(markdown)} ${markdown}`),
         index,
+        planId: doc.id,
+        sourceSessionId: doc.sessionId,
       };
     });
 }
@@ -1806,8 +1819,8 @@ function scorePlanMarkdownCandidate(item: DisplayItem, candidate: PlanMarkdownCa
 function bestPlanMarkdownFallback(
   item: DisplayItem,
   candidates: PlanMarkdownCandidate[]
-): string | undefined {
-  if (item.planMarkdown?.trim() || candidates.length === 0) return undefined;
+): PlanMarkdownCandidate | undefined {
+  if (candidates.length === 0) return undefined;
   let best: PlanMarkdownCandidate | null = null;
   let bestScore = -1;
   for (const candidate of candidates) {
@@ -1817,7 +1830,7 @@ function bestPlanMarkdownFallback(
       bestScore = score;
     }
   }
-  return best && bestScore > 0 ? best.markdown : undefined;
+  return best && bestScore > 0 ? best : undefined;
 }
 
 function planDocumentFromItem(
@@ -1826,15 +1839,17 @@ function planDocumentFromItem(
   fallbackIndex: number,
   createdAt: string,
   live: boolean,
-  fallbackMarkdown?: string
+  fallback?: PlanMarkdownCandidate
 ): PlanDocument | null {
   if (item.kind !== 'plan') return null;
   const entries = item.planEntries ?? [];
-  const markdown = item.planMarkdown?.trim() || fallbackMarkdown?.trim() || markdownFromPlanEntries(entries);
+  const markdown = item.planMarkdown?.trim() || fallback?.markdown.trim() || markdownFromPlanEntries(entries);
   if (!markdown && entries.length === 0) return null;
   const completedCount = entries.filter((entry) => isPlanEntryCompleted(entry.status)).length;
   return {
     id,
+    backendPlanId: fallback?.planId,
+    planSourceSessionId: item.planSourceSessionId ?? fallback?.sourceSessionId,
     title: planTitle(item, fallbackIndex),
     markdown,
     entries,
@@ -1942,6 +1957,58 @@ function openPlan(planId: string | undefined): void {
 function closePlanTab(): void {
   selectedPlanId.value = null;
   activeTab.value = 'chat';
+}
+
+function safeDownloadName(value: string): string {
+  const base = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${base || 'plan'}.plan.md`;
+}
+
+function downloadPlan(plan: PlanDocument | null): void {
+  if (!plan?.markdown.trim()) return;
+  const blob = new Blob([`${plan.markdown.trim()}\n`], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = safeDownloadName(plan.title);
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function shortPlanEntry(content: string): string {
+  return content.replace(/\s+/g, ' ').trim();
+}
+
+function startSessionFromPlanEntry(plan: PlanDocument, entry: PlanEntry, index: number): void {
+  const entryText = entry.content.trim();
+  if (!entryText) return;
+
+  const pointNumber = index + 1;
+  const linkedPlanContext = plan.backendPlanId && plan.planSourceSessionId
+    ? {
+        sourceSessionId: props.sessionId,
+        sourceAcpSessionId: plan.planSourceSessionId,
+        planId: plan.backendPlanId,
+        planTitle: plan.title,
+        entryIndex: index,
+        entryContent: entryText,
+        contextMode: 'target-only' as const,
+      }
+    : undefined;
+
+  emit('start-plan-session', {
+    defaultName: `Point ${pointNumber}: ${shortPlanEntry(entryText).slice(0, 80)}`,
+    draftPrompt: `Implement point ${pointNumber} from the linked plan.`,
+    linkedPlanContext,
+    defaultAgentType: session.value?.agentType,
+    defaultModelSelection: modelSelection.value,
+  });
 }
 
 function parseNestedEvent(line: string): Record<string, unknown> | null {
@@ -3581,6 +3648,16 @@ onUnmounted(() => {
           </select>
 
           <button
+            v-if="selectedPlanDocument"
+            type="button"
+            class="button is-transparent text-xs"
+            title="Download plan as Markdown"
+            @click="downloadPlan(selectedPlanDocument)"
+          >
+            Download
+          </button>
+
+          <button
             type="button"
             class="button is-transparent is-icon"
             title="Close plan"
@@ -3622,7 +3699,7 @@ onUnmounted(() => {
                   <svg v-else-if="planStatusIcon(entry.status) === 'in_progress'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-primary select-none shrink-0 mt-px" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                   <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-text-muted select-none shrink-0 mt-px" aria-hidden="true"><circle cx="12" cy="12" r="10"/></svg>
                   <span
-                    class="leading-snug"
+                    class="min-w-0 flex-1 leading-snug"
                     :class="
                       isPlanEntryCompleted(entry.status)
                         ? 'text-text-muted line-through'
@@ -3631,6 +3708,14 @@ onUnmounted(() => {
                   >
                     {{ entry.content }}
                   </span>
+                  <button
+                    type="button"
+                    class="shrink-0 rounded-md border border-fg/10 px-2 py-1 text-[11px] font-medium text-primary hover:bg-primary/10"
+                    title="Start a new session from this plan point"
+                    @click="startSessionFromPlanEntry(selectedPlanDocument, entry, index)"
+                  >
+                    Start session
+                  </button>
                 </li>
               </ul>
             </div>

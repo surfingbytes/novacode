@@ -23,7 +23,8 @@ import type {
   AutomationRun,
   AgentModelOption,
   AgentModeOption,
-  AgentConfigOption
+  AgentConfigOption,
+  LinkedPlanContext
 } from '@/@types/index';
 
 // ---------------------------------- HTTP ----------------------------------
@@ -389,6 +390,8 @@ export const sessionsApi = {
       name: string;
       tags?: string[] | null;
       agentType?: AgentType;
+      modelSelection?: string | null;
+      linkedPlanContext?: LinkedPlanContext | null;
     }
   ): ReturnType<typeof http.post<Session>> =>
     http.post<Session>(`/workspaces/${workspaceId}/sessions`, payload),

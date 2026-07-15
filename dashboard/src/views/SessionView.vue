@@ -16,7 +16,7 @@ import { sessionsApi, settingsApi } from '@/classes/api';
 import { useWorkspacesStore } from '@/stores/workspaces';
 
 // types
-import type { AgentType } from '@/@types/index';
+import type { AgentType, LinkedPlanContext } from '@/@types/index';
 
 const route = useRoute();
 const router = useRouter();
@@ -62,6 +62,13 @@ const sessionTags = computed(() => {
 // New session modal
 const showNewSessionModal = ref(false);
 const isSubmittingSession = ref(false);
+const pendingPlanHandoff = ref<{
+  defaultName: string;
+  draftPrompt: string;
+  linkedPlanContext?: LinkedPlanContext;
+  defaultAgentType?: AgentType;
+  defaultModelSelection?: string;
+} | null>(null);
 const claudeAvailable = ref(false);
 const cursorAvailable = ref(false);
 const mistralVibeAvailable = ref(false);
@@ -94,12 +101,23 @@ async function createSession(payload: {
   name: string;
   tags?: string[] | null;
   agentType?: AgentType;
+  modelSelection?: string | null;
 }): Promise<void> {
   if (isSubmittingSession.value) return;
   isSubmittingSession.value = true;
   try {
-    const { data: newSession } = await sessionsApi.create(workspaceId.value, payload);
+    const { data: newSession } = await sessionsApi.create(workspaceId.value, {
+      ...payload,
+      linkedPlanContext: pendingPlanHandoff.value?.linkedPlanContext
+    });
+    if (pendingPlanHandoff.value?.draftPrompt) {
+      localStorage.setItem(
+        `sessionPrompt:${workspaceId.value}:${newSession.id}`,
+        pendingPlanHandoff.value.draftPrompt
+      );
+    }
     showNewSessionModal.value = false;
+    pendingPlanHandoff.value = null;
     await router.push({
       name: 'session',
       params: { id: workspaceId.value, sessionId: newSession.id }
@@ -109,6 +127,22 @@ async function createSession(payload: {
   } finally {
     isSubmittingSession.value = false;
   }
+}
+
+function openNewSessionModal(): void {
+  pendingPlanHandoff.value = null;
+  showNewSessionModal.value = true;
+}
+
+function handleStartPlanSession(payload: {
+  defaultName: string;
+  draftPrompt: string;
+  linkedPlanContext?: LinkedPlanContext;
+  defaultAgentType?: AgentType;
+  defaultModelSelection?: string;
+}): void {
+  pendingPlanHandoff.value = payload;
+  showNewSessionModal.value = true;
 }
 
 function setDesktopState(matchesDesktop: boolean): void {
@@ -191,7 +225,7 @@ onUnmounted(() => {
         :desktop-visible="desktopSidebarVisible"
         :show-back-button="activeKind === 'session'"
         @back="handleBackToWorkspaceSessions"
-        @new-session="showNewSessionModal = true"
+        @new-session="openNewSessionModal"
       />
 
       <Transition
@@ -213,7 +247,7 @@ onUnmounted(() => {
           :show-back-button="activeKind === 'session'"
           @close-mobile="mobileTab = 'chat'"
           @back="handleBackToWorkspaceSessions"
-          @new-session="showNewSessionModal = true"
+          @new-session="openNewSessionModal"
         />
       </Transition>
 
@@ -224,6 +258,7 @@ onUnmounted(() => {
         :viewport-height="viewportHeight"
         :show-sidebar-toggle="true"
         @toggle-sidebar="handleSidebarToggle"
+        @start-plan-session="handleStartPlanSession"
       />
 
       <OrchestratorContent
@@ -239,7 +274,13 @@ onUnmounted(() => {
   <NewSessionModal
     v-model="showNewSessionModal"
     :loading="isSubmittingSession"
-    :default-agent-type="(workspace && workspace.defaultAgentType) || null"
+    :title="pendingPlanHandoff ? 'Start from plan point' : 'New session'"
+    :submit-label="pendingPlanHandoff ? 'Create session' : 'Create'"
+    :helper-text="pendingPlanHandoff ? 'The new session will link to the source plan, while the prompt stays compact.' : undefined"
+    :default-session-name="pendingPlanHandoff?.defaultName"
+    :show-model-selection="!!pendingPlanHandoff"
+    :default-model-selection="pendingPlanHandoff?.defaultModelSelection ?? null"
+    :default-agent-type="pendingPlanHandoff?.defaultAgentType ?? ((workspace && workspace.defaultAgentType) || null)"
     :claude-available="claudeAvailable"
     :cursor-available="cursorAvailable"
     :mistral-vibe-available="mistralVibeAvailable"
