@@ -98,6 +98,8 @@ const bMobileSessionMenuOpen = ref(false);
 const mobileSessionMenuRef = ref<HTMLElement | null>(null);
 const bModeMenuOpen = ref(false);
 const modeMenuRef = ref<HTMLElement | null>(null);
+const bPlanActionsMenuOpen = ref(false);
+const planActionsMenuRef = ref<HTMLElement | null>(null);
 
 // Claude limit popup state
 const bShowClaudeLimitPopup = ref(false);
@@ -209,6 +211,10 @@ function closeModeMenu(): void {
   bModeMenuOpen.value = false;
 }
 
+function closePlanActionsMenu(): void {
+  bPlanActionsMenuOpen.value = false;
+}
+
 function handleDocumentClickMobileMenu(e: MouseEvent): void {
   const target = e.target as Node;
   const mobileEl = mobileSessionMenuRef.value;
@@ -219,11 +225,16 @@ function handleDocumentClickMobileMenu(e: MouseEvent): void {
   if (bModeMenuOpen.value && modeEl && !modeEl.contains(target)) {
     closeModeMenu();
   }
+  const planActionsEl = planActionsMenuRef.value;
+  if (bPlanActionsMenuOpen.value && planActionsEl && !planActionsEl.contains(target)) {
+    closePlanActionsMenu();
+  }
 }
 
 function handleKeydownMobileMenu(e: KeyboardEvent): void {
   if (e.key === 'Escape' && bMobileSessionMenuOpen.value) closeMobileSessionMenu();
   if (e.key === 'Escape' && bModeMenuOpen.value) closeModeMenu();
+  if (e.key === 'Escape' && bPlanActionsMenuOpen.value) closePlanActionsMenu();
 }
 
 const CATEGORY_COLORS = [
@@ -1244,6 +1255,7 @@ interface PlanDocument {
   title: string;
   markdown: string;
   entries: PlanEntry[];
+  startableEntries: PlanEntry[];
   completedCount: number;
   renderedHtml: string;
   createdAt: string;
@@ -1885,6 +1897,49 @@ function markdownFromPlanEntries(entries: PlanEntry[]): string {
     .join('\n');
 }
 
+function stripMarkdownSyntax(value: string): string {
+  return value
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/[*_`~#>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function entriesFromPlanMarkdown(markdown: string): PlanEntry[] {
+  const lines = unwrapMarkdownFence(markdown).replace(/\r\n/g, '\n').split('\n');
+  const entries: PlanEntry[] = [];
+  let inFence = false;
+  let fenceMarker: '`' | '~' | null = null;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1][0] as '`' | '~';
+      if (!inFence) {
+        inFence = true;
+        fenceMarker = marker;
+      } else if (marker === fenceMarker) {
+        inFence = false;
+        fenceMarker = null;
+      }
+      continue;
+    }
+    if (inFence) continue;
+
+    const headingMatch = line.match(/^#{1,4}\s+(?:\d+[\.)]\s*)?(.+)$/);
+    const orderedMatch = line.match(/^\s{0,3}\d+[\.)]\s+(.+)$/);
+    const taskMatch = line.match(/^\s{0,3}[-*]\s+\[[ xX]\]\s+(.+)$/);
+    const rawContent = headingMatch?.[1] ?? orderedMatch?.[1] ?? taskMatch?.[1];
+    const content = rawContent ? stripMarkdownSyntax(rawContent) : '';
+    if (content && !entries.some((entry) => entry.content === content)) {
+      entries.push({ content, status: 'pending' });
+    }
+  }
+
+  return entries;
+}
+
 function planTitle(item: DisplayItem, fallbackIndex: number): string {
   const title = item.planTitle?.trim();
   if (title) return title;
@@ -2020,7 +2075,8 @@ function planDocumentFromItem(
   const entries = item.planEntries ?? [];
   const markdown = item.planMarkdown?.trim() || fallback?.markdown.trim() || markdownFromPlanEntries(entries);
   if (!markdown && entries.length === 0) return null;
-  const completedCount = entries.filter((entry) => isPlanEntryCompleted(entry.status)).length;
+  const startableEntries = entries.length ? entries : entriesFromPlanMarkdown(markdown);
+  const completedCount = startableEntries.filter((entry) => isPlanEntryCompleted(entry.status)).length;
   return {
     id,
     backendPlanId: fallback?.planId,
@@ -2028,6 +2084,7 @@ function planDocumentFromItem(
     title: planTitle(item, fallbackIndex),
     markdown,
     entries,
+    startableEntries,
     completedCount,
     renderedHtml: renderMdCached(markdown),
     createdAt,
@@ -2145,6 +2202,7 @@ function safeDownloadName(value: string): string {
 
 function downloadPlan(plan: PlanDocument | null): void {
   if (!plan?.markdown.trim()) return;
+  closePlanActionsMenu();
   const blob = new Blob([`${plan.markdown.trim()}\n`], { type: 'text/markdown;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -2158,6 +2216,33 @@ function downloadPlan(plan: PlanDocument | null): void {
 
 function shortPlanEntry(content: string): string {
   return content.replace(/\s+/g, ' ').trim();
+}
+
+function startSessionFromFullPlan(plan: PlanDocument | null): void {
+  if (!plan?.markdown.trim()) return;
+  closePlanActionsMenu();
+
+  const linkedPlanContext = plan.backendPlanId && plan.planSourceSessionId
+    ? {
+        sourceSessionId: props.sessionId,
+        sourceAcpSessionId: plan.planSourceSessionId,
+        planId: plan.backendPlanId,
+        planTitle: plan.title,
+        entryIndex: 0,
+        entryContent: plan.title,
+        contextMode: 'full' as const,
+      }
+    : undefined;
+
+  emit('start-plan-session', {
+    defaultName: `Plan: ${plan.title.slice(0, 80)}`,
+    draftPrompt: linkedPlanContext
+      ? `Implement the linked plan "${plan.title}".`
+      : `Implement this plan:\n\n${plan.markdown.trim()}`,
+    linkedPlanContext,
+    defaultAgentType: session.value?.agentType,
+    defaultModelSelection: modelSelection.value,
+  });
 }
 
 function startSessionFromPlanEntry(plan: PlanDocument, entry: PlanEntry, index: number): void {
@@ -2179,7 +2264,9 @@ function startSessionFromPlanEntry(plan: PlanDocument, entry: PlanEntry, index: 
 
   emit('start-plan-session', {
     defaultName: `Point ${pointNumber}: ${shortPlanEntry(entryText).slice(0, 80)}`,
-    draftPrompt: `Implement point ${pointNumber} from the linked plan.`,
+    draftPrompt: linkedPlanContext
+      ? `Implement point ${pointNumber} from the linked plan.`
+      : `Implement point ${pointNumber} from "${plan.title}":\n\n${entryText}`,
     linkedPlanContext,
     defaultAgentType: session.value?.agentType,
     defaultModelSelection: modelSelection.value,
@@ -3844,8 +3931,8 @@ onUnmounted(() => {
               </span>
             </div>
             <div v-if="selectedPlanDocument" class="text-xs text-text-muted">
-              <template v-if="selectedPlanDocument.entries.length">
-                {{ selectedPlanDocument.completedCount }}/{{ selectedPlanDocument.entries.length }} completed
+              <template v-if="selectedPlanDocument.startableEntries.length">
+                {{ selectedPlanDocument.completedCount }}/{{ selectedPlanDocument.startableEntries.length }} completed
               </template>
               <template v-else>Plan document</template>
             </div>
@@ -3866,15 +3953,47 @@ onUnmounted(() => {
             </option>
           </select>
 
-          <button
+          <div
             v-if="selectedPlanDocument"
-            type="button"
-            class="button is-transparent text-xs"
-            title="Download plan as Markdown"
-            @click="downloadPlan(selectedPlanDocument)"
+            ref="planActionsMenuRef"
+            class="relative inline-flex shrink-0"
           >
-            Download
-          </button>
+            <button
+              type="button"
+              class="button is-transparent rounded-r-none! text-xs"
+              title="Download plan as Markdown"
+              @click="downloadPlan(selectedPlanDocument)"
+            >
+              Download
+            </button>
+            <button
+              type="button"
+              class="button is-transparent is-icon rounded-l-none! border-l border-fg/10"
+              title="Plan actions"
+              @click.stop="bPlanActionsMenuOpen = !bPlanActionsMenuOpen"
+            >
+              <ChevronDown class="h-3.5 w-3.5" />
+            </button>
+            <div
+              v-if="bPlanActionsMenuOpen"
+              class="absolute right-0 top-full z-30 mt-1 min-w-56 overflow-hidden rounded-lg border border-fg/10 bg-surface shadow-xl"
+            >
+              <button
+                type="button"
+                class="flex w-full items-center px-3 py-2 text-left text-xs text-text-primary hover:bg-fg/[0.06]"
+                @click="startSessionFromFullPlan(selectedPlanDocument)"
+              >
+                Start whole plan in new session
+              </button>
+              <button
+                type="button"
+                class="flex w-full items-center px-3 py-2 text-left text-xs text-text-primary hover:bg-fg/[0.06]"
+                @click="downloadPlan(selectedPlanDocument)"
+              >
+                Download markdown
+              </button>
+            </div>
+          </div>
 
           <button
             type="button"
@@ -3898,19 +4017,19 @@ onUnmounted(() => {
               ></div>
             </div>
             <div
-              v-if="selectedPlanDocument.entries.length"
+              v-if="selectedPlanDocument.startableEntries.length"
               class="rounded-2xl border border-fg/10 bg-fg/[0.03] overflow-hidden"
             >
               <div class="flex items-center gap-2 border-b border-fg/10 px-4 py-2.5">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none text-text-muted shrink-0" aria-hidden="true"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2M9 12l2 2 4-4"/></svg>
-                <span class="text-xs font-medium text-text-primary">Todos</span>
+                <span class="text-xs font-medium text-text-primary">Plan points</span>
                 <span class="ml-auto text-xs text-text-muted">
-                  {{ selectedPlanDocument.completedCount }}/{{ selectedPlanDocument.entries.length }}
+                  {{ selectedPlanDocument.completedCount }}/{{ selectedPlanDocument.startableEntries.length }}
                 </span>
               </div>
               <ul class="space-y-1.5 px-4 py-3">
                 <li
-                  v-for="(entry, index) in selectedPlanDocument.entries"
+                  v-for="(entry, index) in selectedPlanDocument.startableEntries"
                   :key="`${selectedPlanDocument.id}-todo-${index}`"
                   class="flex items-start gap-2 text-xs"
                 >
