@@ -780,7 +780,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  // POST /api/git/workspace/:workspaceId/checkout — switch to an existing branch
+  // POST /api/git/workspace/:workspaceId/checkout — switch to a local branch or track a remote branch
   fastifyInstance.post(
     '/api/git/workspace/:workspaceId/checkout',
     {
@@ -789,6 +789,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         params: Type.Object({ workspaceId: Type.String() }),
         body: Type.Object({
           branch: Type.String({ minLength: 1 }),
+          remoteBranch: Type.Optional(Type.String({ minLength: 1 })),
           repo: Type.Optional(Type.String())
         }),
         response: {
@@ -807,7 +808,17 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         if (!context) return reply.code(404).send({ error: 'Workspace not found' });
 
         ensureSafeGitArg(request.body.branch, 'branch name');
-        await execFileAsync('git', ['switch', request.body.branch], {
+        const remoteBranch = request.body.remoteBranch?.trim();
+        const args = ['switch', request.body.branch];
+
+        if (remoteBranch) {
+          ensureSafeGitArg(remoteBranch, 'remote branch');
+          const { remoteBranches } = await listBranches(context.cwd);
+          if (!remoteBranches.includes(remoteBranch)) throw new Error('Remote branch not found');
+          args.splice(1, 1, '--track', remoteBranch);
+        }
+
+        await execFileAsync('git', args, {
           cwd: context.cwd,
           env: gitEnv(context.workspace)
         });

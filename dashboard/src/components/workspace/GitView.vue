@@ -68,6 +68,7 @@ const pushResult = ref<{ type: 'success' | 'error'; text: string; repo?: string 
 const gitActionResult = ref<{ type: 'success' | 'error'; text: string; repo?: string } | null>(null);
 
 const branches = ref<GitBranch[]>([]);
+const remoteBranches = ref<string[]>([]);
 const bBranchesLoading = ref<boolean>(false);
 const bPulling = ref<boolean>(false);
 const bFetching = ref<boolean>(false);
@@ -205,7 +206,7 @@ const canSwitchBranch = computed(
   (): boolean =>
     !!activeRepo.value &&
     !!selectedBranch.value &&
-    selectedBranch.value !== activeRepo.value.currentBranch &&
+    selectedBranch.value !== `local:${activeRepo.value.currentBranch}` &&
     !gitOperationInProgress.value
 );
 const canCreateBranch = computed(
@@ -214,10 +215,53 @@ const canCreateBranch = computed(
 const canDiscardSelected = computed(
   (): boolean => !!activeRepo.value && selectedFilesInActiveRepo.value.length > 0 && !gitOperationInProgress.value
 );
-const filteredBranches = computed((): GitBranch[] => {
+type BranchOption = GitBranch & {
+  key: string;
+  remote: boolean;
+  remoteName: string | null;
+};
+
+const localNameFromRemoteBranch = (remoteBranch: string): string => {
+  const slash = remoteBranch.indexOf('/');
+  return slash < 0 ? remoteBranch : remoteBranch.slice(slash + 1);
+};
+
+const branchOptions = computed((): BranchOption[] => {
+  const localNames = new Set(branches.value.map((branch) => branch.name));
+  const upstreams = new Set(
+    branches.value
+      .map((branch) => branch.upstream)
+      .filter((upstream): upstream is string => !!upstream)
+  );
+
+  const localBranches = branches.value.map((branch) => ({
+    ...branch,
+    key: `local:${branch.name}`,
+    remote: false,
+    remoteName: null
+  }));
+
+  const remoteOnlyBranches = remoteBranches.value
+    .filter((remoteBranch) => {
+      const localName = localNameFromRemoteBranch(remoteBranch);
+      return !localNames.has(localName) && !upstreams.has(remoteBranch);
+    })
+    .map((remoteBranch) => ({
+      name: localNameFromRemoteBranch(remoteBranch),
+      current: false,
+      upstream: remoteBranch,
+      key: `remote:${remoteBranch}`,
+      remote: true,
+      remoteName: remoteBranch
+    }));
+
+  return [...localBranches, ...remoteOnlyBranches];
+});
+
+const filteredBranches = computed((): BranchOption[] => {
   const q = branchSearch.value.trim().toLowerCase();
-  if (!q) return branches.value;
-  return branches.value.filter(
+  if (!q) return branchOptions.value;
+  return branchOptions.value.filter(
     (branch) =>
       branch.name.toLowerCase().includes(q) ||
       branch.upstream?.toLowerCase().includes(q)
@@ -289,10 +333,12 @@ const loadBranches = async (repo: string): Promise<void> => {
   try {
     const response = await gitApi.branches(props.workspaceId, repo);
     branches.value = response.data.branches;
-    selectedBranch.value = response.data.currentBranch;
+    remoteBranches.value = response.data.remoteBranches;
+    selectedBranch.value = `local:${response.data.currentBranch}`;
   } catch (e: unknown) {
     setGitActionResult('error', gitErrorMessage(e, 'Failed to load branches'), repo);
     branches.value = [];
+    remoteBranches.value = [];
     selectedBranch.value = '';
   } finally {
     bBranchesLoading.value = false;
@@ -523,7 +569,7 @@ const pullActiveRepo = async (): Promise<void> => {
 const openSwitchBranchDialog = async (): Promise<void> => {
   const r = activeRepo.value;
   if (!r) return;
-  selectedBranch.value = r.currentBranch;
+  selectedBranch.value = `local:${r.currentBranch}`;
   branchSearch.value = '';
   bShowGitActions.value = false;
   bGitActionsMenuOpen.value = false;
@@ -569,19 +615,24 @@ const onGitActionPick = (key: string): void => {
   }
 };
 
-const switchBranch = async (branchName = selectedBranch.value): Promise<void> => {
+const switchBranch = async (branch: BranchOption): Promise<void> => {
   const r = activeRepo.value;
-  selectedBranch.value = branchName;
+  selectedBranch.value = branch.key;
   if (!r || !canSwitchBranch.value) return;
   bSwitchingBranch.value = true;
   try {
-    const response = await gitApi.checkout(props.workspaceId, selectedBranch.value, r.repo);
+    const response = await gitApi.checkout(
+      props.workspaceId,
+      branch.name,
+      r.repo,
+      branch.remoteName ?? undefined
+    );
     setGitActionResult('success', `Switched to ${response.data.branch}`, r.repo);
     bShowSwitchBranch.value = false;
     clearSelectedFile();
     await refresh();
   } catch (e: unknown) {
-    selectedBranch.value = r.currentBranch;
+    selectedBranch.value = `local:${r.currentBranch}`;
     setGitActionResult('error', gitErrorMessage(e, 'Switch branch failed'), r.repo);
   } finally {
     bSwitchingBranch.value = false;
@@ -1335,11 +1386,11 @@ onUnmounted((): void => {
             </div>
             <button
               v-for="branch in filteredBranches"
-              :key="branch.name"
+              :key="branch.key"
               class="w-full flex items-center justify-between gap-3 rounded-xl px-3 py-3 text-left hover:bg-fg/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               type="button"
               :disabled="branch.current || gitOperationInProgress"
-              @click="switchBranch(branch.name)"
+              @click="switchBranch(branch)"
             >
               <span class="min-w-0">
                 <span class="block truncate font-mono text-sm text-text-primary">{{ branch.name }}</span>
@@ -1352,9 +1403,15 @@ onUnmounted((): void => {
                 Current
               </span>
               <div
-                v-else-if="bSwitchingBranch && selectedBranch === branch.name"
+                v-else-if="bSwitchingBranch && selectedBranch === branch.key"
                 class="w-4 h-4 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
               ></div>
+              <span
+                v-else-if="branch.remote"
+                class="rounded-full bg-fg/[0.08] px-2 py-0.5 text-[10px] uppercase tracking-wide text-text-muted"
+              >
+                Remote
+              </span>
             </button>
           </div>
         </div>
