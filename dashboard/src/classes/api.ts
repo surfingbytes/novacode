@@ -383,9 +383,14 @@ export const gitApi = {
   checkout: (
     workspaceId: string,
     branch: string,
-    repo?: string
+    repo?: string,
+    remoteBranch?: string
   ): ReturnType<typeof http.post<{ branch: string }>> =>
-    http.post<{ branch: string }>(`/git/workspace/${workspaceId}/checkout`, { branch, repo }),
+    http.post<{ branch: string }>(`/git/workspace/${workspaceId}/checkout`, {
+      branch,
+      repo,
+      remoteBranch
+    }),
   createBranch: (
     workspaceId: string,
     branch: string,
