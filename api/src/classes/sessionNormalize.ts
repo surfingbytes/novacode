@@ -26,7 +26,8 @@ export function normalizeSessionForApi<T extends { tags?: unknown; sessionConfig
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         sessionConfigJson = Object.fromEntries(
           Object.entries(parsed as Record<string, unknown>).filter(
-            (entry): entry is [string, string] => typeof entry[1] === 'string'
+            (entry): entry is [string, string] =>
+              typeof entry[1] === 'string' && !entry[0].startsWith('__nova')
           )
         );
       }

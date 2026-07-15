@@ -1,16 +1,14 @@
 // node_modules
 import { FastifyInstance } from 'fastify';
-import type { Dirent } from 'fs';
-import { readdir, readFile } from 'fs/promises';
-import { join } from 'path';
 
 // classes
-import { config } from '../classes/config';
 import { db, normalizeTagStringList } from '../classes/database';
 import { normalizeSessionForApi } from '../classes/sessionNormalize';
 import { jwtPreHandler } from '../classes/auth';
 import { createSessionWithAgent } from '../classes/sessionService';
 import { closeAcpSessionForNovaSession } from '../classes/acpSessionClose';
+import { mergeInternalSessionConfig } from '../classes/linkedPlanContext';
+import { listPlanDocumentsForAcpSession } from '../classes/planDocuments';
 import { getActiveSessionIds, cancelRun } from './chat';
 import { deleteSessionImages } from './images';
 import {
@@ -21,65 +19,9 @@ import {
 
 // types
 import type { AgentType } from '../@types/index';
+import type { LinkedPlanContext } from '../classes/linkedPlanContext';
 
 // -------------------------------------------------- Helpers --------------------------------------------------
-
-interface PlanDocumentSummary {
-  sessionId: string;
-  title: string;
-  markdown: string;
-}
-
-const PLAN_SESSION_ID_RE = /^<!--\s*([a-f0-9-]{36})\s*-->\s*/i;
-
-function stripPlanMetadata(content: string): string {
-  let body = content.replace(PLAN_SESSION_ID_RE, '').trimStart();
-  if (body.startsWith('---')) {
-    const end = body.indexOf('\n---', 3);
-    if (end >= 0) {
-      const afterEnd = body.indexOf('\n', end + 4);
-      body = afterEnd >= 0 ? body.slice(afterEnd + 1) : '';
-    }
-  }
-  return body.trim();
-}
-
-function firstMarkdownHeading(markdown: string): string {
-  return markdown.match(/^#{1,3}\s+(.+)$/m)?.[1]?.trim() ?? 'Plan';
-}
-
-async function listPlanDocumentsForAcpSession(acpSessionId: string | null | undefined): Promise<PlanDocumentSummary[]> {
-  if (!acpSessionId) return [];
-
-  const plansDir = join(config.configDir, '.cursor', 'plans');
-  let entries: Dirent[];
-  try {
-    entries = await readdir(plansDir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-
-  const docs: PlanDocumentSummary[] = [];
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith('.plan.md')) continue;
-    try {
-      const content = await readFile(join(plansDir, entry.name), 'utf8');
-      const sessionMatch = content.match(PLAN_SESSION_ID_RE);
-      if (sessionMatch?.[1] !== acpSessionId) continue;
-      const markdown = stripPlanMetadata(content);
-      if (!markdown) continue;
-      docs.push({
-        sessionId: acpSessionId,
-        title: firstMarkdownHeading(markdown),
-        markdown,
-      });
-    } catch {
-      // Plan files are best-effort UI enrichment; ignore unreadable files.
-    }
-  }
-
-  return docs;
-}
 
 function parseTagsFromBody(body: unknown): string[] | null | undefined {
   if (!body || typeof body !== 'object' || !('tags' in body)) {
@@ -146,6 +88,8 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         name: string;
         tags?: string[] | string | null;
         agentType?: AgentType;
+        modelSelection?: string | null;
+        linkedPlanContext?: LinkedPlanContext | null;
       };
 
       const tagsParsed = parseTagsFromBody(request.body);
@@ -154,6 +98,8 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         name: body.name,
         tags: tagsParsed === undefined ? null : tagsParsed,
         agentType: body.agentType,
+        modelSelection: body.modelSelection ?? undefined,
+        linkedPlanContext: body.linkedPlanContext ?? undefined,
       });
 
       if (result.error) {
@@ -262,8 +208,10 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         patch.sessionMode = body.sessionMode;
       }
       if (body.sessionConfigJson !== undefined) {
-        patch.sessionConfigJson =
-          body.sessionConfigJson === null ? null : JSON.stringify(body.sessionConfigJson);
+        patch.sessionConfigJson = mergeInternalSessionConfig(
+          session.sessionConfigJson,
+          body.sessionConfigJson
+        );
       }
       const updated = await db.updateSession(sessionId, patch);
       if (!updated) {

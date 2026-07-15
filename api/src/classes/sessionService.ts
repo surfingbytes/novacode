@@ -2,10 +2,15 @@
 import { db } from './database';
 import type { AgentErrorCode } from './agentError';
 import { MODE_SENTINEL } from './agentModes';
+import {
+  LINKED_PLAN_CONTEXT_CONFIG_KEY,
+  serializeLinkedPlanContext
+} from './linkedPlanContext';
 
 // types
 import type { SessionModel as Session } from '../generated/client/models/Session';
 import type { AgentType } from '../@types/index';
+import type { LinkedPlanContext } from './linkedPlanContext';
 
 export interface CreateSessionWithAgentParams {
   workspaceId: string;
@@ -14,6 +19,10 @@ export interface CreateSessionWithAgentParams {
   tags?: string[] | null;
   /** Which backend agent to use for this session (defaults to workspace.defaultAgentType or cursor-agent). */
   agentType?: AgentType;
+  /** Optional explicit model id; omitted keeps the latest model for this agent. */
+  modelSelection?: string | null;
+  /** Optional backend-linked plan context to inject on the first prompt. */
+  linkedPlanContext?: LinkedPlanContext | null;
 }
 
 export interface CreateSessionWithAgentResult {
@@ -38,8 +47,13 @@ export async function createSessionWithAgent(
     params.agentType ??
     ((workspace.defaultAgentType as AgentType | null) ?? 'cursor-agent');
   const latestSameAgentSession = await db.getLatestSessionByAgentType(agentType);
-  const modelSelection = latestSameAgentSession?.modelSelection ?? 'auto';
+  const modelSelection = params.modelSelection ?? latestSameAgentSession?.modelSelection ?? 'auto';
   const sessionMode = latestSameAgentSession?.sessionMode ?? MODE_SENTINEL;
+  const sessionConfigJson = params.linkedPlanContext
+    ? JSON.stringify({
+        [LINKED_PLAN_CONTEXT_CONFIG_KEY]: serializeLinkedPlanContext(params.linkedPlanContext),
+      })
+    : null;
 
   const session = await db.createSession({
     name,
@@ -48,6 +62,7 @@ export async function createSessionWithAgent(
     agentType,
     modelSelection,
     sessionMode,
+    sessionConfigJson,
   });
 
   // ACP agents create their backend session lazily on the first prompt. Cursor used

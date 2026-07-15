@@ -56,6 +56,18 @@ export interface ChatQueueItem {
   createdAt: string;
 }
 
+export type LinkedPlanContextMode = 'target-only' | 'full';
+
+export interface LinkedPlanContext {
+  sourceSessionId: string;
+  sourceAcpSessionId: string;
+  planId: string;
+  planTitle: string;
+  entryIndex: number;
+  entryContent: string;
+  contextMode: LinkedPlanContextMode;
+}
+
 export interface ChatWsClientMessage {
   type: 'prompt' | 'cancel' | 'load-more' | 'queue-delete' | 'queue-push';
   text?: string;

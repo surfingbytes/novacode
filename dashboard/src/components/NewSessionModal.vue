@@ -5,8 +5,11 @@ import { computed, ref, watch } from 'vue';
 // components
 import TagChipsInput from '@/components/input/TagChipsInput.vue';
 
+// classes
+import { settingsApi } from '@/classes/api';
+
 // types
-import type { AgentType } from '@/@types/index';
+import type { AgentModelOption, AgentType, LinkedPlanContext } from '@/@types/index';
 
 const AGENT_FALLBACK_ORDER: AgentType[] = [
   'cursor-agent',
@@ -20,7 +23,13 @@ const AGENT_FALLBACK_ORDER: AgentType[] = [
 const props = defineProps<{
   modelValue: boolean;
   loading?: boolean;
+  title?: string;
+  submitLabel?: string;
+  helperText?: string;
+  defaultSessionName?: string;
   defaultAgentType?: AgentType | null;
+  defaultModelSelection?: string | null;
+  showModelSelection?: boolean;
   /** Whether Claude can be used for new sessions (CLI available and token configured). */
   claudeAvailable?: boolean;
   /** Whether Cursor can be used for new sessions (authenticated). */
@@ -43,6 +52,8 @@ const emit = defineEmits<{
       name: string;
       tags?: string[] | null;
       agentType: AgentType;
+      modelSelection?: string | null;
+      linkedPlanContext?: LinkedPlanContext | null;
     }
   ];
 }>();
@@ -52,6 +63,9 @@ const name = ref('');
 const formTags = ref<string[]>([]);
 const defaultName = ref('');
 const agentType = ref<AgentType>('cursor-agent');
+const modelSelection = ref('');
+const modelOptions = ref<AgentModelOption[]>([]);
+const bLoadingModels = ref(false);
 
 // -------------------------------------------------- Computed --------------------------------------------------
 const availableAgents = computed(() => {
@@ -65,6 +79,8 @@ const availableAgents = computed(() => {
 });
 
 const gridColsClass = computed(() => `grid-cols-${Math.min(availableAgents.value.length, 3)}`);
+const modalTitle = computed(() => props.title ?? 'New session');
+const createLabel = computed(() => props.submitLabel ?? 'Create');
 
 // -------------------------------------------------- Methods --------------------------------------------------
 function isAgentAvailable(agent: AgentType): boolean {
@@ -115,13 +131,35 @@ const onCreate = (): void => {
   emit('create', {
     name: finalName,
     ...(tags.length > 0 ? { tags } : {}),
-    agentType: agentType.value
+    agentType: agentType.value,
+    ...(props.showModelSelection && modelSelection.value ? { modelSelection: modelSelection.value } : {})
   });
 };
 
 function selectAgentType(agent: AgentType): void {
   if (isAgentAvailable(agent)) {
     agentType.value = agent;
+  }
+}
+
+async function loadModelOptions(): Promise<void> {
+  if (!props.showModelSelection) {
+    modelOptions.value = [];
+    return;
+  }
+  bLoadingModels.value = true;
+  try {
+    const { data } = await settingsApi.getAgentModels(agentType.value);
+    modelOptions.value = data.models.length > 0
+      ? data.models
+      : [{ id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto', fast: null }];
+    if (modelSelection.value && !modelOptions.value.some((option) => option.id === modelSelection.value)) {
+      modelSelection.value = '';
+    }
+  } catch {
+    modelOptions.value = [{ id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto', fast: null }];
+  } finally {
+    bLoadingModels.value = false;
   }
 }
 
@@ -132,11 +170,20 @@ watch(
     if (open) {
       name.value = '';
       formTags.value = [];
-      defaultName.value = `Session ${new Date().toLocaleString()}`;
+      defaultName.value = props.defaultSessionName || `Session ${new Date().toLocaleString()}`;
       agentType.value = computeInitialAgentType();
+      modelSelection.value = props.defaultModelSelection ?? '';
+      void loadModelOptions();
     }
   }
 );
+
+watch(agentType, () => {
+  if (props.modelValue && props.showModelSelection) {
+    modelSelection.value = '';
+    void loadModelOptions();
+  }
+});
 </script>
 
 <template>
@@ -159,8 +206,9 @@ watch(
         >
           <div class="px-6 pt-5 pb-4">
             <h2 id="new-session-title" class="font-semibold text-text-primary text-lg">
-              New session
+              {{ modalTitle }}
             </h2>
+            <p v-if="helperText" class="mt-1 text-xs text-text-muted">{{ helperText }}</p>
           </div>
 
           <div class="px-6 flex flex-col gap-4 pb-5">
@@ -236,6 +284,24 @@ watch(
                 No agents available. Configure Cursor, Mistral Vibe, or Claude in Settings.
               </p>
             </div>
+
+            <!-- Model selection -->
+            <div v-if="showModelSelection" class="flex flex-col gap-1.5">
+              <label class="text-xs font-medium text-text-muted">
+                Model <span class="font-normal opacity-60">(optional)</span>
+              </label>
+              <select
+                v-model="modelSelection"
+                class="w-full text-sm px-3 py-2.5 rounded-lg border border-fg/[0.12] bg-fg/[0.04] text-text-primary focus:outline-none focus:border-primary/50 transition-colors disabled:opacity-50"
+                :disabled="loading || bLoadingModels"
+              >
+                <option value="">Use latest/default for this agent</option>
+                <option v-for="option in modelOptions" :key="option.id" :value="option.id">
+                  {{ option.label }}
+                </option>
+              </select>
+            </div>
+
             <p v-if="error" class="text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded-lg px-3 py-2">
               {{ error }}
             </p>
@@ -260,7 +326,7 @@ watch(
                 v-if="loading"
                 class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"
               />
-              Create
+              {{ createLabel }}
             </button>
           </div>
         </form>
