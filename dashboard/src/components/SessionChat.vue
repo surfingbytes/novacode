@@ -1483,7 +1483,7 @@ onUnmounted(() => {
               </div>
               <div class="flex justify-start">
                 <div
-                  class="h-16 w-[85%] max-w-md rounded-2xl rounded-bl-sm bg-fg/10 animate-pulse"
+                  class="h-16 w-full md:w-[85%] max-w-md rounded-2xl rounded-bl-sm bg-fg/10 animate-pulse"
                 />
               </div>
               <div class="flex justify-end">
@@ -1550,14 +1550,14 @@ onUnmounted(() => {
                 <template v-for="(item, j) in parseEventsToItems(msg.events ?? [])" :key="j">
                   <div v-if="item.kind === 'text'" class="flex justify-start">
                     <div
-                      class="chat-markdown max-w-[85%] bg-fg/[0.06] text-text-primary px-4 py-2 rounded-2xl rounded-bl-sm text-sm"
+                      class="chat-markdown max-w-full md:max-w-[85%] bg-fg/[0.06] text-text-primary px-4 py-2 rounded-2xl rounded-bl-sm text-sm"
                       v-html="renderMd(item.text)"
                       @click="onChatMarkdownImageClick"
                     ></div>
                   </div>
                   <div v-else-if="item.kind === 'todos'" class="flex justify-start">
                     <div
-                      class="max-w-[85%] w-80 rounded-xl border border-fg/10 bg-fg/[0.03] overflow-hidden"
+                      class="max-w-full md:max-w-[85%] w-80 rounded-xl border border-fg/10 bg-fg/[0.03] overflow-hidden"
                     >
                       <div class="flex items-center gap-2 px-3 py-1.5 border-b border-fg/10">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none text-text-muted shrink-0" aria-hidden="true"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2M9 12l2 2 4-4"/></svg>
@@ -1597,7 +1597,7 @@ onUnmounted(() => {
                   <!-- Plan card (ACP native) -->
                   <div v-else-if="item.kind === 'plan'" class="flex justify-start">
                     <div
-                      class="max-w-[85%] w-80 rounded-xl border border-fg/10 bg-fg/[0.03] overflow-hidden"
+                      class="max-w-full md:max-w-[85%] w-80 rounded-xl border border-fg/10 bg-fg/[0.03] overflow-hidden"
                     >
                       <div class="flex items-center gap-2 px-3 py-1.5 border-b border-fg/10">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none text-text-muted shrink-0" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
@@ -1632,7 +1632,7 @@ onUnmounted(() => {
                   </div>
                   <!-- Tool card -->
                   <div v-else class="flex justify-start">
-                    <div class="flex flex-col gap-0.5 max-w-[85%]">
+                    <div class="flex flex-col gap-0.5 max-w-full md:max-w-[85%]">
                       <div
                         class="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-fg/10 bg-fg/[0.03] text-text-muted text-xs font-mono"
                       >
@@ -1683,7 +1683,7 @@ onUnmounted(() => {
                   class="flex justify-start"
                 >
                   <div
-                    class="chat-markdown max-w-[85%] bg-fg/[0.06] text-text-primary px-4 py-2 rounded-2xl rounded-bl-sm text-sm"
+                    class="chat-markdown max-w-full md:max-w-[85%] bg-fg/[0.06] text-text-primary px-4 py-2 rounded-2xl rounded-bl-sm text-sm"
                     v-html="renderMd(msg.content)"
                     @click="onChatMarkdownImageClick"
                   ></div>
@@ -1696,14 +1696,14 @@ onUnmounted(() => {
               <template v-for="(item, j) in streamingItems" :key="'s' + j">
                 <div v-if="item.kind === 'text'" class="flex justify-start">
                   <div
-                    class="chat-markdown max-w-[85%] bg-fg/[0.06] text-text-primary px-4 py-2 rounded-2xl rounded-bl-sm text-sm"
+                    class="chat-markdown max-w-full md:max-w-[85%] bg-fg/[0.06] text-text-primary px-4 py-2 rounded-2xl rounded-bl-sm text-sm"
                     v-html="renderMd(item.text)"
                     @click="onChatMarkdownImageClick"
                   ></div>
                 </div>
                 <div v-else-if="item.kind === 'todos'" class="flex justify-start">
                   <div
-                    class="max-w-[85%] w-80 rounded-xl border border-fg/10 bg-fg/[0.03] overflow-hidden"
+                    class="max-w-full md:max-w-[85%] w-80 rounded-xl border border-fg/10 bg-fg/[0.03] overflow-hidden"
                   >
                     <div class="flex items-center gap-2 px-3 py-1.5 border-b border-fg/10">
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none text-text-muted shrink-0" aria-hidden="true"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2M9 12l2 2 4-4"/></svg>
@@ -1746,7 +1746,7 @@ onUnmounted(() => {
                 <!-- Plan card (ACP native) — live -->
                 <div v-else-if="item.kind === 'plan'" class="flex justify-start">
                   <div
-                    class="max-w-[85%] w-80 rounded-xl border border-fg/10 bg-fg/[0.03] overflow-hidden"
+                    class="max-w-full md:max-w-[85%] w-80 rounded-xl border border-fg/10 bg-fg/[0.03] overflow-hidden"
                   >
                     <div class="flex items-center gap-2 px-3 py-1.5 border-b border-fg/10">
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none text-text-muted shrink-0" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
@@ -1783,7 +1783,7 @@ onUnmounted(() => {
                 </div>
                 <!-- Tool card — live -->
                 <div v-else class="flex justify-start">
-                  <div class="flex flex-col gap-0.5 max-w-[85%]">
+                  <div class="flex flex-col gap-0.5 max-w-full md:max-w-[85%]">
                     <div
                       class="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-fg/10 bg-fg/[0.03] text-text-muted text-xs font-mono"
                     >
@@ -1846,7 +1846,7 @@ onUnmounted(() => {
                 class="flex justify-start"
               >
                 <div
-                  class="flex h-[240px] max-w-[85%] min-h-0 flex-col overflow-hidden rounded-xl border border-fg/10 border-dashed bg-fg/[0.03] px-3 py-2 text-xs text-text-muted"
+                  class="flex h-[240px] max-w-full md:max-w-[85%] min-h-0 flex-col overflow-hidden rounded-xl border border-fg/10 border-dashed bg-fg/[0.03] px-3 py-2 text-xs text-text-muted"
                 >
                   <div
                     class="flex shrink-0 items-center gap-1.5 pb-1 text-[11px] font-medium uppercase tracking-wide text-text-muted/90"
