@@ -307,12 +307,8 @@ const modelSelectValue = computed(() => {
   if (!bCursorAgentSession.value) return selectedModelName.value;
 
   const preset = selectedCursorPreset.value;
-  const defaultOption = preset ? resolveDefaultCursorModelOption(preset) : null;
-  if (preset && defaultOption?.id === selectedModelOption.value.id) {
-    return cursorPresetValue(preset.label);
-  }
   if (preset) {
-    return cursorCurrentValue(selectedModelOption.value.id);
+    return cursorPresetValue(preset.label);
   }
   return cursorModelValue(selectedModelName.value);
 });
