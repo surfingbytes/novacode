@@ -1108,6 +1108,7 @@ let webSocket: WebSocket | null = null;
 const bWsConnected = ref(false);
 const bWsReconnecting = ref(false);
 let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+const planDocumentsRefreshTimers = new Set<ReturnType<typeof setTimeout>>();
 let wsUnmounted = false;
 
 // ── Display items ─────────────────────────────────────────────────────────────
@@ -1771,6 +1772,15 @@ function stripMarkdownSyntax(value: string): string {
     .trim();
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function entriesFromPlanMarkdown(markdown: string): PlanEntry[] {
   const lines = unwrapMarkdownFence(markdown).replace(/\r\n/g, '\n').split('\n');
   const entries: PlanEntry[] = [];
@@ -1810,40 +1820,60 @@ function entriesFromPlanMarkdown(markdown: string): PlanEntry[] {
   return numberedEntries.length ? numberedEntries : entries;
 }
 
-function normalizePlanEntryText(value: string): string {
-  return stripMarkdownSyntax(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+function planActionRows(entries: PlanEntry[]): string {
+  if (!entries.length) return '';
+  const rows = entries
+    .map((entry, index) => {
+      const label = escapeHtml(entry.content.trim());
+      return `<li class="plan-start-action-row"><span>${label}</span><button type="button" class="plan-start-session-btn" data-plan-entry-index="${index}">Start session</button></li>`;
+    })
+    .join('');
+  return `<div class="plan-start-actions-card"><div class="plan-start-actions-title">Start from plan point</div><ol>${rows}</ol></div>`;
 }
 
 function renderPlanMarkdownWithActions(markdown: string, entries: PlanEntry[]): string {
-  const html = renderMdCached(markdown);
-  if (!entries.length || typeof document === 'undefined') return html;
+  if (!entries.length) return renderMdCached(markdown);
 
-  const template = document.createElement('template');
-  template.innerHTML = html;
-  const entryKeys = entries.map((entry) => normalizePlanEntryText(entry.content));
-  const usedIndexes = new Set<number>();
-  const candidates = Array.from(template.content.querySelectorAll('h1, h2, h3, h4, li'));
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n');
+  const out: string[] = [];
+  let inFence = false;
+  let fenceMarker: '`' | '~' | null = null;
+  let entryIndex = 0;
+  const hasNumberedEntries = lines.some((line) =>
+    /^#{1,4}\s+\d+[\.)]\s+/.test(line) || /^\s{0,3}\d+[\.)]\s+/.test(line)
+  );
 
-  for (const el of candidates) {
-    const text = normalizePlanEntryText(el.textContent ?? '');
-    if (!text) continue;
-    const index = entryKeys.findIndex((entryKey, candidateIndex) => {
-      if (usedIndexes.has(candidateIndex) || !entryKey) return false;
-      return text.includes(entryKey) || entryKey.includes(text);
-    });
-    if (index < 0) continue;
-    usedIndexes.add(index);
+  for (const rawLine of lines) {
+    out.push(rawLine);
+    const line = rawLine.trimEnd();
+    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1][0] as '`' | '~';
+      if (!inFence) {
+        inFence = true;
+        fenceMarker = marker;
+      } else if (marker === fenceMarker) {
+        inFence = false;
+        fenceMarker = null;
+      }
+      continue;
+    }
+    if (inFence || entryIndex >= entries.length) continue;
 
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'plan-start-session-btn';
-    button.dataset.planEntryIndex = String(index);
-    button.textContent = 'Start session';
-    el.classList.add('plan-point-with-action');
-    el.appendChild(button);
+    const bNumberedLine = /^#{1,4}\s+\d+[\.)]\s+/.test(line) || /^\s{0,3}\d+[\.)]\s+/.test(line);
+    const bTaskLine = /^\s{0,3}[-*]\s+\[[ xX]\]\s+/.test(line);
+    const bHeadingLine = /^#{1,4}\s+/.test(line);
+    const bActionTarget = hasNumberedEntries ? bNumberedLine : bNumberedLine || bTaskLine || bHeadingLine;
+    if (!bActionTarget) continue;
+
+    out.push(
+      `<div class="plan-start-action-inline"><button type="button" class="plan-start-session-btn" data-plan-entry-index="${entryIndex}">Start session</button></div>`
+    );
+    entryIndex += 1;
   }
 
-  return template.innerHTML;
+  const fallbackEntries = entryIndex < entries.length ? entries.slice(entryIndex) : [];
+  return `${renderMdCached(out.join('\n'))}${planActionRows(fallbackEntries)}`;
 }
 
 function planTitle(item: DisplayItem, fallbackIndex: number): string {
@@ -1882,37 +1912,6 @@ function looksLikeFullPlanMarkdown(markdown: string | undefined): markdown is st
   const hasPlanSections =
     /^#{1,3}\s+(goal|required order|step\s+\d+|implementation|validation|test plan)\b/im.test(text);
   return headingCount >= 2 || (headingCount >= 1 && hasPlanSections);
-}
-
-function collectPlanMarkdownCandidates(
-  history: DisplayChatMessage[],
-  liveItems: DisplayItem[]
-): PlanMarkdownCandidate[] {
-  const candidates: PlanMarkdownCandidate[] = [];
-  let index = 0;
-  for (const { items } of history) {
-    for (const item of items) {
-      if (item.kind !== 'text' || !looksLikeFullPlanMarkdown(item.text)) continue;
-      const markdown = unwrapMarkdownFence(item.text);
-      candidates.push({
-        markdown,
-        normalized: normalizePlanSearchText(`${firstMarkdownHeading(markdown)} ${markdown}`),
-        index,
-      });
-      index += 1;
-    }
-  }
-  for (const item of liveItems) {
-    if (item.kind !== 'text' || !looksLikeFullPlanMarkdown(item.text)) continue;
-    const markdown = unwrapMarkdownFence(item.text);
-    candidates.push({
-      markdown,
-      normalized: normalizePlanSearchText(`${firstMarkdownHeading(markdown)} ${markdown}`),
-      index,
-    });
-    index += 1;
-  }
-  return candidates;
 }
 
 function planMarkdownCandidatesFromDocuments(
@@ -1998,6 +1997,25 @@ function planDocumentFromItem(
   };
 }
 
+function planDocumentFromFileSummary(doc: PlanDocumentSummary, index: number): PlanDocument | null {
+  const markdown = doc.markdown.trim();
+  if (!markdown) return null;
+  const startableEntries = entriesFromPlanMarkdown(markdown);
+  return {
+    id: `file-plan-${doc.id}`,
+    backendPlanId: doc.id,
+    planSourceSessionId: doc.sessionId,
+    title: doc.title || firstMarkdownHeading(markdown) || (index === 0 ? 'Plan' : `Plan ${index + 1}`),
+    markdown,
+    entries: [],
+    startableEntries,
+    completedCount: 0,
+    renderedHtml: renderPlanMarkdownWithActions(markdown, startableEntries),
+    createdAt: '',
+    live: false
+  };
+}
+
 const displayMessages = computed<DisplayChatMessage[]>(() =>
   messages.value.map((msg, index) => {
     const items =
@@ -2031,9 +2049,16 @@ const streamingDisplayItems = computed(() => {
 
 const planDocuments = computed<PlanDocument[]>(() => {
   const docs: PlanDocument[] = [];
+  const seenMarkdown = new Set<string>();
+  const addPlanDocument = (doc: PlanDocument | null): void => {
+    if (!doc) return;
+    const key = normalizePlanSearchText(doc.markdown);
+    if (key && seenMarkdown.has(key)) return;
+    if (key) seenMarkdown.add(key);
+    docs.push(doc);
+  };
   const filePlanDocuments = session.value?.planDocuments;
   for (const { msg, items, key } of displayMessages.value) {
-    const messageMarkdownCandidates = collectPlanMarkdownCandidates([{ msg, items, key, fallbackHtml: '' }], []);
     let planIndex = 0;
     for (const item of items) {
       if (item.kind !== 'plan') continue;
@@ -2047,15 +2072,13 @@ const planDocuments = computed<PlanDocument[]>(() => {
         planIndex,
         msg.createdAt,
         false,
-        bestPlanMarkdownFallback(item, fileMarkdownCandidates) ??
-          bestPlanMarkdownFallback(item, messageMarkdownCandidates)
+        bestPlanMarkdownFallback(item, fileMarkdownCandidates)
       );
-      if (doc) docs.push(doc);
+      addPlanDocument(doc);
       planIndex += 1;
     }
   }
   let livePlanIndex = 0;
-  const liveMarkdownCandidates = collectPlanMarkdownCandidates([], streamingDisplayItems.value);
   for (const item of streamingDisplayItems.value) {
     if (item.kind !== 'plan') continue;
     const fileMarkdownCandidates = planMarkdownCandidatesFromDocuments(
@@ -2068,12 +2091,12 @@ const planDocuments = computed<PlanDocument[]>(() => {
       livePlanIndex,
       new Date().toISOString(),
       true,
-      bestPlanMarkdownFallback(item, fileMarkdownCandidates) ??
-        bestPlanMarkdownFallback(item, liveMarkdownCandidates)
+      bestPlanMarkdownFallback(item, fileMarkdownCandidates)
     );
-    if (doc) docs.push(doc);
+    addPlanDocument(doc);
     livePlanIndex += 1;
   }
+  filePlanDocuments?.forEach((doc, index) => addPlanDocument(planDocumentFromFileSummary(doc, index)));
   return docs;
 });
 
@@ -2083,6 +2106,13 @@ const selectedPlanDocument = computed<PlanDocument | null>(() => {
     if (selected) return selected;
   }
   return planDocuments.value[planDocuments.value.length - 1] ?? null;
+});
+
+const latestPlanDocumentId = computed(() => planDocuments.value.at(-1)?.id ?? null);
+
+watch(latestPlanDocumentId, (latestId, previousId) => {
+  if (!latestId || latestId === previousId || activeTab.value !== 'plan') return;
+  selectedPlanId.value = latestId;
 });
 
 const bShowPlanTab = computed(() => activeTab.value === 'plan' || planDocuments.value.length > 0);
@@ -2475,6 +2505,8 @@ function connectChatWs() {
         streamingUsage.value = null;
         notifiedTodoIds.clear();
         bIsStreaming.value = false;
+        schedulePlanDocumentsRefresh(250, { selectLatest: activeTab.value === 'plan' });
+        schedulePlanDocumentsRefresh(1500, { selectLatest: activeTab.value === 'plan' });
         scrollToBottomIfPinned();
         notifyTaskDone(
           session.value?.name ?? 'Session',
@@ -2675,6 +2707,32 @@ async function fetchSession() {
   }
 }
 
+async function refreshPlanDocuments(opts: { selectLatest?: boolean } = {}): Promise<void> {
+  try {
+    const response = await sessionsApi.get(props.workspaceId, props.sessionId);
+    if (!session.value || response.data.id !== session.value.id) return;
+    session.value = {
+      ...session.value,
+      planDocuments: response.data.planDocuments ?? []
+    };
+    if (opts.selectLatest) {
+      await nextTick();
+      const latestId = latestPlanDocumentId.value;
+      if (latestId) selectedPlanId.value = latestId;
+    }
+  } catch (e) {
+    console.error('Failed to refresh plan documents:', e);
+  }
+}
+
+function schedulePlanDocumentsRefresh(delayMs: number, opts: { selectLatest?: boolean } = {}): void {
+  const timer = setTimeout(() => {
+    planDocumentsRefreshTimers.delete(timer);
+    void refreshPlanDocuments(opts);
+  }, delayMs);
+  planDocumentsRefreshTimers.add(timer);
+}
+
 function onVisibilityChange() {
   if (document.visibilityState === 'visible' && !webSocket && activeTab.value === 'chat') {
     if (wsReconnectTimer !== null) {
@@ -2799,6 +2857,8 @@ watch(activeTab, (tab) => {
       }
       connectChatWs();
     }
+  } else if (tab === 'plan') {
+    schedulePlanDocumentsRefresh(0, { selectLatest: true });
   }
 });
 
@@ -2889,6 +2949,10 @@ onUnmounted(() => {
     promptCompactMql.removeEventListener('change', syncPromptLayoutBreakpoint);
     promptCompactMql = null;
   }
+  for (const timer of planDocumentsRefreshTimers) {
+    clearTimeout(timer);
+  }
+  planDocumentsRefreshTimers.clear();
   disconnectChatWs();
   document.removeEventListener('visibilitychange', onVisibilityChange);
   document.removeEventListener('click', handleDocumentClickMobileMenu);
@@ -4211,18 +4275,58 @@ onUnmounted(() => {
   padding-left: 0.15rem;
 }
 
-.plan-markdown :deep(.plan-point-with-action) {
-  scroll-margin-top: 1rem;
+.plan-markdown :deep(.plan-start-actions-card) {
+  margin: 1.25rem 0 0;
+  border: 1px solid color-mix(in srgb, var(--color-fg) 10%, transparent);
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--color-fg) 4%, transparent);
+  overflow: hidden;
+}
+
+.plan-markdown :deep(.plan-start-actions-title) {
+  border-bottom: 1px solid color-mix(in srgb, var(--color-fg) 10%, transparent);
+  padding: 0.65rem 0.85rem;
+  color: var(--color-text-primary);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.plan-markdown :deep(.plan-start-actions-card ol) {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  list-style: none;
+}
+
+.plan-markdown :deep(.plan-start-action-row) {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 0.45rem 0;
+}
+
+.plan-markdown :deep(.plan-start-action-row + .plan-start-action-row) {
+  border-top: 1px solid color-mix(in srgb, var(--color-fg) 8%, transparent);
+}
+
+.plan-markdown :deep(.plan-start-action-row span) {
+  min-width: 0;
+  flex: 1;
+  line-height: 1.35;
+}
+
+.plan-markdown :deep(.plan-start-action-inline) {
+  margin: -0.25rem 0 0.75rem;
 }
 
 .plan-markdown :deep(.plan-start-session-btn) {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
-  margin-left: 0.6rem;
   border: 1px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
   border-radius: 0.45rem;
   background: color-mix(in srgb, var(--color-primary) 10%, transparent);
-  padding: 0.2rem 0.45rem;
+  padding: 0.3rem 0.5rem;
   color: var(--color-primary);
   font-size: 0.72rem;
   font-weight: 600;
