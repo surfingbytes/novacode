@@ -4016,20 +4016,26 @@ onUnmounted(() => {
         v-if="activeTab === 'plan'"
         class="flex-1 min-h-0 overflow-hidden flex flex-col bg-bg"
       >
-        <div class="shrink-0 border-b border-fg/10 px-4 md:px-6 py-3 flex items-center gap-3">
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2">
-              <span class="text-sm font-semibold text-text-primary">
+        <div class="shrink-0 border-b border-fg/10 px-4 md:px-6 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+          <div class="min-w-0 sm:flex-1">
+            <div
+              v-if="planDocuments.length <= 1"
+              class="flex items-center gap-2"
+            >
+              <span class="truncate text-sm font-semibold text-text-primary">
                 {{ selectedPlanDocument?.title ?? 'Plan' }}
               </span>
               <span
                 v-if="selectedPlanDocument?.live"
-                class="rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                class="shrink-0 rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
               >
                 Live
               </span>
             </div>
-            <div v-if="selectedPlanDocument" class="text-xs text-text-muted">
+            <div
+              v-if="selectedPlanDocument"
+              class="text-xs text-text-muted whitespace-nowrap"
+            >
               <template v-if="selectedPlanDocument.startableEntries.length">
                 {{ selectedPlanDocument.completedCount }}/{{ selectedPlanDocument.startableEntries.length }} completed
               </template>
@@ -4037,26 +4043,27 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <select
-            v-if="planDocuments.length > 1"
-            class="max-w-[12rem] rounded-md border border-fg/15 bg-bg px-2 py-1 text-xs text-text-primary outline-none focus:border-primary"
-            :value="selectedPlanDocument?.id"
-            @change="selectedPlanId = ($event.target as HTMLSelectElement).value"
-          >
-            <option
-              v-for="plan in planDocuments"
-              :key="plan.id"
-              :value="plan.id"
+          <div class="flex min-w-0 items-center gap-2 sm:ml-auto sm:shrink-0">
+            <select
+              v-if="planDocuments.length > 1"
+              class="min-w-0 flex-1 max-w-none rounded-md border border-fg/15 bg-bg px-2 py-1 text-xs text-text-primary outline-none focus:border-primary sm:max-w-[12rem] sm:flex-none"
+              :value="selectedPlanDocument?.id"
+              @change="selectedPlanId = ($event.target as HTMLSelectElement).value"
             >
-              {{ plan.title }}{{ plan.live ? ' (live)' : '' }}
-            </option>
-          </select>
+              <option
+                v-for="plan in planDocuments"
+                :key="plan.id"
+                :value="plan.id"
+              >
+                {{ plan.title }}{{ plan.live ? ' (live)' : '' }}
+              </option>
+            </select>
 
-          <div
-            v-if="selectedPlanDocument"
-            ref="planActionsMenuRef"
-            class="relative ml-auto inline-flex shrink-0"
-          >
+            <div
+              v-if="selectedPlanDocument"
+              ref="planActionsMenuRef"
+              class="relative inline-flex shrink-0"
+            >
             <button
               type="button"
               class="button is-transparent rounded-r-none! text-xs"
@@ -4091,6 +4098,7 @@ onUnmounted(() => {
               >
                 Download markdown
               </button>
+            </div>
             </div>
           </div>
         </div>
