@@ -1783,10 +1783,19 @@ function escapeHtml(value: string): string {
 
 function entriesFromPlanMarkdown(markdown: string): PlanEntry[] {
   const lines = unwrapMarkdownFence(markdown).replace(/\r\n/g, '\n').split('\n');
-  const entries: PlanEntry[] = [];
+  const headingEntries: PlanEntry[] = [];
+  const actionEntries: PlanEntry[] = [];
   const numberedEntries: PlanEntry[] = [];
   let inFence = false;
   let fenceMarker: '`' | '~' | null = null;
+
+  const addEntry = (target: PlanEntry[], content: string): PlanEntry => {
+    const existing = [...headingEntries, ...actionEntries].find((entry) => entry.content === content);
+    if (existing) return existing;
+    const entry = { content, status: 'pending' };
+    target.push(entry);
+    return entry;
+  };
 
   for (const rawLine of lines) {
     const line = rawLine.trimEnd();
@@ -1810,14 +1819,13 @@ function entriesFromPlanMarkdown(markdown: string): PlanEntry[] {
     const bNumberedEntry = Boolean(orderedMatch || /^#{1,4}\s+\d+[\.)]\s+/.test(line));
     const rawContent = headingMatch?.[1] ?? orderedMatch?.[1] ?? taskMatch?.[1];
     const content = rawContent ? stripMarkdownSyntax(rawContent) : '';
-    if (content && !entries.some((entry) => entry.content === content)) {
-      const entry = { content, status: 'pending' };
-      entries.push(entry);
-      if (bNumberedEntry) numberedEntries.push(entry);
-    }
+    if (!content) continue;
+
+    const entry = addEntry(orderedMatch || taskMatch ? actionEntries : headingEntries, content);
+    if (bNumberedEntry) numberedEntries.push(entry);
   }
 
-  return numberedEntries.length ? numberedEntries : entries;
+  return numberedEntries.length ? numberedEntries : (actionEntries.length ? actionEntries : headingEntries);
 }
 
 function planActionRows(entries: PlanEntry[]): string {
@@ -1866,10 +1874,17 @@ function renderPlanMarkdownWithActions(markdown: string, entries: PlanEntry[]): 
     const bActionTarget = hasNumberedEntries ? bNumberedLine : bNumberedLine || bTaskLine || bHeadingLine;
     if (!bActionTarget) continue;
 
+    const fullPlanAttribute = bHeadingLine && !bNumberedLine && !bTaskLine
+      ? ' data-plan-full-plan="true"'
+      : '';
     out.push(
-      `<div class="plan-start-action-inline"><button type="button" class="plan-start-session-btn" data-plan-entry-index="${entryIndex}">Start session</button></div>`
+      '',
+      `<div class="plan-start-action-inline"><button type="button" class="plan-start-session-btn" data-plan-entry-index="${entryIndex}"${fullPlanAttribute}>Start session</button></div>`,
+      ''
     );
-    entryIndex += 1;
+    if (!fullPlanAttribute) {
+      entryIndex += 1;
+    }
   }
 
   const fallbackEntries = entryIndex < entries.length ? entries.slice(entryIndex) : [];
@@ -2211,6 +2226,11 @@ function onPlanMarkdownClick(event: MouseEvent): void {
   if (!button) return;
 
   const plan = selectedPlanDocument.value;
+  if (button.dataset.planFullPlan === 'true') {
+    startSessionFromFullPlan(plan);
+    return;
+  }
+
   const index = Number(button.dataset.planEntryIndex);
   const entry = Number.isFinite(index) ? plan?.startableEntries[index] : undefined;
   if (plan && entry) {
