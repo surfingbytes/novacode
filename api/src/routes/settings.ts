@@ -23,6 +23,7 @@ import { getOpenCodeModels, clearOpenCodeModelsCache } from '../classes/openCode
 import { getAgentModels } from '../classes/agentModels';
 import { getAgentModes } from '../classes/agentModes';
 import { getAgentConfigOptions } from '../classes/agentConfigOptions';
+import { getAgentOptions } from '../classes/agentOptions';
 import { readSshKeyMaterial } from '../classes/sshKey';
 import { checkCursorAuth, openCodeAuthenticated, codexAuthenticated } from './agentAuth';
 
@@ -300,6 +301,55 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       })
     )
   });
+
+  const AgentThinkingOptionSchema = Type.Object({
+    configId: Type.String(),
+    label: Type.String(),
+    description: Type.Optional(Type.String()),
+    currentValue: Type.Optional(Type.String()),
+    options: Type.Array(
+      Type.Object({
+        value: Type.String(),
+        label: Type.String(),
+        description: Type.Optional(Type.String())
+      })
+    )
+  });
+
+  // GET /api/settings/agent-options/:agentType - unified normalized controls for chat
+  fastifyInstance.get(
+    '/api/settings/agent-options/:agentType',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        params: Type.Object({ agentType: Type.String() }),
+        response: {
+          200: Type.Object({
+            models: Type.Array(AgentModelOptionSchema),
+            modes: Type.Array(AgentModeOptionSchema),
+            configOptions: Type.Array(AgentConfigOptionSchema),
+            thinking: Type.Union([AgentThinkingOptionSchema, Type.Null()]),
+            fromCache: Type.Boolean(),
+            source: Type.Union([
+              Type.Literal('cli'),
+              Type.Literal('acp'),
+              Type.Literal('mixed'),
+              Type.Literal('static')
+            ])
+          }),
+          400: Type.Object({ error: Type.String() })
+        }
+      }
+    },
+    async (request, reply) => {
+      const { agentType } = request.params;
+      if (!isAgentType(agentType)) {
+        return reply.status(400).send({ error: 'Unsupported agent type' });
+      }
+      const user = agentType === 'claude' ? await db.getUserById(request.jwtUser!.id) : null;
+      return getAgentOptions(agentType, { claudeToken: user?.claudeToken ?? null });
+    }
+  );
 
   // GET /api/settings/agent-config/:agentType - effort, fast mode, etc. (not mode/model)
   fastifyInstance.get(

@@ -26,7 +26,7 @@ import { notifyTaskDone, notifyTodoCompleted } from '@/lib/notifications';
 import { useWorkspacesStore } from '@/stores/workspaces';
 
 // types
-import type { AgentConfigOption, AgentModeOption, AgentModelOption, ChatMessage, ChatQueueItem, ChatWsServerMessage, LinkedPlanContext, PlanDocumentSummary, Session } from '@/@types/index';
+import type { AgentConfigOption, AgentModeOption, AgentModelOption, AgentThinkingOptionGroup, ChatMessage, ChatQueueItem, ChatWsServerMessage, LinkedPlanContext, PlanDocumentSummary, Session } from '@/@types/index';
 import { APP_NAV_TOGGLE_KEY } from '@/constants/layout';
 
 marked.setOptions({ breaks: true, gfm: true });
@@ -292,6 +292,7 @@ const hideThinkingOutput = ref(readHideThinkingFromLs());
 const modelOptions = ref<AgentModelOption[]>([]);
 const modeOptions = ref<AgentModeOption[]>([]);
 const agentConfigOptions = ref<AgentConfigOption[]>([]);
+const thinkingOptions = ref<AgentThinkingOptionGroup | null>(null);
 const sessionConfig = ref<Record<string, string>>({});
 const bModelsLoading = ref(false);
 const bModesLoading = ref(false);
@@ -853,52 +854,44 @@ const bHasHiddenModelOptions = computed(
       effectiveModelOptions.value.some((option) => !findCursorPresetForOption(option)))
 );
 
-async function loadAvailableModels() {
+async function loadAgentOptions() {
   const agentType = session.value?.agentType;
   if (!agentType) return;
   bModelsLoading.value = true;
+  bModesLoading.value = true;
+  bConfigLoading.value = true;
   try {
-    const { data } = await settingsApi.getAgentModels(agentType);
+    const { data } = await settingsApi.getAgentOptions(agentType);
     modelOptions.value = data.models.length > 0
       ? data.models
       : [{ id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto', fast: null }];
-  } catch {
-    modelOptions.value = [{ id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto', fast: null }];
-  } finally {
-    bModelsLoading.value = false;
-  }
-}
-
-async function loadAvailableModes() {
-  const agentType = session.value?.agentType;
-  if (!agentType) return;
-  bModesLoading.value = true;
-  try {
-    const { data } = await settingsApi.getAgentModes(agentType);
     modeOptions.value = data.modes.length > 0 ? data.modes : [{ id: MODE_SENTINEL, label: 'Default' }];
-    syncAcpReportedFromOptions();
-  } catch {
-    modeOptions.value = [{ id: MODE_SENTINEL, label: 'Default' }];
-  } finally {
-    bModesLoading.value = false;
-  }
-}
-
-async function loadAgentConfigOptions() {
-  const agentType = session.value?.agentType;
-  if (!agentType) return;
-  bConfigLoading.value = true;
-  try {
-    const { data } = await settingsApi.getAgentConfigOptions(agentType);
-    agentConfigOptions.value = data.options;
-    for (const opt of data.options) {
+    agentConfigOptions.value = data.configOptions;
+    thinkingOptions.value = data.thinking;
+    for (const opt of data.configOptions) {
       if (!sessionConfig.value[opt.id] && opt.currentValue) {
         sessionConfig.value = { ...sessionConfig.value, [opt.id]: opt.currentValue };
       }
     }
+    if (
+      data.thinking &&
+      !sessionConfig.value[data.thinking.configId] &&
+      data.thinking.currentValue
+    ) {
+      sessionConfig.value = {
+        ...sessionConfig.value,
+        [data.thinking.configId]: data.thinking.currentValue
+      };
+    }
+    syncAcpReportedFromOptions();
   } catch {
+    modelOptions.value = [{ id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto', fast: null }];
+    modeOptions.value = [{ id: MODE_SENTINEL, label: 'Default' }];
     agentConfigOptions.value = [];
+    thinkingOptions.value = null;
   } finally {
+    bModelsLoading.value = false;
+    bModesLoading.value = false;
     bConfigLoading.value = false;
   }
 }
@@ -1180,6 +1173,14 @@ function onSharedModelPickerUpdate(nextModelSelection: string): void {
   if (nextModelSelection && nextModelSelection !== modelSelection.value) {
     void persistModelSelection(nextModelSelection);
   }
+}
+
+function onSharedThinkingPickerUpdate(nextThinkingValue: string): void {
+  const configId = thinkingOptions.value?.configId;
+  if (!configId || !nextThinkingValue || sessionConfig.value[configId] === nextThinkingValue) {
+    return;
+  }
+  void persistSessionConfig({ ...sessionConfig.value, [configId]: nextThinkingValue });
 }
 
 async function persistSessionMode(newSessionMode: string) {
@@ -2873,11 +2874,7 @@ async function fetchSession(): Promise<boolean> {
     sessionConfig.value = response.data.sessionConfigJson ?? {};
     acpReportedModeId.value = null;
     acpReportedModelId.value = null;
-    void Promise.allSettled([
-      loadAvailableModels(),
-      loadAvailableModes(),
-      loadAgentConfigOptions()
-    ]);
+    void loadAgentOptions();
     return true;
   } catch (e) {
     if (seq !== fetchSessionSeq || workspaceId !== props.workspaceId || sessionId !== props.sessionId) {
@@ -3075,6 +3072,7 @@ watch(
     modelOptions.value = [];
     modeOptions.value = [];
     agentConfigOptions.value = [];
+    thinkingOptions.value = null;
     expandedToolOutputIds.value = new Set();
     bShowAllCursorModels.value = false;
     bHasMore.value = false;
@@ -4013,9 +4011,12 @@ onUnmounted(() => {
                 :model-value="modelSelection"
                 :agent-type="session?.agentType"
                 :model-options="modelOptions"
-                :disabled="bIsStreaming || bModelsLoading || bSavingModelSelection"
+                :thinking-options="thinkingOptions"
+                :thinking-value="thinkingOptions ? sessionConfig[thinkingOptions.configId] : null"
+                :disabled="bIsStreaming || bModelsLoading || bSavingModelSelection || bSavingSessionConfig"
                 variant="compact"
                 @update:model-value="onSharedModelPickerUpdate"
+                @update:thinking-value="onSharedThinkingPickerUpdate"
               />
             </div>
             <button

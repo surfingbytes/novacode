@@ -23,6 +23,7 @@ import type {
   AutomationRun,
   AgentModelOption,
   AgentModeOption,
+  AgentOptionsResponse,
   AgentConfigOption,
   LinkedPlanContext
 } from '@/@types/index';
@@ -188,6 +189,11 @@ export const settingsApi = {
     agentType: AgentType
   ): ReturnType<typeof http.get<{ options: AgentConfigOption[]; fromCache: boolean }>> =>
     http.get<{ options: AgentConfigOption[]; fromCache: boolean }>(`/settings/agent-config/${agentType}`),
+
+  getAgentOptions: (
+    agentType: AgentType
+  ): ReturnType<typeof http.get<AgentOptionsResponse>> =>
+    http.get<AgentOptionsResponse>(`/settings/agent-options/${agentType}`),
 
   getAgentCapabilities: (): ReturnType<
     typeof http.get<{

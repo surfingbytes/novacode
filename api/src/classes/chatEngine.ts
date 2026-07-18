@@ -439,6 +439,7 @@ export async function dispatchPrompt(
           cwd: workspacePath,
           promptText: agentPrompt,
           claudeToken,
+          model,
           mode: sessionMode,
           configJson: sessionConfig,
           onSessionId: (id) => { currentAcpSessionId = id; },

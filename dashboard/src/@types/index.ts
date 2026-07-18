@@ -112,6 +112,14 @@ export interface AgentConfigOption {
   options: Array<{ value: string; label: string; description?: string }>;
 }
 
+export interface AgentThinkingOptionGroup {
+  configId: string;
+  label: string;
+  description?: string;
+  currentValue?: string;
+  options: Array<{ value: string; label: string; description?: string }>;
+}
+
 export interface AgentModeOption {
   id: string;
   label: string;
@@ -127,6 +135,15 @@ export interface AgentModelOption {
   context: string;
   fast: boolean | null;
   current?: boolean;
+}
+
+export interface AgentOptionsResponse {
+  models: AgentModelOption[];
+  modes: AgentModeOption[];
+  configOptions: AgentConfigOption[];
+  thinking: AgentThinkingOptionGroup | null;
+  fromCache: boolean;
+  source: 'cli' | 'acp' | 'mixed' | 'static';
 }
 
 export interface WorkspaceRuleFileSummary {

@@ -150,7 +150,7 @@ async function loadModelOptions(): Promise<void> {
   }
   bLoadingModels.value = true;
   try {
-    const { data } = await settingsApi.getAgentModels(agentType.value);
+    const { data } = await settingsApi.getAgentOptions(agentType.value);
     modelOptions.value = data.models.length > 0
       ? data.models
       : [{ id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto', fast: null }];
