@@ -1243,6 +1243,7 @@ const bWsReconnecting = ref(false);
 let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 const planDocumentsRefreshTimers = new Set<ReturnType<typeof setTimeout>>();
 let wsUnmounted = false;
+let fetchSessionSeq = 0;
 
 // ── Display items ─────────────────────────────────────────────────────────────
 interface TodoDisplayItem {
@@ -2575,14 +2576,18 @@ function connectChatWs() {
   if (webSocket) {
     return;
   }
-  webSocket = new WebSocket(buildChatWsUrl(props.sessionId));
+  const wsSessionId = props.sessionId;
+  const socket = new WebSocket(buildChatWsUrl(wsSessionId));
+  webSocket = socket;
 
-  webSocket.onopen = () => {
+  socket.onopen = () => {
+    if (socket !== webSocket || wsSessionId !== props.sessionId) return;
     bWsConnected.value = true;
     bWsReconnecting.value = false;
   };
 
-  webSocket.onmessage = (event: MessageEvent) => {
+  socket.onmessage = (event: MessageEvent) => {
+    if (socket !== webSocket || wsSessionId !== props.sessionId) return;
     try {
       const msg = JSON.parse(event.data as string) as ChatWsServerMessage;
 
@@ -2701,7 +2706,8 @@ function connectChatWs() {
     }
   };
 
-  webSocket.onclose = (event: CloseEvent) => {
+  socket.onclose = (event: CloseEvent) => {
+    if (socket !== webSocket) return;
     bWsConnected.value = false;
     webSocket = null;
     if (event.code === 4001 || event.code === 4004) {
@@ -2717,7 +2723,8 @@ function connectChatWs() {
     }
   };
 
-  webSocket.onerror = () => {
+  socket.onerror = () => {
+    if (socket !== webSocket) return;
     bWsConnected.value = false;
     webSocket = null;
   };
@@ -2849,11 +2856,17 @@ function onMobileMenuDelete(): void {
 }
 
 // ── Session fetch ─────────────────────────────────────────────────────────────
-async function fetchSession() {
+async function fetchSession(): Promise<boolean> {
+  const seq = ++fetchSessionSeq;
+  const workspaceId = props.workspaceId;
+  const sessionId = props.sessionId;
   try {
     bLoading.value = true;
     error.value = null;
-    const response = await sessionsApi.get(props.workspaceId, props.sessionId);
+    const response = await sessionsApi.get(workspaceId, sessionId);
+    if (seq !== fetchSessionSeq || workspaceId !== props.workspaceId || sessionId !== props.sessionId) {
+      return false;
+    }
     session.value = response.data;
     modelSelection.value = response.data.modelSelection ?? 'auto';
     sessionMode.value = normalizeStoredMode(response.data.sessionMode);
@@ -2865,11 +2878,18 @@ async function fetchSession() {
       loadAvailableModes(),
       loadAgentConfigOptions()
     ]);
+    return true;
   } catch (e) {
+    if (seq !== fetchSessionSeq || workspaceId !== props.workspaceId || sessionId !== props.sessionId) {
+      return false;
+    }
     error.value = 'Failed to load session';
     console.error('Failed to fetch session:', e);
+    return false;
   } finally {
-    bLoading.value = false;
+    if (seq === fetchSessionSeq && workspaceId === props.workspaceId && sessionId === props.sessionId) {
+      bLoading.value = false;
+    }
   }
 }
 
@@ -3032,6 +3052,10 @@ watch(
   () => props.sessionId,
   async (newId, oldId) => {
     if (!newId || newId === oldId) return;
+    for (const timer of planDocumentsRefreshTimers) {
+      clearTimeout(timer);
+    }
+    planDocumentsRefreshTimers.clear();
     // reset chat state for new session
     messages.value = [];
     seenVibeMessageIds.clear();
@@ -3049,13 +3073,19 @@ watch(
     pendingImages.value = [];
     queuedPrompts.value = [];
     modelOptions.value = [];
+    modeOptions.value = [];
+    agentConfigOptions.value = [];
+    expandedToolOutputIds.value = new Set();
     bShowAllCursorModels.value = false;
+    bHasMore.value = false;
+    bLoadingMore.value = false;
 
     const savedPrompt = localStorage.getItem(promptStorageKey.value);
     promptText.value = savedPrompt ?? '';
 
     disconnectChatWs();
-    await fetchSession();
+    const loaded = await fetchSession();
+    if (!loaded) return;
     if (activeTab.value === 'chat') {
       connectChatWs();
       await nextTick();
