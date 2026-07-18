@@ -436,6 +436,7 @@ export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<{ error?
           cwd: workspacePath,
           promptText: agentPrompt,
           claudeToken,
+          model,
           mode: sessionMode,
           configJson: sessionConfig,
           onSessionId: (id) => { currentAcpSessionId = id; },

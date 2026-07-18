@@ -15,7 +15,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 
 // classes
-import { applySessionMode, applySessionConfig } from './acpSessionHelpers';
+import { applySessionMode, applySessionModel, applySessionConfig } from './acpSessionHelpers';
 import type { AcpSessionResponse } from './acpSessionHelpers';
 import type { SessionConfigSyncHandler } from './acpSubprocessRunner';
 
@@ -129,6 +129,7 @@ export interface RunClaudeAcpParams {
   promptText: string;
   /** Optional OAuth token forwarded as CLAUDE_CODE_OAUTH_TOKEN. */
   claudeToken?: string | null;
+  model?: string;
   mode?: string;
   configJson?: Record<string, string>;
   /** Called with the resolved session ID before the prompt starts — used to keep cancel state in sync. */
@@ -147,7 +148,7 @@ export async function runClaudeAcp(
   onEvent: AcpEventHandler,
   onConfigSync?: SessionConfigSyncHandler
 ): Promise<RunClaudeAcpResult> {
-  const { acpSessionId, cwd, promptText, claudeToken, mode, configJson, onSessionId } = params;
+  const { acpSessionId, cwd, promptText, claudeToken, model, mode, configJson, onSessionId } = params;
 
   if (claudeToken) {
     process.env['CLAUDE_CODE_OAUTH_TOKEN'] = claudeToken;
@@ -173,6 +174,7 @@ export async function runClaudeAcp(
   }
 
   await applySessionMode(agent, resolvedSessionId, mode, sessionResponse);
+  await applySessionModel(agent, resolvedSessionId, model, sessionResponse);
   await applySessionConfig(agent, resolvedSessionId, configJson, sessionResponse);
 
   const resolvedModeId = sessionResponse.modes?.currentModeId;
@@ -185,8 +187,8 @@ export async function runClaudeAcp(
     typeof modelOpt.currentValue === 'string'
       ? modelOpt.currentValue
       : undefined;
-  if (resolvedModeId || resolvedModelId) {
-    emitClaudeConfigSync(resolvedSessionId, { modeId: resolvedModeId, modelId: resolvedModelId });
+  if (resolvedModeId || resolvedModelId || model) {
+    emitClaudeConfigSync(resolvedSessionId, { modeId: resolvedModeId, modelId: model ?? resolvedModelId });
   }
 
   onSessionId?.(resolvedSessionId);

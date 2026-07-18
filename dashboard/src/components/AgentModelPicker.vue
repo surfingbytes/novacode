@@ -3,23 +3,28 @@
 import { computed, ref, nextTick } from 'vue';
 
 // types
-import type { AgentModelOption, AgentType } from '@/@types/index';
+import type { AgentModelOption, AgentThinkingOptionGroup, AgentType } from '@/@types/index';
 
 const props = withDefaults(defineProps<{
   modelValue?: string | null;
   agentType?: AgentType | null;
   modelOptions: AgentModelOption[];
+  thinkingOptions?: AgentThinkingOptionGroup | null;
+  thinkingValue?: string | null;
   disabled?: boolean;
   variant?: 'compact' | 'modal';
 }>(), {
   modelValue: 'auto',
   agentType: null,
+  thinkingOptions: null,
+  thinkingValue: null,
   disabled: false,
   variant: 'compact'
 });
 
 const emit = defineEmits<{
   'update:modelValue': [value: string];
+  'update:thinkingValue': [value: string];
 }>();
 
 const THINKING_ORDER = ['auto', 'default', 'none', 'minimal', 'low', 'medium', 'high', 'max'];
@@ -233,6 +238,7 @@ const effectiveModelOptions = computed(() => {
   return [selected, ...props.modelOptions];
 });
 const bCursorAgentSession = computed(() => props.agentType === 'cursor-agent');
+const bConfigBackedThinking = computed(() => (props.thinkingOptions?.options.length ?? 0) > 0);
 
 const modelPickerState = computed(() => {
   const options = effectiveModelOptions.value;
@@ -293,6 +299,29 @@ const modelList = computed(() => modelPickerState.value.modelList);
 const selectedModelName = computed(() => modelPickerState.value.selectedModelName);
 const thinkingList = computed(() => modelPickerState.value.thinkingList);
 const selectedThinkingName = computed(() => modelPickerState.value.selectedThinkingName);
+const thinkingSelectOptions = computed<ModelSelectOption[]>(() => {
+  if (bConfigBackedThinking.value && props.thinkingOptions) {
+    return props.thinkingOptions.options.map((option) => ({
+      value: option.value,
+      label: option.label
+    }));
+  }
+  return thinkingList.value.map((thinking) => ({ value: thinking, label: thinking }));
+});
+const selectedThinkingValue = computed(() => {
+  if (bConfigBackedThinking.value && props.thinkingOptions) {
+    return (
+      props.thinkingValue ||
+      props.thinkingOptions.currentValue ||
+      props.thinkingOptions.options[0]?.value ||
+      ''
+    );
+  }
+  return selectedThinkingName.value;
+});
+const thinkingLabel = computed(() =>
+  props.thinkingOptions?.label?.toLowerCase() === 'effort' ? 'Thinking' : (props.thinkingOptions?.label ?? 'Thinking')
+);
 const contextList = computed(() => modelPickerState.value.contextList);
 const selectedContextName = computed(() => modelPickerState.value.selectedContextName);
 const bFastAvailable = computed(() => modelPickerState.value.bFastAvailable);
@@ -498,6 +527,10 @@ function onModelSelectChange(value: string, selectEl: HTMLSelectElement): void {
 }
 
 function onModelDimensionChange(kind: 'thinking' | 'context', value: string): void {
+  if (kind === 'thinking' && bConfigBackedThinking.value) {
+    emit('update:thinkingValue', value);
+    return;
+  }
   const nextModel = selectedModelName.value;
   const next = resolveModelOption(
     nextModel,
@@ -560,16 +593,16 @@ const smallSelectClass = computed(() =>
       </select>
     </label>
     <label class="flex min-w-0 items-center gap-1">
-      <span :class="labelClass">Thinking</span>
+      <span :class="labelClass">{{ thinkingLabel }}</span>
       <select
-        :value="selectedThinkingName"
+        :value="selectedThinkingValue"
         :disabled="disabled"
-        aria-label="Thinking"
+        :aria-label="thinkingLabel"
         :class="smallSelectClass"
         @change="onModelDimensionChange('thinking', ($event.target as HTMLSelectElement).value)"
       >
-        <option v-for="thinking in thinkingList" :key="thinking" :value="thinking">
-          {{ thinking }}
+        <option v-for="thinking in thinkingSelectOptions" :key="thinking.value" :value="thinking.value">
+          {{ thinking.label }}
         </option>
       </select>
     </label>
