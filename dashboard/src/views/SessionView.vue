@@ -69,6 +69,7 @@ const pendingPlanHandoff = ref<{
   linkedPlanContext?: LinkedPlanContext;
   defaultAgentType?: AgentType;
   defaultModelSelection?: string;
+  defaultSessionMode?: string;
 } | null>(null);
 const claudeAvailable = ref(false);
 const cursorAvailable = ref(false);
@@ -110,7 +111,8 @@ async function createSession(payload: {
   try {
     const { data: newSession } = await sessionsApi.create(workspaceId.value, {
       ...payload,
-      linkedPlanContext: pendingPlanHandoff.value?.linkedPlanContext
+      linkedPlanContext: pendingPlanHandoff.value?.linkedPlanContext,
+      sessionMode: pendingPlanHandoff.value?.defaultSessionMode,
     });
     if (pendingPlanHandoff.value?.draftPrompt) {
       localStorage.setItem(
@@ -144,6 +146,7 @@ function handleStartPlanSession(payload: {
   linkedPlanContext?: LinkedPlanContext;
   defaultAgentType?: AgentType;
   defaultModelSelection?: string;
+  defaultSessionMode?: string;
 }): void {
   pendingPlanHandoff.value = payload;
   showNewSessionModal.value = true;
