@@ -171,7 +171,9 @@ watch(
     if (open) {
       formTags.value = [];
       defaultName.value = props.defaultSessionName || `Session ${new Date().toLocaleString()}`;
-      name.value = defaultName.value;
+      // Prefill only when a suggested name is provided (e.g. plan handoff);
+      // otherwise keep the datetime as placeholder so the user can type a fresh name.
+      name.value = props.defaultSessionName?.trim() ? defaultName.value : '';
       agentType.value = computeInitialAgentType();
       modelSelection.value = props.defaultModelSelection ?? '';
       void loadModelOptions();
@@ -219,7 +221,7 @@ watch(agentType, () => {
               <input
                 v-model="name"
                 type="text"
-                placeholder="Session name"
+                :placeholder="defaultName"
                 autofocus
                 class="w-full text-sm px-3 py-3 rounded-lg border border-fg/[0.12] bg-fg/[0.04] text-text-primary placeholder-text-muted focus:outline-none focus:border-primary/50 transition-colors"
                 @keydown.escape="close"
