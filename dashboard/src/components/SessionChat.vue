@@ -21,6 +21,7 @@ import {
   type AgentErrorCode
 } from '@/classes/api';
 import { notifyTaskDone, notifyTodoCompleted } from '@/lib/notifications';
+import { renderMermaidDiagrams } from '@/lib/mermaid';
 
 // stores
 import { useWorkspacesStore } from '@/stores/workspaces';
@@ -101,6 +102,20 @@ const bModeMenuOpen = ref(false);
 const modeMenuRef = ref<HTMLElement | null>(null);
 const bPlanActionsMenuOpen = ref(false);
 const planActionsMenuRef = ref<HTMLElement | null>(null);
+const sessionChatRootRef = ref<HTMLElement | null>(null);
+let mermaidRenderTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleMermaidRender(): void {
+  if (mermaidRenderTimer !== null) {
+    clearTimeout(mermaidRenderTimer);
+  }
+  mermaidRenderTimer = setTimeout(() => {
+    mermaidRenderTimer = null;
+    void nextTick(() => {
+      void renderMermaidDiagrams(sessionChatRootRef.value);
+    });
+  }, 80);
+}
 
 // Claude limit popup state
 const bShowClaudeLimitPopup = ref(false);
@@ -3040,10 +3055,27 @@ watch(activeTab, (tab) => {
       }
       connectChatWs();
     }
+    scheduleMermaidRender();
   } else if (tab === 'plan') {
     schedulePlanDocumentsRefresh(0, { selectLatest: true });
+    scheduleMermaidRender();
   }
 });
+
+watch(
+  [
+    () =>
+      displayMessages.value
+        .map((m) => `${m.fallbackHtml}\0${m.items.map((i) => i.renderedHtml ?? '').join('\0')}`)
+        .join('\n'),
+    () => streamingDisplayItems.value.map((item) => item.renderedHtml ?? '').join('\0'),
+    () => selectedPlanDocument.value?.renderedHtml ?? '',
+    () => selectedPlanDocument.value?.id ?? ''
+  ],
+  () => {
+    scheduleMermaidRender();
+  }
+);
 
 watch(
   () => props.sessionId,
@@ -3129,10 +3161,15 @@ onMounted(async () => {
   document.addEventListener('visibilitychange', onVisibilityChange);
   document.addEventListener('click', handleDocumentClickMobileMenu);
   document.addEventListener('keydown', handleKeydownMobileMenu);
+  scheduleMermaidRender();
 });
 
 onUnmounted(() => {
   wsUnmounted = true;
+  if (mermaidRenderTimer !== null) {
+    clearTimeout(mermaidRenderTimer);
+    mermaidRenderTimer = null;
+  }
   promptInputResizeObserver?.disconnect();
   promptInputResizeObserver = null;
   if (chatInputMql) {
@@ -3155,7 +3192,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex-1 flex flex-col overflow-hidden">
+  <div ref="sessionChatRootRef" class="flex-1 flex flex-col overflow-hidden">
     <!-- Header -->
 
     <div class="h-16 px-4 md:px-6 flex items-center border-b border-fg/10 shrink-0 gap-3 min-w-0">
