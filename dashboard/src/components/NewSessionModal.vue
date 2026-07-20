@@ -169,9 +169,9 @@ watch(
   () => props.modelValue,
   (open) => {
     if (open) {
-      name.value = '';
       formTags.value = [];
       defaultName.value = props.defaultSessionName || `Session ${new Date().toLocaleString()}`;
+      name.value = defaultName.value;
       agentType.value = computeInitialAgentType();
       modelSelection.value = props.defaultModelSelection ?? '';
       void loadModelOptions();
@@ -219,7 +219,7 @@ watch(agentType, () => {
               <input
                 v-model="name"
                 type="text"
-                :placeholder="defaultName"
+                placeholder="Session name"
                 autofocus
                 class="w-full text-sm px-3 py-3 rounded-lg border border-fg/[0.12] bg-fg/[0.04] text-text-primary placeholder-text-muted focus:outline-none focus:border-primary/50 transition-colors"
                 @keydown.escape="close"

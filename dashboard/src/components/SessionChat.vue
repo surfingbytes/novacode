@@ -2139,7 +2139,9 @@ function bestPlanMarkdownFallback(
       bestScore = score;
     }
   }
-  return best && bestScore > 0 ? best : undefined;
+  if (!best) return undefined;
+  if (bestScore > 0 || candidates.length === 1) return best;
+  return undefined;
 }
 
 function planDocumentFromItem(
@@ -2223,12 +2225,19 @@ const streamingDisplayItems = computed(() => {
 
 const planDocuments = computed<PlanDocument[]>(() => {
   const docs: PlanDocument[] = [];
-  const seenMarkdown = new Set<string>();
+  const seenMarkdown = new Map<string, number>();
   const addPlanDocument = (doc: PlanDocument | null): void => {
     if (!doc) return;
     const key = normalizePlanSearchText(doc.markdown);
-    if (key && seenMarkdown.has(key)) return;
-    if (key) seenMarkdown.add(key);
+    if (key && seenMarkdown.has(key)) {
+      const existing = docs[seenMarkdown.get(key)!];
+      if (doc.backendPlanId && !existing.backendPlanId) {
+        existing.backendPlanId = doc.backendPlanId;
+        existing.planSourceSessionId = doc.planSourceSessionId ?? existing.planSourceSessionId;
+      }
+      return;
+    }
+    if (key) seenMarkdown.set(key, docs.length);
     docs.push(doc);
   };
   const filePlanDocuments = session.value?.planDocuments;
@@ -2323,15 +2332,26 @@ function shortPlanEntry(content: string): string {
   return content.replace(/\s+/g, ' ').trim();
 }
 
+function resolvePlanLinkMeta(plan: PlanDocument): {
+  backendPlanId?: string;
+  planSourceSessionId?: string;
+} {
+  return {
+    backendPlanId: plan.backendPlanId,
+    planSourceSessionId: plan.planSourceSessionId ?? session.value?.sessionId ?? undefined,
+  };
+}
+
 function startSessionFromFullPlan(plan: PlanDocument | null): void {
   if (!plan?.markdown.trim()) return;
   closePlanActionsMenu();
 
-  const linkedPlanContext = plan.backendPlanId && plan.planSourceSessionId
+  const { backendPlanId, planSourceSessionId } = resolvePlanLinkMeta(plan);
+  const linkedPlanContext = backendPlanId && planSourceSessionId
     ? {
         sourceSessionId: props.sessionId,
-        sourceAcpSessionId: plan.planSourceSessionId,
-        planId: plan.backendPlanId,
+        sourceAcpSessionId: planSourceSessionId,
+        planId: backendPlanId,
         planTitle: plan.title,
         entryIndex: 0,
         entryContent: plan.title,
@@ -2356,11 +2376,12 @@ function startSessionFromPlanEntry(plan: PlanDocument, entry: PlanEntry, index: 
   if (!entryText) return;
 
   const pointNumber = index + 1;
-  const linkedPlanContext = plan.backendPlanId && plan.planSourceSessionId
+  const { backendPlanId, planSourceSessionId } = resolvePlanLinkMeta(plan);
+  const linkedPlanContext = backendPlanId && planSourceSessionId
     ? {
         sourceSessionId: props.sessionId,
-        sourceAcpSessionId: plan.planSourceSessionId,
-        planId: plan.backendPlanId,
+        sourceAcpSessionId: planSourceSessionId,
+        planId: backendPlanId,
         planTitle: plan.title,
         entryIndex: index,
         entryContent: entryText,
