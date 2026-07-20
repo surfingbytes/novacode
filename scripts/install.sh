@@ -121,7 +121,7 @@ hash_file_md5() {
 }
 
 fetch_env_example_md5() {
-  # Returns md5 of upstream .env.example, or non-zero if unavailable.
+  # Returns md5 of published .env.example, or non-zero if unavailable.
   command -v curl >/dev/null 2>&1 || return 1
 
   local tmp
@@ -267,7 +267,7 @@ cmd_run() {
     env_has_key "POSTGRES_PASSWORD" || regen_secrets=1
     env_has_key "POSTGRES_DB" || regen_secrets=1
 
-    # Otherwise, regenerate only if upstream .env.example changed.
+    # Otherwise, regenerate only if published .env.example changed.
     fetched_env_md5="$(fetch_env_example_md5 || true)"
     installed_env_md5="$(get_installed_env_example_md5 || true)"
 
@@ -305,7 +305,7 @@ cmd_run() {
 
   echo "Installing Nova Code under ${NOVACODE_DIR}..."
   write_compose
-  # Best-effort: store current upstream .env.example hash for future updates.
+  # Best-effort: store current published .env.example hash for future updates.
   write_env_file "$(fetch_env_example_md5 || true)"
   # shellcheck disable=SC1090
   set -a && source "${NOVACODE_DIR}/.env" && set +a

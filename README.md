@@ -29,6 +29,12 @@ Run [Cursor Agent](https://cursor.com), [Claude Code](https://claude.ai/code), a
 
 ---
 
+## Project status
+
+Nova Code was originally created by [Jonah Fintz](https://github.com/JonahFintzDev). The original repository ([`JonahFintzDev/novacode`](https://github.com/JonahFintzDev/novacode)) has been deleted; development continues here at [`surfingbytes/novacode`](https://github.com/surfingbytes/novacode) via Cursor.
+
+---
+
 ## Documentation
 
 - **[Coding conventions](../docs/coding-conventions.md)** — dashboard/API style (imports, Vue script sections, boolean `b` prefix, naming, braces).
@@ -94,7 +100,7 @@ The script writes `~/.novacode/.env` with generated secrets, pulls `ghcr.io/surf
 
 On first install you may be prompted for extra host directory mounts (workspaces under `/data-root/...`). Then open **`http://localhost:3030`** and complete **first-run setup**.
 
-### Docker Compose (published fork image)
+### Docker Compose (published image)
 
 ```bash
 # 1. Clone the application repository
@@ -108,7 +114,7 @@ cp .env.example .env
 # 3. By default, ~/.novacode/data on the host is mounted at /data-root — put repos there
 #    (mkdir -p ~/.novacode/data) or edit docker-compose.yml to add more bind mounts.
 
-# 4. Pull and start the fork image
+# 4. Pull and start the published image
 export UID=$(id -u) GID=$(id -g)
 docker compose pull
 docker compose up -d
@@ -329,4 +335,4 @@ Recent stream-preview utility refactors in `api/src/classes/chatStreamPreviewFro
 
 ## License
 
-[MIT](LICENSE) © Jonah Fintz
+[MIT](LICENSE) © Jonah Fintz (original author). See [Project status](#project-status).
