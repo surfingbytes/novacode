@@ -90,6 +90,7 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         agentType?: AgentType;
         modelSelection?: string | null;
         linkedPlanContext?: LinkedPlanContext | null;
+        sessionMode?: string | null;
       };
 
       const tagsParsed = parseTagsFromBody(request.body);
@@ -100,6 +101,7 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         agentType: body.agentType,
         modelSelection: body.modelSelection ?? undefined,
         linkedPlanContext: body.linkedPlanContext ?? undefined,
+        sessionMode: body.sessionMode ?? undefined,
       });
 
       if (result.error) {

@@ -22,6 +22,8 @@ export interface CreateSessionWithAgentParams {
   modelSelection?: string | null;
   /** Optional backend-linked plan context to inject on the first prompt. */
   linkedPlanContext?: LinkedPlanContext | null;
+  /** Optional explicit session mode; plan handoffs default to agent. */
+  sessionMode?: string | null;
 }
 
 export interface CreateSessionWithAgentResult {
@@ -45,7 +47,10 @@ export async function createSessionWithAgent(
     ((workspace.defaultAgentType as AgentType | null) ?? 'cursor-agent');
   const latestSameAgentSession = await db.getLatestSessionByAgentType(agentType);
   const modelSelection = params.modelSelection ?? latestSameAgentSession?.modelSelection ?? 'auto';
-  const sessionMode = latestSameAgentSession?.sessionMode ?? MODE_SENTINEL;
+  const sessionMode = params.sessionMode
+    ?? (params.linkedPlanContext ? 'agent' : undefined)
+    ?? latestSameAgentSession?.sessionMode
+    ?? MODE_SENTINEL;
   const sessionConfigJson = params.linkedPlanContext
     ? JSON.stringify({
         [LINKED_PLAN_CONTEXT_CONFIG_KEY]: serializeLinkedPlanContext(params.linkedPlanContext),

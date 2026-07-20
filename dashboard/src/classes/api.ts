@@ -398,6 +398,7 @@ export const sessionsApi = {
       agentType?: AgentType;
       modelSelection?: string | null;
       linkedPlanContext?: LinkedPlanContext | null;
+      sessionMode?: string | null;
     }
   ): ReturnType<typeof http.post<Session>> =>
     http.post<Session>(`/workspaces/${workspaceId}/sessions`, payload),

@@ -42,6 +42,7 @@ const emit = defineEmits<{
     linkedPlanContext?: LinkedPlanContext;
     defaultAgentType?: Session['agentType'];
     defaultModelSelection?: string;
+    defaultSessionMode?: string;
   }): void;
 }>();
 
@@ -2205,6 +2206,7 @@ function startSessionFromFullPlan(plan: PlanDocument | null): void {
     linkedPlanContext,
     defaultAgentType: session.value?.agentType,
     defaultModelSelection: modelSelection.value,
+    defaultSessionMode: 'agent',
   });
 }
 
@@ -2233,6 +2235,7 @@ function startSessionFromPlanEntry(plan: PlanDocument, entry: PlanEntry, index: 
     linkedPlanContext,
     defaultAgentType: session.value?.agentType,
     defaultModelSelection: modelSelection.value,
+    defaultSessionMode: 'agent',
   });
 }
 
