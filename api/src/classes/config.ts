@@ -70,6 +70,7 @@ export const config = {
       'USER',
       'LOGNAME',
       'XDG_CONFIG_HOME',
+      'XDG_DATA_HOME',
       'CURSOR_HOME',
       'VIBE_HOME'
     ];
@@ -108,6 +109,7 @@ export const config = {
     env['OPENCODE_HOME'] = env['OPENCODE_HOME'] || configDir + '/.opencode';
     env['CODEX_HOME'] = env['CODEX_HOME'] || configDir + '/.codex';
     env['XDG_CONFIG_HOME'] = env['XDG_CONFIG_HOME'] || configDir + '/.config';
+    env['XDG_DATA_HOME'] = env['XDG_DATA_HOME'] || configDir + '/.local/share';
 
     // workspace-level git identity overrides take precedence over .gitconfig user section
     if (gitOverrides?.name) {

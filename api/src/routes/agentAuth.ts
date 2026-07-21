@@ -21,9 +21,10 @@ import {
 import { hasAnyOpenCodeAuth } from '../classes/openCodeProviders';
 
 const CURSOR_AUTH_FILE = '.config/cursor/auth.json';
-// OPENCODE_HOME is set to configDir + '/.opencode' in agentEnv(), so opencode
-// reads auth from $OPENCODE_HOME/auth.json, not the XDG default.
-const OPENCODE_AUTH_FILE = '.opencode/auth.json';
+// OpenCode stores provider credentials in its XDG data dir. `config.agentEnv()` sets
+// XDG_DATA_HOME=/config/.local/share for spawned OpenCode processes.
+const OPENCODE_AUTH_FILE = '.local/share/opencode/auth.json';
+const OPENCODE_LEGACY_AUTH_FILE = '.opencode/auth.json';
 const CODEX_AUTH_FILE = '.codex/auth.json';
 
 export const checkCursorAuth = (): CursorAuthCheck => {
@@ -201,7 +202,7 @@ export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
       const trimmed = apiKey.trim();
       if (!trimmed) return reply.send({ ok: false });
       const authPath = join(config.configDir, OPENCODE_AUTH_FILE);
-      const authDir = join(config.configDir, '.opencode');
+      const authDir = join(config.configDir, '.local/share/opencode');
       try {
         if (!existsSync(authDir)) mkdirSync(authDir, { recursive: true });
         let existing: Record<string, unknown> = {};
@@ -294,6 +295,20 @@ export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
           writeFileSync(authPath, JSON.stringify(data, null, 2), 'utf8');
         } catch {
           rmSync(authPath, { force: true });
+        }
+      }
+      const legacyAuthPath = join(config.configDir, OPENCODE_LEGACY_AUTH_FILE);
+      if (existsSync(legacyAuthPath)) {
+        try {
+          const parsed: unknown = JSON.parse(readFileSync(legacyAuthPath, 'utf8'));
+          const data =
+            parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+              ? parsed as Record<string, unknown>
+              : {};
+          delete data['opencode-go'];
+          writeFileSync(legacyAuthPath, JSON.stringify(data, null, 2), 'utf8');
+        } catch {
+          // ignore malformed legacy auth cleanup
         }
       }
       return reply.code(204).send(null);

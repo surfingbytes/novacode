@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 const OPENCODE_CONFIG_FILE = '.config/opencode/opencode.json';
-const OPENCODE_AUTH_FILE = '.opencode/auth.json';
+const OPENCODE_AUTH_FILE = '.local/share/opencode/auth.json';
+const OPENCODE_LEGACY_AUTH_FILE = '.opencode/auth.json';
 
 export type OpenCodeProviderAdapter = 'openai-compatible' | 'openai' | 'custom';
 
@@ -52,6 +53,10 @@ function authPath(configDir: string): string {
   return join(configDir, OPENCODE_AUTH_FILE);
 }
 
+function legacyAuthPath(configDir: string): string {
+  return join(configDir, OPENCODE_LEGACY_AUTH_FILE);
+}
+
 function readJsonObject(path: string): JsonRecord {
   if (!existsSync(path)) {
     return {};
@@ -88,6 +93,21 @@ function providerMap(root: JsonRecord): JsonRecord {
 
 function authMap(root: JsonRecord): Record<string, OpenCodeAuthEntry> {
   return root as Record<string, OpenCodeAuthEntry>;
+}
+
+function readAuth(configDir: string): Record<string, OpenCodeAuthEntry> {
+  const legacy = authMap(readJsonObject(legacyAuthPath(configDir)));
+  const current = authMap(readJsonObject(authPath(configDir)));
+  const merged = { ...legacy, ...current };
+  const hasLegacyOnlyKeys = Object.keys(legacy).some((key) => current[key] === undefined);
+  if (hasLegacyOnlyKeys) {
+    writeAuth(configDir, merged);
+  }
+  return merged;
+}
+
+function writeAuth(configDir: string, auth: Record<string, OpenCodeAuthEntry>): void {
+  writeJsonObject(authPath(configDir), auth);
 }
 
 function stringProp(value: unknown): string {
@@ -162,7 +182,7 @@ function isAuthenticated(auth: Record<string, OpenCodeAuthEntry>, providerId: st
 export function readOpenCodeProviders(configDir: string): OpenCodeProviderSummary[] {
   const configRoot = readJsonObject(configPath(configDir));
   const providers = providerMap(configRoot);
-  const auth = authMap(readJsonObject(authPath(configDir)));
+  const auth = readAuth(configDir);
 
   return Object.entries(providers)
     .map(([id, raw]) => {
@@ -191,7 +211,7 @@ export function readOpenCodeProviders(configDir: string): OpenCodeProviderSummar
 }
 
 export function hasAnyOpenCodeAuth(configDir: string): boolean {
-  const auth = authMap(readJsonObject(authPath(configDir)));
+  const auth = readAuth(configDir);
   return Object.values(auth).some((entry) => {
     const key = entry?.key;
     return typeof key === 'string' && key.trim().length > 0;
@@ -226,13 +246,12 @@ export function saveOpenCodeProvider(
 
   const apiKey = input.apiKey?.trim();
   if (apiKey) {
-    const authRoot = readJsonObject(authPath(configDir));
-    const auth = authMap(authRoot);
+    const auth = readAuth(configDir);
     auth[id] = { key: apiKey, type: 'api' };
-    writeJsonObject(authPath(configDir), authRoot);
+    writeAuth(configDir, auth);
   }
 
-  const authenticated = apiKey ? true : isAuthenticated(authMap(readJsonObject(authPath(configDir))), id);
+  const authenticated = apiKey ? true : isAuthenticated(readAuth(configDir), id);
   return { id, name, npm, adapter: adapterFromNpm(npm), baseURL, models, authenticated };
 }
 
@@ -243,16 +262,26 @@ export function deleteOpenCodeProvider(configDir: string, id: string): void {
   delete providers[providerId];
   writeJsonObject(configPath(configDir), configRoot);
 
-  const authRoot = readJsonObject(authPath(configDir));
-  const auth = authMap(authRoot);
+  const auth = readAuth(configDir);
   delete auth[providerId];
-  writeJsonObject(authPath(configDir), authRoot);
+  writeAuth(configDir, auth);
+
+  const legacyAuth = authMap(readJsonObject(legacyAuthPath(configDir)));
+  if (legacyAuth[providerId]) {
+    delete legacyAuth[providerId];
+    writeJsonObject(legacyAuthPath(configDir), legacyAuth);
+  }
 }
 
 export function deleteOpenCodeProviderAuth(configDir: string, id: string): void {
   const providerId = validateProviderId(id);
-  const authRoot = readJsonObject(authPath(configDir));
-  const auth = authMap(authRoot);
+  const auth = readAuth(configDir);
   delete auth[providerId];
-  writeJsonObject(authPath(configDir), authRoot);
+  writeAuth(configDir, auth);
+
+  const legacyAuth = authMap(readJsonObject(legacyAuthPath(configDir)));
+  if (legacyAuth[providerId]) {
+    delete legacyAuth[providerId];
+    writeJsonObject(legacyAuthPath(configDir), legacyAuth);
+  }
 }
