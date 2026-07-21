@@ -35,12 +35,12 @@ export async function requestPermission(): Promise<NotificationPermission> {
   return Notification.requestPermission();
 }
 
-function base64UrlToUint8Array(base64Url: string): Uint8Array {
+function base64UrlToUint8Array(base64Url: string): Uint8Array<ArrayBuffer> {
   const padded = (base64Url + '='.repeat((4 - (base64Url.length % 4)) % 4))
     .replace(/-/g, '+')
     .replace(/_/g, '/');
   const raw = window.atob(padded);
-  const output = new Uint8Array(raw.length);
+  const output = new Uint8Array(new ArrayBuffer(raw.length));
   for (let i = 0; i < raw.length; ++i) output[i] = raw.charCodeAt(i);
   return output;
 }

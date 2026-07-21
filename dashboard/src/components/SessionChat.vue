@@ -2558,6 +2558,11 @@ function onMessagesScroll() {
   }
 }
 
+function loadOlderMessages(): void {
+  bLoadingMore.value = true;
+  webSocket?.send(JSON.stringify({ type: 'load-more', offset: messages.value.length }));
+}
+
 function forceInitialScrollToBottom() {
   scrollToBottom();
   // Some message content (e.g. markdown/images) can expand after first paint.
@@ -3388,10 +3393,7 @@ onUnmounted(() => {
             <div v-else-if="bHasMore" class="flex justify-center py-2">
               <button
                 class="text-xs text-text-muted hover:text-text-primary transition-colors"
-                @click="
-                  bLoadingMore = true;
-                  webSocket!.send(JSON.stringify({ type: 'load-more', offset: messages.length }));
-                "
+                @click="loadOlderMessages"
               >
                 Load older messages
               </button>

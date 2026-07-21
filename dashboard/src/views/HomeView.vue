@@ -95,8 +95,8 @@ onMounted(() => {
     <div class="stats-strip" v-if="!workspacesStore.bSessionsLoading || activeSessions.length > 0">
       <div class="stats-strip__cell" v-for="(stat, i) in [
         { label: 'Busy',         value: busyCount,             sub: 'agents processing a prompt', accent: true },
-        { label: 'Idle',         value: idleCount,             sub: 'sessions ready for input' },
-        { label: 'Total active', value: activeSessions.length, sub: 'non-archived sessions' },
+        { label: 'Idle',         value: idleCount,             sub: 'sessions ready for input', accent: false },
+        { label: 'Total active', value: activeSessions.length, sub: 'non-archived sessions', accent: false },
       ]" :key="stat.label" :style="i > 0 ? { borderLeft: '1px solid var(--line)' } : {}">
         <div class="nc-eyebrow stats-strip__label">{{ stat.label }}</div>
         <div class="stats-strip__value nc-mono" :class="{ 'stats-strip__value--accent': stat.accent }">
