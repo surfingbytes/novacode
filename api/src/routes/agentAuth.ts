@@ -18,6 +18,7 @@ import {
   isTimeoutError,
   type CursorAuthCheck
 } from '../classes/agentError';
+import { hasAnyOpenCodeAuth } from '../classes/openCodeProviders';
 
 const CURSOR_AUTH_FILE = '.config/cursor/auth.json';
 // OPENCODE_HOME is set to configDir + '/.opencode' in agentEnv(), so opencode
@@ -68,16 +69,7 @@ export const cursorAuthenticated = (): boolean => {
 };
 
 export const openCodeAuthenticated = (): boolean => {
-  const authPath = join(config.configDir, OPENCODE_AUTH_FILE);
-  if (!existsSync(authPath)) return false;
-  try {
-    const data = JSON.parse(readFileSync(authPath, 'utf8'));
-    return (
-      typeof data?.['opencode-go']?.key === 'string' && data['opencode-go']?.key.trim().length > 0
-    );
-  } catch {
-    return false;
-  }
+  return hasAnyOpenCodeAuth(config.configDir);
 };
 
 export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
@@ -212,9 +204,20 @@ export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
       const authDir = join(config.configDir, '.opencode');
       try {
         if (!existsSync(authDir)) mkdirSync(authDir, { recursive: true });
+        let existing: Record<string, unknown> = {};
+        if (existsSync(authPath)) {
+          try {
+            const parsed: unknown = JSON.parse(readFileSync(authPath, 'utf8'));
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              existing = parsed as Record<string, unknown>;
+            }
+          } catch {
+            existing = {};
+          }
+        }
         writeFileSync(
           authPath,
-          JSON.stringify({ 'opencode-go': { key: trimmed, type: 'api' } }, null, 2),
+          JSON.stringify({ ...existing, 'opencode-go': { key: trimmed, type: 'api' } }, null, 2),
           'utf8'
         );
       } catch (err) {
@@ -280,7 +283,19 @@ export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: jwtPreHandler, schema: { response: { 204: Type.Null() } } },
     async (_request, reply) => {
       const authPath = join(config.configDir, OPENCODE_AUTH_FILE);
-      if (existsSync(authPath)) rmSync(authPath, { force: true });
+      if (existsSync(authPath)) {
+        try {
+          const parsed: unknown = JSON.parse(readFileSync(authPath, 'utf8'));
+          const data =
+            parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+              ? parsed as Record<string, unknown>
+              : {};
+          delete data['opencode-go'];
+          writeFileSync(authPath, JSON.stringify(data, null, 2), 'utf8');
+        } catch {
+          rmSync(authPath, { force: true });
+        }
+      }
       return reply.code(204).send(null);
     }
   );

@@ -24,6 +24,11 @@ import { getAgentModels } from '../classes/agentModels';
 import { getAgentModes } from '../classes/agentModes';
 import { getAgentConfigOptions } from '../classes/agentConfigOptions';
 import { getAgentOptions } from '../classes/agentOptions';
+import {
+  deleteOpenCodeProvider,
+  readOpenCodeProviders,
+  saveOpenCodeProvider
+} from '../classes/openCodeProviders';
 import { readSshKeyMaterial } from '../classes/sshKey';
 import { checkCursorAuth, openCodeAuthenticated, codexAuthenticated } from './agentAuth';
 
@@ -31,6 +36,7 @@ import { checkCursorAuth, openCodeAuthenticated, codexAuthenticated } from './ag
 import type { FastifyInstance } from 'fastify';
 import type { McpClientServerConfig } from '../classes/config';
 import type { AgentType } from '../@types/index';
+import type { SaveOpenCodeProviderInput } from '../classes/openCodeProviders';
 
 type AppSettingsUser = {
   gitUserName: string | null;
@@ -227,6 +233,103 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     async (request) => {
       if ((request.query as Record<string, string>)['bust']) clearOpenCodeModelsCache();
       return getOpenCodeModels();
+    }
+  );
+
+  const OpenCodeProviderAdapterSchema = Type.Union([
+    Type.Literal('openai-compatible'),
+    Type.Literal('openai'),
+    Type.Literal('custom')
+  ]);
+
+  const OpenCodeProviderModelSchema = Type.Object({
+    id: Type.String(),
+    name: Type.String()
+  });
+
+  const OpenCodeProviderSchema = Type.Object({
+    id: Type.String(),
+    name: Type.String(),
+    npm: Type.String(),
+    adapter: OpenCodeProviderAdapterSchema,
+    baseURL: Type.String(),
+    models: Type.Array(OpenCodeProviderModelSchema),
+    authenticated: Type.Boolean()
+  });
+
+  const SaveOpenCodeProviderSchema = Type.Object({
+    id: Type.String(),
+    name: Type.String(),
+    adapter: OpenCodeProviderAdapterSchema,
+    npm: Type.Optional(Type.String()),
+    baseURL: Type.String(),
+    models: Type.Array(OpenCodeProviderModelSchema),
+    apiKey: Type.Optional(Type.String())
+  });
+
+  fastifyInstance.get(
+    '/api/settings/opencode-providers',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        response: {
+          200: Type.Object({ providers: Type.Array(OpenCodeProviderSchema) })
+        }
+      }
+    },
+    async () => ({ providers: readOpenCodeProviders(config.configDir) })
+  );
+
+  fastifyInstance.put(
+    '/api/settings/opencode-providers/:providerId',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        params: Type.Object({ providerId: Type.String() }),
+        body: SaveOpenCodeProviderSchema,
+        response: {
+          200: OpenCodeProviderSchema,
+          400: Type.Object({ error: Type.String() })
+        }
+      }
+    },
+    async (request, reply) => {
+      const { providerId } = request.params;
+      const body = request.body as SaveOpenCodeProviderInput;
+      if (body.id !== providerId) {
+        return reply.status(400).send({ error: 'Provider id cannot be changed while editing.' });
+      }
+      try {
+        const provider = saveOpenCodeProvider(config.configDir, body);
+        clearOpenCodeModelsCache();
+        return provider;
+      } catch (err) {
+        return reply.status(400).send({ error: err instanceof Error ? err.message : 'Invalid provider config' });
+      }
+    }
+  );
+
+  fastifyInstance.delete(
+    '/api/settings/opencode-providers/:providerId',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        params: Type.Object({ providerId: Type.String() }),
+        response: {
+          204: Type.Null(),
+          400: Type.Object({ error: Type.String() })
+        }
+      }
+    },
+    async (request, reply) => {
+      const { providerId } = request.params;
+      try {
+        deleteOpenCodeProvider(config.configDir, providerId);
+        clearOpenCodeModelsCache();
+        return reply.code(204).send(null);
+      } catch (err) {
+        return reply.status(400).send({ error: err instanceof Error ? err.message : 'Invalid provider id' });
+      }
     }
   );
 

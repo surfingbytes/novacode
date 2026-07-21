@@ -180,6 +180,33 @@ export interface McpClientServer {
   headers?: Record<string, string>;
 }
 
+export type OpenCodeProviderAdapter = 'openai-compatible' | 'openai' | 'custom';
+
+export interface OpenCodeProviderModel {
+  id: string;
+  name: string;
+}
+
+export interface OpenCodeProvider {
+  id: string;
+  name: string;
+  npm: string;
+  adapter: OpenCodeProviderAdapter;
+  baseURL: string;
+  models: OpenCodeProviderModel[];
+  authenticated: boolean;
+}
+
+export interface SaveOpenCodeProviderPayload {
+  id: string;
+  name: string;
+  adapter: OpenCodeProviderAdapter;
+  npm?: string;
+  baseURL: string;
+  models: OpenCodeProviderModel[];
+  apiKey?: string;
+}
+
 /** Result of Settings → MCP “Test connectivity” dry-run */
 export interface McpConnectivityCheckResult {
   ok: boolean;

@@ -25,7 +25,9 @@ import type {
   AgentModeOption,
   AgentOptionsResponse,
   AgentConfigOption,
-  LinkedPlanContext
+  LinkedPlanContext,
+  OpenCodeProvider,
+  SaveOpenCodeProviderPayload
 } from '@/@types/index';
 
 // ---------------------------------- HTTP ----------------------------------
@@ -163,6 +165,10 @@ interface McpClientsCheckResponse {
   results: Record<string, McpConnectivityCheckResult>;
 }
 
+interface OpenCodeProvidersResponse {
+  providers: OpenCodeProvider[];
+}
+
 export const settingsApi = {
   get: (): ReturnType<typeof http.get<AppSettings>> => http.get<AppSettings>('/settings'),
   update: (payload: Partial<AppSettings>): ReturnType<typeof http.put<AppSettings>> =>
@@ -174,6 +180,17 @@ export const settingsApi = {
 
   getOpenCodeModels: (): ReturnType<typeof http.get<{ models: { id: string; label: string }[]; fromCache: boolean }>> =>
     http.get<{ models: { id: string; label: string }[]; fromCache: boolean }>('/settings/opencode-models'),
+
+  getOpenCodeProviders: (): ReturnType<typeof http.get<OpenCodeProvidersResponse>> =>
+    http.get<OpenCodeProvidersResponse>('/settings/opencode-providers'),
+
+  saveOpenCodeProvider: (
+    provider: SaveOpenCodeProviderPayload
+  ): ReturnType<typeof http.put<OpenCodeProvider>> =>
+    http.put<OpenCodeProvider>(`/settings/opencode-providers/${encodeURIComponent(provider.id)}`, provider),
+
+  deleteOpenCodeProvider: (providerId: string): ReturnType<typeof http.delete> =>
+    http.delete(`/settings/opencode-providers/${encodeURIComponent(providerId)}`),
 
   getAgentModels: (
     agentType: AgentType

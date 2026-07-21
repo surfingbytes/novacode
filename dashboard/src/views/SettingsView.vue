@@ -8,7 +8,7 @@ import PageShell from '@/components/layout/PageShell.vue';
 import PageHeader from '@/components/layout/PageHeader.vue';
 
 // classes
-import { agentAuthApi, settingsApi, type CursorAuthStatus } from '@/classes/api';
+import { agentAuthApi, apiErrorMessage, settingsApi, type CursorAuthStatus } from '@/classes/api';
 
 // lib
 import {
@@ -32,7 +32,12 @@ import {
 } from '@/lib/notifications';
 
 // types
-import type { McpClientServer, McpConnectivityCheckResult } from '@/@types/index';
+import type {
+  McpClientServer,
+  McpConnectivityCheckResult,
+  OpenCodeProvider,
+  OpenCodeProviderAdapter
+} from '@/@types/index';
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const activeTab = ref<'general' | 'git' | 'integrations' | 'mcp'>('general');
@@ -43,6 +48,30 @@ const bClaudeAuthenticated = ref<boolean>(false);
 const bOpenCodeAuthenticated = ref<boolean>(false);
 const bCodexAuthenticated = ref<boolean>(false);
 const bOpenCodeAvailable = ref<boolean>(false);
+const openCodeProviders = ref<OpenCodeProvider[]>([]);
+const bLoadingOpenCodeProviders = ref<boolean>(false);
+const bSavingOpenCodeProvider = ref<boolean>(false);
+const bShowOpenCodeProviderModal = ref<boolean>(false);
+const openCodeProviderEditId = ref<string | null>(null);
+const openCodeProviderError = ref<string>('');
+const bOpenCodeProviderSuccess = ref<boolean>(false);
+const openCodeProviderForm = ref<{
+  id: string;
+  name: string;
+  adapter: OpenCodeProviderAdapter;
+  npm: string;
+  baseURL: string;
+  models: string;
+  apiKey: string;
+}>({
+  id: '',
+  name: '',
+  adapter: 'openai-compatible',
+  npm: '',
+  baseURL: '',
+  models: '',
+  apiKey: ''
+});
 const bStartingCursorLogin = ref<boolean>(false);
 const bStartingClaudeLogin = ref<boolean>(false);
 const bLoggingOutCursor = ref<boolean>(false);
@@ -138,6 +167,18 @@ const cursorAuthChipClass = computed(() => {
   return '';
 });
 
+const openCodeProviderCountLabel = computed(() => {
+  const total = openCodeProviders.value.length;
+  const authed = openCodeProviders.value.filter((provider) => provider.authenticated).length;
+  if (total === 0) {
+    return 'No providers';
+  }
+  if (authed === 0) {
+    return `${total} provider${total === 1 ? '' : 's'}, no keys`;
+  }
+  return `${authed}/${total} configured`;
+});
+
 // -------------------------------------------------- Methods --------------------------------------------------
 const toggleNotifications = async (): Promise<void> => {
   if (!canRequestPermission()) {
@@ -197,6 +238,18 @@ const refreshAuthStatus = async (): Promise<void> => {
     bOpenCodeAvailable.value = capsResponse.data.openCodeAvailable;
   } catch {
     // ignore
+  }
+};
+
+const loadOpenCodeProviders = async (): Promise<void> => {
+  bLoadingOpenCodeProviders.value = true;
+  try {
+    const response = await settingsApi.getOpenCodeProviders();
+    openCodeProviders.value = response.data.providers;
+  } catch {
+    openCodeProviders.value = [];
+  } finally {
+    bLoadingOpenCodeProviders.value = false;
   }
 };
 
@@ -451,6 +504,7 @@ const closeOpenCodeApiKeyModal = (): void => {
   bShowOpenCodeApiKeyModal.value = false;
   openCodeApiKeyError.value = '';
   refreshAuthStatus();
+  loadOpenCodeProviders();
 };
 
 const saveOpenCodeApiKey = async (): Promise<void> => {
@@ -486,6 +540,132 @@ const logoutOpenCode = async (): Promise<void> => {
     // ignore
   } finally {
     bLoggingOutOpenCode.value = false;
+  }
+};
+
+const openAddOpenCodeProvider = (): void => {
+  openCodeProviderEditId.value = null;
+  openCodeProviderError.value = '';
+  openCodeProviderForm.value = {
+    id: '',
+    name: '',
+    adapter: 'openai-compatible',
+    npm: '',
+    baseURL: '',
+    models: '',
+    apiKey: ''
+  };
+  bShowOpenCodeProviderModal.value = true;
+};
+
+const openAddKimiProvider = (): void => {
+  openCodeProviderEditId.value = null;
+  openCodeProviderError.value = '';
+  openCodeProviderForm.value = {
+    id: 'moonshot',
+    name: 'Moonshot',
+    adapter: 'openai-compatible',
+    npm: '',
+    baseURL: 'https://api.moonshot.ai/v1',
+    models: 'kimi-k3=Kimi K3',
+    apiKey: ''
+  };
+  bShowOpenCodeProviderModal.value = true;
+};
+
+const openEditOpenCodeProvider = (provider: OpenCodeProvider): void => {
+  openCodeProviderEditId.value = provider.id;
+  openCodeProviderError.value = '';
+  openCodeProviderForm.value = {
+    id: provider.id,
+    name: provider.name,
+    adapter: provider.adapter,
+    npm: provider.adapter === 'custom' ? provider.npm : '',
+    baseURL: provider.baseURL,
+    models: provider.models.map((model) => `${model.id}=${model.name}`).join('\n'),
+    apiKey: ''
+  };
+  bShowOpenCodeProviderModal.value = true;
+};
+
+const closeOpenCodeProviderModal = (): void => {
+  bShowOpenCodeProviderModal.value = false;
+  openCodeProviderError.value = '';
+};
+
+const parseOpenCodeProviderModels = (): Array<{ id: string; name: string }> => {
+  return openCodeProviderForm.value.models
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const equalsIndex = line.indexOf('=');
+      if (equalsIndex === -1) {
+        return { id: line, name: line };
+      }
+      const id = line.slice(0, equalsIndex).trim();
+      const name = line.slice(equalsIndex + 1).trim() || id;
+      return { id, name };
+    });
+};
+
+const saveOpenCodeProvider = async (): Promise<void> => {
+  const form = openCodeProviderForm.value;
+  openCodeProviderError.value = '';
+  const providerId = form.id.trim();
+  if (!providerId) {
+    openCodeProviderError.value = 'Provider id is required.';
+    return;
+  }
+  if (!form.baseURL.trim()) {
+    openCodeProviderError.value = 'Base URL is required.';
+    return;
+  }
+  const models = parseOpenCodeProviderModels();
+  if (models.length === 0) {
+    openCodeProviderError.value = 'Add at least one model id.';
+    return;
+  }
+  if (form.adapter === 'custom' && !form.npm.trim()) {
+    openCodeProviderError.value = 'Custom provider package is required.';
+    return;
+  }
+
+  bSavingOpenCodeProvider.value = true;
+  try {
+    const response = await settingsApi.saveOpenCodeProvider({
+      id: providerId,
+      name: form.name.trim() || providerId,
+      adapter: form.adapter,
+      ...(form.adapter === 'custom' ? { npm: form.npm.trim() } : {}),
+      baseURL: form.baseURL.trim(),
+      models,
+      ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {})
+    });
+    const next = openCodeProviders.value.filter((provider) => provider.id !== response.data.id);
+    next.push(response.data);
+    openCodeProviders.value = next.sort((a, b) => a.name.localeCompare(b.name));
+    bOpenCodeProviderSuccess.value = true;
+    closeOpenCodeProviderModal();
+    await refreshAuthStatus();
+    setTimeout(() => { bOpenCodeProviderSuccess.value = false; }, 3000);
+  } catch (err) {
+    openCodeProviderError.value = apiErrorMessage(err, 'Failed to save provider.');
+  } finally {
+    bSavingOpenCodeProvider.value = false;
+  }
+};
+
+const deleteOpenCodeProvider = async (providerId: string): Promise<void> => {
+  bSavingOpenCodeProvider.value = true;
+  try {
+    await settingsApi.deleteOpenCodeProvider(providerId);
+    openCodeProviders.value = openCodeProviders.value.filter((provider) => provider.id !== providerId);
+    await refreshAuthStatus();
+  } catch {
+    // ignore
+  } finally {
+    bSavingOpenCodeProvider.value = false;
   }
 };
 
@@ -805,6 +985,7 @@ onMounted((): void => {
   refreshAuthStatus();
   loadSettings();
   loadVibeApiKeyStatus();
+  loadOpenCodeProviders();
   loadMcpClients();
 });
 </script>
@@ -1117,17 +1298,62 @@ onMounted((): void => {
             <div class="settings-auth-card__top">
               <div class="settings-auth-card__info">
                 <div class="settings-auth-card__name">OpenCode</div>
-                <div class="settings-auth-card__desc">Open-source AI coding assistant. API key stored via <code class="settings-mono-chip">opencode auth login -p opencode</code>.</div>
+                <div class="settings-auth-card__desc">
+                  Open-source AI coding assistant. Configure OpenCode providers such as Moonshot/Kimi,
+                  proxies, or other OpenAI-compatible endpoints.
+                </div>
               </div>
-              <span class="nc-chip" :class="bOpenCodeAuthenticated ? 'success' : ''">{{ bOpenCodeAuthenticated ? 'Configured' : 'Not configured' }}</span>
+              <span class="nc-chip" :class="bOpenCodeAuthenticated ? 'success' : ''">{{ openCodeProviderCountLabel }}</span>
             </div>
             <div class="settings-auth-card__actions">
-              <button class="settings-btn-accent" @click="openOpenCodeApiKeyModal">{{ bOpenCodeAuthenticated ? 'Update API key' : 'Set API key' }}</button>
+              <button class="settings-btn-accent" @click="openAddKimiProvider">Add Moonshot/Kimi</button>
+              <button class="settings-btn" @click="openAddOpenCodeProvider">Add custom provider</button>
+              <button class="settings-btn" @click="openOpenCodeApiKeyModal">Legacy OpenCode key</button>
               <button v-if="bOpenCodeAuthenticated" class="settings-btn" :disabled="bLoggingOutOpenCode" @click="logoutOpenCode">
-                <span v-if="bLoggingOutOpenCode" class="settings-spinner" />Logout
+                <span v-if="bLoggingOutOpenCode" class="settings-spinner" />Clear legacy key
               </button>
             </div>
-            <p v-if="bOpenCodeAuthSuccess" class="settings-auth-card__success">OpenCode API key saved.</p>
+            <p v-if="bOpenCodeAuthSuccess" class="settings-auth-card__success">Legacy OpenCode API key saved.</p>
+            <p v-if="bOpenCodeProviderSuccess" class="settings-auth-card__success">OpenCode provider saved.</p>
+            <div class="mt-4 rounded-lg border border-fg/[0.08] bg-fg/[0.025] divide-y divide-fg/[0.06]">
+              <div v-if="bLoadingOpenCodeProviders" class="px-3 py-3 text-sm text-text-muted">
+                Loading providers...
+              </div>
+              <div v-else-if="openCodeProviders.length === 0" class="px-3 py-3 text-sm text-text-muted">
+                No OpenCode providers configured yet.
+              </div>
+              <template v-else>
+                <div
+                  v-for="provider in openCodeProviders"
+                  :key="provider.id"
+                  class="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-start sm:justify-between"
+                >
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span class="text-sm font-medium text-text-primary">{{ provider.name }}</span>
+                      <span class="settings-mono-chip">{{ provider.id }}</span>
+                      <span class="nc-chip" :class="provider.authenticated ? 'success' : ''">
+                        {{ provider.authenticated ? 'Key stored' : 'No key' }}
+                      </span>
+                    </div>
+                    <p class="mt-1 truncate font-mono text-xs text-text-muted">{{ provider.baseURL }}</p>
+                    <p class="mt-1 text-xs text-text-muted">
+                      {{ provider.models.map((model) => model.name || model.id).join(', ') }}
+                    </p>
+                  </div>
+                  <div class="flex shrink-0 items-center gap-1">
+                    <button class="settings-btn" @click="openEditOpenCodeProvider(provider)">Edit</button>
+                    <button
+                      class="settings-btn text-destructive"
+                      :disabled="bSavingOpenCodeProvider"
+                      @click="deleteOpenCodeProvider(provider.id)"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </template>
+            </div>
           </div>
           <div class="settings-auth-card">
             <div class="settings-auth-card__top">
@@ -1550,6 +1776,136 @@ onMounted((): void => {
                 @click="deleteVibeApiKey"
               >
                 {{ bDeletingVibeApiKey ? 'Removing…' : 'Remove key' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- OpenCode provider modal -->
+    <Teleport to="body">
+      <Transition name="modal-fade">
+        <div
+          v-if="bShowOpenCodeProviderModal"
+          class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          @click.self="closeOpenCodeProviderModal"
+        >
+          <div
+            class="modal-panel w-full max-w-2xl flex max-h-[90vh] flex-col bg-fg/[0.04] border border-fg/[0.12] rounded-xl shadow-2xl"
+            @click.stop
+          >
+            <div class="flex flex-shrink-0 items-center justify-between px-4 py-3 border-b border-fg/[0.08]">
+              <p class="text-sm font-medium text-text-primary">
+                {{ openCodeProviderEditId ? 'Edit OpenCode provider' : 'Add OpenCode provider' }}
+              </p>
+              <button
+                class="text-sm px-3 py-2 text-text-muted hover:text-text-primary hover:bg-fg/[0.08] rounded-lg transition-all"
+                @click="closeOpenCodeProviderModal"
+              >
+                Cancel
+              </button>
+            </div>
+            <div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+              <p class="text-sm text-text-muted">
+                Nova writes OpenCode-native provider config and stores the key under the same provider id in
+                <code class="settings-mono-chip">~/.opencode/auth.json</code>.
+              </p>
+              <div class="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label class="block text-sm font-medium text-text-primary mb-1.5">Provider id</label>
+                  <input
+                    v-model="openCodeProviderForm.id"
+                    type="text"
+                    placeholder="moonshot"
+                    class="w-full bg-fg/[0.05] border border-fg/[0.1] rounded-lg px-3 py-2.5 text-sm text-text-primary font-mono placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
+                    :disabled="!!openCodeProviderEditId || bSavingOpenCodeProvider"
+                    autocomplete="off"
+                  />
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-text-primary mb-1.5">Display name</label>
+                  <input
+                    v-model="openCodeProviderForm.name"
+                    type="text"
+                    placeholder="Moonshot"
+                    class="w-full bg-fg/[0.05] border border-fg/[0.1] rounded-lg px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
+                    :disabled="bSavingOpenCodeProvider"
+                    autocomplete="off"
+                  />
+                </div>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-text-primary mb-1.5">Base URL</label>
+                <input
+                  v-model="openCodeProviderForm.baseURL"
+                  type="url"
+                  placeholder="https://api.moonshot.ai/v1"
+                  class="w-full bg-fg/[0.05] border border-fg/[0.1] rounded-lg px-3 py-2.5 text-sm text-text-primary font-mono placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
+                  :disabled="bSavingOpenCodeProvider"
+                  autocomplete="off"
+                />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-text-primary mb-1.5">API type</label>
+                <select
+                  v-model="openCodeProviderForm.adapter"
+                  class="w-full bg-fg/[0.05] border border-fg/[0.1] rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
+                  :disabled="bSavingOpenCodeProvider"
+                >
+                  <option value="openai-compatible">OpenAI-compatible Chat Completions</option>
+                  <option value="openai">OpenAI / Responses API</option>
+                  <option value="custom">Custom provider package</option>
+                </select>
+              </div>
+              <div v-if="openCodeProviderForm.adapter === 'custom'">
+                <label class="block text-sm font-medium text-text-primary mb-1.5">Provider package</label>
+                <input
+                  v-model="openCodeProviderForm.npm"
+                  type="text"
+                  placeholder="@ai-sdk/cerebras"
+                  class="w-full bg-fg/[0.05] border border-fg/[0.1] rounded-lg px-3 py-2.5 text-sm text-text-primary font-mono placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
+                  :disabled="bSavingOpenCodeProvider"
+                  autocomplete="off"
+                />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-text-primary mb-1.5">
+                  Models
+                  <span class="text-text-muted font-normal">(one per line, id=name)</span>
+                </label>
+                <textarea
+                  v-model="openCodeProviderForm.models"
+                  rows="4"
+                  placeholder="kimi-k3=Kimi K3"
+                  class="w-full bg-fg/[0.05] border border-fg/[0.1] rounded-lg px-3 py-2.5 text-sm text-text-primary font-mono placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all resize-y"
+                  :disabled="bSavingOpenCodeProvider"
+                ></textarea>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-text-primary mb-1.5">
+                  API key
+                  <span class="text-text-muted font-normal">{{ openCodeProviderEditId ? '(leave blank to keep existing)' : '' }}</span>
+                </label>
+                <input
+                  v-model="openCodeProviderForm.apiKey"
+                  type="password"
+                  placeholder="Provider API key"
+                  class="w-full bg-fg/[0.05] border border-fg/[0.1] rounded-lg px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
+                  :disabled="bSavingOpenCodeProvider"
+                  autocomplete="off"
+                  @keydown.enter="saveOpenCodeProvider"
+                />
+              </div>
+              <p v-if="openCodeProviderError" class="text-xs text-destructive">{{ openCodeProviderError }}</p>
+            </div>
+            <div class="flex flex-shrink-0 gap-2 p-4 pt-0">
+              <button
+                class="flex-1 bg-primary hover:bg-primary-hover disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg transition-all"
+                :disabled="!openCodeProviderForm.id.trim() || !openCodeProviderForm.baseURL.trim() || bSavingOpenCodeProvider"
+                @click="saveOpenCodeProvider"
+              >
+                {{ bSavingOpenCodeProvider ? 'Saving...' : 'Save provider' }}
               </button>
             </div>
           </div>
