@@ -10,6 +10,7 @@ import { normalizeSessionForApi } from '../classes/sessionNormalize';
 import { getActiveSessionIds } from './chat';
 import { subscribeBusy } from '../classes/chatEngine';
 import { registerSessionListBroadcaster } from '../classes/sessionListBroadcast';
+import { workspaceTerminalManager } from '../classes/workspaceTerminalManager';
 
 // types
 import type { WsClientMessage, WsServerMessage } from '../@types/index';
@@ -150,6 +151,88 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
       sessionManager.unsubscribeStatus(id, statusHandler);
     });
   });
+
+  fastify.get(
+    '/api/ws/workspaces/:workspaceId/sessions/:sessionId/terminal',
+    { websocket: true },
+    async (socket: WebSocket, request) => {
+      wsClients.add(socket);
+      const query = request.query as Record<string, string>;
+      const token = query['token'];
+      if (!token) {
+        socket.close(4001, 'Missing token');
+        return;
+      }
+      try {
+        await verifyToken(token);
+      } catch {
+        socket.close(4001, 'Invalid token');
+        return;
+      }
+
+      const { workspaceId, sessionId } = request.params as {
+        workspaceId: string;
+        sessionId: string;
+      };
+      const [workspace, session] = await Promise.all([
+        db.getWorkspace(workspaceId),
+        db.getSession(sessionId)
+      ]);
+      if (!workspace || !session || session.workspaceId !== workspaceId) {
+        socket.close(4004, 'Session not found');
+        return;
+      }
+
+      let live: ReturnType<typeof workspaceTerminalManager.getOrCreate>;
+      try {
+        live = workspaceTerminalManager.getOrCreate(sessionId, workspace);
+      } catch (error) {
+        socket.close(4005, error instanceof Error ? error.message : 'Failed to start terminal');
+        return;
+      }
+
+      const send = (msg: WsServerMessage): void => {
+        if (socket.readyState === socket.OPEN) {
+          socket.send(JSON.stringify(msg));
+        }
+      };
+
+      const history = live.pty.history;
+      if (history) {
+        send({ type: 'history', data: history });
+      }
+      send({ type: 'status', status: live.status });
+
+      const outputHandler = (data: string): void => {
+        send({ type: 'output', data });
+      };
+      const statusHandler = (status: typeof live.status): void => {
+        send({ type: 'status', status });
+      };
+
+      live.pty.subscribe(outputHandler);
+      workspaceTerminalManager.subscribeStatus(sessionId, statusHandler);
+
+      socket.on('message', (raw: Buffer) => {
+        try {
+          const msg = JSON.parse(raw.toString()) as WsClientMessage;
+          if (msg.type === 'input' && msg.data !== undefined) {
+            live.pty.write(msg.data);
+          } else if (msg.type === 'resize' && msg.cols && msg.rows) {
+            live.pty.resize(msg.cols, msg.rows);
+          }
+        } catch {
+          // ignore malformed messages
+        }
+      });
+
+      socket.on('close', () => {
+        wsClients.delete(socket);
+        live.pty.unsubscribe(outputHandler);
+        workspaceTerminalManager.unsubscribeStatus(sessionId, statusHandler);
+      });
+    }
+  );
 
   fastify.get(
     '/api/ws/sessions',

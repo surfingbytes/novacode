@@ -11,6 +11,7 @@ import { registerAuth } from './classes/auth';
 import { config, writeGlobalGitConfig } from './classes/config';
 import { db } from './classes/database';
 import { sessionManager } from './classes/sessionManager';
+import { workspaceTerminalManager } from './classes/workspaceTerminalManager';
 
 // routes
 import { authRoutes } from './routes/auth';
@@ -144,6 +145,7 @@ async function main(): Promise<void> {
     stopAutomationScheduler();
     await new Promise((r) => setTimeout(r, 5000));
     sessionManager.stopAll();
+    workspaceTerminalManager.stopAll();
     await fastify.close();
     process.exit(0);
   };

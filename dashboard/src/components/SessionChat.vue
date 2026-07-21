@@ -8,6 +8,7 @@ import { Bug, ChevronDown, Infinity as InfinityIcon, ListChecks, ListTodo, Messa
 // components
 import FilesView from '@/components/workspace/FilesComponent.vue';
 import GitView from '@/components/workspace/GitView.vue';
+import AppTerminal from '@/components/AppTerminal.vue';
 import ConfirmModal from '@/components/ConfirmModal.vue';
 import SessionEditModal from '@/components/SessionEditModal.vue';
 import ClaudeLimitPopup from '@/components/ClaudeLimitPopup.vue';
@@ -18,6 +19,7 @@ import {
   sessionsApi,
   settingsApi,
   buildChatWsUrl,
+  buildSessionTerminalWsUrl,
   type AgentErrorCode
 } from '@/classes/api';
 import { notifyTaskDone, notifyTodoCompleted } from '@/lib/notifications';
@@ -271,7 +273,7 @@ function categoryColorClass(name: string): string {
   return CATEGORY_COLORS[h % CATEGORY_COLORS.length];
 }
 
-type SessionTab = 'chat' | 'files' | 'git' | 'plan';
+type SessionTab = 'chat' | 'terminal' | 'files' | 'git' | 'plan';
 const activeTab = ref<SessionTab>('chat');
 
 // ── Chat state ───────────────────────────────────────────────────────────────
@@ -324,6 +326,9 @@ const lastPromptRequest = ref<{ text: string; imagePaths: string[] } | null>(nul
 const promptStorageKey = computed(() => `sessionPrompt:${props.workspaceId}:${props.sessionId}`);
 const workspaceName = computed(
   () => workspacesStore.workspaces.find((w) => w.id === props.workspaceId)?.name ?? 'Workspace'
+);
+const sessionTerminalWsUrl = computed(() =>
+  buildSessionTerminalWsUrl(props.workspaceId, props.sessionId)
 );
 
 /** Tailwind `md` — desktop shows full placeholder with keyboard hints */
@@ -4277,6 +4282,11 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <!-- Terminal -->
+      <div v-if="activeTab === 'terminal'" class="flex-1 min-h-0 p-2 md:p-4">
+        <AppTerminal :ws-url="sessionTerminalWsUrl" />
+      </div>
+
       <!-- Files -->
       <FilesView
         v-if="activeTab === 'files'"
@@ -4321,6 +4331,17 @@ onUnmounted(() => {
           @click="openPlan(selectedPlanDocument?.id)"
         >
           Plan
+        </button>
+        <button
+          class="flex-1 md:flex-none px-4 py-3 text-sm md:px-4 md:py-2 md:text-sm font-medium transition-colors border-t-2 md:border-t-0 md:rounded-full"
+          :class="
+            activeTab === 'terminal'
+              ? 'border-primary text-text-primary bg-fg/[0.03]'
+              : 'border-transparent text-text-muted hover:text-text-primary hover:bg-fg/[0.04]'
+          "
+          @click="activeTab = 'terminal'"
+        >
+          Terminal
         </button>
         <button
           class="flex-1 md:flex-none px-4 py-3 text-sm md:px-4 md:py-2 md:text-sm font-medium transition-colors border-t-2 md:border-t-0 md:rounded-full"

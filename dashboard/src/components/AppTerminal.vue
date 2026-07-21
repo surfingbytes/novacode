@@ -14,7 +14,7 @@ import type { WsServerMessage, WsClientMessage } from '@/@types/index';
 
 // -------------------------------------------------- Props --------------------------------------------------
 const props = withDefaults(
-  defineProps<{ sessionId: string; readOnly?: boolean; scanUrls?: boolean }>(),
+  defineProps<{ sessionId?: string; wsUrl?: string; readOnly?: boolean; scanUrls?: boolean }>(),
   { readOnly: false, scanUrls: false }
 );
 
@@ -130,6 +130,8 @@ const sendWs = (msg: WsClientMessage): void => {
   }
 };
 
+const terminalWsUrl = (): string => props.wsUrl ?? buildWsUrl(props.sessionId ?? '');
+
 const scheduleReconnect = (): void => {
   if (bIsDestroyed) return;
   if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -154,7 +156,7 @@ const connectWs = (): void => {
     webSocket.close();
   }
 
-  webSocket = new WebSocket(buildWsUrl(props.sessionId));
+  webSocket = new WebSocket(terminalWsUrl());
 
   webSocket.onopen = () => {
     reconnectDelay = 1000;
@@ -357,7 +359,7 @@ onMounted((): void => {
 });
 
 watch(
-  () => props.sessionId,
+  () => [props.sessionId, props.wsUrl],
   () => {
     term?.clear();
     outputBuffer = '';

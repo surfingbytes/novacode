@@ -487,6 +487,11 @@ export const buildChatWsUrl = (sessionId: string): string => {
   return `${wsBase()}/ws/chat/${sessionId}?token=${encodeURIComponent(token)}`;
 };
 
+export const buildSessionTerminalWsUrl = (workspaceId: string, sessionId: string): string => {
+  const token: string = localStorage.getItem('token') ?? '';
+  return `${wsBase()}/ws/workspaces/${workspaceId}/sessions/${sessionId}/terminal?token=${encodeURIComponent(token)}`;
+};
+
 export const buildWorkspaceSessionsWsUrl = (workspaceId: string): string => {
   const token: string = localStorage.getItem('token') ?? '';
   return `${wsBase()}/ws/workspaces/${workspaceId}/sessions?token=${encodeURIComponent(token)}`;

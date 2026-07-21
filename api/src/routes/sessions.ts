@@ -9,6 +9,7 @@ import { createSessionWithAgent } from '../classes/sessionService';
 import { closeAcpSessionForNovaSession } from '../classes/acpSessionClose';
 import { mergeInternalSessionConfig } from '../classes/linkedPlanContext';
 import { listPlanDocumentsForAcpSession } from '../classes/planDocuments';
+import { workspaceTerminalManager } from '../classes/workspaceTerminalManager';
 import { getActiveSessionIds, cancelRun } from './chat';
 import { deleteSessionImages } from './images';
 import {
@@ -239,6 +240,7 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       }
       for (const id of ids) {
         cancelRun(id);
+        workspaceTerminalManager.stop(id);
         await closeAcpSessionForNovaSession(id);
       }
       const count = await db.deleteManySessions(ids, workspaceId);
@@ -281,6 +283,7 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: 'Session not found' });
       }
       cancelRun(sessionId);
+      workspaceTerminalManager.stop(sessionId);
       await closeAcpSessionForNovaSession(sessionId);
       const success = await db.deleteSession(sessionId);
       if (!success) {
