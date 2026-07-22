@@ -8,7 +8,7 @@ import { jwtPreHandler } from '../classes/auth';
 import { createSessionWithAgent } from '../classes/sessionService';
 import { closeAcpSessionForNovaSession } from '../classes/acpSessionClose';
 import { mergeInternalSessionConfig } from '../classes/linkedPlanContext';
-import { listPlanDocumentsForAcpSession } from '../classes/planDocuments';
+import { getPlanDocumentsSource } from '../classes/planDocumentSources';
 import { workspaceTerminalManager } from '../classes/workspaceTerminalManager';
 import { getActiveSessionIds, cancelRun } from './chat';
 import { deleteSessionImages } from './images';
@@ -161,7 +161,9 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       }
       return reply.send({
         ...normalizeSessionForApi(session),
-        planDocuments: await listPlanDocumentsForAcpSession(session.sessionId),
+        planDocuments: await getPlanDocumentsSource(session.agentType).listForSession(
+          session.sessionId
+        ),
       });
     }
   );

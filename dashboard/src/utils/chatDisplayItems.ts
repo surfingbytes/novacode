@@ -308,6 +308,22 @@ export function mergeAssistantTextIntoDisplayItems(
   items.push({ kind: 'text', text: assistantText });
 }
 
+/**
+ * ACP `agent_message_chunk` content is a sequential increment — the reference
+ * SDK's readText() plain-appends it. Boundary dedup corrupts content that
+ * legitimately repeats (table separator rows, code indentation), so ACP chunks
+ * are appended verbatim. The defensive merge above stays for legacy
+ * cursor-style/Vibe events, whose payloads are cumulative snapshots.
+ */
+function appendAssistantTextChunk(assistantText: string, items: DisplayItem[]): void {
+  const last = items[items.length - 1];
+  if (last?.kind === 'text') {
+    last.text = (last.text ?? '') + assistantText;
+    return;
+  }
+  items.push({ kind: 'text', text: assistantText });
+}
+
 function shouldKeepAssistantTextChunk(assistantText: string, items: DisplayItem[]): boolean {
   return Boolean(assistantText.trim() || items[items.length - 1]?.kind === 'text');
 }
@@ -388,7 +404,7 @@ export function createChatStreamParser(hooks: ChatStreamParserHooks = {}) {
         typeof content.text === 'string' &&
         shouldKeepAssistantTextChunk(content.text, items)
       ) {
-        mergeAssistantTextIntoDisplayItems(content.text, items);
+        appendAssistantTextChunk(content.text, items);
       }
       return;
     }

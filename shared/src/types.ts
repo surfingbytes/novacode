@@ -98,6 +98,8 @@ export interface LinkedPlanContext {
   entryIndex: number;
   entryContent: string;
   contextMode: LinkedPlanContextMode;
+  /** Agent that produced the source plan; selects the plan-documents source. */
+  sourceAgentType?: AgentType;
 }
 
 export interface ChatWsClientMessage {

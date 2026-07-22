@@ -212,17 +212,19 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
   function resolvePlanLinkMeta(plan: PlanDocument): {
     backendPlanId?: string;
     planSourceSessionId?: string;
+    sourceAgentType?: Session['agentType'];
   } {
     return {
       backendPlanId: plan.backendPlanId,
-      planSourceSessionId: plan.planSourceSessionId ?? ctx.session.value?.sessionId ?? undefined
+      planSourceSessionId: plan.planSourceSessionId ?? ctx.session.value?.sessionId ?? undefined,
+      sourceAgentType: ctx.session.value?.agentType ?? undefined
     };
   }
 
   function startSessionFromFullPlan(plan: PlanDocument | null): void {
     if (!plan?.markdown.trim()) return;
 
-    const { backendPlanId, planSourceSessionId } = resolvePlanLinkMeta(plan);
+    const { backendPlanId, planSourceSessionId, sourceAgentType } = resolvePlanLinkMeta(plan);
     const linkedPlanContext =
       backendPlanId && planSourceSessionId
         ? {
@@ -232,7 +234,8 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
             planTitle: plan.title,
             entryIndex: 0,
             entryContent: plan.title,
-            contextMode: 'full' as const
+            contextMode: 'full' as const,
+            ...(sourceAgentType ? { sourceAgentType } : {})
           }
         : undefined;
 
@@ -253,7 +256,7 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
     if (!entryText) return;
 
     const pointNumber = index + 1;
-    const { backendPlanId, planSourceSessionId } = resolvePlanLinkMeta(plan);
+    const { backendPlanId, planSourceSessionId, sourceAgentType } = resolvePlanLinkMeta(plan);
     const linkedPlanContext =
       backendPlanId && planSourceSessionId
         ? {
@@ -263,7 +266,8 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
             planTitle: plan.title,
             entryIndex: index,
             entryContent: entryText,
-            contextMode: 'target-only' as const
+            contextMode: 'target-only' as const,
+            ...(sourceAgentType ? { sourceAgentType } : {})
           }
         : undefined;
 

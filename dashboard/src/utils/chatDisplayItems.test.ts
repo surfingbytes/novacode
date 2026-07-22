@@ -17,7 +17,7 @@ import {
 // ---------------------------------- ACP native ----------------------------------
 
 describe('ACP native events', () => {
-  it('merges cumulative agent_message_chunk text', () => {
+  it('appends incremental agent_message_chunk text verbatim', () => {
     const parser = createChatStreamParser();
     const items: DisplayItem[] = [];
     parser.processEventLine(
@@ -30,12 +30,31 @@ describe('ACP native events', () => {
     parser.processEventLine(
       JSON.stringify({
         sessionId: 's1',
-        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Hello world' } }
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'world' } }
       }),
       items
     );
     expect(items).toHaveLength(1);
     expect(items[0].text).toBe('Hello world');
+  });
+
+  it('does not dedup repeated boundary substrings across incremental chunks', () => {
+    // Regression: a table separator row split across chunk boundaries must
+    // survive intact — greedy overlap trimming used to eat the repeated run.
+    const parser = createChatStreamParser();
+    const items: DisplayItem[] = [];
+    const chunks = ['| A | B |\n', '|----------|', '----------|\n', '| a', '  ', '| b |'];
+    for (const text of chunks) {
+      parser.processEventLine(
+        JSON.stringify({
+          sessionId: 's1',
+          update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } }
+        }),
+        items
+      );
+    }
+    expect(items).toHaveLength(1);
+    expect(items[0].text).toBe('| A | B |\n|----------|----------|\n| a  | b |');
   });
 
   it('tracks tool_call lifecycle with locations and output', () => {

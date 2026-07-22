@@ -1,5 +1,5 @@
 // classes
-import { getPlanDocumentById } from './planDocuments';
+import { getPlanDocumentsSource } from './planDocumentSources';
 
 export const LINKED_PLAN_CONTEXT_CONFIG_KEY = '__novaLinkedPlanContext';
 
@@ -13,6 +13,8 @@ export interface LinkedPlanContext {
   entryIndex: number;
   entryContent: string;
   contextMode: LinkedPlanContextMode;
+  /** Agent that produced the source plan; selects the plan-documents source. */
+  sourceAgentType?: string;
 }
 
 export function parseLinkedPlanContext(value: unknown): LinkedPlanContext | null {
@@ -37,6 +39,9 @@ export function parseLinkedPlanContext(value: unknown): LinkedPlanContext | null
       entryIndex: parsed.entryIndex,
       entryContent: parsed.entryContent,
       contextMode: parsed.contextMode === 'full' ? 'full' : 'target-only',
+      ...(typeof parsed.sourceAgentType === 'string' && parsed.sourceAgentType
+        ? { sourceAgentType: parsed.sourceAgentType }
+        : {}),
     };
   } catch {
     return null;
@@ -52,6 +57,7 @@ export function serializeLinkedPlanContext(context: LinkedPlanContext): string {
     entryIndex: context.entryIndex,
     entryContent: context.entryContent,
     contextMode: context.contextMode,
+    ...(context.sourceAgentType ? { sourceAgentType: context.sourceAgentType } : {}),
   });
 }
 
@@ -117,7 +123,12 @@ export async function buildLinkedPlanContextPrefix(
   ];
 
   if (context.contextMode === 'full') {
-    const doc = await getPlanDocumentById(context.planId, { sessionId: context.sourceAcpSessionId });
+    // Default to the cursor source for linked contexts created before
+    // sourceAgentType existed (cursor was the only file-based plan source).
+    const doc = await getPlanDocumentsSource(context.sourceAgentType ?? 'cursor-agent').getById(
+      context.planId,
+      context.sourceAcpSessionId
+    );
     if (doc?.markdown.trim()) {
       parts.push('', '## Full Source Plan', '', doc.markdown.trim());
     }

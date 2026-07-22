@@ -52,6 +52,12 @@ export interface AcpSubprocessRunParams {
    * a `--model` startup arg instead and sets this flag to avoid a redundant/ineffective config write.
    */
   skipModelConfigOption?: boolean;
+  /**
+   * Last-chance prompt rewrite invoked just before session/prompt, once the
+   * ACP session id is known (e.g. agent-specific plan-mode instructions that
+   * must embed the session id). Only applied on prompt turns.
+   */
+  transformPrompt?: (promptText: string, acpSessionId: string) => string;
 }
 
 export interface AcpSubprocessRunResult {
@@ -591,9 +597,12 @@ export async function runAcpSubprocessPrompt(
       activeHandlers.set(resolvedSessionId, onEvent);
       try {
         phase('session:prompt:start');
+        const finalPromptText = params.transformPrompt
+          ? params.transformPrompt(promptText, resolvedSessionId)
+          : promptText;
         const resp = (await ctx.request(methods.agent.session.prompt, {
           sessionId: resolvedSessionId,
-          prompt: [{ type: 'text', text: promptText }],
+          prompt: [{ type: 'text', text: finalPromptText }],
         })) as { stopReason?: string };
         phase('session:prompt:done');
         return {

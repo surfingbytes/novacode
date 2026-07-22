@@ -7,7 +7,7 @@ import { extractStreamNotificationPreview } from './chatStreamPreview.js';
 // ---------------------------------- ACP native format ----------------------------------
 
 describe('ACP native events', () => {
-  it('returns the merged assistant text for agent_message_chunk events', () => {
+  it('appends incremental agent_message_chunk events verbatim', () => {
     const events = [
       JSON.stringify({
         sessionId: 's1',
@@ -15,10 +15,23 @@ describe('ACP native events', () => {
       }),
       JSON.stringify({
         sessionId: 's1',
-        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Hello world' } }
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'world' } }
       })
     ];
     expect(extractStreamNotificationPreview(events)).toBe('Hello world');
+  });
+
+  it('does not dedup repeated boundary substrings across incremental chunks', () => {
+    // Regression: a table separator row split across chunk boundaries must
+    // survive intact — greedy overlap trimming used to eat the repeated run.
+    const chunks = ['| A | B |\n', '|----------|', '----------|\n', '| a', '  ', '| b |'];
+    const events = chunks.map((text) =>
+      JSON.stringify({
+        sessionId: 's1',
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } }
+      })
+    );
+    expect(extractStreamNotificationPreview(events)).toBe('| A | B |\n|----------|----------|\n| a  | b |');
   });
 
   it('falls back to the last tool summary when the run ends on a tool call', () => {

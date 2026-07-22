@@ -4,6 +4,7 @@
 
 // classes
 import { config } from './config';
+import { buildOpenCodePlanModeInstruction } from './planDocumentSources';
 import {
   cancelAcpSubprocess,
   closeAcpSubprocessSession,
@@ -48,6 +49,14 @@ export async function runOpenCodeAcp(
       model: params.model,
       mode: params.mode,
       configJson: params.configJson,
+      // OpenCode's built-in plan-file workflow is TUI-only; over ACP the plan
+      // agent needs explicit instructions (embedding the ACP session id) so the
+      // plan lands where getPlanDocumentsSource('open-code') looks for it.
+      transformPrompt:
+        params.mode === 'plan'
+          ? (promptText, acpSessionId) =>
+              `${promptText}\n\n${buildOpenCodePlanModeInstruction(acpSessionId)}`
+          : undefined,
       logTag: 'openCodeAcp',
     },
     onEvent,

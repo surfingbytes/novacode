@@ -55,8 +55,14 @@ function processAcpUpdate(update: Record<string, unknown>, items: StreamDisplayI
 
   if (sessionUpdate === 'agent_message_chunk') {
     const content = update.content as { type?: string; text?: string } | undefined;
-    if (content?.type === 'text' && content.text?.trim()) {
-      mergeAssistantTextIntoDisplayItems(content.text, items);
+    // Keep whitespace-only chunks mid-message (table padding, code indentation);
+    // skip them only when they would start a new text item.
+    if (
+      content?.type === 'text' &&
+      typeof content.text === 'string' &&
+      (content.text.trim() || items[items.length - 1]?.kind === 'text')
+    ) {
+      appendAssistantTextChunk(content.text, items);
     }
     return;
   }
@@ -195,6 +201,22 @@ function isToolResultSuccess(toolCallObj: Record<string, unknown>): boolean {
 }
 
 // ---------------------------------- Shared merge helper ----------------------------------
+
+/**
+ * ACP `agent_message_chunk` content is a sequential increment — the reference
+ * SDK's readText() plain-appends it. Boundary dedup corrupts content that
+ * legitimately repeats (table separator rows, code indentation), so ACP chunks
+ * are appended verbatim. The defensive merge below stays for legacy
+ * cursor-style/Vibe events, whose payloads are cumulative snapshots.
+ */
+function appendAssistantTextChunk(assistantText: string, items: StreamDisplayItem[]): void {
+  const lastItem = items[items.length - 1];
+  if (lastItem?.kind === 'text') {
+    lastItem.text = (lastItem.text ?? '') + assistantText;
+    return;
+  }
+  items.push({ kind: 'text', text: assistantText });
+}
 
 export function mergeAssistantTextIntoDisplayItems(
   assistantText: string,
