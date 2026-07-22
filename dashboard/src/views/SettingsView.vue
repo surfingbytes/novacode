@@ -5,6 +5,7 @@ import { computed, ref, onMounted } from 'vue';
 // components
 import AppTerminal from '@/components/AppTerminal.vue';
 import BaseModal from '@/components/BaseModal.vue';
+import ModalHeader from '@/components/ModalHeader.vue';
 import PageShell from '@/components/layout/PageShell.vue';
 import PageHeader from '@/components/layout/PageHeader.vue';
 
@@ -1526,20 +1527,13 @@ onMounted((): void => {
       labelledby="mcp-client-modal-title"
       panel-class="max-w-md"
     >
-            <div
-              class="flex flex-shrink-0 items-center justify-between border-b border-border px-4 py-3"
-            >
-              <p id="mcp-client-modal-title" class="text-sm font-medium text-text-primary">
-                {{ mcpClientEditName ? 'Edit MCP server' : 'Add MCP server' }}
-              </p>
-              <button
-                class="text-sm px-3 py-2 text-text-muted hover:text-text-primary hover:bg-fg/[0.08] rounded-lg transition-all"
-                @click="bShowMcpClientModal = false"
-              >
-                Cancel
-              </button>
-            </div>
-            <div class="max-h-[70vh] min-h-0 flex-1 space-y-4 overflow-y-auto bg-surface p-4">
+            <ModalHeader
+              :eyebrow="mcpClientEditName ? '// edit mcp server' : '// add mcp server'"
+              :title="mcpClientEditName ? 'Edit MCP server' : 'Add MCP server'"
+              title-id="mcp-client-modal-title"
+              @close="bShowMcpClientModal = false"
+            />
+            <div class="max-h-[70vh] min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
               <div>
                 <label class="block text-sm font-medium text-text-primary mb-1.5">Server name</label>
                 <input
@@ -1664,15 +1658,12 @@ onMounted((): void => {
       panel-class="max-w-md"
       @update:model-value="(v: boolean) => { if (!v) closeCodexApiKeyModal(); }"
     >
-            <div class="flex flex-shrink-0 items-center justify-between px-4 py-3 border-b border-fg/[0.08]">
-              <p id="codex-key-modal-title" class="text-sm font-medium text-text-primary">Codex API key</p>
-              <button
-                class="text-sm px-3 py-2 text-text-muted hover:text-text-primary hover:bg-fg/[0.08] rounded-lg transition-all"
-                @click="closeCodexApiKeyModal"
-              >
-                Cancel
-              </button>
-            </div>
+            <ModalHeader
+              :eyebrow="'// codex api key'"
+              :title="'Codex API key'"
+              title-id="codex-key-modal-title"
+              @close="closeCodexApiKeyModal"
+            />
             <div class="flex-1 min-h-0 p-4 space-y-4">
               <p class="text-sm text-text-muted">
                 Enter your OpenAI API key for Codex ACP authentication.
@@ -1709,17 +1700,12 @@ onMounted((): void => {
       panel-class="max-w-md"
       @update:model-value="(v: boolean) => { if (!v) closeVibeApiKeyModal(); }"
     >
-            <div
-              class="flex flex-shrink-0 items-center justify-between px-4 py-3 border-b border-fg/[0.08]"
-            >
-              <p id="vibe-key-modal-title" class="text-sm font-medium text-text-primary">Mistral Vibe API key</p>
-              <button
-                class="text-sm px-3 py-2 text-text-muted hover:text-text-primary hover:bg-fg/[0.08] rounded-lg transition-all"
-                @click="closeVibeApiKeyModal"
-              >
-                Cancel
-              </button>
-            </div>
+            <ModalHeader
+              :eyebrow="'// mistral vibe api key'"
+              :title="'Mistral Vibe API key'"
+              title-id="vibe-key-modal-title"
+              @close="closeVibeApiKeyModal"
+            />
             <div class="flex-1 min-h-0 p-4 space-y-4">
               <p class="text-sm text-text-muted">
                 Enter your Mistral API key. It will be saved to
@@ -1766,17 +1752,12 @@ onMounted((): void => {
       panel-class="max-w-md"
       @update:model-value="(v: boolean) => { if (!v) closeOpenCodeProviderModal(); }"
     >
-            <div class="flex flex-shrink-0 items-center justify-between px-4 py-3 border-b border-fg/[0.08]">
-              <p id="opencode-provider-modal-title" class="text-sm font-medium text-text-primary">
-                {{ openCodeProviderEditId ? 'Edit OpenCode provider' : 'Add OpenCode provider' }}
-              </p>
-              <button
-                class="text-sm px-3 py-2 text-text-muted hover:text-text-primary hover:bg-fg/[0.08] rounded-lg transition-all"
-                @click="closeOpenCodeProviderModal"
-              >
-                Cancel
-              </button>
-            </div>
+            <ModalHeader
+              :eyebrow="openCodeProviderEditId ? '// edit opencode provider' : '// add opencode provider'"
+              :title="openCodeProviderEditId ? 'Edit OpenCode provider' : 'Add OpenCode provider'"
+              title-id="opencode-provider-modal-title"
+              @close="closeOpenCodeProviderModal"
+            />
             <div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
               <p class="text-sm text-text-muted">
                 Nova writes OpenCode-native provider config and stores the key under the same provider id in
@@ -1888,15 +1869,12 @@ onMounted((): void => {
       panel-class="max-w-md"
       @update:model-value="(v: boolean) => { if (!v) closeOpenCodeApiKeyModal(); }"
     >
-            <div class="flex flex-shrink-0 items-center justify-between px-4 py-3 border-b border-fg/[0.08]">
-              <p id="opencode-key-modal-title" class="text-sm font-medium text-text-primary">OpenCode API key</p>
-              <button
-                class="text-sm px-3 py-2 text-text-muted hover:text-text-primary hover:bg-fg/[0.08] rounded-lg transition-all"
-                @click="closeOpenCodeApiKeyModal"
-              >
-                Cancel
-              </button>
-            </div>
+            <ModalHeader
+              :eyebrow="'// opencode api key'"
+              :title="'OpenCode API key'"
+              title-id="opencode-key-modal-title"
+              @close="closeOpenCodeApiKeyModal"
+            />
             <div class="flex-1 min-h-0 p-4 space-y-4">
               <p class="text-sm text-text-muted">
                 Enter your OpenCode API key. It will be stored via
@@ -1934,17 +1912,12 @@ onMounted((): void => {
       panel-class="max-w-3xl"
       @update:model-value="(v: boolean) => { if (!v) dismissAuthTerminal(); }"
     >
-            <div
-              class="flex flex-shrink-0 items-center justify-between px-4 py-3 border-b border-fg/[0.08]"
-            >
-              <p id="auth-terminal-modal-title" class="text-sm font-medium text-text-primary">Authentication terminal</p>
-              <button
-                class="text-sm px-3 py-2 text-text-muted hover:text-text-primary hover:bg-fg/[0.08] rounded-lg transition-all"
-                @click="dismissAuthTerminal"
-              >
-                Dismiss
-              </button>
-            </div>
+            <ModalHeader
+              :eyebrow="'// agent authentication'"
+              :title="'Authentication terminal'"
+              title-id="auth-terminal-modal-title"
+              @close="dismissAuthTerminal"
+            />
 
             <div class="flex-1 min-h-0 overflow-y-auto p-4">
               <div class="h-96 rounded-lg overflow-hidden bg-black/40">

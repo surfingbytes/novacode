@@ -5,12 +5,16 @@ import { computed, ref, watch } from 'vue';
 // components
 import TagChipsInput from '@/components/input/TagChipsInput.vue';
 import AgentModelPicker from '@/components/AgentModelPicker.vue';
+import ModalHeader from '@/components/ModalHeader.vue';
 
 // classes
 import { settingsApi } from '@/classes/api';
 
 // types
 import type { AgentModelOption, AgentType, LinkedPlanContext } from '@/@types/index';
+
+// utils
+import { agentSelectedStyle } from '@/utils/agentTypeMeta';
 
 const AGENT_FALLBACK_ORDER: AgentType[] = [
   'cursor-agent',
@@ -81,6 +85,7 @@ const availableAgents = computed(() => {
 
 const gridColsClass = computed(() => `grid-cols-${Math.min(availableAgents.value.length, 3)}`);
 const modalTitle = computed(() => props.title ?? 'New session');
+const modalEyebrow = computed(() => (props.title ? `// ${props.title.toLowerCase()}` : '// new session'));
 const createLabel = computed(() => props.submitLabel ?? 'Create');
 
 // -------------------------------------------------- Methods --------------------------------------------------
@@ -198,31 +203,34 @@ watch(agentType, () => {
   >
     <!-- Panel -->
     <form class="contents" @submit.prevent="onCreate">
-          <div class="px-6 pt-5 pb-4">
-            <h2 id="new-session-title" class="font-semibold text-text-primary text-lg">
-              {{ modalTitle }}
-            </h2>
-            <p v-if="helperText" class="mt-1 text-xs text-text-muted">{{ helperText }}</p>
+          <ModalHeader
+            :eyebrow="modalEyebrow"
+            :title="modalTitle"
+            title-id="new-session-title"
+            @close="close"
+          />
+          <div v-if="helperText" class="px-6 pt-2">
+            <p class="text-xs text-text-muted">{{ helperText }}</p>
           </div>
 
           <div class="px-6 flex flex-col gap-4 pb-5">
             <!-- Name -->
-            <div class="flex flex-col gap-1.5">
-              <label class="text-xs font-medium text-text-muted">Name</label>
+            <div class="nc-field">
+              <label class="nc-field-label" for="new-session-name">Name</label>
               <input
+                id="new-session-name"
                 v-model="name"
                 type="text"
                 :placeholder="defaultName"
-                autofocus
-                class="w-full text-sm px-3 py-3 rounded-lg border border-fg/[0.12] bg-fg/[0.04] text-text-primary placeholder-text-muted focus:outline-none focus:border-primary/50 transition-colors"
+                data-modal-autofocus
                 @keydown.escape="close"
               />
             </div>
 
             <!-- Tags -->
-            <div class="flex flex-col gap-1.5">
-              <label class="text-xs font-medium text-text-muted"
-                >Tags <span class="font-normal opacity-60">(optional)</span></label
+            <div class="nc-field">
+              <span class="nc-field-label"
+                >Tags <span class="normal-case opacity-60">(optional)</span></span
               >
               <TagChipsInput
                 v-model="formTags"
@@ -233,11 +241,11 @@ watch(agentType, () => {
             </div>
 
             <!-- Agent selection -->
-            <div class="flex flex-col gap-1.5">
-              <label class="text-xs font-medium text-text-muted">
+            <div class="nc-field">
+              <span class="nc-field-label">
                 Agent
-                <span class="font-normal opacity-60">(required)</span>
-              </label>
+                <span class="normal-case opacity-60">(required)</span>
+              </span>
               <div
                 class="grid rounded-lg border border-fg/[0.12] bg-fg/[0.04] p-0.5 gap-1"
                 :class="gridColsClass"
@@ -246,8 +254,8 @@ watch(agentType, () => {
                   v-for="agent in availableAgents"
                   :key="agent"
                   type="button"
-                  class="text-xs px-2 py-1.5 rounded-md transition-colors text-text-muted hover:text-text-primary hover:bg-fg/[0.06]"
-                  :class="{ 'bg-primary text-on-accent': agentType === agent }"
+                  class="text-xs px-2 py-1.5 rounded-md border border-transparent transition-colors text-text-muted hover:text-text-primary hover:bg-fg/[0.06]"
+                  :style="agentType === agent ? agentSelectedStyle(agent) : {}"
                   :title="
                     agent === 'cursor-agent'
                       ? 'Cursor Agent'
@@ -280,10 +288,10 @@ watch(agentType, () => {
             </div>
 
             <!-- Model selection -->
-            <div v-if="showModelSelection" class="flex flex-col gap-1.5">
-              <label class="text-xs font-medium text-text-muted">
+            <div v-if="showModelSelection" class="nc-field">
+              <span class="nc-field-label">
                 Model
-              </label>
+              </span>
               <AgentModelPicker
                 v-model="modelSelection"
                 :agent-type="agentType"
@@ -302,7 +310,7 @@ watch(agentType, () => {
           <div class="flex items-center justify-end gap-2 px-6 pb-5">
             <button
               type="button"
-              class="px-4 py-2.5 text-sm text-text-muted hover:text-text-primary bg-fg/[0.04] hover:bg-fg/[0.08] border border-fg/[0.08] rounded-lg transition-all disabled:opacity-50"
+              class="button"
               :disabled="loading"
               @click="close"
             >
@@ -310,7 +318,7 @@ watch(agentType, () => {
             </button>
             <button
               type="submit"
-              class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium bg-primary hover:bg-primary-hover text-on-accent rounded-lg shadow-lg shadow-primary/20 transition-all disabled:opacity-50"
+              class="button is-primary"
               :disabled="loading"
             >
               <div

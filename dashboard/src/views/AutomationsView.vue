@@ -873,7 +873,7 @@ onUnmounted(() => {
       <!-- Right: run report panel -->
       <div
         v-if="selectedAutomation"
-        class="w-full lg:w-[420px] lg:shrink-0 flex flex-col gap-3 mt-4 lg:mt-0"
+        class="w-full lg:w-[360px] lg:shrink-0 flex flex-col gap-3 mt-4 lg:mt-0"
       >
         <div class="rounded-lg border border-fg/10 bg-fg/[0.02] overflow-hidden flex flex-col">
           <div class="px-4 py-3 border-b border-fg/10 flex items-center justify-between">
@@ -1165,7 +1165,7 @@ onUnmounted(() => {
       <!-- Placeholder when nothing selected -->
       <div
         v-else-if="automations.length > 0"
-        class="w-full lg:w-[420px] lg:shrink-0 rounded-lg border border-fg/10 bg-fg/[0.02] flex items-center justify-center text-text-muted text-sm py-16 text-center px-6 mt-4 lg:mt-0"
+        class="w-full lg:w-[360px] lg:shrink-0 rounded-lg border border-fg/10 bg-fg/[0.02] flex items-center justify-center text-text-muted text-sm py-16 text-center px-6 mt-4 lg:mt-0"
       >
         <div>
           <svg

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // components
 import BaseModal from '@/components/BaseModal.vue';
+import ModalHeader from '@/components/ModalHeader.vue';
 
 // types
 import type { Workspace } from '@/@types/index';
@@ -34,13 +35,12 @@ const close = (): void => {
     panel-class="max-w-md"
     @update:model-value="close"
   >
-    <!-- Header -->
-    <div class="modal-header">
-      <div id="delete-workspace-modal-title">Delete Workspace</div>
-      <button class="close-button" aria-label="Close dialog" @click="close">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M18 6L6 18M6 6l12 12"/></svg>
-      </button>
-    </div>
+    <ModalHeader
+      eyebrow="// delete workspace"
+      title="Delete Workspace"
+      title-id="delete-workspace-modal-title"
+      @close="close"
+    />
 
     <!-- Body -->
     <div class="modal-body">

@@ -4,6 +4,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 
 // components
 import BaseModal from '@/components/BaseModal.vue';
+import ModalHeader from '@/components/ModalHeader.vue';
 
 // classes
 import { orchestratorApi } from '@/classes/api';
@@ -372,7 +373,7 @@ onBeforeUnmount(stopPolling);
               type="button"
               @click="generateTasks"
               :disabled="!userInput.trim() || bDecomposing"
-              class="px-4 py-2 text-sm font-medium bg-primary text-on-accent rounded-lg hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center gap-2"
+              class="px-4 py-2 text-sm font-medium btn-primary-solid rounded-lg disabled:opacity-40 transition-opacity flex items-center gap-2"
             >
               <span
                 v-if="bDecomposing"
@@ -549,10 +550,13 @@ onBeforeUnmount(stopPolling);
         labelledby="edit-task-title"
         panel-class="max-w-md"
       >
-        <div class="p-5">
-              <h2 id="edit-task-title" class="text-lg font-semibold text-text-primary mb-4">
-                Edit task
-              </h2>
+        <ModalHeader
+          eyebrow="// edit task"
+          title="Edit task"
+          title-id="edit-task-title"
+          @close="closeEditModal"
+        />
+        <div class="p-5 pt-4">
               <div class="space-y-4">
                 <div>
                   <label class="block text-xs font-medium text-text-muted mb-1">Name</label>
@@ -594,7 +598,7 @@ onBeforeUnmount(stopPolling);
                 </button>
                 <button
                   type="button"
-                  class="px-4 py-2 text-sm font-medium bg-primary text-on-accent rounded-lg"
+                  class="px-4 py-2 text-sm font-medium btn-primary-solid rounded-lg"
                   @click="saveEditFromModal"
                 >
                   Save
@@ -662,7 +666,7 @@ onBeforeUnmount(stopPolling);
         type="button"
         @click="startTasks"
         :disabled="subtasks.length === 0 || bStartingRun"
-        class="px-4 py-2.5 text-sm font-medium bg-primary text-on-accent rounded-lg hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center gap-2"
+        class="px-4 py-2.5 text-sm font-medium btn-primary-solid rounded-lg disabled:opacity-40 transition-opacity flex items-center gap-2"
       >
         <span
           v-if="bStartingRun"

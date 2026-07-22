@@ -32,6 +32,15 @@ const AGENT_TYPE_CHIP_CLASSES: Record<AgentType, string> = {
   codex: 'agent-codex'
 };
 
+/** CSS variable holding the agent identity color (set per theme) */
+const AGENT_TYPE_TOKEN_VARS: Record<AgentType, string> = {
+  claude: '--agent-claude',
+  'cursor-agent': '--agent-cursor',
+  'mistral-vibe': '--agent-vibe',
+  'open-code': '--agent-opencode',
+  codex: '--fg-muted'
+};
+
 export function agentTypeLabel(agentType: string): string {
   return AGENT_TYPE_LABELS[agentType as AgentType] ?? agentType;
 }
@@ -42,4 +51,18 @@ export function agentTypeShortLabel(agentType: string): string {
 
 export function agentTypeChipClass(agentType: string): string {
   return AGENT_TYPE_CHIP_CLASSES[agentType as AgentType] ?? '';
+}
+
+/**
+ * Agent-tinted selected state for segmented agent pickers (design handoff:
+ * "agent segmented control, agent-tinted when selected"). Returns inline
+ * styles since color-mix against per-agent vars can't be a static class.
+ */
+export function agentSelectedStyle(agentType: string): Record<string, string> {
+  const tokenVar = AGENT_TYPE_TOKEN_VARS[agentType as AgentType] ?? '--accent';
+  return {
+    background: `color-mix(in oklab, var(${tokenVar}) 16%, transparent)`,
+    color: `var(${tokenVar})`,
+    borderColor: `color-mix(in oklab, var(${tokenVar}) 35%, transparent)`
+  };
 }

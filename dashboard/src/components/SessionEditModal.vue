@@ -4,6 +4,7 @@ import { ref, watch } from 'vue';
 
 // components
 import BaseModal from '@/components/BaseModal.vue';
+import ModalHeader from '@/components/ModalHeader.vue';
 import TagChipsInput from '@/components/input/TagChipsInput.vue';
 
 // types
@@ -78,27 +79,30 @@ const onSave = (): void => {
   >
     <!-- Panel -->
     <form class="contents" @submit.prevent="onSave">
-          <div class="px-6 pt-5 pb-4">
-            <h2 id="session-edit-title" class="font-semibold text-text-primary text-lg">Edit session</h2>
-          </div>
+          <ModalHeader
+            eyebrow="// edit session"
+            title="Edit session"
+            title-id="session-edit-title"
+            @close="close"
+          />
 
           <div class="px-6 flex flex-col gap-4 pb-5">
             <!-- Name -->
-            <div class="flex flex-col gap-1.5">
-              <label class="text-xs font-medium text-text-muted">Name</label>
+            <div class="nc-field">
+              <label class="nc-field-label" for="session-edit-name">Name</label>
               <input
+                id="session-edit-name"
                 v-model="name"
                 type="text"
                 placeholder="Session name"
-                autofocus
-                class="w-full text-sm px-3 py-3 rounded-lg border border-fg/[0.12] bg-fg/[0.04] text-text-primary placeholder-text-muted focus:outline-none focus:border-primary/50 transition-colors"
+                data-modal-autofocus
               />
             </div>
 
             <!-- Tags -->
-            <div class="flex flex-col gap-1.5">
-              <label class="text-xs font-medium text-text-muted"
-                >Tags <span class="font-normal opacity-60">(optional)</span></label
+            <div class="nc-field">
+              <span class="nc-field-label"
+                >Tags <span class="normal-case opacity-60">(optional)</span></span
               >
               <TagChipsInput
                 v-model="formTags"
@@ -113,7 +117,7 @@ const onSave = (): void => {
           <div class="flex items-center justify-end gap-2 px-6 pb-5">
             <button
               type="button"
-              class="px-4 py-2.5 text-sm text-text-muted hover:text-text-primary bg-fg/[0.04] hover:bg-fg/[0.08] border border-fg/[0.08] rounded-lg transition-all disabled:opacity-50"
+              class="button"
               :disabled="loading"
               @click="close"
             >
@@ -121,7 +125,7 @@ const onSave = (): void => {
             </button>
             <button
               type="submit"
-              class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium bg-primary hover:bg-primary-hover text-on-accent rounded-lg shadow-lg shadow-primary/20 transition-all disabled:opacity-50"
+              class="button is-primary"
               :disabled="loading || !name.trim()"
             >
               <div v-if="loading" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />

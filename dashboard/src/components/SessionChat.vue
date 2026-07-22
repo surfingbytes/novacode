@@ -4031,6 +4031,11 @@ onUnmounted(() => {
               class="hidden"
               @change="onFileChange"
             />
+            <kbd
+              class="hidden sm:inline-flex items-center h-[18px] px-1.5 rounded border border-fg/10 bg-fg/[0.04] font-mono text-[10.5px] text-text-muted select-none shrink-0 self-center"
+              title="Send with ⌘/Ctrl + Enter"
+              aria-hidden="true"
+            >⌘↵</kbd>
             <button
               type="button"
               @click="sendPrompt"

@@ -240,7 +240,7 @@ startCountdown();
             <button
               @click="toggleAutoContinue"
               :disabled="bSaving"
-              class="flex-1 py-2 px-4 rounded-lg bg-primary text-on-accent hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              class="flex-1 py-2 px-4 rounded-lg btn-primary-solid disabled:cursor-not-allowed transition-colors"
             >
               <span v-if="!bAutoContinueEnabled">Enable Auto-Continue</span>
               <span v-else>Disable Auto-Continue</span>

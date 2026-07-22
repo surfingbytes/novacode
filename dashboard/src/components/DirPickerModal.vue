@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue';
 
 // components
 import BaseModal from '@/components/BaseModal.vue';
+import ModalHeader from '@/components/ModalHeader.vue';
 
 // classes
 import { workspaceApi } from '@/classes/api';
@@ -148,12 +149,12 @@ watch(
     @update:model-value="close"
   >
     <!-- Header -->
-    <div class="modal-header">
-      <div id="dir-picker-modal-title">Choose workspace folder</div>
-      <button class="close-button" aria-label="Close dialog" @click="close">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M18 6L6 18M6 6l12 12"/></svg>
-      </button>
-    </div>
+    <ModalHeader
+      eyebrow="// choose folder"
+      title="Choose workspace folder"
+      title-id="dir-picker-modal-title"
+      @close="close"
+    />
 
           <!-- Body -->
           <div class="modal-body">

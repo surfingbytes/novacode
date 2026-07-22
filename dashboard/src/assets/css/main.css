@@ -68,6 +68,9 @@ body {
   background: var(--color-bg);
   color: var(--color-text-primary);
   font-family: var(--font-family-sans);
+  /* Design handoff type treatment */
+  letter-spacing: -0.005em;
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -238,16 +241,35 @@ input[type='radio'] {
 
 .field {
   .label {
-    @apply block relative text-sm font-medium text-text-primary mb-1.5 flex items-center gap-2 justify-between;
+    /* Design handoff: eyebrow field labels */
+    @apply block relative mb-1.5 flex items-center gap-2 justify-between;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-subtle);
+    font-weight: 500;
 
     button {
-      @apply flex absolute right-0 top-0 items-center gap-1 text-xs text-primary uppercase cursor-pointer;
+      @apply flex items-center gap-1 cursor-pointer;
+      font-size: 10.5px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
       @apply hover:text-primary-hover;
     }
   }
 
   .input-wrap {
     @apply relative text-text-muted flex items-center gap-2;
+
+    input,
+    select {
+      /* Design handoff: 34px modal inputs on elevated surface */
+      height: 34px;
+      background: var(--bg-elev);
+      border-color: var(--line);
+    }
 
     .icon {
       @apply absolute left-2.5 top-2.5 transition-all;
@@ -271,7 +293,7 @@ input[type='radio'] {
     }
 
     button.button {
-      @apply shrink-0 px-4 h-10;
+      @apply shrink-0 px-4;
     }
 
     /* has .has-error child */
@@ -329,31 +351,64 @@ input[type='radio'] {
 }
 
 button.button {
-  @apply flex items-center justify-center gap-2 h-10 bg-input cursor-pointer border border-border hover:border-primary/50 hover:bg-primary/10 text-text-primary text-sm font-medium px-4 py-2 rounded-md transition-all;
+  /* Design handoff .btn: 30px outline button */
+  @apply flex items-center justify-center gap-1.5 h-[30px] cursor-pointer text-[13px] font-medium px-3 rounded-md transition-all;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--line-strong);
+
+  &:hover {
+    background: var(--bg-hover);
+    border-color: var(--fg-faint);
+  }
+
+  /* Design handoff .btn.primary: solid foreground, NOT accent */
   &.is-primary {
-    @apply bg-primary border-transparent hover:bg-primary-hover text-on-accent text-sm font-medium rounded-md transition-all;
+    background: var(--fg);
+    color: var(--bg);
+    border-color: transparent;
+
+    &:hover {
+      background: var(--fg);
+      opacity: 0.92;
+    }
 
     /* glow */
     &.has-glow {
-      @apply shadow-primary/20 shadow-lg;
+      @apply shadow-lg;
     }
-
-    /* hover */
-    @apply hover:bg-primary-hover;
 
     /* disabled */
     @apply disabled:opacity-40 disabled:cursor-not-allowed;
   }
 
   &.is-destructive {
-    @apply bg-destructive border-transparent hover:bg-destructive/80 text-on-accent text-sm font-medium rounded-md transition-all;
+    @apply border-transparent text-on-accent transition-all;
+    background: var(--danger);
+
+    &:hover {
+      background: var(--danger);
+      opacity: 0.88;
+    }
   }
   &.is-warning {
-    @apply bg-warning border-transparent hover:bg-warning/80 text-on-accent text-sm font-medium rounded-md transition-all;
+    @apply border-transparent text-on-accent transition-all;
+    background: var(--warn);
+
+    &:hover {
+      background: var(--warn);
+      opacity: 0.88;
+    }
   }
 
+  /* Design handoff .btn.ghost */
   &.is-transparent {
-    @apply bg-transparent border-transparent text-text-muted hover:text-text-primary hover:bg-fg/[0.07] transition-all;
+    @apply bg-transparent border-transparent text-text-muted transition-all;
+
+    &:hover {
+      background: var(--bg-hover);
+      color: var(--fg);
+    }
   }
 
   &.is-icon {
@@ -361,7 +416,8 @@ button.button {
   }
 
   .loading-spinner {
-    @apply w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin;
+    @apply w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin;
+    opacity: 0.7;
   }
 }
 
@@ -708,4 +764,70 @@ hr {
 .modal-fade-enter-from,
 .modal-fade-leave-to {
   opacity: 0;
+}
+
+/* ────── Field treatment (design handoff: eyebrow label + 34px input) ────── */
+
+.nc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.nc-field-label {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+  font-weight: 500;
+}
+.nc-field input,
+.nc-field select,
+.nc-field textarea {
+  height: 34px;
+  padding: 0 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--fg);
+}
+.nc-field textarea {
+  height: auto;
+  padding: 8px 10px;
+  resize: vertical;
+}
+.nc-field input:focus,
+.nc-field select:focus,
+.nc-field textarea:focus {
+  border-color: var(--accent-line);
+  outline: none;
+}
+.nc-field input:disabled,
+.nc-field select:disabled,
+.nc-field textarea:disabled {
+  opacity: 0.55;
+}
+.nc-field .nc-field-hint {
+  font-size: 12px;
+  color: var(--fg-subtle);
+  line-height: 1.5;
+}
+.nc-field .nc-field-hint.is-error {
+  color: var(--danger);
+}
+
+/* Design handoff .btn.primary equivalent for hand-rolled action buttons:
+   solid foreground (not accent). Prefer .button.is-primary for new code. */
+.btn-primary-solid {
+  background: var(--fg);
+  color: var(--bg);
+  border-color: transparent;
+}
+.btn-primary-solid:hover {
+  background: var(--fg);
+  opacity: 0.92;
+}
+.btn-primary-solid:disabled {
+  opacity: 0.4;
 }

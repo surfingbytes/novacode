@@ -13,8 +13,7 @@ import {
   Plus,
   RefreshCw,
   Sparkles,
-  Trash2,
-  X
+  Trash2
 } from 'lucide-vue-next';
 
 // classes
@@ -22,6 +21,7 @@ import { gitApi, type GitBranch, type GitFile, type GitRepoStatus } from '@/clas
 
 // components
 import BaseModal from '@/components/BaseModal.vue';
+import ModalHeader from '@/components/ModalHeader.vue';
 import ConfirmModal from '@/components/ConfirmModal.vue';
 import ContextMenu from '@/components/ContextMenu.vue';
 import type { ContextMenuItem } from '@/components/ContextMenu.vue';
@@ -1050,7 +1050,7 @@ onUnmounted((): void => {
           <div class="flex items-center gap-2">
             <button
               v-if="files.length"
-              class="text-sm px-3 py-2 bg-primary hover:bg-primary-hover text-on-accent rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              class="text-sm px-3 py-2 btn-primary-solid rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
               :disabled="!canCommit"
               @click="commitChanges(repos[0].repo)"
             >
@@ -1136,7 +1136,7 @@ onUnmounted((): void => {
           <div class="flex items-center gap-2 flex-wrap">
             <button
               v-if="activeRepo.files.length"
-              class="text-sm px-3 py-2 bg-primary hover:bg-primary-hover text-on-accent rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              class="text-sm px-3 py-2 btn-primary-solid rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
               :disabled="!canCommitActiveRepo"
               @click="commitChanges(activeRepo.repo)"
             >
@@ -1264,19 +1264,13 @@ onUnmounted((): void => {
     @update:model-value="bShowGitActions = false"
   >
     <template v-if="activeRepo">
-          <div class="flex items-start justify-between gap-3 px-5 pt-5 pb-3">
-            <div class="min-w-0">
-              <h2 id="git-actions-title" class="font-semibold text-text-primary">Git actions</h2>
-              <p class="mt-1 truncate font-mono text-xs text-text-muted">{{ activeRepo.currentBranch }}</p>
-            </div>
-            <button
-              class="text-text-muted hover:text-text-primary transition-colors"
-              type="button"
-              @click="bShowGitActions = false"
-            >
-              <X :size="18" :stroke-width="1.8" class="select-none" aria-hidden="true" />
-            </button>
-          </div>
+          <ModalHeader
+            eyebrow="// git actions"
+            title="Git actions"
+            title-id="git-actions-title"
+            @close="bShowGitActions = false"
+          />
+          <p class="px-6 pt-1 truncate font-mono text-xs text-text-muted">{{ activeRepo.currentBranch }}</p>
           <div class="px-3 pb-3">
             <button
               class="w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-text-primary hover:bg-fg/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1364,19 +1358,13 @@ onUnmounted((): void => {
     @update:model-value="bShowSwitchBranch = false"
   >
     <template v-if="activeRepo">
-          <div class="flex items-start justify-between gap-3 px-5 pt-5 pb-3">
-            <div>
-              <h2 id="switch-branch-title" class="font-semibold text-text-primary">Switch branch</h2>
-              <p class="mt-1 text-xs text-text-muted">Current: <span class="font-mono">{{ activeRepo.currentBranch }}</span></p>
-            </div>
-            <button
-              class="text-text-muted hover:text-text-primary transition-colors"
-              type="button"
-              @click="bShowSwitchBranch = false"
-            >
-              <X :size="18" :stroke-width="1.8" class="select-none" aria-hidden="true" />
-            </button>
-          </div>
+          <ModalHeader
+            eyebrow="// switch branch"
+            title="Switch branch"
+            title-id="switch-branch-title"
+            @close="bShowSwitchBranch = false"
+          />
+          <p class="px-6 pt-1 text-xs text-text-muted">Current: <span class="font-mono">{{ activeRepo.currentBranch }}</span></p>
           <div class="px-5 pb-3">
             <input
               v-model="branchSearch"
@@ -1437,19 +1425,13 @@ onUnmounted((): void => {
     <form class="contents"
           @submit.prevent="createBranch"
         >
-          <div class="flex items-start justify-between gap-3 px-5 pt-5 pb-3">
-            <div>
-              <h2 id="create-branch-title" class="font-semibold text-text-primary">Create branch</h2>
-              <p class="mt-1 text-xs text-text-muted">From <span class="font-mono">{{ activeRepo.currentBranch }}</span></p>
-            </div>
-            <button
-              class="text-text-muted hover:text-text-primary transition-colors"
-              type="button"
-              @click="bShowCreateBranch = false"
-            >
-              <X :size="18" :stroke-width="1.8" class="select-none" aria-hidden="true" />
-            </button>
-          </div>
+          <ModalHeader
+            eyebrow="// create branch"
+            title="Create branch"
+            title-id="create-branch-title"
+            @close="bShowCreateBranch = false"
+          />
+          <p class="px-6 pt-1 text-xs text-text-muted">From <span class="font-mono">{{ activeRepo.currentBranch }}</span></p>
           <div class="px-5 pb-5">
             <label class="text-xs font-medium text-text-muted">Branch name</label>
             <input

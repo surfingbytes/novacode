@@ -188,10 +188,10 @@ onBeforeUnmount((): void => {
         aria-modal="true"
         :aria-labelledby="labelledby"
       >
-        <div class="absolute inset-0 bg-black/75 backdrop-blur-sm" @click="onBackdropClick"></div>
+        <div class="base-modal-backdrop absolute inset-0" @click="onBackdropClick"></div>
         <div
           ref="panelRef"
-          class="modal-panel relative flex max-h-[calc(100%-2rem)] w-full flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl shadow-black/60 outline-none"
+          class="base-modal-panel relative flex max-h-[calc(100%-2rem)] w-full flex-col overflow-hidden rounded-xl outline-none"
           :class="panelClass"
           tabindex="-1"
         >
@@ -201,3 +201,18 @@ onBeforeUnmount((): void => {
     </Transition>
   </Teleport>
 </template>
+
+<style scoped>
+/* Design handoff modal treatment */
+.base-modal-backdrop {
+  background: color-mix(in oklab, var(--bg) 75%, transparent);
+  backdrop-filter: blur(4px);
+}
+.base-modal-panel {
+  background: var(--bg-elev-2);
+  border-radius: 12px;
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.6),
+    0 0 0 1px var(--line-strong);
+}
+</style>

@@ -4,9 +4,13 @@ import { computed, ref, watch } from 'vue';
 
 // components
 import BaseModal from '@/components/BaseModal.vue';
+import ModalHeader from '@/components/ModalHeader.vue';
 
 // types
 import type { AgentType } from '@/@types/index';
+
+// utils
+import { agentSelectedStyle } from '@/utils/agentTypeMeta';
 
 const AGENT_FALLBACK_ORDER: AgentType[] = [
   'cursor-agent',
@@ -140,44 +144,45 @@ watch(
     @update:model-value="close"
   >
     <form class="contents" @submit.prevent="onCreate">
-          <div class="px-6 pt-5 pb-4">
-            <h2 id="new-orchestrator-title" class="font-semibold text-text-primary text-lg">
-              New orchestrator
-            </h2>
-          </div>
+          <ModalHeader
+            eyebrow="// new orchestrator"
+            title="New orchestrator"
+            title-id="new-orchestrator-title"
+            @close="close"
+          />
 
           <div class="px-6 flex flex-col gap-4 pb-5">
-            <div class="flex flex-col gap-1.5">
-              <label class="text-xs font-medium text-text-muted">Name</label>
+            <div class="nc-field">
+              <label class="nc-field-label" for="new-orchestrator-name">Name</label>
               <input
+                id="new-orchestrator-name"
                 v-model="name"
                 type="text"
                 :placeholder="defaultName"
-                autofocus
-                class="w-full text-sm px-3 py-3 rounded-lg border border-fg/[0.12] bg-fg/[0.04] text-text-primary placeholder-text-muted focus:outline-none focus:border-primary/50 transition-colors"
+                data-modal-autofocus
                 @keydown.escape="close"
               />
             </div>
 
-            <div class="flex flex-col gap-1.5">
-              <label class="text-xs font-medium text-text-muted">
-                Tags <span class="font-normal opacity-60">(optional)</span>
+            <div class="nc-field">
+              <label class="nc-field-label" for="new-orchestrator-tags">
+                Tags <span class="normal-case opacity-60">(optional)</span>
               </label>
               <input
+                id="new-orchestrator-tags"
                 v-model="tags"
                 type="text"
                 placeholder="e.g. Flow, Refactor…"
-                class="w-full text-sm px-3 py-3 rounded-lg border border-fg/[0.12] bg-fg/[0.04] text-text-primary placeholder-text-muted focus:outline-none focus:border-primary/50 transition-colors"
                 @keydown.escape="close"
               />
             </div>
 
             <!-- Agent selection -->
-            <div class="flex flex-col gap-1.5">
-              <label class="text-xs font-medium text-text-muted">
+            <div class="nc-field">
+              <span class="nc-field-label">
                 Agent
-                <span class="font-normal opacity-60">(required)</span>
-              </label>
+                <span class="normal-case opacity-60">(required)</span>
+              </span>
               <div
                 class="grid rounded-lg border border-fg/[0.12] bg-fg/[0.04] p-0.5 gap-1"
                 :class="gridColsClass"
@@ -186,8 +191,8 @@ watch(
                   v-for="agent in availableAgents"
                   :key="agent"
                   type="button"
-                  class="text-xs px-2 py-1.5 rounded-md transition-colors text-text-muted hover:text-text-primary hover:bg-fg/[0.06]"
-                  :class="{ 'bg-primary text-on-accent': agentType === agent }"
+                  class="text-xs px-2 py-1.5 rounded-md border border-transparent transition-colors text-text-muted hover:text-text-primary hover:bg-fg/[0.06]"
+                  :style="agentType === agent ? agentSelectedStyle(agent) : {}"
                   :title="
                     agent === 'cursor-agent'
                       ? 'Cursor Agent'
@@ -223,7 +228,7 @@ watch(
           <div class="flex items-center justify-end gap-2 px-6 pb-5">
             <button
               type="button"
-              class="px-4 py-2.5 text-sm text-text-muted hover:text-text-primary bg-fg/[0.04] hover:bg-fg/[0.08] border border-fg/[0.08] rounded-lg transition-all disabled:opacity-50"
+              class="button"
               :disabled="loading"
               @click="close"
             >
@@ -231,7 +236,7 @@ watch(
             </button>
             <button
               type="submit"
-              class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium bg-primary hover:bg-primary-hover text-on-accent rounded-lg shadow-lg shadow-primary/20 transition-all disabled:opacity-50"
+              class="button is-primary"
               :disabled="loading || !bCanCreate"
             >
               <div

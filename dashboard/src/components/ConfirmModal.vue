@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // components
 import BaseModal from '@/components/BaseModal.vue';
+import ModalHeader from '@/components/ModalHeader.vue';
 
 // -------------------------------------------------- Props --------------------------------------------------
 
@@ -9,12 +10,15 @@ const props = withDefaults(
     modelValue: boolean;
     title: string;
     description: string;
+    /** Eyebrow shown above the title, defaults to '// confirm' */
+    eyebrow?: string;
     confirmLabel?: string;
     cancelLabel?: string;
     variant?: 'danger' | 'primary';
     loading?: boolean;
   }>(),
   {
+    eyebrow: '// confirm',
     confirmLabel: 'Delete',
     cancelLabel: 'Cancel',
     variant: 'danger',
@@ -54,31 +58,23 @@ const onConfirm = (): void => {
     :close-on-esc="!loading"
     @update:model-value="close"
   >
-    <div class="flex flex-shrink-0 px-6 pt-5">
-      <h2 id="confirm-modal-title" class="font-semibold text-text-primary text-lg">
-        {{ title }}
-      </h2>
+    <ModalHeader
+      :eyebrow="eyebrow"
+      :title="title"
+      title-id="confirm-modal-title"
+      :show-close="false"
+    />
+    <div class="flex-1 min-h-0 overflow-y-auto px-6 pt-2 pb-3">
+      <p class="text-[13px] text-[var(--fg-muted)] leading-relaxed">{{ description }}</p>
     </div>
-    <div class="flex-1 min-h-0 overflow-y-auto px-6 py-3">
-      <p class="text-sm text-text-muted mb-4">{{ description }}</p>
-    </div>
-    <div class="flex flex-shrink-0 items-center justify-end gap-2 px-6 pb-5">
-      <button
-        type="button"
-        class="px-4 py-2.5 text-sm text-text-muted hover:text-text-primary bg-fg/[0.04] hover:bg-fg/[0.08] border border-fg/[0.08] rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-        :disabled="loading"
-        @click="close"
-      >
+    <div class="flex flex-shrink-0 items-center justify-end gap-2 px-6 pb-5 pt-2">
+      <button type="button" class="button" :disabled="loading" @click="close">
         {{ cancelLabel }}
       </button>
       <button
         type="button"
-        class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-        :class="
-          variant === 'danger'
-            ? 'bg-destructive hover:bg-destructive/80 text-on-accent shadow-lg shadow-destructive/20'
-            : 'bg-primary hover:bg-primary-hover text-on-accent shadow-lg shadow-primary/20'
-        "
+        class="button"
+        :class="variant === 'danger' ? 'is-destructive' : 'is-primary'"
         :disabled="loading"
         @click="onConfirm"
       >

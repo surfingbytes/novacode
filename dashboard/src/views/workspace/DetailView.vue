@@ -159,8 +159,14 @@ onBeforeUnmount(() => {
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18 M3 12h18 M3 18h18" /></svg>
         </button>
-        <div class="wd-icon">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+        <div
+          class="wd-icon"
+          :style="{
+            background: `color-mix(in oklab, ${workspace?.color || 'var(--accent)'} 22%, transparent)`,
+            color: workspace?.color || 'var(--accent)'
+          }"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
         </div>
         <template v-if="workspace?.group">
           <span class="wd-group">{{ workspace.group }}</span>
@@ -282,14 +288,12 @@ onBeforeUnmount(() => {
 }
 
 .wd-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in oklab, var(--accent) 16%, transparent);
-  color: var(--accent);
   flex-shrink: 0;
 }
 

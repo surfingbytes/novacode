@@ -4,6 +4,7 @@ import { ref, watch } from 'vue';
 
 // components
 import BaseModal from '@/components/BaseModal.vue';
+import ModalHeader from '@/components/ModalHeader.vue';
 
 // -------------------------------------------------- Props --------------------------------------------------
 
@@ -11,6 +12,7 @@ const props = withDefaults(
   defineProps<{
     modelValue: boolean;
     title: string;
+    eyebrow?: string;
     label?: string;
     initialValue?: string;
     placeholder?: string;
@@ -19,6 +21,7 @@ const props = withDefaults(
     loading?: boolean;
   }>(),
   {
+    eyebrow: undefined,
     label: undefined,
     initialValue: '',
     placeholder: '',
@@ -77,36 +80,31 @@ watch(
     @update:model-value="close"
   >
     <form class="contents" @submit.prevent="onSubmit">
-      <div class="flex flex-shrink-0 px-6 pt-5">
-        <h2 id="prompt-modal-title" class="font-semibold text-text-primary text-lg">
-          {{ title }}
-        </h2>
-      </div>
-      <div class="flex-1 min-h-0 overflow-y-auto px-6 py-3">
-        <label v-if="label" for="prompt-modal-input" class="mb-1.5 block text-xs text-text-muted">
-          {{ label }}
-        </label>
-        <input
-          id="prompt-modal-input"
-          v-model="inputValue"
-          type="text"
-          :placeholder="placeholder"
-          data-modal-autofocus
-          class="w-full"
-        />
+      <ModalHeader
+        :eyebrow="eyebrow"
+        :title="title"
+        title-id="prompt-modal-title"
+        :show-close="false"
+      />
+      <div class="flex-1 min-h-0 overflow-y-auto px-6 py-4">
+        <div class="nc-field">
+          <label v-if="label" for="prompt-modal-input" class="nc-field-label">{{ label }}</label>
+          <input
+            id="prompt-modal-input"
+            v-model="inputValue"
+            type="text"
+            :placeholder="placeholder"
+            data-modal-autofocus
+          />
+        </div>
       </div>
       <div class="flex flex-shrink-0 items-center justify-end gap-2 px-6 pb-5">
-        <button
-          type="button"
-          class="px-4 py-2.5 text-sm text-text-muted hover:text-text-primary bg-fg/[0.04] hover:bg-fg/[0.08] border border-fg/[0.08] rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          :disabled="loading"
-          @click="close"
-        >
+        <button type="button" class="button" :disabled="loading" @click="close">
           {{ cancelLabel }}
         </button>
         <button
           type="submit"
-          class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium bg-primary hover:bg-primary-hover text-on-accent rounded-lg shadow-lg shadow-primary/20 transition-all disabled:opacity-50"
+          class="button is-primary"
           :disabled="loading || !inputValue.trim()"
         >
           <div
