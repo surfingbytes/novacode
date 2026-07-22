@@ -4,6 +4,7 @@ import { computed, ref, onMounted } from 'vue';
 
 // components
 import AppTerminal from '@/components/AppTerminal.vue';
+import BaseModal from '@/components/BaseModal.vue';
 import PageShell from '@/components/layout/PageShell.vue';
 import PageHeader from '@/components/layout/PageHeader.vue';
 
@@ -1520,21 +1521,15 @@ onMounted((): void => {
   </PageShell>
 
     <!-- MCP client server modal -->
-    <Teleport to="body">
-      <Transition name="modal-fade">
-        <div
-          v-if="bShowMcpClientModal"
-          class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
-          @click.self="bShowMcpClientModal = false"
-        >
-          <div
-            class="modal-panel w-full max-w-md flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl"
-            @click.stop
-          >
+    <BaseModal
+      v-model="bShowMcpClientModal"
+      labelledby="mcp-client-modal-title"
+      panel-class="max-w-md"
+    >
             <div
               class="flex flex-shrink-0 items-center justify-between border-b border-border px-4 py-3"
             >
-              <p class="text-sm font-medium text-text-primary">
+              <p id="mcp-client-modal-title" class="text-sm font-medium text-text-primary">
                 {{ mcpClientEditName ? 'Edit MCP server' : 'Add MCP server' }}
               </p>
               <button
@@ -1660,25 +1655,17 @@ onMounted((): void => {
                 {{ bSavingMcpClients ? 'Saving…' : 'Save' }}
               </button>
             </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    </BaseModal>
 
     <!-- Codex API key modal -->
-    <Teleport to="body">
-      <Transition name="modal-fade">
-        <div
-          v-if="bShowCodexApiKeyModal"
-          class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
-          @click.self="closeCodexApiKeyModal"
-        >
-          <div
-            class="modal-panel w-full max-w-md flex flex-col bg-fg/[0.04] border border-fg/[0.12] rounded-xl shadow-2xl"
-            @click.stop
-          >
+    <BaseModal
+      :model-value="bShowCodexApiKeyModal"
+      labelledby="codex-key-modal-title"
+      panel-class="max-w-md"
+      @update:model-value="(v: boolean) => { if (!v) closeCodexApiKeyModal(); }"
+    >
             <div class="flex flex-shrink-0 items-center justify-between px-4 py-3 border-b border-fg/[0.08]">
-              <p class="text-sm font-medium text-text-primary">Codex API key</p>
+              <p id="codex-key-modal-title" class="text-sm font-medium text-text-primary">Codex API key</p>
               <button
                 class="text-sm px-3 py-2 text-text-muted hover:text-text-primary hover:bg-fg/[0.08] rounded-lg transition-all"
                 @click="closeCodexApiKeyModal"
@@ -1713,27 +1700,19 @@ onMounted((): void => {
                 {{ bSavingCodexApiKey ? 'Saving…' : 'Save' }}
               </button>
             </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    </BaseModal>
 
     <!-- Mistral Vibe API key setup modal -->
-    <Teleport to="body">
-      <Transition name="modal-fade">
-        <div
-          v-if="bShowVibeApiKeyModal"
-          class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
-          @click.self="closeVibeApiKeyModal"
-        >
-          <div
-            class="modal-panel w-full max-w-md flex flex-col bg-fg/[0.04] border border-fg/[0.12] rounded-xl shadow-2xl"
-            @click.stop
-          >
+    <BaseModal
+      :model-value="bShowVibeApiKeyModal"
+      labelledby="vibe-key-modal-title"
+      panel-class="max-w-md"
+      @update:model-value="(v: boolean) => { if (!v) closeVibeApiKeyModal(); }"
+    >
             <div
               class="flex flex-shrink-0 items-center justify-between px-4 py-3 border-b border-fg/[0.08]"
             >
-              <p class="text-sm font-medium text-text-primary">Mistral Vibe API key</p>
+              <p id="vibe-key-modal-title" class="text-sm font-medium text-text-primary">Mistral Vibe API key</p>
               <button
                 class="text-sm px-3 py-2 text-text-muted hover:text-text-primary hover:bg-fg/[0.08] rounded-lg transition-all"
                 @click="closeVibeApiKeyModal"
@@ -1778,25 +1757,17 @@ onMounted((): void => {
                 {{ bDeletingVibeApiKey ? 'Removing…' : 'Remove key' }}
               </button>
             </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    </BaseModal>
 
     <!-- OpenCode provider modal -->
-    <Teleport to="body">
-      <Transition name="modal-fade">
-        <div
-          v-if="bShowOpenCodeProviderModal"
-          class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
-          @click.self="closeOpenCodeProviderModal"
-        >
-          <div
-            class="modal-panel w-full max-w-2xl flex max-h-[90vh] flex-col bg-fg/[0.04] border border-fg/[0.12] rounded-xl shadow-2xl"
-            @click.stop
-          >
+    <BaseModal
+      :model-value="bShowOpenCodeProviderModal"
+      labelledby="opencode-provider-modal-title"
+      panel-class="max-w-md"
+      @update:model-value="(v: boolean) => { if (!v) closeOpenCodeProviderModal(); }"
+    >
             <div class="flex flex-shrink-0 items-center justify-between px-4 py-3 border-b border-fg/[0.08]">
-              <p class="text-sm font-medium text-text-primary">
+              <p id="opencode-provider-modal-title" class="text-sm font-medium text-text-primary">
                 {{ openCodeProviderEditId ? 'Edit OpenCode provider' : 'Add OpenCode provider' }}
               </p>
               <button
@@ -1908,25 +1879,17 @@ onMounted((): void => {
                 {{ bSavingOpenCodeProvider ? 'Saving...' : 'Save provider' }}
               </button>
             </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    </BaseModal>
 
     <!-- OpenCode API key modal -->
-    <Teleport to="body">
-      <Transition name="modal-fade">
-        <div
-          v-if="bShowOpenCodeApiKeyModal"
-          class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
-          @click.self="closeOpenCodeApiKeyModal"
-        >
-          <div
-            class="modal-panel w-full max-w-md flex flex-col bg-fg/[0.04] border border-fg/[0.12] rounded-xl shadow-2xl"
-            @click.stop
-          >
+    <BaseModal
+      :model-value="bShowOpenCodeApiKeyModal"
+      labelledby="opencode-key-modal-title"
+      panel-class="max-w-md"
+      @update:model-value="(v: boolean) => { if (!v) closeOpenCodeApiKeyModal(); }"
+    >
             <div class="flex flex-shrink-0 items-center justify-between px-4 py-3 border-b border-fg/[0.08]">
-              <p class="text-sm font-medium text-text-primary">OpenCode API key</p>
+              <p id="opencode-key-modal-title" class="text-sm font-medium text-text-primary">OpenCode API key</p>
               <button
                 class="text-sm px-3 py-2 text-text-muted hover:text-text-primary hover:bg-fg/[0.08] rounded-lg transition-all"
                 @click="closeOpenCodeApiKeyModal"
@@ -1962,27 +1925,19 @@ onMounted((): void => {
                 {{ bSavingOpenCodeApiKey ? 'Saving…' : 'Save' }}
               </button>
             </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    </BaseModal>
 
     <!-- Authentication terminal overlay (Claude/Cursor login) -->
-    <Teleport to="body">
-      <Transition name="modal-fade">
-        <div
-          v-if="authSessionId"
-          class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
-          @click.self="dismissAuthTerminal"
-        >
-          <div
-            class="modal-panel w-full max-w-3xl flex flex-col bg-fg/[0.04] border border-fg/[0.12] rounded-xl shadow-2xl"
-            @click.stop
-          >
+    <BaseModal
+      :model-value="authSessionId !== null"
+      labelledby="auth-terminal-modal-title"
+      panel-class="max-w-3xl"
+      @update:model-value="(v: boolean) => { if (!v) dismissAuthTerminal(); }"
+    >
             <div
               class="flex flex-shrink-0 items-center justify-between px-4 py-3 border-b border-fg/[0.08]"
             >
-              <p class="text-sm font-medium text-text-primary">Authentication terminal</p>
+              <p id="auth-terminal-modal-title" class="text-sm font-medium text-text-primary">Authentication terminal</p>
               <button
                 class="text-sm px-3 py-2 text-text-muted hover:text-text-primary hover:bg-fg/[0.08] rounded-lg transition-all"
                 @click="dismissAuthTerminal"
@@ -1994,6 +1949,7 @@ onMounted((): void => {
             <div class="flex-1 min-h-0 overflow-y-auto p-4">
               <div class="h-96 rounded-lg overflow-hidden bg-black/40">
                 <AppTerminal
+                  v-if="authSessionId"
                   ref="authTerminalRef"
                   :session-id="authSessionId"
                   :scan-urls="true"
@@ -2038,10 +1994,7 @@ onMounted((): void => {
                 Submit
               </button>
             </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    </BaseModal>
 </template>
 
 <style scoped>

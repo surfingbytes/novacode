@@ -54,14 +54,37 @@ function touchApiReachability(ok: boolean): void {
   }
 }
 
+/**
+ * Called when any non-auth endpoint answers 401 (expired/invalid token
+ * mid-session). Registered by App.vue to log out and redirect to /login —
+ * kept injectable to avoid a classes/api ⇄ stores/auth import cycle.
+ */
+let onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler;
+}
+
+/** Auth-flow endpoints are allowed to 401 without triggering a global logout. */
+function isAuthFlowUrl(url: string | undefined): boolean {
+  if (!url) {
+    return false;
+  }
+  return url.includes('/auth/login') || url.includes('/auth/setup') || url.includes('/auth/validate');
+}
+
 http.interceptors.response.use(
   (response) => {
     touchApiReachability(true);
     return response;
   },
   (error: unknown) => {
-    if (isAxiosError(error) && error.response === undefined) {
-      touchApiReachability(false);
+    if (isAxiosError(error)) {
+      if (error.response === undefined) {
+        touchApiReachability(false);
+      } else if (error.response.status === 401 && !isAuthFlowUrl(error.config?.url)) {
+        onUnauthorized?.();
+      }
     }
     return Promise.reject(error);
   }

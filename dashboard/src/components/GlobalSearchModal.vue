@@ -96,6 +96,7 @@ const bLoading = ref(false);
 const errorMessage = ref<string | null>(null);
 const modalRef = ref<HTMLElement | null>(null);
 const searchInputRef = ref<HTMLInputElement | null>(null);
+const activeResultIndex = ref<number>(-1);
 
 // -------------------------------------------------- Computed --------------------------------------------------
 const hasResults = computed(() => {
@@ -116,6 +117,27 @@ const totalResults = computed(() => {
     searchResults.value.automations.length +
     searchResults.value.settings.length
   );
+});
+
+/**
+ * Flat result list in the exact render order of the template groups
+ * (workspaces → sessions → automations → roleTemplates → settings) so
+ * ArrowUp/Down and Enter map 1:1 onto what the user sees.
+ */
+const flatResults = computed<SearchResult[]>(() => [
+  ...searchResults.value.workspaces,
+  ...searchResults.value.sessions,
+  ...searchResults.value.automations,
+  ...searchResults.value.roleTemplates,
+  ...searchResults.value.settings
+]);
+
+function resultKey(result: SearchResult): string {
+  return `${result.type}:${result.id}`;
+}
+
+const resultIndexByKey = computed<Map<string, number>>(() => {
+  return new Map(flatResults.value.map((result, index) => [resultKey(result), index]));
 });
 
 // -------------------------------------------------- Methods --------------------------------------------------
@@ -216,6 +238,36 @@ function handleDocumentKeydown(event: KeyboardEvent): void {
   }
 }
 
+function scrollActiveResultIntoView(): void {
+  nextTick(() => {
+    const el = modalRef.value?.querySelector(
+      `[data-flat-index="${activeResultIndex.value}"]`
+    );
+    el?.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+function onSearchInputKeydown(event: KeyboardEvent): void {
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    const count = flatResults.value.length;
+    if (count === 0) {
+      return;
+    }
+    const delta = event.key === 'ArrowDown' ? 1 : -1;
+    activeResultIndex.value = (activeResultIndex.value + delta + count) % count;
+    scrollActiveResultIntoView();
+    return;
+  }
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    const target = flatResults.value[activeResultIndex.value] ?? flatResults.value[0];
+    if (target) {
+      navigateToResult(target);
+    }
+  }
+}
+
 function navigateToResult(result: SearchResult): void {
   props.onClose();
   emit('navigate');
@@ -276,6 +328,7 @@ async function focusSearchInput(): Promise<void> {
 watch(
   searchQuery,
   () => {
+    activeResultIndex.value = -1;
     performSearch();
   },
   { immediate: false }
@@ -338,7 +391,13 @@ onBeforeUnmount(() => {
               placeholder="Search sessions, files, workspaces…"
               class="search-input"
               autocomplete="off"
-              @keydown.enter="$event.preventDefault()"
+              role="combobox"
+              aria-expanded="true"
+              aria-controls="search-results-list"
+              :aria-activedescendant="
+                activeResultIndex >= 0 ? `search-result-${activeResultIndex}` : undefined
+              "
+              @keydown="onSearchInputKeydown"
             />
             <button
               v-if="searchQuery"
@@ -378,7 +437,7 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- Results -->
-          <div class="search-results">
+          <div id="search-results-list" class="search-results" role="listbox">
             <!-- Loading -->
             <div v-if="bLoading" class="search-state">
               <div class="search-spinner" />
@@ -441,9 +500,21 @@ onBeforeUnmount(() => {
                   <div class="search-group-label nc-eyebrow">{{ group.label }}</div>
                   <button
                     v-for="result in group.items"
+                    :id="`search-result-${resultIndexByKey.get(resultKey(result))}`"
                     :key="result.id"
                     class="search-result-row nc-row-hover"
+                    :class="{
+                      'is-active': resultIndexByKey.get(resultKey(result)) === activeResultIndex
+                    }"
+                    :data-flat-index="resultIndexByKey.get(resultKey(result))"
+                    role="option"
+                    :aria-selected="
+                      resultIndexByKey.get(resultKey(result)) === activeResultIndex
+                    "
                     @click="navigateToResult(result)"
+                    @mouseenter="
+                      activeResultIndex = resultIndexByKey.get(resultKey(result)) ?? -1
+                    "
                   >
                     <svg
                       class="search-result-icon"
@@ -638,7 +709,8 @@ onBeforeUnmount(() => {
   color: var(--fg);
   transition: background 0.1s;
 }
-.search-result-row:hover {
+.search-result-row:hover,
+.search-result-row.is-active {
   background: var(--bg-hover);
 }
 

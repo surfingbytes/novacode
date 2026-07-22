@@ -110,12 +110,12 @@ router.beforeEach(async (to) => {
     return true;
   }
   if (!auth.token) {
-    return { name: 'login' };
+    return { name: 'login', query: to.fullPath !== '/' ? { redirect: to.fullPath } : {} };
   }
   if (!auth.bValidated) {
     const ok = await auth.validate();
     if (!ok) {
-      return { name: 'login' };
+      return { name: 'login', query: to.fullPath !== '/' ? { redirect: to.fullPath } : {} };
     }
   }
   return true;

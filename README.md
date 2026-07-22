@@ -240,25 +240,35 @@ The same screen lists the **private** key for advanced setups (treat it as a sec
 
 ## Development
 
+The repo uses **npm workspaces** (`shared/`, `api/`, `dashboard/`) with a single root install:
+
+```bash
+npm install        # once, at the repo root — also builds shared/ and generates the Prisma client
+```
+
 ### API
 
 ```bash
-cd api
-npm ci
 # Copy and fill in env vars
-cp ../.env.example .env
-npx prisma migrate dev
-npm run dev          # starts on PORT (default 3000 locally)
+cp .env.example .env
+cd api && npx prisma migrate dev && cd ..
+npm run dev:api      # starts on PORT (default 3000 locally)
 ```
 
 ### Dashboard
 
 ```bash
-cd dashboard
-npm ci
 # Point Vite at your local API
-VITE_API_URL=http://localhost:3000/api npm run dev
+VITE_API_URL=http://localhost:3000/api npm run dev:dashboard
 ```
+
+### Shared package (`shared/`)
+
+`@novacode/shared` holds the canonical entity/WS-protocol types and the agent
+stream-parsing logic used by **both** the API and the dashboard (previously two
+hand-synced copies). It builds to `shared/dist` (dual CJS/ESM) via the root
+`postinstall`; rebuild after editing with `npm run build -w @novacode/shared`.
+Useful root scripts: `npm run build`, `npm run typecheck`, `npm run test`.
 
 ### Docker (split services)
 
@@ -298,6 +308,11 @@ app/
 │       ├── views/        # Page-level components
 │       ├── components/   # Shared UI components
 │       └── stores/       # Pinia stores
+├── shared/               # @novacode/shared — canonical types + stream parsing (API ⇄ dashboard)
+│   └── src/
+│       ├── types.ts      # Entity + WebSocket protocol types
+│       ├── chatStreamPreview.ts
+│       └── orchestratorPayload.ts
 ├── docs/                 # Additional documentation
 ├── scripts/
 │   ├── install.sh        # One-line Docker install / update
@@ -329,7 +344,7 @@ Pull requests are welcome. For larger changes, please open an issue first to dis
 
 Refactors and new code should follow the shared conventions in `/data-root/personal/CODING_CONVENTIONS.md` (import grouping, Vue section layout, boolean naming, and explicit control-flow braces).
 Recent UI refactors standardize modal and menu scripts to the section-header layout (`Props`, `Emits`, `Store`, `Constants`, `Refs`, `Computed`, `Watchers`, `Methods`, `Lifecycle` as applicable), use the `b` prefix on local boolean refs in views such as **Automations** (`bLoading`, `bShowCreateForm`, …) and context-menu visibility (`bCtxMenuOpen`), merge duplicate `@/classes/api` imports where obvious, and replace inline control-flow one-liners with explicit `{}` blocks in script logic.
-Recent stream-preview utility refactors in `api/src/classes/chatStreamPreviewFromEvents.ts`, `dashboard/src/utils/chatStreamPreviewFromEvents.ts`, and `api/src/classes/chatPreview.ts` also follow the same naming and brace rules while preserving existing behavior.
+The stream-preview and orchestrator-payload logic now lives in `shared/` (`@novacode/shared`) as the single source of truth for both API and dashboard; the old per-app files are thin re-export shims. New shared behavior should be added there (with tests in `shared/src/*.test.ts`), not in per-app copies.
 
 ---
 

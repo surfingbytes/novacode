@@ -21,6 +21,8 @@ import {
 import { gitApi, type GitBranch, type GitFile, type GitRepoStatus } from '@/classes/api';
 
 // components
+import BaseModal from '@/components/BaseModal.vue';
+import ConfirmModal from '@/components/ConfirmModal.vue';
 import ContextMenu from '@/components/ContextMenu.vue';
 import type { ContextMenuItem } from '@/components/ContextMenu.vue';
 
@@ -658,10 +660,26 @@ const createBranch = async (): Promise<void> => {
   }
 };
 
-const discardFiles = async (targetFiles: string[], repo: string): Promise<void> => {
+const bShowDiscardConfirm = ref<boolean>(false);
+const pendingDiscard = ref<{ files: string[]; repo: string } | null>(null);
+
+const discardLabel = computed((): string => {
+  const pending = pendingDiscard.value;
+  if (!pending) return '';
+  return pending.files.length === 1 ? pending.files[0] : `${pending.files.length} files`;
+});
+
+const discardFiles = (targetFiles: string[], repo: string): void => {
   if (!targetFiles.length || bDiscarding.value) return;
+  pendingDiscard.value = { files: targetFiles, repo };
+  bShowDiscardConfirm.value = true;
+};
+
+const confirmDiscardFiles = async (): Promise<void> => {
+  const pending = pendingDiscard.value;
+  if (!pending) return;
+  const { files: targetFiles, repo } = pending;
   const label = targetFiles.length === 1 ? targetFiles[0] : `${targetFiles.length} files`;
-  if (!window.confirm(`Discard changes in ${label}? This cannot be undone.`)) return;
 
   bDiscarding.value = true;
   try {
@@ -671,6 +689,8 @@ const discardFiles = async (targetFiles: string[], repo: string): Promise<void> 
     const discarded = new Set(targetFiles.map((file) => `${repo}::${file}`));
     selectedFiles.value = new Set([...selectedFiles.value].filter((key) => !discarded.has(key)));
     await refresh();
+    bShowDiscardConfirm.value = false;
+    pendingDiscard.value = null;
   } catch (e: unknown) {
     setGitActionResult('error', gitErrorMessage(e, 'Discard failed'), repo);
   } finally {
@@ -1030,7 +1050,7 @@ onUnmounted((): void => {
           <div class="flex items-center gap-2">
             <button
               v-if="files.length"
-              class="text-sm px-3 py-2 bg-primary hover:bg-primary-hover text-white rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              class="text-sm px-3 py-2 bg-primary hover:bg-primary-hover text-on-accent rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
               :disabled="!canCommit"
               @click="commitChanges(repos[0].repo)"
             >
@@ -1116,7 +1136,7 @@ onUnmounted((): void => {
           <div class="flex items-center gap-2 flex-wrap">
             <button
               v-if="activeRepo.files.length"
-              class="text-sm px-3 py-2 bg-primary hover:bg-primary-hover text-white rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              class="text-sm px-3 py-2 bg-primary hover:bg-primary-hover text-on-accent rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
               :disabled="!canCommitActiveRepo"
               @click="commitChanges(activeRepo.repo)"
             >
@@ -1237,17 +1257,13 @@ onUnmounted((): void => {
     </template>
   </div>
 
-  <Teleport to="body">
-    <Transition name="modal-fade">
-      <div
-        v-if="bShowGitActions && activeRepo"
-        class="fixed inset-0 z-50 flex items-end justify-center p-3 sm:items-center sm:p-4"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="git-actions-title"
-      >
-        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" @click="bShowGitActions = false" />
-        <div class="modal-panel relative w-full max-w-sm rounded-2xl border border-fg/[0.09] bg-surface shadow-2xl shadow-black/60">
+  <BaseModal
+    :model-value="bShowGitActions && !!activeRepo"
+    labelledby="git-actions-title"
+    panel-class="max-w-sm"
+    @update:model-value="bShowGitActions = false"
+  >
+    <template v-if="activeRepo">
           <div class="flex items-start justify-between gap-3 px-5 pt-5 pb-3">
             <div class="min-w-0">
               <h2 id="git-actions-title" class="font-semibold text-text-primary">Git actions</h2>
@@ -1330,10 +1346,8 @@ onUnmounted((): void => {
               </span>
             </button>
           </div>
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
+    </template>
+  </BaseModal>
 
   <ContextMenu
     v-model="bGitActionsMenuOpen"
@@ -1343,17 +1357,13 @@ onUnmounted((): void => {
     @pick="onGitActionPick"
   />
 
-  <Teleport to="body">
-    <Transition name="modal-fade">
-      <div
-        v-if="bShowSwitchBranch && activeRepo"
-        class="fixed inset-0 z-50 flex items-end justify-center p-3 sm:items-center sm:p-4"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="switch-branch-title"
-      >
-        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" @click="bShowSwitchBranch = false" />
-        <div class="modal-panel relative flex max-h-[85vh] w-full max-w-md flex-col rounded-2xl border border-fg/[0.09] bg-surface shadow-2xl shadow-black/60">
+  <BaseModal
+    :model-value="bShowSwitchBranch && !!activeRepo"
+    labelledby="switch-branch-title"
+    panel-class="max-w-md"
+    @update:model-value="bShowSwitchBranch = false"
+  >
+    <template v-if="activeRepo">
           <div class="flex items-start justify-between gap-3 px-5 pt-5 pb-3">
             <div>
               <h2 id="switch-branch-title" class="font-semibold text-text-primary">Switch branch</h2>
@@ -1414,23 +1424,17 @@ onUnmounted((): void => {
               </span>
             </button>
           </div>
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
+    </template>
+  </BaseModal>
 
-  <Teleport to="body">
-    <Transition name="modal-fade">
-      <div
-        v-if="bShowCreateBranch && activeRepo"
-        class="fixed inset-0 z-50 flex items-end justify-center p-3 sm:items-center sm:p-4"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="create-branch-title"
-      >
-        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" @click="bShowCreateBranch = false" />
-        <form
-          class="modal-panel relative w-full max-w-sm rounded-2xl border border-fg/[0.09] bg-surface shadow-2xl shadow-black/60"
+  <BaseModal
+    :model-value="bShowCreateBranch && !!activeRepo"
+    labelledby="create-branch-title"
+    panel-class="max-w-sm"
+    @update:model-value="bShowCreateBranch = false"
+  >
+    <template v-if="activeRepo">
+    <form class="contents"
           @submit.prevent="createBranch"
         >
           <div class="flex items-start justify-between gap-3 px-5 pt-5 pb-3">
@@ -1468,7 +1472,7 @@ onUnmounted((): void => {
               Cancel
             </button>
             <button
-              class="rounded-lg bg-primary px-4 py-2 text-sm text-white transition-colors hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed"
+              class="rounded-lg bg-primary px-4 py-2 text-sm text-on-accent transition-colors hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed"
               type="submit"
               :disabled="!canCreateBranch"
             >
@@ -1477,7 +1481,15 @@ onUnmounted((): void => {
             </button>
           </div>
         </form>
-      </div>
-    </Transition>
-  </Teleport>
+    </template>
+  </BaseModal>
+
+  <ConfirmModal
+    v-model="bShowDiscardConfirm"
+    title="Discard changes"
+    :description="`Discard changes in ${discardLabel}? This cannot be undone.`"
+    confirm-label="Discard"
+    :loading="bDiscarding"
+    @confirm="confirmDiscardFiles"
+  />
 </template>

@@ -65,11 +65,11 @@ const iconLabel = computed(() => {
     class="w-11 h-11 rounded-full shrink-0 flex items-center justify-center overflow-hidden border border-fg/10 p-1.5"
     :class="[
       variant === 'claude'
-        ? 'bg-orange-500/12'
+        ? 'avatar-tint-claude'
         : variant === 'vibe'
-          ? 'bg-emerald-500/12'
+          ? 'avatar-tint-vibe'
           : variant === 'opencode'
-            ? 'bg-cyan-500/12'
+            ? 'avatar-tint-opencode'
             : 'bg-white avatar-cursor-wrap'
     ]"
   >
@@ -90,6 +90,17 @@ const iconLabel = computed(() => {
 .avatar-icon-img {
   width: 70%;
   height: 70%;
+}
+
+/* Agent identity tints from theme tokens (adapt per theme, unlike raw palette classes) */
+.avatar-tint-claude {
+  background: color-mix(in oklab, var(--agent-claude) 12%, transparent);
+}
+.avatar-tint-vibe {
+  background: color-mix(in oklab, var(--agent-vibe) 12%, transparent);
+}
+.avatar-tint-opencode {
+  background: color-mix(in oklab, var(--agent-opencode) 12%, transparent);
 }
 
 /* Cursor only: invert circle + icon together on dark themes */

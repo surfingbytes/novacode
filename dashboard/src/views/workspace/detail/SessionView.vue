@@ -887,6 +887,8 @@ onBeforeUnmount(() => {
       <button
         class="button is-icon"
         :class="{ 'is-active': viewMode === 'list' }"
+        aria-label="List view"
+        :aria-pressed="viewMode === 'list'"
         @click="viewMode = 'list'"
       >
         <svg
@@ -911,6 +913,8 @@ onBeforeUnmount(() => {
       <button
         class="button is-icon"
         :class="{ 'is-active': viewMode === 'grid' }"
+        aria-label="Grid view"
+        :aria-pressed="viewMode === 'grid'"
         @click="viewMode = 'grid'"
       >
         <svg

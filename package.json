@@ -1,0 +1,20 @@
+{
+  "name": "novacode",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Nova Code monorepo — API, dashboard, and shared types/logic",
+  "workspaces": [
+    "shared",
+    "api",
+    "dashboard"
+  ],
+  "scripts": {
+    "postinstall": "npm run build -w @novacode/shared && npm run generate -w novacode-api",
+    "dev:api": "npm run dev -w novacode-api",
+    "dev:dashboard": "npm run dev -w novacode-dashboard",
+    "build": "npm run build -w @novacode/shared && npm run build -w novacode-api && npm run build -w novacode-dashboard",
+    "typecheck": "npm run build -w @novacode/shared && npm run typecheck -w novacode-api && npm run type-check -w novacode-dashboard",
+    "test": "npm run test -w @novacode/shared && npm run test -w novacode-api && npm run test -w novacode-dashboard",
+    "lint": "npm run lint -w novacode-dashboard"
+  }
+}

@@ -24,6 +24,7 @@ import {
 } from '@/classes/api';
 import { notifyTaskDone, notifyTodoCompleted } from '@/lib/notifications';
 import { renderMermaidDiagrams } from '@/lib/mermaid';
+import { tagColorClass as categoryColorClass } from '@/utils/tagColors';
 
 // stores
 import { useWorkspacesStore } from '@/stores/workspaces';
@@ -251,26 +252,10 @@ function handleDocumentClickMobileMenu(e: MouseEvent): void {
 }
 
 function handleKeydownMobileMenu(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && lightboxSrc.value) lightboxSrc.value = null;
   if (e.key === 'Escape' && bMobileSessionMenuOpen.value) closeMobileSessionMenu();
   if (e.key === 'Escape' && bModeMenuOpen.value) closeModeMenu();
   if (e.key === 'Escape' && bPlanActionsMenuOpen.value) closePlanActionsMenu();
-}
-
-const CATEGORY_COLORS = [
-  'bg-blue-500/15 text-blue-400 border-blue-500/20',
-  'bg-purple-500/15 text-purple-400 border-purple-500/20',
-  'bg-green-500/15 text-green-400 border-green-500/20',
-  'bg-orange-500/15 text-orange-400 border-orange-500/20',
-  'bg-pink-500/15 text-pink-400 border-pink-500/20',
-  'bg-cyan-500/15 text-cyan-400 border-cyan-500/20',
-  'bg-yellow-500/15 text-yellow-500/20',
-  'bg-red-500/15 text-red-400 border-red-500/20'
-];
-
-function categoryColorClass(name: string): string {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return CATEGORY_COLORS[h % CATEGORY_COLORS.length];
 }
 
 type SessionTab = 'chat' | 'terminal' | 'files' | 'git' | 'plan';
@@ -3441,7 +3426,7 @@ onUnmounted(() => {
                   </div>
                   <div
                     v-if="msg.content"
-                    class="bg-primary text-white px-4 py-2 rounded-2xl rounded-br-sm text-sm whitespace-pre-wrap break-words"
+                    class="bg-primary text-on-accent px-4 py-2 rounded-2xl rounded-br-sm text-sm whitespace-pre-wrap break-words"
                   >
                     {{ msg.content }}
                   </div>
@@ -3897,7 +3882,7 @@ onUnmounted(() => {
               <button
                 type="button"
                 @click.stop="pendingImages.splice(i, 1)"
-                class="absolute -top-1.5 -right-1.5 w-5 h-5 bg-destructive text-white rounded-full text-xs flex items-center justify-center leading-none shadow-sm"
+                class="absolute -top-1.5 -right-1.5 w-5 h-5 bg-destructive text-on-accent rounded-full text-xs flex items-center justify-center leading-none shadow-sm"
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
               </button>
@@ -4032,6 +4017,7 @@ onUnmounted(() => {
                 @click="onAttachClick"
                 :disabled="bIsStreaming"
                 title="Attach file"
+                aria-label="Attach file"
                 class="prompt-attach button is-transparent is-icon h-[36px]! px-0! aspect-square! shrink-0"
                 :class="bPromptUseCompactMultiline ? 'mb-0.5' : 'mb-[3px]'"
               >
@@ -4049,6 +4035,8 @@ onUnmounted(() => {
               type="button"
               @click="sendPrompt"
               :disabled="(!promptText.trim() && !pendingImages.length) || !bWsConnected"
+              :aria-label="bIsStreaming ? 'Waiting for response' : 'Send message'"
+              :title="bIsStreaming ? 'Waiting for response' : 'Send message'"
               class="button is-primary is-icon !h-[44px] !w-[44px] !min-w-[44px] shrink-0 !rounded-md !p-0"
             >
               <svg v-if="bIsStreaming" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none send-wait-hourglass" aria-hidden="true"><path d="M5 22h14M5 2h14M17 22v-4.172a2 2 0 00-.586-1.414L12 12M7 22v-4.172a2 2 0 01.586-1.414L12 12M17 2v4.172a2 2 0 01-.586 1.414L12 12M7 2v4.172a2 2 0 00.586 1.414L12 12"/></svg>
@@ -4391,18 +4379,22 @@ onUnmounted(() => {
         <div
           v-if="lightboxSrc"
           class="lightbox-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Attached image preview"
           @click.self="lightboxSrc = null"
         >
           <button
             type="button"
             class="absolute top-4 right-4 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-fg/10 text-white hover:bg-fg/20 transition-colors"
+            aria-label="Close image preview"
             @click="lightboxSrc = null"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
           </button>
           <img
             :src="lightboxSrc"
-            alt=""
+            alt="Attached image preview"
             class="lightbox-img max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
           />
         </div>

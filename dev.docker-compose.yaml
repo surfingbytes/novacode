@@ -20,23 +20,23 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
     volumes:
-      - ./api/src:/app/src
+      - ./api/src:/app/api/src
       - ./config:/config
       - ~:/data-root
     restart: unless-stopped
   dashboard:
     build:
-      context: ./dashboard
-      dockerfile: Dockerfile.dev
+      context: .
+      dockerfile: dashboard/Dockerfile.dev
     ports:
       - "21001:8080"
     environment:
       NODE_ENV: development
       VITE_API_URL: http://localhost:21000/api
     volumes:
-      - ./dashboard/src:/app/src
-      - ./dashboard/public:/app/public
-      - ./dashboard/index.html:/app/index.html
+      - ./dashboard/src:/app/dashboard/src
+      - ./dashboard/public:/app/dashboard/public
+      - ./dashboard/index.html:/app/dashboard/index.html
     depends_on:
       - api
     restart: unless-stopped

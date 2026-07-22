@@ -151,15 +151,28 @@ async function loadFile(filename: string): Promise<void> {
   }
 }
 
+const bShowDiscardConfirm = ref<boolean>(false);
+const pendingSelectFilename = ref<string | null>(null);
+
 async function selectFile(filename: string): Promise<void> {
   if (filename === selectedFilename.value) {
     return;
   }
   if (hasUnsavedChanges.value) {
-    const discard = window.confirm('Discard unsaved changes to the current rule file?');
-    if (!discard) {
-      return;
-    }
+    pendingSelectFilename.value = filename;
+    bShowDiscardConfirm.value = true;
+    return;
+  }
+  selectedFilename.value = filename;
+  await loadFile(filename);
+}
+
+async function confirmDiscardAndSelect(): Promise<void> {
+  const filename = pendingSelectFilename.value;
+  bShowDiscardConfirm.value = false;
+  pendingSelectFilename.value = null;
+  if (!filename) {
+    return;
   }
   selectedFilename.value = filename;
   await loadFile(filename);
@@ -594,6 +607,16 @@ onMounted(async () => {
         }
       "
       @confirm="deleteFile"
+    />
+
+    <!-- Discard unsaved changes confirmation -->
+    <ConfirmModal
+      v-model="bShowDiscardConfirm"
+      title="Discard changes"
+      description="Discard unsaved changes to the current rule file?"
+      confirm-label="Discard"
+      variant="danger"
+      @confirm="confirmDiscardAndSelect"
     />
 
     <!-- Rename rule file -->

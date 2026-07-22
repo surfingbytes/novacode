@@ -6,13 +6,16 @@ import { useRoute } from 'vue-router';
 // components
 import ApiOfflineBanner from '@/components/ApiOfflineBanner.vue';
 import AppLayout from '@/components/AppLayout.vue';
+import AppToasts from '@/components/AppToasts.vue';
 
 // stores
 import { useApiHealthStore } from '@/stores/apiHealth';
 import { useAuthStore } from '@/stores/auth';
+import { useToastStore } from '@/stores/toasts';
 
 // classes
-import { settingsApi } from '@/classes/api';
+import router from '@/classes/router';
+import { settingsApi, setUnauthorizedHandler } from '@/classes/api';
 import {
   applyTheme,
   DEFAULT_THEME_ID,
@@ -26,6 +29,7 @@ import { isNotificationsEnabled, syncPushSubscription } from '@/lib/notification
 // -------------------------------------------------- Store --------------------------------------------------
 const auth = useAuthStore();
 const apiHealth = useApiHealthStore();
+const toastStore = useToastStore();
 const route = useRoute();
 
 // -------------------------------------------------- Refs --------------------------------------------------
@@ -115,6 +119,21 @@ watch(
 onMounted(async (): Promise<void> => {
   applyActiveTheme();
 
+  // Mid-session 401 on any API call → log out and send the user back to
+  // login, preserving the deep link they were on.
+  setUnauthorizedHandler(() => {
+    if (!auth.token) {
+      return;
+    }
+    auth.logout();
+    toastStore.info('Your session has expired — please log in again.');
+    const currentPath = router.currentRoute.value.fullPath;
+    void router.push({
+      name: 'login',
+      query: currentPath && currentPath !== '/' ? { redirect: currentPath } : {}
+    });
+  });
+
   void apiHealth.ping();
   scheduleHealthPolling();
   document.addEventListener('visibilitychange', onDocumentVisibilityChange);
@@ -139,6 +158,7 @@ onUnmounted((): void => {
     clearInterval(healthPollId);
     healthPollId = null;
   }
+  setUnauthorizedHandler(null);
   stopAutoThemeWatcher();
 });
 </script>
@@ -150,5 +170,6 @@ onUnmounted((): void => {
     <template v-else>
       <RouterView class="flex min-h-0 flex-1 flex-col" />
     </template>
+    <AppToasts />
   </div>
 </template>

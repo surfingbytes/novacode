@@ -2,12 +2,16 @@
 // node_modules
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 
+// components
+import BaseModal from '@/components/BaseModal.vue';
+
 // classes
 import { orchestratorApi } from '@/classes/api';
 import {
   parseOrchestratorSubtasksJson,
   serializeOrchestratorSubtasksPayload
 } from '@/utils/orchestratorPayload';
+import { tagColorClass as categoryColorClass } from '@/utils/tagColors';
 
 // types
 import type { Orchestrator, SubTask } from '@/@types/index';
@@ -25,19 +29,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:orchestrator': [Orchestrator];
 }>();
-
-// -------------------------------------------------- Constants --------------------------------------------------
-
-const CATEGORY_COLORS = [
-  'bg-blue-500/15 text-blue-400 border-blue-500/20',
-  'bg-purple-500/15 text-purple-400 border-purple-500/20',
-  'bg-green-500/15 text-green-400 border-green-500/20',
-  'bg-orange-500/15 text-orange-400 border-orange-500/20',
-  'bg-pink-500/15 text-pink-400 border-pink-500/20',
-  'bg-cyan-500/15 text-cyan-400 border-cyan-500/20',
-  'bg-yellow-500/15 text-yellow-400 border-yellow-500/20',
-  'bg-red-500/15 text-red-400 border-red-500/20'
-];
 
 // -------------------------------------------------- Refs --------------------------------------------------
 
@@ -156,14 +147,6 @@ function taskStatus(index: number): 'idle' | 'active' | 'done' {
   }
 
   return 'idle';
-}
-
-function categoryColorClass(name: string): string {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) {
-    h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  }
-  return CATEGORY_COLORS[h % CATEGORY_COLORS.length];
 }
 
 function startPolling() {
@@ -389,7 +372,7 @@ onBeforeUnmount(stopPolling);
               type="button"
               @click="generateTasks"
               :disabled="!userInput.trim() || bDecomposing"
-              class="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center gap-2"
+              class="px-4 py-2 text-sm font-medium bg-primary text-on-accent rounded-lg hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center gap-2"
             >
               <span
                 v-if="bDecomposing"
@@ -561,20 +544,12 @@ onBeforeUnmount(stopPolling);
       </div>
 
       <!-- Edit task modal -->
-      <Teleport to="body">
-        <Transition name="modal-fade">
-          <div
-            v-if="bShowEditModal"
-            class="fixed inset-0 z-50 flex items-center justify-center p-4"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="edit-task-title"
-          >
-            <div class="absolute inset-0 bg-black/75 backdrop-blur-sm" @click="closeEditModal" />
-            <div
-              class="relative w-full max-w-md rounded-2xl border border-fg/10 bg-surface shadow-xl p-5"
-              @click.stop
-            >
+      <BaseModal
+        v-model="bShowEditModal"
+        labelledby="edit-task-title"
+        panel-class="max-w-md"
+      >
+        <div class="p-5">
               <h2 id="edit-task-title" class="text-lg font-semibold text-text-primary mb-4">
                 Edit task
               </h2>
@@ -619,16 +594,14 @@ onBeforeUnmount(stopPolling);
                 </button>
                 <button
                   type="button"
-                  class="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg"
+                  class="px-4 py-2 text-sm font-medium bg-primary text-on-accent rounded-lg"
                   @click="saveEditFromModal"
                 >
                   Save
                 </button>
               </div>
-            </div>
-          </div>
-        </Transition>
-      </Teleport>
+        </div>
+      </BaseModal>
 
       <!-- Run progress (from server state) -->
       <div
@@ -675,7 +648,7 @@ onBeforeUnmount(stopPolling);
         type="button"
         @click="stopTasks"
         :disabled="bStopping"
-        class="px-4 py-2.5 text-sm font-medium bg-destructive/80 text-white rounded-lg hover:bg-destructive transition-colors flex items-center gap-2 disabled:opacity-60"
+        class="px-4 py-2.5 text-sm font-medium bg-destructive/80 text-on-accent rounded-lg hover:bg-destructive transition-colors flex items-center gap-2 disabled:opacity-60"
       >
         <span
           v-if="bStopping"
@@ -689,7 +662,7 @@ onBeforeUnmount(stopPolling);
         type="button"
         @click="startTasks"
         :disabled="subtasks.length === 0 || bStartingRun"
-        class="px-4 py-2.5 text-sm font-medium bg-primary text-white rounded-lg hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center gap-2"
+        class="px-4 py-2.5 text-sm font-medium bg-primary text-on-accent rounded-lg hover:opacity-90 disabled:opacity-40 transition-opacity flex items-center gap-2"
       >
         <span
           v-if="bStartingRun"
@@ -708,9 +681,9 @@ onBeforeUnmount(stopPolling);
   border-radius: 0.75rem;
   background: linear-gradient(
     90deg,
-    rgba(59, 130, 246, 0.9),
-    rgba(6, 182, 212, 0.9),
-    rgba(59, 130, 246, 0.9)
+    var(--accent, #8b85ff),
+    var(--agent-opencode, #50c8d6),
+    var(--accent, #8b85ff)
   );
   background-size: 200% 200%;
   animation: orch-border-spin 3s linear infinite;
@@ -721,7 +694,7 @@ onBeforeUnmount(stopPolling);
 }
 
 .orch-active-border .orch-card-inner {
-  background-color: rgba(15, 23, 42, 0.98);
+  background-color: var(--bg-elev, #171614);
 }
 
 @keyframes orch-border-spin {

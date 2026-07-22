@@ -8,6 +8,7 @@ import OrchestratorPanel from '@/components/OrchestratorPanel.vue';
 import FilesView from '@/components/workspace/FilesComponent.vue';
 import GitView from '@/components/workspace/GitView.vue';
 import ConfirmModal from '@/components/ConfirmModal.vue';
+import PromptModal from '@/components/PromptModal.vue';
 
 // classes
 import { orchestratorApi } from '@/classes/api';
@@ -118,26 +119,36 @@ async function toggleArchive(): Promise<void> {
   }
 }
 
-async function openEditOrchestratorName(): Promise<void> {
+const bShowRenameModal = ref<boolean>(false);
+const bRenaming = ref<boolean>(false);
+
+function openEditOrchestratorName(): void {
+  if (!orchestrator.value) {
+    return;
+  }
+  bShowRenameModal.value = true;
+}
+
+async function confirmRename(nextName: string): Promise<void> {
   if (!orchestrator.value) {
     return;
   }
   const currentName = orchestrator.value.name ?? 'Orchestrator';
-  const nextName = window.prompt('Edit orchestrator name', currentName);
-  if (nextName == null) {
+  if (!nextName || nextName === currentName) {
+    bShowRenameModal.value = false;
     return;
   }
-  const trimmedName = nextName.trim();
-  if (!trimmedName || trimmedName === currentName) {
-    return;
-  }
+  bRenaming.value = true;
   try {
     const { data: updated } = await orchestratorApi.update(props.workspaceId, props.orchestratorId, {
-      name: trimmedName,
+      name: nextName,
     });
     orchestrator.value = updated;
+    bShowRenameModal.value = false;
   } catch (e) {
     console.error('Failed to rename orchestrator:', e);
+  } finally {
+    bRenaming.value = false;
   }
 }
 
@@ -387,6 +398,16 @@ watch(
       confirm-label="Delete"
       :loading="bDeleting"
       @confirm="deleteOrchestrator"
+    />
+
+    <PromptModal
+      v-model="bShowRenameModal"
+      title="Edit orchestrator name"
+      label="Name"
+      :initial-value="orchestrator?.name ?? ''"
+      confirm-label="Save"
+      :loading="bRenaming"
+      @confirm="confirmRename"
     />
   </div>
 </template>

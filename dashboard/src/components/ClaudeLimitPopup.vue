@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // node_modules
-import { onUnmounted, ref, watch } from 'vue';
+import { onMounted, onUnmounted, ref, watch } from 'vue';
 
 // classes
 import { settingsApi } from '@/classes/api';
@@ -122,10 +122,21 @@ function stopCountdown(): void {
   }
 }
 
+function onDocumentKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && bShowPopup.value) {
+    closePopup();
+  }
+}
+
 // -------------------------------------------------- Lifecycle --------------------------------------------------
+
+onMounted(() => {
+  document.addEventListener('keydown', onDocumentKeydown);
+});
 
 onUnmounted(() => {
   stopCountdown();
+  document.removeEventListener('keydown', onDocumentKeydown);
 });
 
 startCountdown();
@@ -146,6 +157,8 @@ startCountdown();
     <div
       v-if="bShowPopup"
       class="fixed bottom-6 left-1/2 transform -translate-x-1/2 w-full max-w-md mx-4 z-50"
+      role="alertdialog"
+      aria-labelledby="claude-limit-title"
     >
       <div class="bg-fg border border-fg/[0.15] rounded-2xl shadow-2xl overflow-hidden">
         <!-- Header -->
@@ -155,7 +168,7 @@ startCountdown();
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="text-primary"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             </div>
             <div>
-              <h3 class="font-semibold text-text-primary">Claude API Limit Reached</h3>
+              <h3 id="claude-limit-title" class="font-semibold text-text-primary">Claude API Limit Reached</h3>
               <p class="text-xs text-text-muted">
                 {{ countdown }}
               </p>
@@ -164,6 +177,7 @@ startCountdown();
               @click="closePopup"
               class="ml-auto text-text-muted hover:text-text-primary transition-colors"
               title="Close"
+              aria-label="Close"
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
             </button>
@@ -226,7 +240,7 @@ startCountdown();
             <button
               @click="toggleAutoContinue"
               :disabled="bSaving"
-              class="flex-1 py-2 px-4 rounded-lg bg-primary text-white hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              class="flex-1 py-2 px-4 rounded-lg bg-primary text-on-accent hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <span v-if="!bAutoContinueEnabled">Enable Auto-Continue</span>
               <span v-else>Disable Auto-Continue</span>

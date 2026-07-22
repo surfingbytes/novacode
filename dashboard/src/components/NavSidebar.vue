@@ -3,6 +3,7 @@ import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import ThemeToggleButton from '@/components/ThemeToggleButton.vue';
+import { agentTypeChipClass } from '@/utils/agentTypeMeta';
 
 const props = withDefaults(
   defineProps<{
@@ -80,14 +81,6 @@ const mergedQuickSessions = computed(() => {
 
 function workspaceNameById(id: string): string {
   return workspacesStore.workspaces.find((w) => w.id === id)?.name ?? 'Workspace';
-}
-
-function agentClass(agentType: string): string {
-  if (agentType === 'claude') return 'agent-claude';
-  if (agentType === 'cursor-agent') return 'agent-cursor';
-  if (agentType === 'mistral-vibe') return 'agent-vibe';
-  if (agentType === 'open-code') return 'agent-opencode';
-  return '';
 }
 
 onMounted(() => {
@@ -228,7 +221,7 @@ onBeforeUnmount(() => {
               {{ workspaceNameById(session.workspaceId) }}
             </div>
           </div>
-          <span v-if="session.agentType" class="nc-chip" :class="agentClass(session.agentType)">{{
+          <span v-if="session.agentType" class="nc-chip" :class="agentTypeChipClass(session.agentType)">{{
             session.agentType === 'cursor-agent'
               ? 'cursor'
               : session.agentType === 'mistral-vibe'

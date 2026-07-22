@@ -3,6 +3,7 @@
 import { ref, watch } from 'vue';
 
 // components
+import BaseModal from '@/components/BaseModal.vue';
 import TagChipsInput from '@/components/input/TagChipsInput.vue';
 
 // types
@@ -69,23 +70,14 @@ const onSave = (): void => {
 </script>
 
 <template>
-  <Teleport to="body">
-    <Transition name="modal-fade">
-      <div
-        v-if="modelValue"
-        class="fixed inset-0 z-50 flex items-center justify-center p-4"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="session-edit-title"
-      >
-        <!-- Backdrop -->
-        <div class="absolute inset-0 bg-black/75 backdrop-blur-sm" @click="close" />
-
-        <!-- Panel -->
-        <form
-          class="modal-panel relative w-full max-w-sm bg-surface border border-fg/[0.09] rounded-2xl shadow-2xl shadow-black/60"
-          @submit.prevent="onSave"
-        >
+  <BaseModal
+    :model-value="modelValue"
+    labelledby="session-edit-title"
+    panel-class="max-w-sm"
+    @update:model-value="close"
+  >
+    <!-- Panel -->
+    <form class="contents" @submit.prevent="onSave">
           <div class="px-6 pt-5 pb-4">
             <h2 id="session-edit-title" class="font-semibold text-text-primary text-lg">Edit session</h2>
           </div>
@@ -129,15 +121,13 @@ const onSave = (): void => {
             </button>
             <button
               type="submit"
-              class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium bg-primary hover:bg-primary-hover text-white rounded-lg shadow-lg shadow-primary/20 transition-all disabled:opacity-50"
+              class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium bg-primary hover:bg-primary-hover text-on-accent rounded-lg shadow-lg shadow-primary/20 transition-all disabled:opacity-50"
               :disabled="loading || !name.trim()"
             >
               <div v-if="loading" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
               Save
             </button>
           </div>
-        </form>
-      </div>
-    </Transition>
-  </Teleport>
+    </form>
+  </BaseModal>
 </template>

@@ -2,6 +2,9 @@
 // node_modules
 import { computed, ref, watch } from 'vue';
 
+// components
+import BaseModal from '@/components/BaseModal.vue';
+
 // classes
 import { workspaceApi } from '@/classes/api';
 
@@ -138,21 +141,19 @@ watch(
 </script>
 
 <template>
-  <Teleport to="body">
-    <Transition name="modal-fade">
-      <div v-if="modelValue" class="modal-wrap" role="dialog" aria-modal="true">
-        <!-- Backdrop -->
-        <div class="modal-backdrop" @click="close"></div>
-
-        <!-- Panel -->
-        <div class="modal-panel w-full max-w-xl">
-          <!-- Header -->
-          <div class="modal-header">
-            <div>Choose workspace folder</div>
-            <button class="close-button" @click="close">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M18 6L6 18M6 6l12 12"/></svg>
-            </button>
-          </div>
+  <BaseModal
+    :model-value="modelValue"
+    labelledby="dir-picker-modal-title"
+    panel-class="max-w-xl"
+    @update:model-value="close"
+  >
+    <!-- Header -->
+    <div class="modal-header">
+      <div id="dir-picker-modal-title">Choose workspace folder</div>
+      <button class="close-button" aria-label="Close dialog" @click="close">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
 
           <!-- Body -->
           <div class="modal-body">
@@ -254,8 +255,5 @@ watch(
               Select this folder
             </button>
           </div>
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
+  </BaseModal>
 </template>

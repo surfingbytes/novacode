@@ -1,28 +1,38 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 1: Build the Vue dashboard
+# Stage 1: Install all workspace dependencies (npm workspaces at repo root)
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:22-bookworm-slim AS dashboard-builder
+FROM node:24 AS deps
 
-WORKDIR /build/dashboard
-COPY dashboard/package*.json ./
-COPY .env .env
+WORKDIR /app
+COPY package.json package-lock.json ./
+# shared/ is copied in full: the root postinstall builds it (dist/)
+COPY shared/ shared/
+COPY api/package.json api/
+# prisma schema/config are needed by the root postinstall (prisma generate)
+COPY api/prisma api/prisma
+COPY api/prisma.config.ts api/
+COPY dashboard/package.json dashboard/
 RUN npm ci
-COPY dashboard/ ./
-RUN npm run build
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 2: Build the Fastify API
+# Stage 2: Build the Vue dashboard
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:24 AS api-builder
+FROM deps AS dashboard-builder
 
-WORKDIR /build/api
-COPY api/package*.json ./
-RUN npm ci
-COPY api/ ./
-RUN npm run build
+COPY dashboard/ dashboard/
+COPY .env dashboard/.env
+RUN npm run build -w novacode-dashboard
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 3: Runtime image
+# Stage 3: Build the Fastify API
+# ─────────────────────────────────────────────────────────────────────────────
+FROM deps AS api-builder
+
+COPY api/ api/
+RUN npm run build -w novacode-api
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stage 4: Runtime image
 # ─────────────────────────────────────────────────────────────────────────────
 FROM node:24
 
@@ -53,16 +63,18 @@ RUN npm install -g @openai/codex @zed-industries/codex-acp
 WORKDIR /app
 
 # Copy compiled API
-COPY --from=api-builder /build/api/build ./build
-COPY --from=api-builder /build/api/node_modules ./node_modules
-COPY --from=api-builder /build/api/package.json ./
+COPY --from=api-builder /app/api/build ./build
+# Hoisted workspace node_modules (includes @novacode/shared symlink → /app/shared)
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=api-builder /app/shared ./shared
+COPY --from=api-builder /app/api/package.json ./package.json
 
 # Prisma schema, migrations, and config (required by docker-entrypoint for `prisma migrate deploy`)
-COPY --from=api-builder /build/api/prisma ./prisma
-COPY --from=api-builder /build/api/prisma.config.ts ./
+COPY --from=api-builder /app/api/prisma ./prisma
+COPY --from=api-builder /app/api/prisma.config.ts ./
 
 # Copy built dashboard into a location the API can serve
-COPY --from=dashboard-builder /build/dashboard/dist ./dashboard-dist
+COPY --from=dashboard-builder /app/dashboard/dist ./dashboard-dist
 
 # Config directory for SQLite DB (mounted as a named volume)
 RUN mkdir -p /config
@@ -78,4 +90,3 @@ ENV HOME=/config
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["node", "build/src/index.js"]
-

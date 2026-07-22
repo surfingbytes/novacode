@@ -288,6 +288,44 @@ const sendInput = (data: string): void => {
 
 defineExpose({ sendInput, scrollToBottom, isAtBottom: bIsAtBottom });
 
+// -------------------------------------------------- Terminal theme (follows app theme tokens) --------------------------------------------------
+
+function cssVar(name: string, fallback: string): string {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+function buildTerminalTheme(): Record<string, string> {
+  return {
+    background: cssVar('--bg-elev', '#171614'),
+    foreground: cssVar('--fg', '#f5f1ea'),
+    cursor: cssVar('--accent', '#8b85ff'),
+    selectionBackground: cssVar('--bg-hover', '#23201d'),
+    black: cssVar('--bg-hover', '#23201d'),
+    red: cssVar('--danger', '#e87676'),
+    green: cssVar('--success', '#7ec994'),
+    yellow: cssVar('--warn', '#e6b067'),
+    blue: cssVar('--agent-cursor', '#7aa2ff'),
+    magenta: cssVar('--accent', '#8b85ff'),
+    cyan: cssVar('--agent-opencode', '#50c8d6'),
+    white: cssVar('--fg-muted', '#a6a098'),
+    brightBlack: cssVar('--fg-faint', '#48443f'),
+    brightRed: cssVar('--danger', '#e87676'),
+    brightGreen: cssVar('--success', '#7ec994'),
+    brightYellow: cssVar('--warn', '#e6b067'),
+    brightBlue: cssVar('--agent-cursor', '#7aa2ff'),
+    brightMagenta: cssVar('--accent', '#8b85ff'),
+    brightCyan: cssVar('--agent-opencode', '#50c8d6'),
+    brightWhite: cssVar('--fg', '#f5f1ea')
+  };
+}
+
+const handleThemeChanged = (): void => {
+  if (term) {
+    term.options.theme = buildTerminalTheme();
+  }
+};
+
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 onMounted((): void => {
   if (!containerEl.value) return;
@@ -298,31 +336,11 @@ onMounted((): void => {
     lineHeight: 1.2,
     cursorBlink: true,
     cursorStyle: 'bar',
-    theme: {
-      background: '#1e1e2e',
-      foreground: '#cdd6f4',
-      cursor: '#f5c2e7',
-      selectionBackground: '#45475a',
-      black: '#45475a',
-      red: '#f38ba8',
-      green: '#a6e3a1',
-      yellow: '#f9e2af',
-      blue: '#89b4fa',
-      magenta: '#f5c2e7',
-      cyan: '#94e2d5',
-      white: '#bac2de',
-      brightBlack: '#585b70',
-      brightRed: '#f38ba8',
-      brightGreen: '#a6e3a1',
-      brightYellow: '#f9e2af',
-      brightBlue: '#89b4fa',
-      brightMagenta: '#f5c2e7',
-      brightCyan: '#94e2d5',
-      brightWhite: '#a6adc8'
-    },
+    theme: buildTerminalTheme(),
     allowProposedApi: false,
     scrollback: 5000
   });
+  window.addEventListener('nc-theme-changed', handleThemeChanged);
 
   fitAddon = new FitAddon();
   term.loadAddon(fitAddon);
@@ -394,6 +412,7 @@ onUnmounted((): void => {
   if (reconnectTimer) clearTimeout(reconnectTimer);
   document.removeEventListener('visibilitychange', handleVisibilityChange);
   window.removeEventListener('online', handleOnline);
+  window.removeEventListener('nc-theme-changed', handleThemeChanged);
   if (viewport) viewport.removeEventListener('scroll', onViewportScroll);
   inputDisposable?.dispose();
   webSocket?.close();
@@ -411,7 +430,7 @@ onUnmounted((): void => {
   width: 100%;
   height: 100%;
   min-height: 0;
-  background: #1e1e2e;
+  background: var(--bg-elev, #171614);
   border-radius: 4px;
   overflow: hidden;
 }

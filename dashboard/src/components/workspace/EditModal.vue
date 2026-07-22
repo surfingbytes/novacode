@@ -3,6 +3,7 @@
 import { computed, ref, watch } from 'vue';
 
 // components
+import BaseModal from '@/components/BaseModal.vue';
 import ColorPicker from '@/components/input/ColorPicker.vue';
 import DirPickerModal from '@/components/DirPickerModal.vue';
 
@@ -277,23 +278,21 @@ watch(AGENT_OPTIONS, (options) => {
 </script>
 
 <template>
-  <Teleport to="body">
-    <Transition name="modal-fade">
-      <div v-if="modelValue" class="modal-wrap" role="dialog" aria-modal="true">
-        <!-- Backdrop -->
-        <div class="modal-backdrop" @click="close"></div>
-
-        <!-- Panel -->
-        <div class="modal-panel max-w-md">
-          <!-- Header -->
-          <div class="modal-header">
-            <div>
-              {{ workspace ? 'Edit Workspace' : 'Add Workspace' }}
-            </div>
-            <button class="close-button" @click="close">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M18 6L6 18M6 6l12 12"/></svg>
-            </button>
-          </div>
+  <BaseModal
+    :model-value="modelValue"
+    labelledby="workspace-edit-modal-title"
+    panel-class="max-w-md"
+    @update:model-value="close"
+  >
+    <!-- Header -->
+    <div class="modal-header">
+      <div id="workspace-edit-modal-title">
+        {{ workspace ? 'Edit Workspace' : 'Add Workspace' }}
+      </div>
+      <button class="close-button" aria-label="Close dialog" @click="close">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
 
           <!-- Body -->
           <div class="modal-body">
@@ -470,12 +469,9 @@ watch(AGENT_OPTIONS, (options) => {
               {{ workspace ? 'Save Workspace' : 'Create Workspace' }}
             </button>
           </div>
-        </div>
+  </BaseModal>
 
-        <DirPickerModal v-model="bShowDirPicker" :initial-path="form.path" @select="onDirPicked" />
-      </div>
-    </Transition>
-  </Teleport>
+  <DirPickerModal v-model="bShowDirPicker" :initial-path="form.path" @select="onDirPicked" />
 </template>
 
 <style scoped>

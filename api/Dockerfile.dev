@@ -23,24 +23,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl bash gosu openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
-
-
+# npm workspaces: install everything from the repo root
 WORKDIR /app
-
-# Build context is repo root (same as production Dockerfile)
-COPY api/package*.json ./
+COPY package.json package-lock.json ./
+COPY shared/ shared/
+COPY api/package.json api/
+COPY api/prisma api/prisma
+COPY api/prisma.config.ts api/
+COPY dashboard/package.json dashboard/
 RUN npm ci
 
-COPY api/tsconfig.json ./
+COPY api/tsconfig.json api/
 COPY api/docker-entrypoint.dev.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
-## generate prisma client
-COPY api/prisma ./prisma
-COPY api/prisma.config.ts ./prisma.config.ts
+# The API runs from its workspace dir (src is bind-mounted here by compose)
+WORKDIR /app/api
 RUN npx prisma generate
 
 EXPOSE 3000
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["npm", "run", "dev"]
-

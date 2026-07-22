@@ -3,6 +3,7 @@ import { computed, onMounted } from 'vue';
 import PageShell from '@/components/layout/PageShell.vue';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { useAuthStore } from '@/stores/auth';
+import { agentTypeChipClass, agentTypeShortLabel } from '@/utils/agentTypeMeta';
 import type { Session } from '@/@types/index';
 
 const workspacesStore = useWorkspacesStore();
@@ -41,21 +42,6 @@ const recentlyActive = computed<Session[]>(() => {
 
 function workspaceName(workspaceId: string): string {
   return workspacesStore.workspaces.find((w) => w.id === workspaceId)?.name ?? 'Workspace';
-}
-
-function agentClass(agentType: string): string {
-  if (agentType === 'claude') return 'agent-claude';
-  if (agentType === 'cursor-agent') return 'agent-cursor';
-  if (agentType === 'mistral-vibe') return 'agent-vibe';
-  if (agentType === 'open-code') return 'agent-opencode';
-  return '';
-}
-
-function agentLabel(agentType: string): string {
-  if (agentType === 'cursor-agent') return 'cursor';
-  if (agentType === 'mistral-vibe') return 'vibe';
-  if (agentType === 'claude') return 'claude';
-  return 'opencode';
 }
 
 const relFmt = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
@@ -127,8 +113,8 @@ onMounted(() => {
         >
           <span class="nc-status-dot" :class="session.busy ? 'busy' : 'idle'" />
           <span class="session-row__name">{{ session.name || 'Untitled session' }}</span>
-          <span v-if="session.agentType" class="nc-chip" :class="agentClass(session.agentType)">
-            {{ agentLabel(session.agentType) }}
+          <span v-if="session.agentType" class="nc-chip" :class="agentTypeChipClass(session.agentType)">
+            {{ agentTypeShortLabel(session.agentType) }}
           </span>
           <span class="session-row__ws nc-mono">{{ workspaceName(session.workspaceId) }}</span>
           <span class="session-row__age nc-mono">{{ relativeTime(session.updatedAt) }}</span>

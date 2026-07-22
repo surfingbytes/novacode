@@ -13,6 +13,7 @@ import type { ContextMenuItem } from '@/components/ContextMenu.vue';
 
 // stores
 import { useWorkspacesStore } from '@/stores/workspaces';
+import { useToastStore } from '@/stores/toasts';
 
 // classes
 import { agentAuthApi, sessionsApi, settingsApi } from '@/classes/api';
@@ -22,6 +23,7 @@ import type { AgentType, Workspace } from '@/@types/index';
 
 // -------------------------------------------------- Store --------------------------------------------------
 const store = useWorkspacesStore();
+const toastStore = useToastStore();
 const router = useRouter();
 
 // -------------------------------------------------- Refs --------------------------------------------------
@@ -253,7 +255,7 @@ const handleDeleteWorkspace = async (id: string): Promise<void> => {
     const msg =
       (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
       'Failed to delete workspace';
-    alert(msg);
+    toastStore.error(msg);
   } finally {
     deletingId.value = null;
     bShowWorkspaceDeleteModal.value = false;

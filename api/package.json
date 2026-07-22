@@ -6,12 +6,14 @@
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "prisma generate && tsc",
     "start": "node build/index.js",
+    "generate": "prisma generate",
     "typecheck": "prisma generate && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "^0.60.0",
+    "@novacode/shared": "file:../shared",
     "@agentclientprotocol/sdk": "^1.2.1",
     "@fastify/auth": "^5.0.4",
     "@fastify/cors": "^11.3.0",

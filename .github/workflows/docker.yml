@@ -6,13 +6,19 @@ on:
     paths:
       - 'api/**'
       - 'dashboard/**'
+      - 'shared/**'
       - 'Dockerfile'
+      - 'package.json'
+      - 'package-lock.json'
       - '.github/workflows/docker.yml'
   pull_request:
     paths:
       - 'api/**'
       - 'dashboard/**'
+      - 'shared/**'
       - 'Dockerfile'
+      - 'package.json'
+      - 'package-lock.json'
       - '.github/workflows/docker.yml'
 
 env:
@@ -34,13 +40,7 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: api/package-lock.json
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: dashboard/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Prepare .env for Docker build
         run: cp .env.example .env

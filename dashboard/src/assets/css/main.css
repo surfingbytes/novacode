@@ -15,6 +15,9 @@
   --color-text-muted: #a6a098;
   --color-info: #7aa2ff;
   --color-fg: #ffffff;
+  /* Text/icons sitting on filled accent-colored surfaces (buttons, chips).
+     Tracks the active theme's app background — passes WCAG AA on every theme. */
+  --color-on-accent: var(--bg);
   --font-family-sans:
     'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
     sans-serif;
@@ -156,6 +159,10 @@ button:disabled {
 .nc-chip.agent-opencode {
   color: var(--agent-opencode);
   border-color: color-mix(in oklab, var(--agent-opencode) 30%, var(--line));
+}
+.nc-chip.agent-codex {
+  color: var(--fg-muted);
+  border-color: color-mix(in oklab, var(--fg-muted) 30%, var(--line));
 }
 .nc-chip.success {
   color: var(--success);
@@ -324,7 +331,7 @@ input[type='radio'] {
 button.button {
   @apply flex items-center justify-center gap-2 h-10 bg-input cursor-pointer border border-border hover:border-primary/50 hover:bg-primary/10 text-text-primary text-sm font-medium px-4 py-2 rounded-md transition-all;
   &.is-primary {
-    @apply bg-primary border-transparent hover:bg-primary-hover text-white text-sm font-medium rounded-md transition-all;
+    @apply bg-primary border-transparent hover:bg-primary-hover text-on-accent text-sm font-medium rounded-md transition-all;
 
     /* glow */
     &.has-glow {
@@ -339,10 +346,10 @@ button.button {
   }
 
   &.is-destructive {
-    @apply bg-destructive border-transparent hover:bg-destructive/80 text-white text-sm font-medium rounded-md transition-all;
+    @apply bg-destructive border-transparent hover:bg-destructive/80 text-on-accent text-sm font-medium rounded-md transition-all;
   }
   &.is-warning {
-    @apply bg-warning border-transparent hover:bg-warning/80 text-white text-sm font-medium rounded-md transition-all;
+    @apply bg-warning border-transparent hover:bg-warning/80 text-on-accent text-sm font-medium rounded-md transition-all;
   }
 
   &.is-transparent {
@@ -364,7 +371,7 @@ button.button {
     @apply flex-1 text-sm text-center justify-center px-3 py-1.5 rounded-md transition-colors hover:bg-fg/75;
 
     &.is-active {
-      @apply bg-primary text-white;
+      @apply bg-primary text-on-accent;
     }
   }
 }
@@ -435,7 +442,8 @@ hr {
 
   .grid-view-items {
     @apply grid gap-4;
-    grid-template-columns: repeat(auto-fill, minmax(24rem, 1fr));
+    /* min(): never overflow viewports narrower than 24rem (small phones) */
+    grid-template-columns: repeat(auto-fill, minmax(min(24rem, 100%), 1fr));
     .grid-item {
       @apply bg-card/30 p-4 rounded-md border border-border overflow-hidden cursor-pointer;
       @apply transition-all hover:bg-card/40 hover:border-primary/50;
@@ -677,7 +685,7 @@ hr {
   a {
     @apply flex-1 flex items-center justify-center text-center px-3 py-2  pb-1.5 text-sm font-medium  transition-colors flex items-center gap-1.5;
     &.is-active {
-      @apply bg-primary text-white;
+      @apply bg-primary text-on-accent;
     }
   }
 
@@ -690,4 +698,14 @@ hr {
       @apply md:text-primary md:border-b-2 md:border-primary md:bg-transparent;
     }
   }
+}
+
+/* Global modal transition (used by BaseModal and all modal-fade transitions) */
+.modal-fade-enter-active,
+.modal-fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.modal-fade-enter-from,
+.modal-fade-leave-to {
+  opacity: 0;
 }

@@ -190,23 +190,14 @@ watch(agentType, () => {
 </script>
 
 <template>
-  <Teleport to="body">
-    <Transition name="modal-fade">
-      <div
-        v-if="modelValue"
-        class="fixed inset-0 z-50 flex items-center justify-center p-4"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="new-session-title"
-      >
-        <!-- Backdrop -->
-        <div class="absolute inset-0 bg-black/75 backdrop-blur-sm" @click="close" />
-
-        <!-- Panel -->
-        <form
-          class="modal-panel relative w-full max-w-sm bg-surface border border-fg/[0.09] rounded-2xl shadow-2xl shadow-black/60"
-          @submit.prevent="onCreate"
-        >
+  <BaseModal
+    :model-value="modelValue"
+    labelledby="new-session-title"
+    panel-class="max-w-sm"
+    @update:model-value="close"
+  >
+    <!-- Panel -->
+    <form class="contents" @submit.prevent="onCreate">
           <div class="px-6 pt-5 pb-4">
             <h2 id="new-session-title" class="font-semibold text-text-primary text-lg">
               {{ modalTitle }}
@@ -256,7 +247,7 @@ watch(agentType, () => {
                   :key="agent"
                   type="button"
                   class="text-xs px-2 py-1.5 rounded-md transition-colors text-text-muted hover:text-text-primary hover:bg-fg/[0.06]"
-                  :class="{ 'bg-primary text-white': agentType === agent }"
+                  :class="{ 'bg-primary text-on-accent': agentType === agent }"
                   :title="
                     agent === 'cursor-agent'
                       ? 'Cursor Agent'
@@ -319,7 +310,7 @@ watch(agentType, () => {
             </button>
             <button
               type="submit"
-              class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium bg-primary hover:bg-primary-hover text-white rounded-lg shadow-lg shadow-primary/20 transition-all disabled:opacity-50"
+              class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium bg-primary hover:bg-primary-hover text-on-accent rounded-lg shadow-lg shadow-primary/20 transition-all disabled:opacity-50"
               :disabled="loading"
             >
               <div
@@ -329,8 +320,6 @@ watch(agentType, () => {
               {{ createLabel }}
             </button>
           </div>
-        </form>
-      </div>
-    </Transition>
-  </Teleport>
+    </form>
+  </BaseModal>
 </template>

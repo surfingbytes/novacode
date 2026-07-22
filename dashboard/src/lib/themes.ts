@@ -26,6 +26,7 @@ export interface Theme {
   agentClaude: string;
   agentCursor: string;
   agentVibe: string;
+  agentOpencode: string;
   // Swatch dots for theme picker [bg, accent, surface]
   previewDots: [string, string, string];
 }
@@ -57,6 +58,7 @@ export const themes: Theme[] = [
     agentClaude: '#d97757',
     agentCursor: '#7aa2ff',
     agentVibe: '#7ec994',
+    agentOpencode: '#50c8d6',
     previewDots: ['#0f0e0d', '#8b85ff', '#171614']
   },
   {
@@ -85,6 +87,7 @@ export const themes: Theme[] = [
     agentClaude: '#ff8a4c',
     agentCursor: '#7aa2ff',
     agentVibe: '#7ec994',
+    agentOpencode: '#50c8d6',
     previewDots: ['#100c0a', '#ff8a4c', '#1a1210']
   },
   {
@@ -113,6 +116,7 @@ export const themes: Theme[] = [
     agentClaude: '#d97757',
     agentCursor: '#7aa2ff',
     agentVibe: '#7ec994',
+    agentOpencode: '#4fd8c4',
     previewDots: ['#0c0e0c', '#7ec994', '#111911']
   },
   {
@@ -141,6 +145,7 @@ export const themes: Theme[] = [
     agentClaude: '#d97757',
     agentCursor: '#7aa2ff',
     agentVibe: '#7ec994',
+    agentOpencode: '#50c8d6',
     previewDots: ['#0a0c12', '#7aa2ff', '#111525']
   },
   {
@@ -169,6 +174,7 @@ export const themes: Theme[] = [
     agentClaude: '#d97757',
     agentCursor: '#aaaaaa',
     agentVibe: '#7ec994',
+    agentOpencode: '#9a9a9a',
     previewDots: ['#0a0a0a', '#d4d4d4', '#141414']
   },
   {
@@ -197,6 +203,7 @@ export const themes: Theme[] = [
     agentClaude: '#b05a3c',
     agentCursor: '#3a6ad9',
     agentVibe: '#3f8a5a',
+    agentOpencode: '#0e7490',
     previewDots: ['#f6f3ec', '#4f48e6', '#fbf9f4']
   }
 ];
@@ -284,10 +291,12 @@ export function applyTheme(themeId: string): void {
   root.style.setProperty('--agent-claude', theme.agentClaude);
   root.style.setProperty('--agent-cursor', theme.agentCursor);
   root.style.setProperty('--agent-vibe', theme.agentVibe);
+  root.style.setProperty('--agent-opencode', theme.agentOpencode);
 
   root.setAttribute('data-theme', theme.dark ? 'dark' : 'light');
   document.body.style.background = theme.bg;
   document.body.style.color = theme.textPrimary;
+  window.dispatchEvent(new CustomEvent('nc-theme-changed'));
 }
 
 let _colorSchemeListener: ((e: MediaQueryListEvent) => void) | null = null;

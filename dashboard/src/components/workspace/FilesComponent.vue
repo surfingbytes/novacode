@@ -370,7 +370,7 @@ onUnmounted((): void => {
         Files
 
         <div class="flex items-center gap-1">
-          <button type="button" class="button is-icon is-transparent h-8!" @click="openCreateFile">
+          <button type="button" class="button is-icon is-transparent h-8!" aria-label="New file" title="New file" @click="openCreateFile">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
           </button>
 
@@ -378,6 +378,8 @@ onUnmounted((): void => {
           <button
             type="button"
             class="button is-icon is-transparent h-8!"
+            :aria-label="bFullscreen ? 'Exit fullscreen' : 'Fullscreen'"
+            :title="bFullscreen ? 'Exit fullscreen' : 'Fullscreen'"
             @click="bFullscreen = !bFullscreen"
           >
             <svg v-if="bFullscreen" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3"/></svg>

@@ -12,6 +12,7 @@ import { automationsApi, workspaceApi } from '@/classes/api';
 
 // types
 import type { Automation, AutomationRun, Workspace, AgentType } from '@/@types/index';
+import { agentTypeLabel } from '@/utils/agentTypeMeta';
 
 // -------------------------------------------------- Constants --------------------------------------------------
 
@@ -118,19 +119,6 @@ function formatInterval(minutes: number): string {
     return `${minutes / 1440}d`;
   }
   return `${minutes / 10080}w`;
-}
-
-function agentTypeLabel(t: AgentType): string {
-  if (t === 'claude') {
-    return 'Claude';
-  }
-  if (t === 'mistral-vibe') {
-    return 'Mistral Vibe';
-  }
-  if (t === 'open-code') {
-    return 'OpenCode';
-  }
-  return 'Cursor';
 }
 
 function formatNextRun(automation: Automation): string {
@@ -465,6 +453,8 @@ onUnmounted(() => {
         <button
           class="button is-icon"
           :class="{ 'is-active': viewMode === 'list' }"
+          aria-label="List view"
+          :aria-pressed="viewMode === 'list'"
           @click="setViewMode('list')"
         >
           <svg
@@ -489,6 +479,8 @@ onUnmounted(() => {
         <button
           class="button is-icon"
           :class="{ 'is-active': viewMode === 'grid' }"
+          aria-label="Grid view"
+          :aria-pressed="viewMode === 'grid'"
           @click="setViewMode('grid')"
         >
           <svg

@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router';
 
 // components
 import AppTerminal from '@/components/AppTerminal.vue';
+import BaseModal from '@/components/BaseModal.vue';
 
 // stores
 import { useAuthStore } from '@/stores/auth';
@@ -331,9 +332,9 @@ onMounted((): void => {
               <div
                 class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-all duration-300 ring-4"
                 :class="{
-                  'bg-success text-white ring-success/20 shadow-lg':
+                  'bg-success text-on-accent ring-success/20 shadow-lg':
                     stepStatuses[((i + 1) as 1 | 2 | 3 | 4)] === 'complete',
-                  'bg-primary text-white ring-primary/20 shadow-lg shadow-primary/30':
+                  'bg-primary text-on-accent ring-primary/20 shadow-lg shadow-primary/30':
                     stepStatuses[((i + 1) as 1 | 2 | 3 | 4)] === 'active',
                   'bg-surface border-2 border-border text-text-muted ring-transparent':
                     stepStatuses[((i + 1) as 1 | 2 | 3 | 4)] === 'pending'
@@ -829,19 +830,14 @@ onMounted((): void => {
     </footer>
 
     <!-- Authentication terminal overlay (Claude/Cursor login) -->
-    <Teleport to="body">
-      <Transition name="modal-fade">
-        <div
-          v-if="authSessionId"
-          class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
-          @click.self="dismissAuthTerminal"
-        >
-          <div
-            class="w-full max-w-3xl flex flex-col bg-fg/[0.04] border border-fg/[0.12] rounded-xl shadow-2xl"
-            @click.stop
-          >
+    <BaseModal
+      :model-value="authSessionId !== null"
+      labelledby="setup-auth-terminal-title"
+      panel-class="max-w-3xl"
+      @update:model-value="(v: boolean) => { if (!v) dismissAuthTerminal(); }"
+    >
             <div class="flex shrink-0 items-center justify-between px-4 py-3 border-b border-fg/[0.08]">
-              <p class="text-sm font-medium text-text-primary">Authentication terminal</p>
+              <p id="setup-auth-terminal-title" class="text-sm font-medium text-text-primary">Authentication terminal</p>
               <button
                 class="text-sm px-3 py-2 text-text-muted hover:text-text-primary hover:bg-fg/[0.08] rounded-lg transition-all"
                 @click="dismissAuthTerminal"
@@ -853,6 +849,7 @@ onMounted((): void => {
             <div class="flex-1 min-h-0 overflow-y-auto p-4">
               <div class="h-96 rounded-lg overflow-hidden bg-black/40">
                 <AppTerminal
+                  v-if="authSessionId"
                   ref="authTerminalRef"
                   :session-id="authSessionId"
                   :scan-urls="true"
@@ -889,17 +886,14 @@ onMounted((): void => {
                 </div>
               </div>
               <button
-                class="shrink-0 bg-primary hover:bg-primary-hover disabled:opacity-40 text-white text-sm px-4 py-2.5 rounded-lg transition-all"
+                class="shrink-0 bg-primary hover:bg-primary-hover disabled:opacity-40 text-on-accent text-sm px-4 py-2.5 rounded-lg transition-all"
                 :disabled="!authCode.trim()"
                 @click="submitAuthCode"
               >
                 Submit
               </button>
             </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    </BaseModal>
   </div>
 </template>
 

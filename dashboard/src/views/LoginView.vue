@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // node_modules
 import { ref, computed, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 
 // stores
 import { useAuthStore } from '@/stores/auth';
@@ -12,6 +12,7 @@ import { authApi } from '@/classes/api';
 // -------------------------------------------------- Store --------------------------------------------------
 const auth = useAuthStore();
 const router = useRouter();
+const route = useRoute();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const bSetupLoading = ref<boolean>(true);
@@ -40,7 +41,10 @@ const submit = async (): Promise<void> => {
   const success = await auth.login(username.value, password.value);
   bLoading.value = false;
   if (success) {
-    await router.push('/');
+    // Return to the deep link the user was headed to before the auth detour.
+    const redirect = route.query.redirect;
+    const target = typeof redirect === 'string' && redirect.startsWith('/') ? redirect : '/';
+    await router.push(target);
   } else {
     error.value = 'Invalid username or password';
     password.value = '';
