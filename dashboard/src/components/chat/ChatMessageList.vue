@@ -36,6 +36,8 @@ interface DisplayChatMessage {
 const props = withDefaults(
   defineProps<{
     bLoading: boolean;
+    /** False while the first chat history frame is still in flight */
+    bHistoryLoaded: boolean;
     displayMessages: DisplayChatMessage[];
     streamingDisplayItems: DisplayItem[];
     streamingThinkingText: string;
@@ -250,7 +252,7 @@ defineExpose({ scrollToBottom, notifyHistoryPage, forceInitialScrollToBottom });
       @scroll="onMessagesScroll"
     >
       <!-- Chat skeleton -->
-      <template v-if="bLoading">
+      <template v-if="bLoading || (!bHistoryLoaded && !chatError)">
         <div class="space-y-4">
           <div class="flex gap-2.5">
             <div class="w-[26px] h-[26px] rounded-md bg-fg/10 animate-pulse shrink-0" />
@@ -282,7 +284,7 @@ defineExpose({ scrollToBottom, notifyHistoryPage, forceInitialScrollToBottom });
 
         <!-- Empty state -->
         <div
-          v-if="displayMessages.length === 0 && !bIsStreaming && !bLoadingMore"
+          v-if="bHistoryLoaded && displayMessages.length === 0 && !bIsStreaming && !bLoadingMore"
           class="h-full flex items-center justify-center"
         >
           <p class="text-sm text-text-muted">Start the conversation below.</p>

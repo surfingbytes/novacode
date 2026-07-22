@@ -216,6 +216,7 @@ const {
   queuedPrompts,
   bHasMore,
   bLoadingMore,
+  bHistoryLoaded,
   bWsConnected,
   bWsReconnecting
 } = chatSocket;
@@ -610,6 +611,7 @@ onUnmounted(() => {
         <ChatMessageList
           ref="chatListRef"
           :b-loading="bLoading"
+          :b-history-loaded="bHistoryLoaded"
           :display-messages="displayMessages"
           :streaming-display-items="streamingDisplayItems"
           :streaming-thinking-text="streamingThinkingText"

@@ -11,6 +11,7 @@ import { Bug, ChevronDown, Infinity as InfinityIcon, ListChecks, ListTodo, Messa
 
 // components
 import AgentModelPicker from '@/components/AgentModelPicker.vue';
+import UiSelectMenu, { type SelectMenuOption } from '@/components/ui/UiSelectMenu.vue';
 
 // types
 import type {
@@ -118,6 +119,10 @@ const promptPlaceholder = computed(() => {
 });
 
 // -------------------------------------------------- Methods --------------------------------------------------
+
+function configMenuOptions(cfg: AgentConfigOption): SelectMenuOption[] {
+  return cfg.options.map((option) => ({ value: option.value, label: option.label }));
+}
 
 function send(): void {
   const text = promptText.value.trim();
@@ -504,17 +509,14 @@ defineExpose({
           class="flex min-w-0 items-center gap-1"
         >
           <span class="hidden shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted sm:inline">{{ cfg.label }}</span>
-          <select
-            :value="agentConfigDisplayValue(cfg)"
+          <UiSelectMenu
+            :model-value="agentConfigDisplayValue(cfg)"
+            :options="configMenuOptions(cfg)"
             :disabled="bIsStreaming || bConfigLoading || bSavingSessionConfig"
             :aria-label="cfg.label"
-            class="h-5! min-h-0! w-[4.25rem] rounded border border-fg/[0.08] bg-transparent px-1! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50 sm:w-24 sm:px-1.5!"
-            @change="emit('configChange', cfg.id, ($event.target as HTMLSelectElement).value)"
-          >
-            <option v-for="opt in cfg.options" :key="opt.value" :value="opt.value">
-              {{ opt.label }}
-            </option>
-          </select>
+            button-class="w-[4.75rem] sm:w-24"
+            @update:model-value="(v) => emit('configChange', cfg.id, v)"
+          />
         </label>
         <AgentModelPicker
           :model-value="modelSelection"

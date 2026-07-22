@@ -1,6 +1,9 @@
 <script setup lang="ts">
 // node_modules
-import { computed, ref, nextTick } from 'vue';
+import { computed, ref } from 'vue';
+
+// components
+import UiSelectMenu, { type SelectMenuOption } from '@/components/ui/UiSelectMenu.vue';
 
 // types
 import type { AgentModelOption, AgentThinkingOptionGroup, AgentType } from '@/@types/index';
@@ -475,25 +478,15 @@ function resolveDefaultModelOption(model: string): AgentModelOption | null {
   return resolveModelOption(model, thinking, context, bHasFastVariants && bHasSlowFastVariant ? false : null);
 }
 
-function reopenModelSelect(selectEl: HTMLSelectElement): void {
-  selectEl.focus();
-  try {
-    selectEl.showPicker?.();
-  } catch {
-    // Some browsers only allow showPicker during the original user gesture.
-  }
-}
-
 function emitSelection(option: AgentModelOption | null): void {
   if (option) {
     emit('update:modelValue', option.id);
   }
 }
 
-function onModelSelectChange(value: string, selectEl: HTMLSelectElement): void {
+function onModelSelectChange(value: string): void {
   if (value === MORE_MODEL_OPTION_VALUE) {
     bShowAllCursorModels.value = true;
-    void nextTick(() => reopenModelSelect(selectEl));
     return;
   }
 
@@ -547,6 +540,25 @@ function onModelFastChange(checked: boolean): void {
   emitSelection(next);
 }
 
+const modelMenuOptions = computed<SelectMenuOption[]>(() => {
+  const options: SelectMenuOption[] = visibleModelOptions.value.map((option) => ({
+    value: option.value,
+    label: option.label
+  }));
+  if (bHasHiddenModelOptions.value) {
+    options.push({ value: MORE_MODEL_OPTION_VALUE, label: 'More…', hint: 'special' });
+  }
+  return options;
+});
+
+const thinkingMenuOptions = computed<SelectMenuOption[]>(() =>
+  thinkingSelectOptions.value.map((option) => ({ value: option.value, label: option.label }))
+);
+
+const contextMenuOptions = computed<SelectMenuOption[]>(() =>
+  contextList.value.map((context) => ({ value: context, label: context }))
+);
+
 const wrapperClass = computed(() =>
   props.variant === 'compact'
     ? 'flex min-w-0 flex-wrap items-center gap-1 text-xs'
@@ -557,15 +569,11 @@ const labelClass = computed(() =>
     ? 'hidden shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted sm:inline'
     : 'shrink-0 text-[9px] font-medium uppercase tracking-wide text-text-muted'
 );
-const selectClass = computed(() =>
-  props.variant === 'compact'
-    ? 'h-5! min-h-0! w-[5.25rem] rounded border border-fg/[0.08] bg-transparent px-1! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50 sm:w-32 sm:px-1.5!'
-    : 'h-7 min-h-0 rounded border border-fg/[0.08] bg-transparent px-1.5 text-xs leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50'
+const selectButtonClass = computed(() =>
+  props.variant === 'compact' ? 'w-[5.5rem] sm:w-32' : 'w-36 h-[26px]!'
 );
-const smallSelectClass = computed(() =>
-  props.variant === 'compact'
-    ? 'h-5! min-h-0! w-[4.25rem] rounded border border-fg/[0.08] bg-transparent px-1! py-0! text-[11px] leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50 sm:w-24 sm:px-1.5!'
-    : 'h-7 min-h-0 w-24 rounded border border-fg/[0.08] bg-transparent px-1.5 text-xs leading-none text-text-primary focus:border-primary/50 focus:outline-none disabled:opacity-50'
+const smallSelectButtonClass = computed(() =>
+  props.variant === 'compact' ? 'w-[4.5rem] sm:w-24' : 'w-24 h-[26px]!'
 );
 </script>
 
@@ -573,48 +581,37 @@ const smallSelectClass = computed(() =>
   <div :class="wrapperClass">
     <label class="flex min-w-0 items-center gap-1">
       <span :class="labelClass">Model</span>
-      <select
-        :value="modelSelectValue"
+      <UiSelectMenu
+        :model-value="modelSelectValue"
+        :options="modelMenuOptions"
         :disabled="disabled"
         aria-label="Model"
-        :class="selectClass"
-        @change="onModelSelectChange(($event.target as HTMLSelectElement).value, $event.target as HTMLSelectElement)"
-      >
-        <option v-for="model in visibleModelOptions" :key="model.value" :value="model.value">
-          {{ model.label }}
-        </option>
-        <option v-if="bHasHiddenModelOptions" :value="MORE_MODEL_OPTION_VALUE">
-          More...
-        </option>
-      </select>
+        :button-class="selectButtonClass"
+        @update:model-value="onModelSelectChange"
+        @special="onModelSelectChange"
+      />
     </label>
     <label class="flex min-w-0 items-center gap-1">
       <span :class="labelClass">{{ thinkingLabel }}</span>
-      <select
-        :value="selectedThinkingValue"
+      <UiSelectMenu
+        :model-value="selectedThinkingValue"
+        :options="thinkingMenuOptions"
         :disabled="disabled"
         :aria-label="thinkingLabel"
-        :class="smallSelectClass"
-        @change="onModelDimensionChange('thinking', ($event.target as HTMLSelectElement).value)"
-      >
-        <option v-for="thinking in thinkingSelectOptions" :key="thinking.value" :value="thinking.value">
-          {{ thinking.label }}
-        </option>
-      </select>
+        :button-class="smallSelectButtonClass"
+        @update:model-value="(v) => onModelDimensionChange('thinking', v)"
+      />
     </label>
     <label class="flex min-w-0 items-center gap-1">
       <span :class="labelClass">Context</span>
-      <select
-        :value="selectedContextName"
+      <UiSelectMenu
+        :model-value="selectedContextName"
+        :options="contextMenuOptions"
         :disabled="disabled"
         aria-label="Context"
-        :class="smallSelectClass"
-        @change="onModelDimensionChange('context', ($event.target as HTMLSelectElement).value)"
-      >
-        <option v-for="context in contextList" :key="context" :value="context">
-          {{ context }}
-        </option>
-      </select>
+        :button-class="smallSelectButtonClass"
+        @update:model-value="(v) => onModelDimensionChange('context', v)"
+      />
     </label>
     <label
       v-if="bFastAvailable"

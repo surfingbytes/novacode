@@ -62,6 +62,8 @@ export function useChatSocket(ctx: UseChatSocketContext) {
   const lastPromptRequest = ref<{ text: string; imagePaths: string[] } | null>(null);
   const bHasMore = ref(false);
   const bLoadingMore = ref(false);
+  /** True once the first `history` frame for this session has arrived. */
+  const bHistoryLoaded = ref(false);
   const bWsConnected = ref(false);
   const bWsReconnecting = ref(false);
 
@@ -97,6 +99,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
   // -------------------------------------------------- Frame handlers --------------------------------------------------
 
   function handleHistory(msg: ChatWsServerMessage): void {
+    bHistoryLoaded.value = true;
     messages.value = msg.messages ?? [];
     seenVibeMessageIds.clear();
     seenVibeToolCallIds.clear();
@@ -353,6 +356,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
 
   /** Reset everything (session switch / unmount). */
   function resetChatState(): void {
+    bHistoryLoaded.value = false;
     messages.value = [];
     seenVibeMessageIds.clear();
     seenVibeToolCallIds.clear();
@@ -381,6 +385,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     lastPromptRequest,
     bHasMore,
     bLoadingMore,
+    bHistoryLoaded,
     bWsConnected,
     bWsReconnecting,
     // methods
