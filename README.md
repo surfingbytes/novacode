@@ -307,7 +307,14 @@ app/
 │   └── src/
 │       ├── views/        # Page-level components
 │       ├── components/   # Shared UI components
-│       └── stores/       # Pinia stores
+│       │   ├── ui/       # Design primitives (UiButton, UiToggle, EmptyState, EntityDetailHeader, BottomTabBar)
+│       │   ├── chat/     # Chat surface (ChatMessageList, ChatDisplayItems, ChatComposer)
+│       │   ├── workspace/# Workspace-specific (SessionCard, OrchestratorCard, GitView, …)
+│       │   └── automations/
+│       ├── composables/  # useChatSocket, useAgentOptions, usePlanDocuments, useAgentCapabilities, useLongPress
+│       ├── lib/          # Framework-free helpers (themes, notifications, wsClient, mermaid)
+│       ├── utils/        # chatDisplayItems, tagColors, agentTypeMeta, relativeTime, …
+│       └── stores/       # Pinia stores (workspaces, orchestrators, auth, toasts, apiHealth)
 ├── shared/               # @novacode/shared — canonical types + stream parsing (API ⇄ dashboard)
 │   └── src/
 │       ├── types.ts      # Entity + WebSocket protocol types
@@ -345,6 +352,7 @@ Pull requests are welcome. For larger changes, please open an issue first to dis
 Refactors and new code should follow the shared conventions in `/data-root/personal/CODING_CONVENTIONS.md` (import grouping, Vue section layout, boolean naming, and explicit control-flow braces).
 Recent UI refactors standardize modal and menu scripts to the section-header layout (`Props`, `Emits`, `Store`, `Constants`, `Refs`, `Computed`, `Watchers`, `Methods`, `Lifecycle` as applicable), use the `b` prefix on local boolean refs in views such as **Automations** (`bLoading`, `bShowCreateForm`, …) and context-menu visibility (`bCtxMenuOpen`), merge duplicate `@/classes/api` imports where obvious, and replace inline control-flow one-liners with explicit `{}` blocks in script logic.
 The stream-preview and orchestrator-payload logic now lives in `shared/` (`@novacode/shared`) as the single source of truth for both API and dashboard; the old per-app files are thin re-export shims. New shared behavior should be added there (with tests in `shared/src/*.test.ts`), not in per-app copies.
+The dashboard chat surface is decomposed: stream→display parsing is pure logic in `dashboard/src/utils/chatDisplayItems.ts` (regression tests alongside), connection/state in `src/composables/`, and presentation in `src/components/chat/`. Reusable UI primitives live in `src/components/ui/` — use them for new UI instead of hand-rolling buttons/toggles/modals (`BaseModal` + `ModalHeader` for dialogs).
 
 ---
 

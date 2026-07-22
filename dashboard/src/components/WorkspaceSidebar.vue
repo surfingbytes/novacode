@@ -20,6 +20,7 @@ import type { ContextMenuItem } from '@/components/ContextMenu.vue';
 
 // utils
 import { subtasksFromStoredJson } from '@/utils/orchestratorPayload';
+import { relativeTimeShort } from '@/utils/relativeTime';
 import { formatSessionSidebarPreview, previewFromMessageJson } from '@/utils/sessionListPreview';
 import { tagColorClass as categoryColorClass } from '@/utils/tagColors';
 
@@ -192,27 +193,6 @@ function sessionPreviewLine(session: Session): string {
 function orchestratorPreviewLine(orch: Orchestrator): string {
   const preview = previewFromMessageJson(orch.messageJson);
   return preview ? formatSessionSidebarPreview(preview.text, preview.role) : '';
-}
-
-function relativeTime(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const seconds = Math.floor(diff / 1000);
-  if (seconds < 60) {
-    return 'just now';
-  }
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) {
-    return `${minutes}m ago`;
-  }
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    return `${hours}h ago`;
-  }
-  const days = Math.floor(hours / 24);
-  if (days < 30) {
-    return `${days}d ago`;
-  }
-  return new Date(dateStr).toLocaleDateString();
 }
 
 async function load(): Promise<void> {
@@ -482,7 +462,7 @@ watch(
                     {{ item.session.name || 'Untitled session' }}
                   </span>
                   <span class="text-[11px] text-text-muted shrink-0 whitespace-nowrap tabular-nums">
-                    {{ relativeTime(item.session.updatedAt) }}
+                    {{ relativeTimeShort(item.session.updatedAt) }}
                   </span>
                 </div>
                 <p
@@ -539,7 +519,7 @@ watch(
                       {{ item.orchestrator.name || 'Untitled orchestrator' }}
                     </span>
                     <span class="text-[11px] text-text-muted shrink-0 whitespace-nowrap tabular-nums">
-                      {{ relativeTime(item.orchestrator.updatedAt) }}
+                      {{ relativeTimeShort(item.orchestrator.updatedAt) }}
                     </span>
                   </div>
                   <p

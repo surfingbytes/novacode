@@ -4,27 +4,37 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 
 // components
 import ConfirmModal from '@/components/ConfirmModal.vue';
+import AutomationCard from '@/components/automations/AutomationCard.vue';
+import AutomationFormModal from '@/components/automations/AutomationFormModal.vue';
 import PageShell from '@/components/layout/PageShell.vue';
 import PageHeader from '@/components/layout/PageHeader.vue';
 
 // api
 import { automationsApi, workspaceApi } from '@/classes/api';
 
+// stores
+import { useToastStore } from '@/stores/toasts';
+
 // types
 import type { Automation, AutomationRun, Workspace, AgentType } from '@/@types/index';
-import { agentTypeLabel } from '@/utils/agentTypeMeta';
 
-// -------------------------------------------------- Constants --------------------------------------------------
+// utils
+import { formatDate } from '@/components/automations/automationFormat';
 
-const intervalPresets = [
-  { label: '15 minutes', value: 15 },
-  { label: '30 minutes', value: 30 },
-  { label: '1 hour', value: 60 },
-  { label: '6 hours', value: 360 },
-  { label: '12 hours', value: 720 },
-  { label: '24 hours (daily)', value: 1440 },
-  { label: '7 days (weekly)', value: 10080 }
-];
+// -------------------------------------------------- Types --------------------------------------------------
+
+interface AutomationFormPayload {
+  name: string;
+  workspaceId: string;
+  agentType: AgentType;
+  intervalMinutes: number;
+  prompt: string;
+  enabled: boolean;
+}
+
+// -------------------------------------------------- Stores --------------------------------------------------
+
+const toastStore = useToastStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 
@@ -32,7 +42,6 @@ const workspaces = ref<Workspace[]>([]);
 const automations = ref<Automation[]>([]);
 const bLoading = ref(true);
 const errorMessage = ref<string | null>(null);
-const successMessage = ref<string | null>(null);
 const viewMode = ref<'list' | 'grid'>(
   (localStorage.getItem('automationsViewMode') as 'list' | 'grid') ?? 'list'
 );
@@ -43,27 +52,11 @@ const runs = ref<AutomationRun[]>([]);
 const bRunsLoading = ref(false);
 const selectedRun = ref<AutomationRun | null>(null);
 
-// create modal
-const bShowCreateForm = ref(false);
-const newName = ref('');
-const newWorkspaceId = ref('');
-const newAgentType = ref<AgentType>('cursor-agent');
-const newPrompt = ref('');
-const newIntervalMinutes = ref(60);
-const bNewEnabled = ref(true);
-const bCreating = ref(false);
-const createError = ref<string | null>(null);
-
-// edit modal
-const bShowEditModal = ref(false);
-const editingId = ref<string | null>(null);
-const editName = ref('');
-const editAgentType = ref<AgentType>('cursor-agent');
-const editPrompt = ref('');
-const editIntervalMinutes = ref(60);
-const bEditEnabled = ref(true);
-const bSavingEdit = ref(false);
-const editError = ref<string | null>(null);
+// form modal (shared by create + edit; null = create)
+const bShowFormModal = ref(false);
+const editingAutomation = ref<Automation | null>(null);
+const bSavingForm = ref(false);
+const formError = ref<string | null>(null);
 
 // delete
 const automationToDelete = ref<Automation | null>(null);
@@ -85,64 +78,9 @@ const deleteConfirmDescription = computed(() =>
 
 // -------------------------------------------------- Methods --------------------------------------------------
 
-function showSuccess(msg: string): void {
-  successMessage.value = msg;
-  setTimeout(() => {
-    successMessage.value = null;
-  }, 3000);
-}
-
 function setViewMode(mode: 'list' | 'grid'): void {
   viewMode.value = mode;
   localStorage.setItem('automationsViewMode', mode);
-}
-
-function formatDate(iso: string | null): string {
-  if (!iso) {
-    return '—';
-  }
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
-}
-
-function formatInterval(minutes: number): string {
-  if (minutes < 60) {
-    return `${minutes}m`;
-  }
-  if (minutes < 1440) {
-    return `${minutes / 60}h`;
-  }
-  if (minutes < 10080) {
-    return `${minutes / 1440}d`;
-  }
-  return `${minutes / 10080}w`;
-}
-
-function formatNextRun(automation: Automation): string {
-  if (!automation.enabled) {
-    return 'Disabled';
-  }
-  if (!automation.nextRunAt) {
-    return '—';
-  }
-  const next = new Date(automation.nextRunAt);
-  const now = new Date();
-  const diff = next.getTime() - now.getTime();
-  if (diff <= 0) {
-    return 'Running soon…';
-  }
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 60) {
-    return `in ${mins}m`;
-  }
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) {
-    return `in ${hrs}h ${mins % 60}m`;
-  }
-  return `in ${Math.floor(hrs / 24)}d`;
 }
 
 async function fetchAll(): Promise<void> {
@@ -209,130 +147,60 @@ function startPoll(): void {
   }, 15_000);
 }
 
-// --- create ---
+// --- create/edit form modal ---
 function openCreateForm(): void {
-  bShowCreateForm.value = true;
-  newName.value = '';
-  newWorkspaceId.value = workspaces.value[0]?.id ?? '';
-  newAgentType.value = 'cursor-agent';
-  newPrompt.value = '';
-  newIntervalMinutes.value = 60;
-  bNewEnabled.value = true;
-  createError.value = null;
+  editingAutomation.value = null;
+  formError.value = null;
+  bShowFormModal.value = true;
 }
 
-function cancelCreate(): void {
-  if (bCreating.value) {
-    return;
-  }
-  bShowCreateForm.value = false;
-  createError.value = null;
-}
-
-async function createAutomation(): Promise<void> {
-  createError.value = null;
-  if (!newName.value.trim()) {
-    createError.value = 'Name is required';
-    return;
-  }
-  if (!newWorkspaceId.value) {
-    createError.value = 'Workspace is required';
-    return;
-  }
-  if (!newPrompt.value.trim()) {
-    createError.value = 'Prompt is required';
-    return;
-  }
-  if (newIntervalMinutes.value < 1) {
-    createError.value = 'Interval must be at least 1 minute';
-    return;
-  }
-
-  bCreating.value = true;
-  try {
-    await automationsApi.create({
-      name: newName.value.trim(),
-      workspaceId: newWorkspaceId.value,
-      agentType: newAgentType.value,
-      prompt: newPrompt.value.trim(),
-      intervalMinutes: newIntervalMinutes.value,
-      enabled: bNewEnabled.value
-    });
-    await fetchAll();
-    cancelCreate();
-    showSuccess('Automation created');
-  } catch (e: unknown) {
-    const caughtError = e as { response?: { data?: { error?: string } }; message?: string };
-    createError.value =
-      caughtError.response?.data?.error ?? caughtError.message ?? 'Failed to create';
-  } finally {
-    bCreating.value = false;
-  }
-}
-
-// --- edit ---
 function startEdit(a: Automation): void {
-  bShowEditModal.value = true;
-  editingId.value = a.id;
-  editName.value = a.name;
-  editAgentType.value = a.agentType;
-  editPrompt.value = a.prompt;
-  editIntervalMinutes.value = a.intervalMinutes;
-  bEditEnabled.value = a.enabled;
-  editError.value = null;
+  editingAutomation.value = a;
+  formError.value = null;
+  bShowFormModal.value = true;
 }
 
-function cancelEdit(): void {
-  if (bSavingEdit.value) {
-    return;
-  }
-  bShowEditModal.value = false;
-  editingId.value = null;
-  editError.value = null;
-}
-
-async function saveEdit(): Promise<void> {
-  if (!editingId.value) {
-    return;
-  }
-  editError.value = null;
-  if (!editName.value.trim()) {
-    editError.value = 'Name is required';
-    return;
-  }
-  if (!editPrompt.value.trim()) {
-    editError.value = 'Prompt is required';
-    return;
-  }
-  if (editIntervalMinutes.value < 1) {
-    editError.value = 'Interval must be >= 1 minute';
-    return;
-  }
-
-  bSavingEdit.value = true;
+async function saveAutomation(payload: AutomationFormPayload): Promise<void> {
+  formError.value = null;
+  bSavingForm.value = true;
+  const target = editingAutomation.value;
   try {
-    await automationsApi.update(editingId.value, {
-      name: editName.value.trim(),
-      agentType: editAgentType.value,
-      prompt: editPrompt.value.trim(),
-      intervalMinutes: editIntervalMinutes.value,
-      enabled: bEditEnabled.value
-    });
+    if (target) {
+      await automationsApi.update(target.id, {
+        name: payload.name,
+        agentType: payload.agentType,
+        prompt: payload.prompt,
+        intervalMinutes: payload.intervalMinutes,
+        enabled: payload.enabled
+      });
+    } else {
+      await automationsApi.create({
+        name: payload.name,
+        workspaceId: payload.workspaceId,
+        agentType: payload.agentType,
+        prompt: payload.prompt,
+        intervalMinutes: payload.intervalMinutes,
+        enabled: payload.enabled
+      });
+    }
     await fetchAll();
     // refresh selected if it's the one we edited
-    if (selectedAutomation.value?.id === editingId.value) {
-      const updated = automations.value.find((a) => a.id === editingId.value);
+    if (target && selectedAutomation.value?.id === target.id) {
+      const updated = automations.value.find((a) => a.id === target.id);
       if (updated) {
         selectedAutomation.value = updated;
       }
     }
-    cancelEdit();
-    showSuccess('Automation updated');
+    bShowFormModal.value = false;
+    toastStore.success(target ? 'Automation updated' : 'Automation created');
   } catch (e: unknown) {
     const caughtError = e as { response?: { data?: { error?: string } }; message?: string };
-    editError.value = caughtError.response?.data?.error ?? caughtError.message ?? 'Failed to save';
+    formError.value =
+      caughtError.response?.data?.error ??
+      caughtError.message ??
+      (target ? 'Failed to save' : 'Failed to create');
   } finally {
-    bSavingEdit.value = false;
+    bSavingForm.value = false;
   }
 }
 
@@ -364,7 +232,7 @@ async function doDelete(): Promise<void> {
     }
     await fetchAll();
     automationToDelete.value = null;
-    showSuccess('Automation deleted');
+    toastStore.success('Automation deleted');
   } catch {
     errorMessage.value = 'Failed to delete automation';
   } finally {
@@ -377,7 +245,7 @@ async function triggerNow(a: Automation): Promise<void> {
   triggeringId.value = a.id;
   try {
     await automationsApi.trigger(a.id);
-    showSuccess('Automation triggered — it will run in the background');
+    toastStore.success('Automation triggered — it will run in the background');
     // wait a bit then refresh runs
     setTimeout(() => {
       if (selectedAutomation.value?.id === a.id) {
@@ -510,12 +378,6 @@ onUnmounted(() => {
     >
       {{ errorMessage }}
     </div>
-    <div
-      v-if="successMessage"
-      class="mb-4 px-4 py-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm"
-    >
-      {{ successMessage }}
-    </div>
 
     <!-- Loading -->
     <div v-if="bLoading" class="flex items-center gap-2 py-8 text-text-muted text-sm">
@@ -558,314 +420,38 @@ onUnmounted(() => {
           v-if="viewMode === 'list'"
           class="rounded-lg border border-fg/10 bg-fg/[0.02] divide-y divide-fg/10 overflow-hidden"
         >
-          <li
+          <AutomationCard
             v-for="a in automations"
             :key="a.id"
-            class="px-4 py-3 hover:bg-fg/[0.03] transition-colors cursor-pointer"
-            :class="{
-              'ring-1 ring-inset ring-primary/30 bg-primary/[0.02]': selectedAutomation?.id === a.id
-            }"
-            @click="selectAutomation(a)"
-          >
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-2 flex-wrap">
-                  <p class="text-sm font-medium text-text-primary truncate">{{ a.name }}</p>
-                  <!-- enabled badge -->
-                  <span
-                    class="text-[10px] px-1.5 py-0.5 rounded font-medium"
-                    :class="
-                      a.enabled ? 'bg-green-500/15 text-green-400' : 'bg-fg/10 text-text-muted'
-                    "
-                  >
-                    {{ a.enabled ? 'active' : 'disabled' }}
-                  </span>
-                  <!-- agent badge -->
-                  <span
-                    class="text-[10px] px-1.5 py-0.5 rounded bg-fg/10 text-text-muted font-medium"
-                  >
-                    {{ agentTypeLabel(a.agentType) }}
-                  </span>
-                </div>
-                <div class="flex items-center gap-3 mt-1 text-xs text-text-muted flex-wrap">
-                  <span>{{ workspaceName(a.workspaceId) }}</span>
-                  <span>every {{ formatInterval(a.intervalMinutes) }}</span>
-                  <span>next: {{ formatNextRun(a) }}</span>
-                  <span v-if="a.lastRunAt">last: {{ formatDate(a.lastRunAt) }}</span>
-                </div>
-                <p class="text-xs text-text-muted mt-1 truncate opacity-70">{{ a.prompt }}</p>
-              </div>
-              <!-- Actions -->
-              <div class="flex items-center gap-1 shrink-0" @click.stop>
-                <!-- toggle -->
-                <button
-                  type="button"
-                  :title="a.enabled ? 'Disable' : 'Enable'"
-                  class="p-1.5 text-text-muted hover:text-text-primary hover:bg-fg/[0.06] rounded-lg transition-colors"
-                  @click="toggleEnabled(a)"
-                >
-                  <svg
-                    v-if="a.enabled"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.6"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    width="16"
-                    height="16"
-                    aria-hidden="true"
-                  >
-                    <rect x="6" y="4" width="4" height="16" />
-                    <rect x="14" y="4" width="4" height="16" />
-                  </svg>
-                  <svg
-                    v-else
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.6"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    width="16"
-                    height="16"
-                    aria-hidden="true"
-                  >
-                    <polygon points="5 3 19 12 5 21 5 3" />
-                  </svg>
-                </button>
-                <!-- trigger now -->
-                <button
-                  type="button"
-                  title="Run now"
-                  class="p-1.5 text-text-muted hover:text-primary hover:bg-primary/[0.06] rounded-lg transition-colors"
-                  :disabled="triggeringId === a.id"
-                  @click="triggerNow(a)"
-                >
-                  <span
-                    v-if="triggeringId === a.id"
-                    class="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin block"
-                  />
-                  <svg
-                    v-else
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.6"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    width="16"
-                    height="16"
-                    aria-hidden="true"
-                  >
-                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                  </svg>
-                </button>
-                <!-- edit -->
-                <button
-                  type="button"
-                  title="Edit"
-                  class="p-1.5 text-text-muted hover:text-text-primary hover:bg-fg/[0.06] rounded-lg transition-colors"
-                  @click="startEdit(a)"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.6"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    width="16"
-                    height="16"
-                    aria-hidden="true"
-                  >
-                    <path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6" />
-                    <path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z" />
-                  </svg>
-                </button>
-                <!-- delete -->
-                <button
-                  type="button"
-                  title="Delete"
-                  class="p-1.5 text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
-                  @click="confirmDelete(a)"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.6"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    width="16"
-                    height="16"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"
-                    />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          </li>
+            :automation="a"
+            :workspace-name="workspaceName(a.workspaceId)"
+            :b-selected="selectedAutomation?.id === a.id"
+            :b-triggering="triggeringId === a.id"
+            @select="selectAutomation(a)"
+            @edit="startEdit(a)"
+            @toggle="toggleEnabled(a)"
+            @trigger="triggerNow(a)"
+            @delete="confirmDelete(a)"
+          />
         </ul>
 
         <!-- Automation grid -->
         <div v-else class="grid-view">
           <div class="grid-view-items">
-            <article
+            <AutomationCard
               v-for="a in automations"
               :key="a.id"
-              class="group grid-item cursor-pointer"
-              :class="{
-                'ring-1 ring-inset ring-primary/30 bg-primary/[0.02]':
-                  selectedAutomation?.id === a.id
-              }"
-              @click="selectAutomation(a)"
-            >
-              <div class="top">
-                <div class="icon">
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.6"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    width="16"
-                    height="16"
-                    aria-hidden="true"
-                  >
-                    <circle cx="12" cy="12" r="10" />
-                    <polyline points="12 6 12 12 16 14" />
-                  </svg>
-                </div>
-                <div class="info min-w-0">
-                  <p class="title truncate">{{ a.name }}</p>
-                  <p class="text-xs text-text-muted mt-1">
-                    {{ workspaceName(a.workspaceId) }} · every
-                    {{ formatInterval(a.intervalMinutes) }}
-                  </p>
-                  <p class="text-xs text-text-muted mt-1">next: {{ formatNextRun(a) }}</p>
-                  <p class="text-xs text-text-muted mt-1 truncate opacity-70">{{ a.prompt }}</p>
-                  <div class="flex items-center gap-2 mt-2">
-                    <span
-                      class="text-[10px] px-1.5 py-0.5 rounded font-medium"
-                      :class="
-                        a.enabled ? 'bg-green-500/15 text-green-400' : 'bg-fg/10 text-text-muted'
-                      "
-                    >
-                      {{ a.enabled ? 'active' : 'disabled' }}
-                    </span>
-                    <span
-                      class="text-[10px] px-1.5 py-0.5 rounded bg-fg/10 text-text-muted font-medium"
-                    >
-                      {{ agentTypeLabel(a.agentType) }}
-                    </span>
-                  </div>
-                </div>
-                <div class="buttons" @click.stop>
-                  <button
-                    class="button is-icon is-transparent"
-                    :title="a.enabled ? 'Disable' : 'Enable'"
-                    @click="toggleEnabled(a)"
-                  >
-                    <svg
-                      v-if="a.enabled"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.6"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      width="14"
-                      height="14"
-                      aria-hidden="true"
-                    >
-                      <rect x="6" y="4" width="4" height="16" />
-                      <rect x="14" y="4" width="4" height="16" />
-                    </svg>
-                    <svg
-                      v-else
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.6"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      width="14"
-                      height="14"
-                      aria-hidden="true"
-                    >
-                      <polygon points="5 3 19 12 5 21 5 3" />
-                    </svg>
-                  </button>
-                  <button
-                    class="button is-icon is-transparent"
-                    title="Run now"
-                    :disabled="triggeringId === a.id"
-                    @click="triggerNow(a)"
-                  >
-                    <span
-                      v-if="triggeringId === a.id"
-                      class="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin block"
-                    />
-                    <svg
-                      v-else
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.6"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      width="14"
-                      height="14"
-                      aria-hidden="true"
-                    >
-                      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                    </svg>
-                  </button>
-                  <button class="button is-icon is-transparent" title="Edit" @click="startEdit(a)">
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.6"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      width="14"
-                      height="14"
-                      aria-hidden="true"
-                    >
-                      <path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6" />
-                      <path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z" />
-                    </svg>
-                  </button>
-                  <button
-                    class="button is-icon is-transparent is-delete"
-                    title="Delete"
-                    @click="confirmDelete(a)"
-                  >
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.6"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      width="14"
-                      height="14"
-                      aria-hidden="true"
-                    >
-                      <path
-                        d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            </article>
+              b-grid
+              :automation="a"
+              :workspace-name="workspaceName(a.workspaceId)"
+              :b-selected="selectedAutomation?.id === a.id"
+              :b-triggering="triggeringId === a.id"
+              @select="selectAutomation(a)"
+              @edit="startEdit(a)"
+              @toggle="toggleEnabled(a)"
+              @trigger="triggerNow(a)"
+              @delete="confirmDelete(a)"
+            />
           </div>
         </div>
       </div>
@@ -1189,193 +775,15 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Create modal -->
-    <div
-      v-if="bShowCreateForm"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      @click.self="cancelCreate"
-    >
-      <div class="bg-bg border border-fg/20 rounded-lg shadow-xl max-w-2xl w-full p-4">
-        <h2 class="text-sm font-medium text-text-primary mb-3">New automation</h2>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-medium text-text-muted mb-1">Name</label>
-            <input
-              v-model="newName"
-              type="text"
-              placeholder="e.g. Daily security audit"
-              class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
-              :disabled="bCreating"
-            />
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-text-muted mb-1">Workspace</label>
-            <select
-              v-model="newWorkspaceId"
-              class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
-              :disabled="bCreating"
-            >
-              <option v-for="w in workspaces" :key="w.id" :value="w.id">{{ w.name }}</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-text-muted mb-1">Agent</label>
-            <select
-              v-model="newAgentType"
-              class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
-              :disabled="bCreating"
-            >
-              <option value="cursor-agent">Cursor</option>
-              <option value="mistral-vibe">Mistral Vibe</option>
-              <option value="claude">Claude</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-text-muted mb-1">Interval</label>
-            <select
-              v-model="newIntervalMinutes"
-              class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
-              :disabled="bCreating"
-            >
-              <option v-for="p in intervalPresets" :key="p.value" :value="p.value">
-                {{ p.label }}
-              </option>
-            </select>
-          </div>
-          <div class="md:col-span-2">
-            <label class="block text-xs font-medium text-text-muted mb-1">Prompt</label>
-            <textarea
-              v-model="newPrompt"
-              rows="4"
-              placeholder="Describe what the agent should do each time it runs…"
-              class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all resize-y"
-              :disabled="bCreating"
-            />
-          </div>
-        </div>
-        <p v-if="createError" class="text-sm text-destructive mt-2">{{ createError }}</p>
-        <div class="flex items-center justify-end gap-2 mt-4">
-          <label class="flex items-center gap-2 cursor-pointer mr-auto">
-            <input
-              v-model="bNewEnabled"
-              type="checkbox"
-              class="accent-primary w-4 h-4"
-              :disabled="bCreating"
-            />
-            <span class="text-sm text-text-muted">Enabled</span>
-          </label>
-          <button
-            type="button"
-            class="px-3 py-1.5 text-sm text-text-muted hover:text-text-primary hover:bg-fg/[0.06] rounded-lg transition-colors"
-            :disabled="bCreating"
-            @click="cancelCreate"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            class="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
-            :disabled="bCreating || !newName.trim() || !newPrompt.trim() || !newWorkspaceId"
-            @click="createAutomation"
-          >
-            <span
-              v-if="bCreating"
-              class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"
-            />
-            Create
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Edit modal -->
-    <div
-      v-if="bShowEditModal"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      @click.self="cancelEdit"
-    >
-      <div class="bg-bg border border-fg/20 rounded-lg shadow-xl max-w-2xl w-full p-4">
-        <h2 class="text-sm font-medium text-text-primary mb-3">Edit automation</h2>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-medium text-text-muted mb-1">Name</label>
-            <input
-              v-model="editName"
-              type="text"
-              class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
-              :disabled="bSavingEdit"
-            />
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-text-muted mb-1">Agent</label>
-            <select
-              v-model="editAgentType"
-              class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
-              :disabled="bSavingEdit"
-            >
-              <option value="cursor-agent">Cursor</option>
-              <option value="mistral-vibe">Mistral Vibe</option>
-              <option value="claude">Claude</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-text-muted mb-1">Interval</label>
-            <select
-              v-model="editIntervalMinutes"
-              class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
-              :disabled="bSavingEdit"
-            >
-              <option v-for="p in intervalPresets" :key="p.value" :value="p.value">
-                {{ p.label }}
-              </option>
-            </select>
-          </div>
-          <div class="flex items-end pb-0.5">
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input
-                v-model="bEditEnabled"
-                type="checkbox"
-                class="accent-primary w-4 h-4"
-                :disabled="bSavingEdit"
-              />
-              <span class="text-sm text-text-muted">Enabled</span>
-            </label>
-          </div>
-          <div class="md:col-span-2">
-            <label class="block text-xs font-medium text-text-muted mb-1">Prompt</label>
-            <textarea
-              v-model="editPrompt"
-              rows="4"
-              class="w-full bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-sm text-text-primary outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all resize-y"
-              :disabled="bSavingEdit"
-            />
-          </div>
-        </div>
-        <p v-if="editError" class="text-sm text-destructive mt-2">{{ editError }}</p>
-        <div class="flex items-center justify-end gap-2 mt-4">
-          <button
-            type="button"
-            class="px-3 py-1.5 text-sm text-text-muted hover:text-text-primary hover:bg-fg/[0.06] rounded-lg transition-colors"
-            :disabled="bSavingEdit"
-            @click="cancelEdit"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            class="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
-            :disabled="bSavingEdit || !editName.trim() || !editPrompt.trim()"
-            @click="saveEdit"
-          >
-            <span
-              v-if="bSavingEdit"
-              class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"
-            />
-            Save
-          </button>
-        </div>
-      </div>
-    </div>
+    <!-- Create/edit modal -->
+    <AutomationFormModal
+      v-model="bShowFormModal"
+      :automation="editingAutomation"
+      :workspaces="workspaces"
+      :b-saving="bSavingForm"
+      :server-error="formError"
+      @save="saveAutomation"
+    />
 
     <!-- Delete confirm -->
     <ConfirmModal

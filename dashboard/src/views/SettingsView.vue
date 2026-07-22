@@ -3,6 +3,7 @@
 import { computed, ref, onMounted } from 'vue';
 
 // components
+import ApiKeyModal from '@/components/ApiKeyModal.vue';
 import AppTerminal from '@/components/AppTerminal.vue';
 import BaseModal from '@/components/BaseModal.vue';
 import ModalHeader from '@/components/ModalHeader.vue';
@@ -82,8 +83,6 @@ const bLoggingOutOpenCode = ref<boolean>(false);
 const bLoggingOutCodex = ref<boolean>(false);
 const bShowOpenCodeApiKeyModal = ref<boolean>(false);
 const bShowCodexApiKeyModal = ref<boolean>(false);
-const openCodeApiKeyInput = ref<string>('');
-const codexApiKeyInput = ref<string>('');
 const bSavingOpenCodeApiKey = ref<boolean>(false);
 const bSavingCodexApiKey = ref<boolean>(false);
 const openCodeApiKeyError = ref<string>('');
@@ -130,7 +129,6 @@ const bSavingClaudeAutoContinue = ref<boolean>(false);
 const bVibeConfigured = ref<boolean>(false);
 const bLoadingVibeStatus = ref<boolean>(false);
 const bShowVibeApiKeyModal = ref<boolean>(false);
-const vibeApiKeyInput = ref<string>('');
 const bSavingVibeApiKey = ref<boolean>(false);
 const vibeApiKeyError = ref<string>('');
 const bDeletingVibeApiKey = ref<boolean>(false);
@@ -497,7 +495,6 @@ const logoutClaude = async (): Promise<void> => {
 };
 
 const openOpenCodeApiKeyModal = (): void => {
-  openCodeApiKeyInput.value = '';
   openCodeApiKeyError.value = '';
   bShowOpenCodeApiKeyModal.value = true;
 };
@@ -509,8 +506,8 @@ const closeOpenCodeApiKeyModal = (): void => {
   loadOpenCodeProviders();
 };
 
-const saveOpenCodeApiKey = async (): Promise<void> => {
-  const key = openCodeApiKeyInput.value.trim();
+const saveOpenCodeApiKey = async (apiKey: string): Promise<void> => {
+  const key = apiKey.trim();
   openCodeApiKeyError.value = '';
   if (!key) {
     openCodeApiKeyError.value = 'Enter your OpenCode API key.';
@@ -672,7 +669,6 @@ const deleteOpenCodeProvider = async (providerId: string): Promise<void> => {
 };
 
 const openCodexApiKeyModal = (): void => {
-  codexApiKeyInput.value = '';
   codexApiKeyError.value = '';
   bShowCodexApiKeyModal.value = true;
 };
@@ -683,8 +679,8 @@ const closeCodexApiKeyModal = (): void => {
   refreshAuthStatus();
 };
 
-const saveCodexApiKey = async (): Promise<void> => {
-  const key = codexApiKeyInput.value.trim();
+const saveCodexApiKey = async (apiKey: string): Promise<void> => {
+  const key = apiKey.trim();
   codexApiKeyError.value = '';
   if (!key) {
     codexApiKeyError.value = 'Enter your Codex API key.';
@@ -782,7 +778,6 @@ const loadVibeApiKeyStatus = async (): Promise<void> => {
 };
 
 const openVibeApiKeyModal = (): void => {
-  vibeApiKeyInput.value = '';
   vibeApiKeyError.value = '';
   bShowVibeApiKeyModal.value = true;
 };
@@ -793,8 +788,8 @@ const closeVibeApiKeyModal = (): void => {
   loadVibeApiKeyStatus();
 };
 
-const saveVibeApiKey = async (): Promise<void> => {
-  const key = vibeApiKeyInput.value.trim();
+const saveVibeApiKey = async (apiKey: string): Promise<void> => {
+  const key = apiKey.trim();
   vibeApiKeyError.value = '';
   if (!key) {
     vibeApiKeyError.value = 'Enter your Mistral API key.';
@@ -1652,98 +1647,39 @@ onMounted((): void => {
     </BaseModal>
 
     <!-- Codex API key modal -->
-    <BaseModal
+    <ApiKeyModal
       :model-value="bShowCodexApiKeyModal"
-      labelledby="codex-key-modal-title"
-      panel-class="max-w-md"
+      provider-name="Codex"
+      eyebrow="// codex api key"
+      description="Enter your OpenAI API key for Codex ACP authentication."
+      placeholder="Your OpenAI API key"
+      :b-configured="bCodexAuthenticated"
+      :b-saving="bSavingCodexApiKey"
+      :error-message="codexApiKeyError"
       @update:model-value="(v: boolean) => { if (!v) closeCodexApiKeyModal(); }"
-    >
-            <ModalHeader
-              :eyebrow="'// codex api key'"
-              :title="'Codex API key'"
-              title-id="codex-key-modal-title"
-              @close="closeCodexApiKeyModal"
-            />
-            <div class="flex-1 min-h-0 p-4 space-y-4">
-              <p class="text-sm text-text-muted">
-                Enter your OpenAI API key for Codex ACP authentication.
-              </p>
-              <div>
-                <label class="block text-sm font-medium text-text-primary mb-1.5">API key</label>
-                <input
-                  v-model="codexApiKeyInput"
-                  type="password"
-                  placeholder="Your OpenAI API key"
-                  class="w-full bg-fg/[0.05] border border-fg/[0.1] rounded-lg px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
-                  :disabled="bSavingCodexApiKey"
-                  autocomplete="off"
-                  @keydown.enter="saveCodexApiKey"
-                />
-              </div>
-              <p v-if="codexApiKeyError" class="text-xs text-destructive">{{ codexApiKeyError }}</p>
-            </div>
-            <div class="flex flex-shrink-0 gap-2 p-4 pt-0">
-              <button
-                class="flex-1 bg-primary hover:bg-primary-hover disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg transition-all"
-                :disabled="!codexApiKeyInput.trim() || bSavingCodexApiKey"
-                @click="saveCodexApiKey"
-              >
-                {{ bSavingCodexApiKey ? 'Saving…' : 'Save' }}
-              </button>
-            </div>
-    </BaseModal>
+      @save="saveCodexApiKey"
+    />
 
     <!-- Mistral Vibe API key setup modal -->
-    <BaseModal
+    <ApiKeyModal
       :model-value="bShowVibeApiKeyModal"
-      labelledby="vibe-key-modal-title"
-      panel-class="max-w-md"
+      provider-name="Mistral Vibe"
+      eyebrow="// mistral vibe api key"
+      placeholder="Your Mistral API key"
+      :b-configured="bVibeConfigured"
+      :b-saving="bSavingVibeApiKey"
+      :b-deleting="bDeletingVibeApiKey"
+      :error-message="vibeApiKeyError"
       @update:model-value="(v: boolean) => { if (!v) closeVibeApiKeyModal(); }"
+      @save="saveVibeApiKey"
+      @delete="deleteVibeApiKey"
     >
-            <ModalHeader
-              :eyebrow="'// mistral vibe api key'"
-              :title="'Mistral Vibe API key'"
-              title-id="vibe-key-modal-title"
-              @close="closeVibeApiKeyModal"
-            />
-            <div class="flex-1 min-h-0 p-4 space-y-4">
-              <p class="text-sm text-text-muted">
-                Enter your Mistral API key. It will be saved to
-                <code class="bg-fg/[0.06] px-1 py-0.5 rounded text-[11px]">~/.vibe/.env</code>
-                and used when running Vibe.
-              </p>
-              <div>
-                <label class="block text-sm font-medium text-text-primary mb-1.5">API key</label>
-                <input
-                  v-model="vibeApiKeyInput"
-                  type="password"
-                  placeholder="Your Mistral API key"
-                  class="w-full bg-fg/[0.05] border border-fg/[0.1] rounded-lg px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
-                  :disabled="bSavingVibeApiKey"
-                  autocomplete="off"
-                  @keydown.enter="saveVibeApiKey"
-                />
-              </div>
-              <p v-if="vibeApiKeyError" class="text-xs text-destructive">{{ vibeApiKeyError }}</p>
-            </div>
-            <div class="flex flex-shrink-0 gap-2 p-4 pt-0">
-              <button
-                class="flex-1 bg-primary hover:bg-primary-hover disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg transition-all"
-                :disabled="!vibeApiKeyInput.trim() || bSavingVibeApiKey"
-                @click="saveVibeApiKey"
-              >
-                {{ bSavingVibeApiKey ? 'Saving…' : 'Save' }}
-              </button>
-              <button
-                v-if="bVibeConfigured"
-                class="flex-1 bg-destructive/10 hover:bg-destructive/20 text-destructive text-sm font-medium py-2.5 rounded-lg border border-destructive/40 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                :disabled="bDeletingVibeApiKey"
-                @click="deleteVibeApiKey"
-              >
-                {{ bDeletingVibeApiKey ? 'Removing…' : 'Remove key' }}
-              </button>
-            </div>
-    </BaseModal>
+      <template #description>
+        Enter your Mistral API key. It will be saved to
+        <code class="bg-fg/[0.06] px-1 py-0.5 rounded text-[11px]">~/.vibe/.env</code>
+        and used when running Vibe.
+      </template>
+    </ApiKeyModal>
 
     <!-- OpenCode provider modal -->
     <BaseModal
@@ -1863,47 +1799,22 @@ onMounted((): void => {
     </BaseModal>
 
     <!-- OpenCode API key modal -->
-    <BaseModal
+    <ApiKeyModal
       :model-value="bShowOpenCodeApiKeyModal"
-      labelledby="opencode-key-modal-title"
-      panel-class="max-w-md"
+      provider-name="OpenCode"
+      eyebrow="// opencode api key"
+      placeholder="Your OpenCode API key"
+      :b-configured="bOpenCodeAuthenticated"
+      :b-saving="bSavingOpenCodeApiKey"
+      :error-message="openCodeApiKeyError"
       @update:model-value="(v: boolean) => { if (!v) closeOpenCodeApiKeyModal(); }"
+      @save="saveOpenCodeApiKey"
     >
-            <ModalHeader
-              :eyebrow="'// opencode api key'"
-              :title="'OpenCode API key'"
-              title-id="opencode-key-modal-title"
-              @close="closeOpenCodeApiKeyModal"
-            />
-            <div class="flex-1 min-h-0 p-4 space-y-4">
-              <p class="text-sm text-text-muted">
-                Enter your OpenCode API key. It will be stored via
-                <code class="bg-fg/[0.06] px-1 py-0.5 rounded text-[11px]">opencode auth login -p opencode</code>.
-              </p>
-              <div>
-                <label class="block text-sm font-medium text-text-primary mb-1.5">API key</label>
-                <input
-                  v-model="openCodeApiKeyInput"
-                  type="password"
-                  placeholder="Your OpenCode API key"
-                  class="w-full bg-fg/[0.05] border border-fg/[0.1] rounded-lg px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
-                  :disabled="bSavingOpenCodeApiKey"
-                  autocomplete="off"
-                  @keydown.enter="saveOpenCodeApiKey"
-                />
-              </div>
-              <p v-if="openCodeApiKeyError" class="text-xs text-destructive">{{ openCodeApiKeyError }}</p>
-            </div>
-            <div class="flex flex-shrink-0 gap-2 p-4 pt-0">
-              <button
-                class="flex-1 bg-primary hover:bg-primary-hover disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg transition-all"
-                :disabled="!openCodeApiKeyInput.trim() || bSavingOpenCodeApiKey"
-                @click="saveOpenCodeApiKey"
-              >
-                {{ bSavingOpenCodeApiKey ? 'Saving…' : 'Save' }}
-              </button>
-            </div>
-    </BaseModal>
+      <template #description>
+        Enter your OpenCode API key. It will be stored via
+        <code class="bg-fg/[0.06] px-1 py-0.5 rounded text-[11px]">opencode auth login -p opencode</code>.
+      </template>
+    </ApiKeyModal>
 
     <!-- Authentication terminal overlay (Claude/Cursor login) -->
     <BaseModal

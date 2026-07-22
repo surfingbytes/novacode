@@ -41,8 +41,8 @@ const router = createRouter({
         {
           path: '',
           name: 'workspace-sessions',
-          component: (): Promise<typeof import('@/views/workspace/detail/SessionView.vue')> =>
-            import('@/views/workspace/detail/SessionView.vue')
+          component: (): Promise<typeof import('@/views/workspace/detail/SessionListView.vue')> =>
+            import('@/views/workspace/detail/SessionListView.vue')
         },
         {
           path: 'files',

@@ -10,8 +10,8 @@ import PageShell from '@/components/layout/PageShell.vue';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { useOrchestratorsStore } from '@/stores/orchestrators';
 
-// classes
-import { settingsApi } from '@/classes/api';
+// composables
+import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
 
 // types
 import { APP_NAV_TOGGLE_KEY } from '@/constants/layout';
@@ -34,8 +34,7 @@ const orchestratorsViewMode = ref<'list' | 'grid'>(
 );
 const bShowArchived = ref(false);
 const selectedIds = ref<Set<string>>(new Set());
-const bClaudeAvailable = ref(false);
-const bCursorAvailable = ref(false);
+const { ensureLoaded: ensureAgentCapabilitiesLoaded } = useAgentCapabilities();
 const longPressTimer = ref<ReturnType<typeof setTimeout> | null>(null);
 const orchLongPressTimer = ref<ReturnType<typeof setTimeout> | null>(null);
 
@@ -78,17 +77,6 @@ const ensureData = async (): Promise<void> => {
   await store.fetchAll();
 };
 
-const loadAgentCapabilities = async (): Promise<void> => {
-  try {
-    const { data } = await settingsApi.getAgentCapabilities();
-    bClaudeAvailable.value = data.claudeAvailable;
-    bCursorAvailable.value = data.cursorAvailable;
-  } catch {
-    bClaudeAvailable.value = false;
-    bCursorAvailable.value = false;
-  }
-};
-
 const fetchOrchestrators = async (): Promise<void> => {
   if (!workspaceId.value) {
     return;
@@ -105,7 +93,7 @@ const fetchOrchestrators = async (): Promise<void> => {
 
 onMounted(() => {
   ensureData();
-  loadAgentCapabilities();
+  ensureAgentCapabilitiesLoaded();
   store.setActiveWorkspace(workspaceId.value);
   fetchOrchestrators();
 });

@@ -10,7 +10,10 @@ import OrchestratorContent from '@/components/OrchestratorContent.vue';
 import NewSessionModal from '@/components/NewSessionModal.vue';
 
 // classes
-import { apiErrorMessage, sessionsApi, settingsApi } from '@/classes/api';
+import { apiErrorMessage, sessionsApi } from '@/classes/api';
+
+// composables
+import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
 
 // stores
 import { useWorkspacesStore } from '@/stores/workspaces';
@@ -71,32 +74,18 @@ const pendingPlanHandoff = ref<{
   defaultModelSelection?: string;
   defaultSessionMode?: string;
 } | null>(null);
-const claudeAvailable = ref(false);
-const cursorAvailable = ref(false);
-const mistralVibeAvailable = ref(false);
-const openCodeAvailable = ref(false);
-const codexAvailable = ref(false);
+const {
+  claudeAvailable,
+  cursorAvailable,
+  mistralVibeAvailable,
+  openCodeAvailable,
+  codexAvailable,
+  ensureLoaded: ensureAgentCapabilitiesLoaded
+} = useAgentCapabilities();
 
 async function ensureWorkspaceLoaded(): Promise<void> {
   if (store.workspaces.some((w) => w.id === workspaceId.value)) return;
   await store.fetchAll();
-}
-
-async function loadAgentCapabilities(): Promise<void> {
-  try {
-    const { data } = await settingsApi.getAgentCapabilities();
-    claudeAvailable.value = data.claudeAvailable;
-    cursorAvailable.value = data.cursorAvailable;
-    mistralVibeAvailable.value = data.mistralVibeAvailable;
-    openCodeAvailable.value = data.openCodeAvailable;
-    codexAvailable.value = data.codexAvailable;
-  } catch {
-    claudeAvailable.value = false;
-    cursorAvailable.value = false;
-    mistralVibeAvailable.value = false;
-    openCodeAvailable.value = false;
-    codexAvailable.value = false;
-  }
 }
 
 async function createSession(payload: {
@@ -189,7 +178,7 @@ onMounted(() => {
   }
   ensureWorkspaceLoaded();
   store.setActiveWorkspace(workspaceId.value);
-  loadAgentCapabilities();
+  ensureAgentCapabilitiesLoaded();
 });
 
 watch(

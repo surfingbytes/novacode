@@ -4,6 +4,7 @@ import PageShell from '@/components/layout/PageShell.vue';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { useAuthStore } from '@/stores/auth';
 import { agentTypeChipClass, agentTypeShortLabel } from '@/utils/agentTypeMeta';
+import { relativeTimeLong } from '@/utils/relativeTime';
 import type { Session } from '@/@types/index';
 
 const workspacesStore = useWorkspacesStore();
@@ -42,22 +43,6 @@ const recentlyActive = computed<Session[]>(() => {
 
 function workspaceName(workspaceId: string): string {
   return workspacesStore.workspaces.find((w) => w.id === workspaceId)?.name ?? 'Workspace';
-}
-
-const relFmt = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
-
-function relativeTime(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return '—';
-  const diffSec = Math.round((then - Date.now()) / 1000);
-  if (Math.abs(diffSec) < 60) return relFmt.format(diffSec, 'second');
-  const diffMin = Math.round(diffSec / 60);
-  if (Math.abs(diffMin) < 60) return relFmt.format(diffMin, 'minute');
-  const diffHr = Math.round(diffMin / 60);
-  if (Math.abs(diffHr) < 24) return relFmt.format(diffHr, 'hour');
-  const diffDay = Math.round(diffHr / 24);
-  if (Math.abs(diffDay) < 30) return relFmt.format(diffDay, 'day');
-  return relFmt.format(Math.round(diffDay / 30), 'month');
 }
 
 onMounted(() => {
@@ -117,7 +102,7 @@ onMounted(() => {
             {{ agentTypeShortLabel(session.agentType) }}
           </span>
           <span class="session-row__ws nc-mono">{{ workspaceName(session.workspaceId) }}</span>
-          <span class="session-row__age nc-mono">{{ relativeTime(session.updatedAt) }}</span>
+          <span class="session-row__age nc-mono">{{ relativeTimeLong(session.updatedAt) }}</span>
         </RouterLink>
       </div>
     </div>

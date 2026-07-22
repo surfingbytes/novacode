@@ -105,11 +105,6 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     }
   };
 
-  function disconnectSessionSocket(): void {
-    sessionSocket?.close();
-    sessionSocket = null;
-  }
-
   function connectSessionSocket(): void {
     if (sessionSocket) {
       return;
@@ -170,13 +165,6 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     await ensureSessionsInitialized();
   };
 
-  const teardownActiveWorkspace = (): void => {
-    disconnectSessionSocket();
-    activeWorkspaceId.value = null;
-    allSessions.value = [];
-    sessionsInitialized = false;
-  };
-
   const createWorkspace = async (payload: CreateWorkspacePayload): Promise<Workspace> => {
     const response = await workspaceApi.create(payload);
     workspaces.value.push(response.data);
@@ -226,7 +214,6 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     setActiveWorkspace,
     fetchAllSessions,
     ensureSessionsInitialized,
-    teardownActiveWorkspace,
     createWorkspace,
     updateWorkspace,
     archiveWorkspace,

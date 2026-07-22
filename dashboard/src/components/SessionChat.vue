@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // node_modules
-import { ref, computed, onMounted, onUnmounted, nextTick, watch, inject } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { ChevronDown } from 'lucide-vue-next';
 
@@ -13,11 +13,12 @@ import SessionEditModal from '@/components/SessionEditModal.vue';
 import ClaudeLimitPopup from '@/components/ClaudeLimitPopup.vue';
 import ChatMessageList from '@/components/chat/ChatMessageList.vue';
 import ChatComposer, { type PendingAttachment } from '@/components/chat/ChatComposer.vue';
+import EntityDetailHeader from '@/components/ui/EntityDetailHeader.vue';
+import BottomTabBar from '@/components/ui/BottomTabBar.vue';
 
 // classes
 import { sessionsApi, settingsApi, buildSessionTerminalWsUrl } from '@/classes/api';
 import { renderMermaidDiagrams } from '@/lib/mermaid';
-import { tagColorClass as categoryColorClass } from '@/utils/tagColors';
 import {
   isPlanEntryCompleted,
   parseHistoryEventsCached,
@@ -38,7 +39,6 @@ import { useAuthStore } from '@/stores/auth';
 
 // types
 import type { ChatMessage, LinkedPlanContext, Session } from '@/@types/index';
-import { APP_NAV_TOGGLE_KEY } from '@/constants/layout';
 
 // -------------------------------------------------- Props --------------------------------------------------
 const props = defineProps<{
@@ -66,7 +66,6 @@ const router = useRouter();
 const workspacesStore = useWorkspacesStore();
 const toastStore = useToastStore();
 const auth = useAuthStore();
-const toggleAppNav = inject(APP_NAV_TOGGLE_KEY, null);
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const session = ref<Session | null>(null);
@@ -76,8 +75,6 @@ const bShowEditModal = ref(false);
 const bSavingEdit = ref(false);
 const bShowDeleteModal = ref(false);
 const bDeletingSession = ref(false);
-const bMobileSessionMenuOpen = ref(false);
-const mobileSessionMenuRef = ref<HTMLElement | null>(null);
 const bPlanActionsMenuOpen = ref(false);
 const planActionsMenuRef = ref<HTMLElement | null>(null);
 const sessionChatRootRef = ref<HTMLElement | null>(null);
@@ -341,6 +338,14 @@ const sessionTerminalWsUrl = computed(() =>
   buildSessionTerminalWsUrl(props.workspaceId, props.sessionId)
 );
 
+const sessionTabs = computed(() => [
+  { id: 'chat', label: 'Chat' },
+  { id: 'plan', label: 'Plan', bVisible: bShowPlanTab.value },
+  { id: 'terminal', label: 'Terminal' },
+  { id: 'files', label: 'Files' },
+  { id: 'git', label: 'Git' }
+]);
+
 const chatErrorActionLabel = computed(() => {
   if (chatErrorCode.value === 'auth_required') return 'Open Settings';
   if (chatErrorCode.value === 'timeout' && chatSocket.lastPromptRequest.value) return 'Try again';
@@ -378,20 +383,12 @@ function handleChatErrorAction(): void {
   }
 }
 
-function closeMobileSessionMenu(): void {
-  bMobileSessionMenuOpen.value = false;
-}
-
 function closePlanActionsMenu(): void {
   bPlanActionsMenuOpen.value = false;
 }
 
 function handleDocumentClickMobileMenu(e: MouseEvent): void {
   const target = e.target as Node;
-  const mobileEl = mobileSessionMenuRef.value;
-  if (bMobileSessionMenuOpen.value && mobileEl && !mobileEl.contains(target)) {
-    closeMobileSessionMenu();
-  }
   const planActionsEl = planActionsMenuRef.value;
   if (bPlanActionsMenuOpen.value && planActionsEl && !planActionsEl.contains(target)) {
     closePlanActionsMenu();
@@ -400,7 +397,6 @@ function handleDocumentClickMobileMenu(e: MouseEvent): void {
 
 function handleKeydownMobileMenu(e: KeyboardEvent): void {
   if (e.key === 'Escape' && lightboxSrc.value) lightboxSrc.value = null;
-  if (e.key === 'Escape' && bMobileSessionMenuOpen.value) closeMobileSessionMenu();
   if (e.key === 'Escape' && bPlanActionsMenuOpen.value) closePlanActionsMenu();
 }
 
@@ -444,21 +440,6 @@ async function toggleArchive(): Promise<void> {
   } catch {
     toastStore.error('Failed to toggle archive');
   }
-}
-
-function onMobileMenuEdit(): void {
-  closeMobileSessionMenu();
-  openEditModal();
-}
-
-async function onMobileMenuArchive(): Promise<void> {
-  closeMobileSessionMenu();
-  await toggleArchive();
-}
-
-function onMobileMenuDelete(): void {
-  closeMobileSessionMenu();
-  bShowDeleteModal.value = true;
 }
 
 // ── Session fetch ─────────────────────────────────────────────────────────────
@@ -602,131 +583,18 @@ onUnmounted(() => {
 <template>
   <div ref="sessionChatRootRef" class="flex-1 flex flex-col overflow-hidden">
     <!-- Header -->
-    <div class="h-16 px-4 md:px-6 flex items-center border-b border-fg/10 shrink-0 gap-3 min-w-0">
-      <!-- Name + tags -->
-      <div class="flex-1 min-w-0 flex flex-col gap-0.5">
-        <div class="flex items-center min-w-0">
-          <button
-            v-if="toggleAppNav"
-            type="button"
-            class="button is-transparent is-icon mr-1 lg:hidden! shrink-0"
-            title="App menu"
-            aria-label="App menu"
-            @click="toggleAppNav()"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18 M3 12h18 M3 18h18" /></svg>
-          </button>
-          <button
-            v-if="props.showSidebarToggle"
-            @click="emit('toggle-sidebar')"
-            class="button is-transparent is-icon mr-2 lg:hidden! shrink-0"
-            title="Sessions list"
-            aria-label="Sessions list"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>
-          </button>
-          <div class="flex flex-col">
-            <h1 class="text-base font-semibold text-text-primary truncate">
-              {{ bLoading ? '…' : session?.name || 'Session' }}
-            </h1>
-            <!-- workspace name -->
-            <p class="text-xs text-text-muted">
-              {{ workspaceName }}
-            </p>
-            <span
-              v-if="session?.tags?.length"
-              class="inline-flex flex-wrap items-center gap-1 mt-0.5"
-            >
-              <span
-                v-for="tag in session.tags"
-                :key="tag"
-                class="inline-flex items-center text-xs px-2 py-0.5 rounded-full border"
-                :class="categoryColorClass(tag)"
-              >
-                {{ tag }}
-              </span>
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Archive + Edit + Delete -->
-      <div v-if="!bLoading" class="hidden lg:flex items-center gap-1 shrink-0">
-        <button class="button is-transparent is-icon" title="Edit session" aria-label="Edit session" @click="openEditModal">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
-        </button>
-        <button
-          class="button is-transparent is-icon"
-          :title="session?.archived ? 'Unarchive session' : 'Archive session'"
-          :aria-label="session?.archived ? 'Unarchive session' : 'Archive session'"
-          @click="toggleArchive"
-        >
-          <svg v-if="session?.archived" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-primary" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"/></svg>
-          <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-warning" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"/></svg>
-        </button>
-
-        <button
-          class="button is-transparent is-icon hover:!text-destructive hover:!bg-destructive/10"
-          title="Delete session"
-          aria-label="Delete session"
-          @click="bShowDeleteModal = true"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-destructive" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
-        </button>
-      </div>
-
-      <!-- Mobile: overflow menu (Edit / Archive / Delete) -->
-      <div v-if="!bLoading" ref="mobileSessionMenuRef" class="relative lg:hidden shrink-0">
-        <button
-          type="button"
-          class="button is-transparent is-icon"
-          aria-haspopup="true"
-          :aria-expanded="bMobileSessionMenuOpen"
-          title="Session actions"
-          aria-label="Session actions"
-          @click.stop="bMobileSessionMenuOpen = !bMobileSessionMenuOpen"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="0" aria-hidden="true"><circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg>
-        </button>
-        <Transition name="mobile-session-menu-drop">
-          <div
-            v-if="bMobileSessionMenuOpen"
-            class="absolute right-0 top-full mt-1 z-50 min-w-[11rem] rounded-lg border border-border bg-surface py-1 shadow-lg"
-            role="menu"
-            @click.stop
-          >
-            <button
-              type="button"
-              class="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-text-primary hover:bg-fg/[0.06] transition-colors"
-              role="menuitem"
-              @click="onMobileMenuEdit"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="shrink-0" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
-              Edit
-            </button>
-            <button
-              type="button"
-              class="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-text-primary hover:bg-fg/[0.06] transition-colors"
-              role="menuitem"
-              @click="onMobileMenuArchive"
-            >
-              <svg v-if="session?.archived" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-primary" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"/></svg>
-              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 text-warning" aria-hidden="true"><path d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"/></svg>
-              {{ session?.archived ? 'Unarchive' : 'Archive' }}
-            </button>
-            <button
-              type="button"
-              class="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-destructive hover:bg-destructive/[0.08] transition-colors"
-              role="menuitem"
-              @click="onMobileMenuDelete"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="shrink-0" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
-              Delete
-            </button>
-          </div>
-        </Transition>
-      </div>
-    </div>
+    <EntityDetailHeader
+      :title="session?.name || 'Session'"
+      :subtitle="workspaceName"
+      :tags="session?.tags ?? []"
+      :b-loading="bLoading"
+      :archived="session?.archived ?? false"
+      :b-show-sidebar-toggle="props.showSidebarToggle"
+      @toggle-sidebar="emit('toggle-sidebar')"
+      @edit="openEditModal"
+      @archive="toggleArchive"
+      @delete="bShowDeleteModal = true"
+    />
 
     <div
       v-if="error"
@@ -991,70 +859,11 @@ onUnmounted(() => {
     </div>
 
     <!-- Bottom tabs -->
-    <div
-      class="flex border-t border-fg/10 shrink-0 md:border-none md:justify-center md:pb-4 md:mb-4"
-    >
-      <div
-        class="flex flex-1 max-w-md mx-auto md:flex-none md:inline-flex md:items-center md:gap-1.5 md:px-1.5 md:py-1.5 md:rounded-full md:border md:border-fg/15 md:bg-fg/[0.02] md:shadow-sm"
-      >
-        <button
-          class="flex-1 md:flex-none px-4 py-3 text-sm md:px-4 md:py-2 md:text-sm font-medium transition-colors border-t-2 md:border-t-0 md:rounded-full"
-          :class="
-            activeTab === 'chat'
-              ? 'text-text-primary border-primary md:bg-fg/[0.09]'
-              : 'text-text-muted hover:text-text-primary border-transparent'
-          "
-          @click="activeTab = 'chat'"
-        >
-          Chat
-        </button>
-        <button
-          v-if="bShowPlanTab"
-          class="flex-1 md:flex-none px-4 py-3 text-sm md:px-4 md:py-2 md:text-sm font-medium transition-colors border-t-2 md:border-t-0 md:rounded-full"
-          :class="
-            activeTab === 'plan'
-              ? 'text-text-primary border-primary md:bg-fg/[0.09]'
-              : 'text-text-muted hover:text-text-primary border-transparent'
-          "
-          @click="activeTab = 'plan'"
-        >
-          Plan
-        </button>
-        <button
-          class="flex-1 md:flex-none px-4 py-3 text-sm md:px-4 md:py-2 md:text-sm font-medium transition-colors border-t-2 md:border-t-0 md:rounded-full"
-          :class="
-            activeTab === 'terminal'
-              ? 'text-text-primary border-primary md:bg-fg/[0.09]'
-              : 'text-text-muted hover:text-text-primary border-transparent'
-          "
-          @click="activeTab = 'terminal'"
-        >
-          Terminal
-        </button>
-        <button
-          class="flex-1 md:flex-none px-4 py-3 text-sm md:px-4 md:py-2 md:text-sm font-medium transition-colors border-t-2 md:border-t-0 md:rounded-full"
-          :class="
-            activeTab === 'files'
-              ? 'text-text-primary border-primary md:bg-fg/[0.09]'
-              : 'text-text-muted hover:text-text-primary border-transparent'
-          "
-          @click="activeTab = 'files'"
-        >
-          Files
-        </button>
-        <button
-          class="flex-1 md:flex-none px-4 py-3 text-sm md:px-4 md:py-2 md:text-sm font-medium transition-colors border-t-2 md:border-t-0 md:rounded-full"
-          :class="
-            activeTab === 'git'
-              ? 'text-text-primary border-primary md:bg-fg/[0.09]'
-              : 'text-text-muted hover:text-text-primary border-transparent'
-          "
-          @click="activeTab = 'git'"
-        >
-          Git
-        </button>
-      </div>
-    </div>
+    <BottomTabBar
+      :tabs="sessionTabs"
+      :model-value="activeTab"
+      @update:model-value="activeTab = $event as SessionTab"
+    />
 
     <!-- Modals -->
     <SessionEditModal
@@ -1143,26 +952,6 @@ onUnmounted(() => {
 .lightbox-leave-from .lightbox-img {
   opacity: 1;
   transform: scale(1);
-}
-
-.mobile-session-menu-drop-enter-active,
-.mobile-session-menu-drop-leave-active {
-  transition:
-    opacity 0.18s ease,
-    transform 0.18s ease;
-  transform-origin: top right;
-}
-
-.mobile-session-menu-drop-enter-from,
-.mobile-session-menu-drop-leave-to {
-  opacity: 0;
-  transform: translateY(-6px) scale(0.98);
-}
-
-.mobile-session-menu-drop-enter-to,
-.mobile-session-menu-drop-leave-from {
-  opacity: 1;
-  transform: translateY(0) scale(1);
 }
 
 .plan-markdown {
