@@ -3,7 +3,9 @@ import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import ThemeToggleButton from '@/components/ThemeToggleButton.vue';
-import { agentTypeChipClass } from '@/utils/agentTypeMeta';
+import { agentTypeShortLabel } from '@/utils/agentTypeMeta';
+import { sessionStatusDotStyle, workspaceColor } from '@/utils/workspaceColor';
+import type { Workspace } from '@/@types/index';
 
 const props = withDefaults(
   defineProps<{
@@ -79,8 +81,12 @@ const mergedQuickSessions = computed(() => {
   return [...activeQuickSessions.value, ...recentSessions].slice(0, 6);
 });
 
+function workspaceById(id: string): Workspace | undefined {
+  return workspacesStore.workspaces.find((w) => w.id === id);
+}
+
 function workspaceNameById(id: string): string {
-  return workspacesStore.workspaces.find((w) => w.id === id)?.name ?? 'Workspace';
+  return workspaceById(id)?.name ?? 'Workspace';
 }
 
 onMounted(() => {
@@ -213,23 +219,20 @@ onBeforeUnmount(() => {
         :title="bIsCollapsed ? session.name : undefined"
         @click="handleClose"
       >
-        <span class="nc-status-dot" :class="session.busy ? 'busy' : 'idle'" />
+        <span
+          class="nc-status-dot"
+          :style="sessionStatusDotStyle(workspaceById(session.workspaceId), session.busy)"
+        />
         <template v-if="!bIsCollapsed">
           <div class="sidebar__session-info">
             <div class="sidebar__session-name">{{ session.name || 'Untitled' }}</div>
             <div class="sidebar__session-path nc-mono">
-              {{ workspaceNameById(session.workspaceId) }}
+              <span :style="{ color: workspaceColor(workspaceById(session.workspaceId)) }">{{
+                workspaceNameById(session.workspaceId)
+              }}</span>
+              <template v-if="session.agentType"> · {{ agentTypeShortLabel(session.agentType) }}</template>
             </div>
           </div>
-          <span v-if="session.agentType" class="nc-chip" :class="agentTypeChipClass(session.agentType)">{{
-            session.agentType === 'cursor-agent'
-              ? 'cursor'
-              : session.agentType === 'mistral-vibe'
-                ? 'vibe'
-                : session.agentType === 'claude'
-                  ? 'claude'
-                  : 'opencode'
-          }}</span>
         </template>
       </RouterLink>
     </div>

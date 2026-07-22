@@ -274,7 +274,7 @@ function navigateToResult(result: SearchResult): void {
 
   switch (result.type) {
     case 'workspace':
-      router.push({ name: 'workspace', params: { id: result.id } });
+      router.push({ name: 'workspace-sessions', params: { id: result.id } });
       break;
     case 'session':
       if (result.workspaceId) {

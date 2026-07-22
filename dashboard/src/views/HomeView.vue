@@ -3,9 +3,10 @@ import { computed, onMounted } from 'vue';
 import PageShell from '@/components/layout/PageShell.vue';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { useAuthStore } from '@/stores/auth';
-import { agentTypeChipClass, agentTypeShortLabel } from '@/utils/agentTypeMeta';
+import { agentTypeShortLabel } from '@/utils/agentTypeMeta';
+import { sessionStatusDotStyle, workspaceColor } from '@/utils/workspaceColor';
 import { relativeTimeLong } from '@/utils/relativeTime';
-import type { Session } from '@/@types/index';
+import type { Session, Workspace } from '@/@types/index';
 
 const workspacesStore = useWorkspacesStore();
 const auth = useAuthStore();
@@ -41,8 +42,12 @@ const recentlyActive = computed<Session[]>(() => {
   ].slice(0, 20);
 });
 
+function workspaceById(workspaceId: string): Workspace | undefined {
+  return workspacesStore.workspaces.find((w) => w.id === workspaceId);
+}
+
 function workspaceName(workspaceId: string): string {
-  return workspacesStore.workspaces.find((w) => w.id === workspaceId)?.name ?? 'Workspace';
+  return workspaceById(workspaceId)?.name ?? 'Workspace';
 }
 
 onMounted(() => {
@@ -96,12 +101,17 @@ onMounted(() => {
           :to="{ name: 'session', params: { id: session.workspaceId, sessionId: session.id } }"
           class="session-row nc-row-hover"
         >
-          <span class="nc-status-dot" :class="session.busy ? 'busy' : 'idle'" />
+          <span
+            class="nc-status-dot"
+            :style="sessionStatusDotStyle(workspaceById(session.workspaceId), session.busy)"
+          />
           <span class="session-row__name">{{ session.name || 'Untitled session' }}</span>
-          <span v-if="session.agentType" class="nc-chip" :class="agentTypeChipClass(session.agentType)">
-            {{ agentTypeShortLabel(session.agentType) }}
+          <span class="session-row__ws nc-mono">
+            <span :style="{ color: workspaceColor(workspaceById(session.workspaceId)) }">{{
+              workspaceName(session.workspaceId)
+            }}</span>
+            <template v-if="session.agentType"> · {{ agentTypeShortLabel(session.agentType) }}</template>
           </span>
-          <span class="session-row__ws nc-mono">{{ workspaceName(session.workspaceId) }}</span>
           <span class="session-row__age nc-mono">{{ relativeTimeLong(session.updatedAt) }}</span>
         </RouterLink>
       </div>

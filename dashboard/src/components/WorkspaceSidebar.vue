@@ -336,8 +336,12 @@ async function confirmDeleteSession(): Promise<void> {
   }
   bDeletingSession.value = true;
   try {
-    await sessionsApi.remove(props.workspaceId, sessionPendingDelete.value.id);
+    const deletedId = sessionPendingDelete.value.id;
+    await sessionsApi.remove(props.workspaceId, deletedId);
     sessionPendingDelete.value = null;
+    if (props.activeKind === 'session' && props.activeId === deletedId) {
+      router.push({ name: 'workspace-sessions', params: { id: props.workspaceId } });
+    }
   } catch {
     toastStore.error('Failed to delete session');
   } finally {
@@ -351,9 +355,13 @@ async function confirmDeleteOrchestrator(): Promise<void> {
   }
   bDeletingOrchestrator.value = true;
   try {
-    await orchestratorApi.remove(props.workspaceId, orchestratorPendingDelete.value.id);
-    orchestratorsStore.removeOrchestrator(orchestratorPendingDelete.value.id, props.workspaceId);
+    const deletedId = orchestratorPendingDelete.value.id;
+    await orchestratorApi.remove(props.workspaceId, deletedId);
+    orchestratorsStore.removeOrchestrator(deletedId, props.workspaceId);
     orchestratorPendingDelete.value = null;
+    if (props.activeKind === 'orchestrator' && props.activeId === deletedId) {
+      router.push({ name: 'workspace-sessions', params: { id: props.workspaceId } });
+    }
   } catch {
     toastStore.error('Failed to delete orchestrator');
   } finally {

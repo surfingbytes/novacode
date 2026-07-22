@@ -87,7 +87,7 @@ async function deleteOrchestrator(): Promise<void> {
   bDeleting.value = true;
   try {
     await orchestratorApi.remove(props.workspaceId, props.orchestratorId);
-    router.push({ name: 'workspace', params: { id: props.workspaceId } });
+    router.push({ name: 'workspace-sessions', params: { id: props.workspaceId } });
   } catch {
     toastStore.error('Failed to delete orchestrator');
     bDeleting.value = false;

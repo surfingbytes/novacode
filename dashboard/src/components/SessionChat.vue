@@ -423,7 +423,7 @@ async function deleteSession(): Promise<void> {
   bDeletingSession.value = true;
   try {
     await sessionsApi.remove(props.workspaceId, props.sessionId);
-    router.push({ name: 'workspace', params: { id: props.workspaceId } });
+    router.push({ name: 'workspace-sessions', params: { id: props.workspaceId } });
   } catch {
     toastStore.error('Failed to delete session');
     bDeletingSession.value = false;
