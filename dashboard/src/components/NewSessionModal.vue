@@ -3,6 +3,7 @@
 import { computed, ref, watch } from 'vue';
 
 // components
+import BaseModal from '@/components/BaseModal.vue';
 import TagChipsInput from '@/components/input/TagChipsInput.vue';
 import AgentModelPicker from '@/components/AgentModelPicker.vue';
 import ModalHeader from '@/components/ModalHeader.vue';
