@@ -236,11 +236,20 @@ export function saveOpenCodeProvider(
     configRoot.$schema = 'https://opencode.ai/config.json';
   }
   const providers = providerMap(configRoot);
+  // Preserve per-model capability fields (attachment, modalities, options)
+  // that may have been set manually or by other tools — a re-save from the
+  // dashboard must not strip them.
+  const existingModels = objectProp(objectProp(providers[id]).models);
   providers[id] = {
     npm,
     name,
     options: { baseURL },
-    models: Object.fromEntries(models.map((model) => [model.id, { name: model.name }]))
+    models: Object.fromEntries(
+      models.map((model) => [
+        model.id,
+        { ...objectProp(existingModels[model.id]), name: model.name }
+      ])
+    )
   };
   writeJsonObject(configPath(configDir), configRoot);
 
