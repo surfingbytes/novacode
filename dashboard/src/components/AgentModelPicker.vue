@@ -82,10 +82,6 @@ function cursorPresetValue(label: string): string {
   return `${CURSOR_PRESET_VALUE_PREFIX}${label}`;
 }
 
-function cursorCurrentValue(id: string): string {
-  return `${CURSOR_CURRENT_VALUE_PREFIX}${id}`;
-}
-
 function cursorModelValue(model: string): string {
   return `${CURSOR_MODEL_VALUE_PREFIX}${model}`;
 }
