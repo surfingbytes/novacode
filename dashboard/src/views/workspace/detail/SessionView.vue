@@ -12,6 +12,8 @@ import NewOrchestratorModal from '@/components/NewOrchestratorModal.vue';
 
 // stores
 import { useWorkspacesStore } from '@/stores/workspaces';
+import { useToastStore } from '@/stores/toasts';
+import { useOrchestratorsStore } from '@/stores/orchestrators';
 
 // classes
 import { apiErrorMessage, sessionsApi, orchestratorApi, settingsApi } from '@/classes/api';
@@ -44,11 +46,15 @@ const AGENT_TYPE_COLOR = {
 
 // -------------------------------------------------- Store --------------------------------------------------
 const store = useWorkspacesStore();
+const toastStore = useToastStore();
+const orchestratorsStore = useOrchestratorsStore();
 const route = useRoute();
 const router = useRouter();
 
 // -------------------------------------------------- Refs --------------------------------------------------
-const orchestrators = ref<Orchestrator[]>([]);
+const orchestrators = computed<Orchestrator[]>(() =>
+  orchestratorsStore.forWorkspace(workspaceId.value)
+);
 const bOrchestratorsLoading = ref(false);
 /** After first successful fetch; avoids showing step sessions at top level before orchestrator data exists. */
 const bOrchestratorsInitialFetched = ref(false);
@@ -498,11 +504,7 @@ const fetchOrchestrators = async (opts?: { silent?: boolean }): Promise<void> =>
   const silent = opts?.silent === true;
   if (!silent) bOrchestratorsLoading.value = true;
   try {
-    const { data } = await orchestratorApi.list(workspaceId.value);
-    orchestrators.value = data ?? [];
-  } catch (error) {
-    console.error('Failed to fetch orchestrators:', error);
-    orchestrators.value = [];
+    await orchestratorsStore.ensureFetched(workspaceId.value, true);
   } finally {
     if (!silent) bOrchestratorsLoading.value = false;
     bOrchestratorsInitialFetched.value = true;
@@ -525,7 +527,7 @@ const createSession = async (payload: {
       params: { id: props.workspace.id, sessionId: newSession.id }
     });
   } catch (error) {
-    console.error('Failed to create session:', error);
+    toastStore.error('Failed to create session');
     createSessionError.value = apiErrorMessage(error, 'Failed to create session');
   } finally {
     bSubmittingSession.value = false;
@@ -542,14 +544,14 @@ const createOrchestrator = async (payload: {
   bCreatingOrchestrator.value = true;
   try {
     const { data: newOrchestrator } = await orchestratorApi.create(props.workspace.id, payload);
-    orchestrators.value = [newOrchestrator, ...orchestrators.value];
+    orchestratorsStore.upsertOrchestrator(newOrchestrator);
     bShowNewOrchestratorModal.value = false;
     await router.push({
       name: 'orchestrator',
       params: { id: props.workspace.id, orchestratorId: newOrchestrator.id }
     });
-  } catch (error) {
-    console.error('Failed to create orchestrator:', error);
+  } catch {
+    toastStore.error('Failed to create orchestrator');
   } finally {
     bCreatingOrchestrator.value = false;
   }
@@ -561,8 +563,8 @@ const deleteSession = async (): Promise<void> => {
   try {
     await sessionsApi.remove(props.workspace.id, sessionToDelete.value.id);
     sessionToDelete.value = null;
-  } catch (error) {
-    console.error('Failed to delete session:', error);
+  } catch {
+    toastStore.error('Failed to delete session');
   } finally {
     bDeletingSession.value = false;
   }
@@ -576,12 +578,10 @@ const deleteOrchestrator = async (): Promise<void> => {
   bDeletingOrchestrator.value = true;
   try {
     await orchestratorApi.remove(props.workspace.id, orchestratorToDelete.value.id);
-    orchestrators.value = orchestrators.value.filter(
-      (o) => o.id !== orchestratorToDelete.value!.id
-    );
+    orchestratorsStore.removeOrchestrator(orchestratorToDelete.value.id, props.workspace.id);
     orchestratorToDelete.value = null;
-  } catch (error) {
-    console.error('Failed to delete orchestrator:', error);
+  } catch {
+    toastStore.error('Failed to delete orchestrator');
   } finally {
     bDeletingOrchestrator.value = false;
   }
@@ -613,12 +613,14 @@ const bulkDeleteCombined = async (): Promise<void> => {
     if (orchIds.length > 0) {
       const orchSet = new Set(orchIds);
       await Promise.all(orchIds.map((id) => orchestratorApi.remove(props.workspace!.id, id)));
-      orchestrators.value = orchestrators.value.filter((o) => !orchSet.has(o.id));
+      for (const id of orchSet) {
+        orchestratorsStore.removeOrchestrator(id, props.workspace.id);
+      }
       orchestratorSelectedIds.value = new Set();
     }
     bShowBulkDeleteCombined.value = false;
-  } catch (error) {
-    console.error('Failed to delete selection:', error);
+  } catch {
+    toastStore.error('Failed to delete selection');
   } finally {
     bBulkDeletingCombined.value = false;
   }
@@ -633,8 +635,8 @@ const saveEditSession = async (payload: {
   try {
     await sessionsApi.update(props.workspace.id, sessionToEdit.value.id, payload);
     sessionToEdit.value = null;
-  } catch (error) {
-    console.error('Failed to update session:', error);
+  } catch {
+    toastStore.error('Failed to update session');
   } finally {
     bSavingEdit.value = false;
   }
@@ -647,8 +649,8 @@ const toggleArchive = async (session: Session): Promise<void> => {
     await sessionsApi.update(props.workspace.id, session.id, {
       archived: nextArchived
     });
-  } catch (error) {
-    console.error('Failed to toggle archive:', error);
+  } catch {
+    toastStore.error('Failed to toggle archive');
   }
 };
 
@@ -661,8 +663,8 @@ const toggleArchiveOrchestrator = async (orchestrator: Orchestrator): Promise<vo
     });
     const idx = orchestrators.value.findIndex((o) => o.id === orchestrator.id);
     if (idx >= 0 && data) orchestrators.value[idx] = data;
-  } catch (error) {
-    console.error('Failed to toggle orchestrator archive:', error);
+  } catch {
+    toastStore.error('Failed to toggle orchestrator archive');
   }
 };
 
@@ -690,8 +692,8 @@ const onMultiselectArchive = async (): Promise<void> => {
     }
     selectedIds.value = new Set();
     orchestratorSelectedIds.value = new Set();
-  } catch (error) {
-    console.error('Failed to archive selection:', error);
+  } catch {
+    toastStore.error('Failed to archive selection');
   } finally {
     bBulkArchiving.value = false;
   }
@@ -825,29 +827,6 @@ watch(
     if (selActive || orchSelActive) scheduleUpdateMultiselectBarPosition();
   }
 );
-
-// Poll orchestrators list while any is running (so list shows run state)
-const orchestratorPollId = ref<ReturnType<typeof setInterval> | null>(null);
-watch(
-  () => orchestrators.value.some((o) => o.runStatus === 'running'),
-  (anyRunning) => {
-    if (orchestratorPollId.value) {
-      clearInterval(orchestratorPollId.value);
-      orchestratorPollId.value = null;
-    }
-    if (anyRunning && props.workspace) {
-      orchestratorPollId.value = setInterval(() => {
-        fetchOrchestrators({ silent: true });
-      }, 3000);
-    }
-  },
-  { immediate: true }
-);
-onBeforeUnmount(() => {
-  if (orchestratorPollId.value) {
-    clearInterval(orchestratorPollId.value);
-  }
-});
 </script>
 
 <template>

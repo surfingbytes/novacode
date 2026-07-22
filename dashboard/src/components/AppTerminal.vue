@@ -8,6 +8,7 @@ import '@xterm/xterm/css/xterm.css';
 
 // classes
 import { buildWsUrl } from '@/classes/api';
+import { createManagedSocket, type ManagedSocket } from '@/lib/wsClient';
 
 // types
 import type { WsServerMessage, WsClientMessage } from '@/@types/index';
@@ -37,12 +38,10 @@ let viewport: HTMLElement | null = null;
 
 let term: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
-let webSocket: WebSocket | null = null;
+let managedSocket: ManagedSocket | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let inputDisposable: { dispose(): void } | null = null;
 let bIsDestroyed: boolean = false;
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-let reconnectDelay: number = 1000;
 
 let outputBuffer: string = '';
 let bInBox: boolean = false;
@@ -125,50 +124,37 @@ const flushOutputBuffer = (): void => {
 };
 
 const sendWs = (msg: WsClientMessage): void => {
-  if (webSocket && webSocket.readyState === WebSocket.OPEN) {
-    webSocket.send(JSON.stringify(msg));
-  }
+  managedSocket?.send(msg);
 };
 
 const terminalWsUrl = (): string => props.wsUrl ?? buildWsUrl(props.sessionId ?? '');
 
-const scheduleReconnect = (): void => {
-  if (bIsDestroyed) return;
-  if (reconnectTimer) clearTimeout(reconnectTimer);
-  const delay = reconnectDelay;
-  reconnectDelay = Math.min(reconnectDelay * 2, 30000);
-  term?.writeln(`\r\n\x1b[33m[Reconnecting in ${Math.round(delay / 1000)}s…]\x1b[0m`);
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    if (!bIsDestroyed) connectWs();
-  }, delay);
-};
-
 const connectWs = (): void => {
   if (bIsDestroyed) return;
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-  }
-  if (webSocket) {
-    webSocket.onclose = null;
-    webSocket.onerror = null;
-    webSocket.close();
-  }
+  managedSocket?.close();
+  managedSocket = createManagedSocket({
+    url: terminalWsUrl(),
+    onOpen: () => {
+      fitAddon?.fit();
+      const cols = term?.cols ?? 220;
+      const rows = term?.rows ?? 50;
+      sendWs({ type: 'resize', cols, rows });
+    },
+    onMessage: handleWsMessage,
+    onConnectionChange: (bConnected) => {
+      if (!bConnected && !bIsDestroyed) {
+        term?.writeln('\r\n\x1b[33m[Disconnected — reconnecting…]\x1b[0m');
+      }
+    },
+    onUnauthorized: () => {
+      term?.writeln('\r\n\x1b[31m[Authentication failed — please log in again]\x1b[0m');
+    }
+  });
+};
 
-  webSocket = new WebSocket(terminalWsUrl());
-
-  webSocket.onopen = () => {
-    reconnectDelay = 1000;
-    fitAddon?.fit();
-    const cols = term?.cols ?? 220;
-    const rows = term?.rows ?? 50;
-    sendWs({ type: 'resize', cols, rows });
-  };
-
-  webSocket.onmessage = (event: MessageEvent) => {
-    try {
-      const msg = JSON.parse(event.data as string) as WsServerMessage;
+const handleWsMessage = (data: string): void => {
+  try {
+      const msg = JSON.parse(data) as WsServerMessage;
       if (msg.type === 'history' || msg.type === 'output') {
         if (msg.data) {
           if (props.readOnly) writeFiltered(msg.data);
@@ -241,45 +227,6 @@ const connectWs = (): void => {
     } catch {
       // ignore
     }
-  };
-
-  webSocket.onerror = () => {};
-
-  webSocket.onclose = () => {
-    if (bIsDestroyed) return;
-    term?.writeln('\r\n\x1b[33m[Disconnected]\x1b[0m');
-    scheduleReconnect();
-  };
-};
-
-const handleVisibilityChange = (): void => {
-  if (document.visibilityState !== 'visible') return;
-  if (
-    !webSocket ||
-    webSocket.readyState === WebSocket.CLOSED ||
-    webSocket.readyState === WebSocket.CLOSING
-  ) {
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-    }
-    term?.writeln('\r\n\x1b[33m[Reconnecting…]\x1b[0m');
-    connectWs();
-  }
-};
-
-const handleOnline = (): void => {
-  if (
-    !webSocket ||
-    webSocket.readyState === WebSocket.CLOSED ||
-    webSocket.readyState === WebSocket.CLOSING
-  ) {
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-    }
-    connectWs();
-  }
 };
 
 const sendInput = (data: string): void => {
@@ -364,9 +311,6 @@ onMounted((): void => {
 
   connectWs();
 
-  document.addEventListener('visibilitychange', handleVisibilityChange);
-  window.addEventListener('online', handleOnline);
-
   resizeObserver = new ResizeObserver(() => {
     fitAddon?.fit();
     const cols = term?.cols ?? 220;
@@ -409,13 +353,10 @@ watch(
 
 onUnmounted((): void => {
   bIsDestroyed = true;
-  if (reconnectTimer) clearTimeout(reconnectTimer);
-  document.removeEventListener('visibilitychange', handleVisibilityChange);
-  window.removeEventListener('online', handleOnline);
+  managedSocket?.close();
   window.removeEventListener('nc-theme-changed', handleThemeChanged);
   if (viewport) viewport.removeEventListener('scroll', onViewportScroll);
   inputDisposable?.dispose();
-  webSocket?.close();
   resizeObserver?.disconnect();
   term?.dispose();
 });

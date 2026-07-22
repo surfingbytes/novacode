@@ -8,23 +8,23 @@ import PageShell from '@/components/layout/PageShell.vue';
 
 // stores
 import { useWorkspacesStore } from '@/stores/workspaces';
+import { useOrchestratorsStore } from '@/stores/orchestrators';
 
 // classes
-import { orchestratorApi, settingsApi } from '@/classes/api';
+import { settingsApi } from '@/classes/api';
 
 // types
-import type { Orchestrator } from '@/@types/index';
 import { APP_NAV_TOGGLE_KEY } from '@/constants/layout';
 
 // -------------------------------------------------- Store --------------------------------------------------
 
 const store = useWorkspacesStore();
+const orchestratorsStore = useOrchestratorsStore();
 const route = useRoute();
 const toggleAppNav = inject(APP_NAV_TOGGLE_KEY, null);
 
 // -------------------------------------------------- Refs --------------------------------------------------
 
-const orchestrators = ref<Orchestrator[]>([]);
 const bOrchestratorsLoading = ref(false);
 const viewMode = ref<'list' | 'grid'>(
   (localStorage.getItem('sessionsViewMode') as 'list' | 'grid') ?? 'list'
@@ -38,7 +38,6 @@ const bClaudeAvailable = ref(false);
 const bCursorAvailable = ref(false);
 const longPressTimer = ref<ReturnType<typeof setTimeout> | null>(null);
 const orchLongPressTimer = ref<ReturnType<typeof setTimeout> | null>(null);
-const orchestratorPollId = ref<ReturnType<typeof setInterval> | null>(null);
 
 // -------------------------------------------------- Computed --------------------------------------------------
 
@@ -65,21 +64,6 @@ watch(workspaceId, (id) => {
 watch(bShowArchived, () => {
   clearSelection();
 });
-watch(
-  () => orchestrators.value.some((o) => o.runStatus === 'running'),
-  (anyRunning) => {
-    if (orchestratorPollId.value) {
-      clearInterval(orchestratorPollId.value);
-      orchestratorPollId.value = null;
-    }
-    if (anyRunning && workspace.value) {
-      orchestratorPollId.value = setInterval(() => {
-        fetchOrchestrators();
-      }, 3000);
-    }
-  },
-  { immediate: true }
-);
 
 // -------------------------------------------------- Methods --------------------------------------------------
 
@@ -111,11 +95,7 @@ const fetchOrchestrators = async (): Promise<void> => {
   }
   bOrchestratorsLoading.value = true;
   try {
-    const { data } = await orchestratorApi.list(workspaceId.value);
-    orchestrators.value = data ?? [];
-  } catch (error) {
-    console.error('Failed to fetch orchestrators:', error);
-    orchestrators.value = [];
+    await orchestratorsStore.ensureFetched(workspaceId.value, true);
   } finally {
     bOrchestratorsLoading.value = false;
   }
@@ -136,9 +116,6 @@ onBeforeUnmount(() => {
   }
   if (orchLongPressTimer.value) {
     clearTimeout(orchLongPressTimer.value);
-  }
-  if (orchestratorPollId.value) {
-    clearInterval(orchestratorPollId.value);
   }
 });
 </script>

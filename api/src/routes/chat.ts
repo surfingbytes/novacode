@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 
 // classes
-import { verifyToken } from '../classes/auth';
+import { extractWsToken, verifyToken } from '../classes/auth';
 import { db } from '../classes/database';
 import {
   getActiveSessionIds as _getActiveSessionIds,
@@ -165,8 +165,7 @@ async function loadSessionMessages(sessionId: string): Promise<ChatMessage[]> {
 // ---------------------------------- Routes ----------------------------------
 export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get('/api/ws/chat/:id', { websocket: true }, async (socket: WebSocket, request) => {
-    const query = request.query as Record<string, string>;
-    const token = query['token'];
+    const token = extractWsToken(request);
     if (!token) {
       socket.close(4001, 'Missing token');
       return;

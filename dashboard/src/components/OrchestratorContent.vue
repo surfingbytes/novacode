@@ -15,6 +15,8 @@ import { orchestratorApi } from '@/classes/api';
 
 // stores
 import { useWorkspacesStore } from '@/stores/workspaces';
+import { useToastStore } from '@/stores/toasts';
+import { useOrchestratorsStore } from '@/stores/orchestrators';
 
 // types
 import type { Orchestrator } from '@/@types/index';
@@ -38,11 +40,15 @@ const emit = defineEmits<{
 
 const router = useRouter();
 const workspacesStore = useWorkspacesStore();
+const toastStore = useToastStore();
+const orchestratorsStore = useOrchestratorsStore();
 const toggleAppNav = inject(APP_NAV_TOGGLE_KEY, null);
 
 // -------------------------------------------------- Refs --------------------------------------------------
 
-const orchestrator = ref<Orchestrator | null>(null);
+const orchestrator = computed<Orchestrator | null>(() =>
+  orchestratorsStore.byId(props.orchestratorId)
+);
 const bLoading = ref(true);
 const error = ref<string | null>(null);
 const bShowDeleteModal = ref(false);
@@ -83,11 +89,10 @@ async function fetchOrchestrator(): Promise<void> {
   bLoading.value = true;
   error.value = null;
   try {
-    const { data } = await orchestratorApi.get(props.workspaceId, props.orchestratorId);
-    orchestrator.value = data;
-  } catch (e) {
-    error.value = 'Failed to load orchestrator';
-    console.error('Failed to fetch orchestrator:', e);
+    const data = await orchestratorsStore.fetchOne(props.workspaceId, props.orchestratorId);
+    if (!data) {
+      error.value = 'Failed to load orchestrator';
+    }
   } finally {
     bLoading.value = false;
   }
@@ -98,8 +103,8 @@ async function deleteOrchestrator(): Promise<void> {
   try {
     await orchestratorApi.remove(props.workspaceId, props.orchestratorId);
     router.push({ name: 'workspace', params: { id: props.workspaceId } });
-  } catch (e) {
-    console.error('Failed to delete orchestrator:', e);
+  } catch {
+    toastStore.error('Failed to delete orchestrator');
     bDeleting.value = false;
     bShowDeleteModal.value = false;
   }
@@ -113,9 +118,9 @@ async function toggleArchive(): Promise<void> {
     const { data: updated } = await orchestratorApi.update(props.workspaceId, props.orchestratorId, {
       archived: !orchestrator.value.archived,
     });
-    orchestrator.value = updated;
-  } catch (e) {
-    console.error('Failed to toggle orchestrator archive:', e);
+    orchestratorsStore.upsertOrchestrator(updated);
+  } catch {
+    toastStore.error('Failed to toggle orchestrator archive');
   }
 }
 
@@ -143,17 +148,17 @@ async function confirmRename(nextName: string): Promise<void> {
     const { data: updated } = await orchestratorApi.update(props.workspaceId, props.orchestratorId, {
       name: nextName,
     });
-    orchestrator.value = updated;
+    orchestratorsStore.upsertOrchestrator(updated);
     bShowRenameModal.value = false;
-  } catch (e) {
-    console.error('Failed to rename orchestrator:', e);
+  } catch {
+    toastStore.error('Failed to rename orchestrator');
   } finally {
     bRenaming.value = false;
   }
 }
 
 function updateOrchestratorFromPanel(o: Orchestrator): void {
-  orchestrator.value = o;
+  orchestratorsStore.upsertOrchestrator(o);
 }
 
 // -------------------------------------------------- Lifecycle --------------------------------------------------
@@ -175,7 +180,7 @@ watch(
     if (!newId || newId === oldId) {
       return;
     }
-    orchestrator.value = null;
+    // The orchestrator itself comes from the store (reactive on id change).
     activeTab.value = 'orchestrator';
     fetchOrchestrator();
   },

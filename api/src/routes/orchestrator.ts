@@ -16,7 +16,7 @@ import {
   summarizeStepHandoff
 } from '../classes/orchestratorPayload';
 import { deleteSessionImages } from './images';
-import { broadcastWorkspaceSessionsRefresh } from './ws';
+import { broadcastOrchestratorUpsert, broadcastWorkspaceSessionsRefresh } from './ws';
 
 // types
 import type { ChatMessage, OrchestratorSubtasksPayload, SubTask } from '../@types/index';
@@ -179,6 +179,19 @@ function parsePlanFromLlmResponse(raw: string): { sharedContext: string; subtask
   return { sharedContext, subtasks };
 }
 
+/** Persist an orchestrator patch and push it to subscribed dashboards (no polling needed). */
+async function updateOrchestratorAndBroadcast(
+  workspaceId: string,
+  orchestratorId: string,
+  patch: Parameters<typeof db.updateOrchestrator>[1]
+): Promise<Awaited<ReturnType<typeof db.updateOrchestrator>>> {
+  const updated = await db.updateOrchestrator(orchestratorId, patch);
+  if (updated) {
+    broadcastOrchestratorUpsert(workspaceId, updated);
+  }
+  return updated;
+}
+
 export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void> {
   // GET /api/workspaces/:workspaceId/orchestrators
   fastify.get(
@@ -261,7 +274,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
           ? mergeSubtasksJsonPatch(body.subtasksJson ?? null, orchestrator.subtasksJson)
           : undefined;
 
-      const updated = await db.updateOrchestrator(orchestratorId, {
+      const updated = await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
         name: body.name ?? orchestrator.name,
         ...(mergedSubtasks !== undefined && { subtasksJson: mergedSubtasks }),
         ...('tags' in (request.body as object) && { tags: body.tags ?? null }),
@@ -417,7 +430,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
             subtasks: plan.subtasks
           });
 
-          db.updateOrchestrator(orchestratorId, {
+          updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
             messageJson: JSON.stringify(orchestratorMessages),
             subtasksJson: toSave
           })
@@ -493,7 +506,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
               : null
         });
         if (createResult.error || !createResult.session) {
-          await db.updateOrchestrator(orchestratorId, {
+          await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
             runStatus: 'failed',
             runCurrentStep: globalIndex,
             runTotalSteps: total,
@@ -513,7 +526,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
           timeoutMs: 60000_000
         });
         if (runResult.error) {
-          await db.updateOrchestrator(orchestratorId, {
+          await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
             runStatus: 'failed',
             runCurrentStep: globalIndex,
             runTotalSteps: total,
@@ -530,13 +543,13 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
           snippet
         );
 
-        await db.updateOrchestrator(orchestratorId, {
+        await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
           runCurrentStep: globalIndex + 1,
           runTotalSteps: total,
           subtasksJson: serializeSubtasksPayload(payload)
         });
       }
-      await db.updateOrchestrator(orchestratorId, {
+      await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
         runStatus: 'completed',
         runCurrentStep: total,
         runTotalSteps: total,
@@ -546,7 +559,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       console.error('error while running orchestrator', error);
       const current = await db.getOrchestrator(orchestratorId);
       const step = current?.runCurrentStep ?? 0;
-      await db.updateOrchestrator(orchestratorId, {
+      await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
         runStatus: 'failed',
         runCurrentStep: step,
         runTotalSteps: total,
@@ -595,7 +608,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       }
 
       const runStartedAt = new Date().toISOString();
-      await db.updateOrchestrator(orchestratorId, {
+      await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
         runStatus: 'running',
         runCurrentStep: startIndex,
         runTotalSteps: payload.subtasks.length,
@@ -634,7 +647,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       const currentStep = orchestrator.runCurrentStep ?? 0;
       const totalSteps = orchestrator.runTotalSteps ?? null;
 
-      const updated = await db.updateOrchestrator(orchestratorId, {
+      const updated = await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
         runStatus: 'stopped',
         runCurrentStep: currentStep,
         runTotalSteps: totalSteps

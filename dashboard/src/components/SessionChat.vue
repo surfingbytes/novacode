@@ -28,6 +28,7 @@ import { tagColorClass as categoryColorClass } from '@/utils/tagColors';
 
 // stores
 import { useWorkspacesStore } from '@/stores/workspaces';
+import { useToastStore } from '@/stores/toasts';
 
 // types
 import type { AgentConfigOption, AgentModeOption, AgentModelOption, AgentThinkingOptionGroup, ChatMessage, ChatQueueItem, ChatWsServerMessage, LinkedPlanContext, PlanDocumentSummary, Session } from '@/@types/index';
@@ -88,6 +89,7 @@ const emit = defineEmits<{
 // -------------------------------------------------- Store --------------------------------------------------
 const router = useRouter();
 const workspacesStore = useWorkspacesStore();
+const toastStore = useToastStore();
 const toggleAppNav = inject(APP_NAV_TOGGLE_KEY, null);
 
 // -------------------------------------------------- Refs --------------------------------------------------
@@ -2842,8 +2844,8 @@ async function saveSessionEdit(payload: { name: string; tags?: string[] | null }
     const { data: updated } = await sessionsApi.update(props.workspaceId, props.sessionId, payload);
     session.value = updated;
     bShowEditModal.value = false;
-  } catch (e) {
-    console.error('Failed to update session:', e);
+  } catch {
+    toastStore.error('Failed to update session');
   } finally {
     bSavingEdit.value = false;
   }
@@ -2855,8 +2857,8 @@ async function deleteSession() {
   try {
     await sessionsApi.remove(props.workspaceId, props.sessionId);
     router.push({ name: 'workspace', params: { id: props.workspaceId } });
-  } catch (e) {
-    console.error('Failed to delete session:', e);
+  } catch {
+    toastStore.error('Failed to delete session');
     bDeletingSession.value = false;
     bShowDeleteModal.value = false;
   }
@@ -2870,8 +2872,8 @@ async function toggleArchive() {
       archived: !session.value.archived
     });
     session.value = updated;
-  } catch (e) {
-    console.error('Failed to toggle archive:', e);
+  } catch {
+    toastStore.error('Failed to toggle archive');
   }
 }
 

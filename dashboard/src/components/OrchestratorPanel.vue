@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // node_modules
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { ref, computed, watch, onMounted, nextTick } from 'vue';
 
 // components
 import BaseModal from '@/components/BaseModal.vue';
@@ -14,6 +14,10 @@ import {
 } from '@/utils/orchestratorPayload';
 import { tagColorClass as categoryColorClass } from '@/utils/tagColors';
 
+// stores
+import { useOrchestratorsStore } from '@/stores/orchestrators';
+import { useToastStore } from '@/stores/toasts';
+
 // types
 import type { Orchestrator, SubTask } from '@/@types/index';
 
@@ -25,11 +29,10 @@ const props = defineProps<{
   orchestrator: Orchestrator | null;
 }>();
 
-// -------------------------------------------------- Emits --------------------------------------------------
+// -------------------------------------------------- Store --------------------------------------------------
 
-const emit = defineEmits<{
-  'update:orchestrator': [Orchestrator];
-}>();
+const orchestratorsStore = useOrchestratorsStore();
+const toastStore = useToastStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 
@@ -45,7 +48,6 @@ const decomposeExpectedSchema = ref<string>('');
 const decomposeThinking = ref('');
 const decomposeThinkingEl = ref<HTMLElement | null>(null);
 const runError = ref<string | null>(null);
-const pollIntervalId = ref<ReturnType<typeof setInterval> | null>(null);
 const editedSubtasks = ref<SubTask[]>([]);
 const bShowEditModal = ref(false);
 const editingTaskIndex = ref<number | null>(null);
@@ -150,39 +152,6 @@ function taskStatus(index: number): 'idle' | 'active' | 'done' {
   return 'idle';
 }
 
-function startPolling() {
-  stopPolling();
-  pollIntervalId.value = setInterval(async () => {
-    try {
-      const { data } = await orchestratorApi.get(props.workspaceId, props.orchestratorId);
-      if (data) {
-        emit('update:orchestrator', data);
-      }
-    } catch {
-      // ignore
-    }
-  }, 2000);
-}
-
-function stopPolling() {
-  if (pollIntervalId.value) {
-    clearInterval(pollIntervalId.value);
-    pollIntervalId.value = null;
-  }
-}
-
-watch(
-  () => props.orchestrator?.runStatus,
-  (status) => {
-    if (status === 'running') {
-      startPolling();
-    } else {
-      stopPolling();
-    }
-  },
-  { immediate: true }
-);
-
 watch(userInput, (val) => {
   if (!val) {
     localStorage.removeItem(promptStorageKey);
@@ -254,7 +223,7 @@ async function generateTasks() {
       }
     );
     if (data) {
-      emit('update:orchestrator', data);
+      orchestratorsStore.upsertOrchestrator(data);
     }
     userInput.value = '';
   } catch (e: unknown) {
@@ -283,10 +252,10 @@ async function saveSubtasks() {
       subtasksJson: serializeOrchestratorSubtasksPayload(nextPayload)
     });
     if (data) {
-      emit('update:orchestrator', data);
+      orchestratorsStore.upsertOrchestrator(data);
     }
   } catch {
-    // ignore
+    toastStore.error('Failed to save tasks');
   } finally {
     bSavingSubtasks.value = false;
   }
@@ -303,7 +272,7 @@ async function startTasks() {
       startIndex: 0
     });
     if (data) {
-      emit('update:orchestrator', data);
+      orchestratorsStore.upsertOrchestrator(data);
     }
   } catch (e: unknown) {
     const caughtError = e as { response?: { data?: { error?: string }; status?: number } };
@@ -322,7 +291,7 @@ async function stopTasks() {
   try {
     const { data } = await orchestratorApi.stop(props.workspaceId, props.orchestratorId);
     if (data) {
-      emit('update:orchestrator', data);
+      orchestratorsStore.upsertOrchestrator(data);
     }
   } catch (e: unknown) {
     const caughtError = e as { response?: { data?: { error?: string }; status?: number } };
@@ -346,8 +315,6 @@ onMounted(() => {
     userInput.value = savedPrompt;
   }
 });
-
-onBeforeUnmount(stopPolling);
 </script>
 
 <template>

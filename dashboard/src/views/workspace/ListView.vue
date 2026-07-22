@@ -240,7 +240,7 @@ const handleArchiveWorkspace = async (workspace: Workspace, archived: boolean): 
   try {
     await store.archiveWorkspace(workspace.id, archived);
   } catch {
-    // ignore
+    toastStore.error(`Failed to ${archived ? 'archive' : 'unarchive'} workspace`);
   } finally {
     archivingId.value = null;
   }

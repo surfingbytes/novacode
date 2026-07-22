@@ -500,29 +500,26 @@ function wsBase(): string {
   return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${base}${pathPrefix}`;
 }
 
+// WS URLs carry no credentials — clients authenticate via the bearer.<jwt>
+// Sec-WebSocket-Protocol (see lib/wsClient), keeping tokens out of URLs/logs.
 export const buildWsUrl = (sessionId: string): string => {
-  const token: string = localStorage.getItem('token') ?? '';
-  return `${wsBase()}/ws/session/${sessionId}?token=${encodeURIComponent(token)}`;
+  return `${wsBase()}/ws/session/${sessionId}`;
 };
 
 export const buildChatWsUrl = (sessionId: string): string => {
-  const token: string = localStorage.getItem('token') ?? '';
-  return `${wsBase()}/ws/chat/${sessionId}?token=${encodeURIComponent(token)}`;
+  return `${wsBase()}/ws/chat/${sessionId}`;
 };
 
 export const buildSessionTerminalWsUrl = (workspaceId: string, sessionId: string): string => {
-  const token: string = localStorage.getItem('token') ?? '';
-  return `${wsBase()}/ws/workspaces/${workspaceId}/sessions/${sessionId}/terminal?token=${encodeURIComponent(token)}`;
+  return `${wsBase()}/ws/workspaces/${workspaceId}/sessions/${sessionId}/terminal`;
 };
 
 export const buildWorkspaceSessionsWsUrl = (workspaceId: string): string => {
-  const token: string = localStorage.getItem('token') ?? '';
-  return `${wsBase()}/ws/workspaces/${workspaceId}/sessions?token=${encodeURIComponent(token)}`;
+  return `${wsBase()}/ws/workspaces/${workspaceId}/sessions`;
 };
 
 export const buildSessionsWsUrl = (): string => {
-  const token: string = localStorage.getItem('token') ?? '';
-  return `${wsBase()}/ws/sessions?token=${encodeURIComponent(token)}`;
+  return `${wsBase()}/ws/sessions`;
 };
 
 // ---------------------------------- Sessions ----------------------------------

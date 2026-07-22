@@ -11,6 +11,8 @@ import SessionEditModal from '@/components/SessionEditModal.vue';
 
 // stores
 import { useWorkspacesStore } from '@/stores/workspaces';
+import { useToastStore } from '@/stores/toasts';
+import { useOrchestratorsStore } from '@/stores/orchestrators';
 
 // types
 import type { Session, Orchestrator } from '@/@types/index';
@@ -47,6 +49,8 @@ const emit = defineEmits<{
 
 const router = useRouter();
 const workspacesStore = useWorkspacesStore();
+const toastStore = useToastStore();
+const orchestratorsStore = useOrchestratorsStore();
 
 // -------------------------------------------------- Constants --------------------------------------------------
 
@@ -60,7 +64,9 @@ type SidebarItem =
 
 // -------------------------------------------------- Refs --------------------------------------------------
 
-const orchestrators = ref<Orchestrator[]>([]);
+const orchestrators = computed<Orchestrator[]>(() =>
+  orchestratorsStore.forWorkspace(props.workspaceId)
+);
 const bOrchestratorsLoading = ref<boolean>(false);
 
 const bCtxMenuOpen = ref(false);
@@ -212,11 +218,7 @@ function relativeTime(dateStr: string): string {
 async function load(): Promise<void> {
   bOrchestratorsLoading.value = true;
   try {
-    const [orchestratorsResponse] = await Promise.all([orchestratorApi.list(props.workspaceId)]);
-    orchestrators.value = orchestratorsResponse.data ?? [];
-  } catch (error) {
-    console.error('Failed to load sidebar data:', error);
-    orchestrators.value = [];
+    await orchestratorsStore.ensureFetched(props.workspaceId, true);
   } finally {
     bOrchestratorsLoading.value = false;
   }
@@ -322,15 +324,10 @@ function onCtxPick(key: string): void {
       .update(props.workspaceId, orchestrator.id, { archived: !(orchestrator.archived === true) })
       .then(({ data: updatedOrchestrator }) => {
         if (updatedOrchestrator) {
-          const orchestratorIndex = orchestrators.value.findIndex(
-            (orch) => orch.id === orchestrator.id
-          );
-          if (orchestratorIndex >= 0) {
-            orchestrators.value[orchestratorIndex] = updatedOrchestrator;
-          }
+          orchestratorsStore.upsertOrchestrator(updatedOrchestrator);
         }
       })
-      .catch((err) => console.error('Failed to archive orchestrator:', err));
+      .catch(() => toastStore.error('Failed to archive orchestrator'));
     return;
   }
   if (key === 'delete') {
@@ -346,8 +343,8 @@ async function saveSessionEdit(payload: { name: string; tags?: string[] | null }
   try {
     await sessionsApi.update(props.workspaceId, sessionToEdit.value.id, payload);
     sessionToEdit.value = null;
-  } catch (err) {
-    console.error('Failed to update session:', err);
+  } catch {
+    toastStore.error('Failed to update session');
   } finally {
     bSavingSessionEdit.value = false;
   }
@@ -361,8 +358,8 @@ async function confirmDeleteSession(): Promise<void> {
   try {
     await sessionsApi.remove(props.workspaceId, sessionPendingDelete.value.id);
     sessionPendingDelete.value = null;
-  } catch (err) {
-    console.error('Failed to delete session:', err);
+  } catch {
+    toastStore.error('Failed to delete session');
   } finally {
     bDeletingSession.value = false;
   }
@@ -375,12 +372,10 @@ async function confirmDeleteOrchestrator(): Promise<void> {
   bDeletingOrchestrator.value = true;
   try {
     await orchestratorApi.remove(props.workspaceId, orchestratorPendingDelete.value.id);
-    orchestrators.value = orchestrators.value.filter(
-      (orch) => orch.id !== orchestratorPendingDelete.value!.id
-    );
+    orchestratorsStore.removeOrchestrator(orchestratorPendingDelete.value.id, props.workspaceId);
     orchestratorPendingDelete.value = null;
-  } catch (err) {
-    console.error('Failed to delete orchestrator:', err);
+  } catch {
+    toastStore.error('Failed to delete orchestrator');
   } finally {
     bDeletingOrchestrator.value = false;
   }

@@ -62,7 +62,20 @@ async function main(): Promise<void> {
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
   });
 
-  await fastify.register(fastifyWebsocket);
+  await fastify.register(fastifyWebsocket, {
+    options: {
+      // Accept the bearer.<jwt> subprotocol so dashboard WS clients can
+      // authenticate without putting the token in the URL.
+      handleProtocols: (protocols: Set<string>): string | false => {
+        for (const protocol of protocols) {
+          if (protocol.startsWith('bearer.')) {
+            return protocol;
+          }
+        }
+        return false;
+      }
+    }
+  });
 
   // auth decorator
   registerAuth(fastify);

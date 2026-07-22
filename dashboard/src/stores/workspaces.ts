@@ -4,9 +4,13 @@ import { computed, ref } from 'vue';
 
 // classes
 import { sessionsApi, workspaceApi, buildSessionsWsUrl } from '@/classes/api';
+import { createManagedSocket, type ManagedSocket } from '@/lib/wsClient';
+
+// stores
+import { useOrchestratorsStore } from '@/stores/orchestrators';
 
 // types
-import type { Workspace, CreateWorkspacePayload, UpdateWorkspacePayload, Session } from '@/@types/index';
+import type { Workspace, CreateWorkspacePayload, UpdateWorkspacePayload, Session, Orchestrator } from '@/@types/index';
 
 export const useWorkspacesStore = defineStore('workspaces', () => {
   // -------------------------------------------------- Refs --------------------------------------------------
@@ -18,9 +22,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
   const allSessions = ref<Session[]>([]);
   const bSessionsLoading = ref<boolean>(false);
 
-  let sessionSocket: WebSocket | null = null;
-  let sessionSocketReconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  let bSessionSocketUnmounted = false;
+  let sessionSocket: ManagedSocket | null = null;
   let sessionsInitialized = false;
 
   // -------------------------------------------------- Computed --------------------------------------------------
@@ -104,71 +106,60 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
   };
 
   function disconnectSessionSocket(): void {
-    if (sessionSocketReconnectTimer !== null) {
-      clearTimeout(sessionSocketReconnectTimer);
-      sessionSocketReconnectTimer = null;
-    }
-    if (sessionSocket) {
-      sessionSocket.close();
-      sessionSocket = null;
-    }
+    sessionSocket?.close();
+    sessionSocket = null;
   }
 
   function connectSessionSocket(): void {
     if (sessionSocket) {
       return;
     }
-    sessionSocket = new WebSocket(buildSessionsWsUrl());
+    sessionSocket = createManagedSocket({
+      url: buildSessionsWsUrl(),
+      onMessage: (data) => {
+        try {
+          const messagePayload = JSON.parse(data) as
+            | { type: 'global-snapshot'; sessions: Session[] }
+            | { type: 'session-upsert'; session: Session }
+            | { type: 'session-deleted'; id: string; workspaceId?: string }
+            | { type: 'busy-changed'; id: string; busy: boolean }
+            | { type: 'orchestrator-upsert'; orchestrator: Orchestrator }
+            | { type: 'refresh' }
+            | { type: 'server-shutdown' }
+            | { type: 'ping' };
 
-    sessionSocket.onmessage = (event: MessageEvent) => {
-      try {
-        const messagePayload = JSON.parse(event.data as string) as
-          | { type: 'global-snapshot'; sessions: Session[] }
-          | { type: 'session-upsert'; session: Session }
-          | { type: 'session-deleted'; id: string; workspaceId?: string }
-          | { type: 'busy-changed'; id: string; busy: boolean }
-          | { type: 'refresh' }
-          | { type: 'server-shutdown' };
-
-        if (messagePayload.type === 'global-snapshot') {
-          allSessions.value = messagePayload.sessions ?? [];
-        } else if (messagePayload.type === 'session-upsert') {
-          if (messagePayload.session) {
-            upsertSession(messagePayload.session);
+          if (messagePayload.type === 'global-snapshot') {
+            allSessions.value = messagePayload.sessions ?? [];
+          } else if (messagePayload.type === 'session-upsert') {
+            if (messagePayload.session) {
+              upsertSession(messagePayload.session);
+            }
+          } else if (messagePayload.type === 'session-deleted') {
+            if (messagePayload.id) {
+              removeSession(messagePayload.id);
+            }
+          } else if (messagePayload.type === 'busy-changed') {
+            setSessionBusy(messagePayload.id, messagePayload.busy);
+          } else if (messagePayload.type === 'orchestrator-upsert') {
+            if (messagePayload.orchestrator) {
+              useOrchestratorsStore().upsertOrchestrator(messagePayload.orchestrator);
+            }
+          } else if (messagePayload.type === 'refresh') {
+            fetchAllSessions();
+          } else if (messagePayload.type === 'server-shutdown') {
+            // Managed socket reconnects with backoff; nothing else to do here.
           }
-        } else if (messagePayload.type === 'session-deleted') {
-          if (messagePayload.id) {
-            removeSession(messagePayload.id);
-          }
-        } else if (messagePayload.type === 'busy-changed') {
-          setSessionBusy(messagePayload.id, messagePayload.busy);
-        } else if (messagePayload.type === 'refresh') {
-          fetchAllSessions();
+        } catch {
+          // ignore malformed frames
         }
-      } catch {
-        // ignore malformed frames
       }
-    };
-
-    sessionSocket.onclose = (event: CloseEvent) => {
-      sessionSocket = null;
-      if (event.code === 4001 || event.code === 4004) {
-        return;
-      } // auth/workspace errors
-      if (!bSessionSocketUnmounted) {
-        sessionSocketReconnectTimer = setTimeout(() => {
-          sessionSocketReconnectTimer = null;
-          connectSessionSocket();
-        }, 2000);
-      }
-    };
+    });
   }
 
   async function ensureSessionsInitialized(): Promise<void> {
     if (sessionsInitialized) {
       return;
     }
-    bSessionSocketUnmounted = false;
     await fetchAllSessions();
     connectSessionSocket();
     sessionsInitialized = true;
@@ -180,7 +171,6 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
   };
 
   const teardownActiveWorkspace = (): void => {
-    bSessionSocketUnmounted = true;
     disconnectSessionSocket();
     activeWorkspaceId.value = null;
     allSessions.value = [];

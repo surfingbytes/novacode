@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 
 // classes
-import { verifyToken } from '../classes/auth';
+import { extractWsToken, verifyToken } from '../classes/auth';
 import { sessionManager } from '../classes/sessionManager';
 import { db } from '../classes/database';
 import { normalizeSessionForApi } from '../classes/sessionNormalize';
@@ -58,6 +58,12 @@ export function broadcastWorkspaceSessionsRefresh(workspaceId: string): void {
   broadcastGlobalSessions({ type: 'refresh' });
 }
 
+/** Push orchestrator run-state changes so dashboards don't need to poll. */
+export function broadcastOrchestratorUpsert(workspaceId: string, orchestrator: unknown): void {
+  broadcastWorkspace(workspaceId, { type: 'orchestrator-upsert', orchestrator });
+  broadcastGlobalSessions({ type: 'orchestrator-upsert', orchestrator });
+}
+
 export function broadcastServerShutdown(): void {
   const msg: WsServerMessage = { type: 'server-shutdown' };
   const payload = JSON.stringify(msg);
@@ -82,9 +88,8 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.get('/api/ws/session/:id', { websocket: true }, async (socket: WebSocket, request) => {
     wsClients.add(socket);
-    // Validate JWT from query param
-    const query = request.query as Record<string, string>;
-    const token = query['token'];
+    // Validate JWT (bearer subprotocol preferred, ?token= query still accepted)
+    const token = extractWsToken(request);
     if (!token) {
       socket.close(4001, 'Missing token');
       return;
@@ -157,8 +162,7 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
     { websocket: true },
     async (socket: WebSocket, request) => {
       wsClients.add(socket);
-      const query = request.query as Record<string, string>;
-      const token = query['token'];
+      const token = extractWsToken(request);
       if (!token) {
         socket.close(4001, 'Missing token');
         return;
@@ -240,8 +244,7 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
     async (socket: WebSocket, request) => {
       wsClients.add(socket);
       globalSessionClients.add(socket);
-      const query = request.query as Record<string, string>;
-      const token = query['token'];
+      const token = extractWsToken(request);
       if (!token) {
         socket.close(4001, 'Missing token');
         return;
@@ -281,8 +284,7 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
     { websocket: true },
     async (socket: WebSocket, request) => {
       wsClients.add(socket);
-      const query = request.query as Record<string, string>;
-      const token = query['token'];
+      const token = extractWsToken(request);
       if (!token) {
         socket.close(4001, 'Missing token');
         return;
