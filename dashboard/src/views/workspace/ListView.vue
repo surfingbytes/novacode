@@ -720,12 +720,6 @@ onMounted((): void => {
   opacity: 1;
   pointer-events: auto;
 }
-@media (max-width: 1024px) {
-  .ws-card__actions {
-    opacity: 1;
-    pointer-events: auto;
-  }
-}
 
 .ws-card__bar {
   height: 3px;
@@ -843,6 +837,20 @@ onMounted((): void => {
 .ws-icon-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Touch devices / small screens: actions can't rely on hover —
+   keep them visible with larger, well-spaced touch targets */
+@media (hover: none), (max-width: 1024px) {
+  .ws-card__actions {
+    opacity: 1;
+    pointer-events: auto;
+    gap: 8px;
+  }
+  .ws-icon-btn {
+    width: 36px;
+    height: 36px;
+  }
 }
 
 .ws-btn-spinner {
