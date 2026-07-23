@@ -39,7 +39,7 @@ FROM node:24
 # Keep build tools at runtime — node-pty's native addon needs them for the
 # platform-specific binary. Also install git, gosu (for entrypoint chown+drop).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl bash gosu openssh-client \
+    git curl bash gosu openssh-client ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code CLI globally so "Login to Claude" works in the app

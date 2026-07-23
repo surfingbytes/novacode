@@ -11,7 +11,7 @@ import { ref } from 'vue';
 // classes
 import { buildChatWsUrl, type AgentErrorCode } from '@/classes/api';
 import { createManagedSocket, type ManagedSocket } from '@/lib/wsClient';
-import { notifyTaskDone, notifyTodoCompleted } from '@/lib/notifications';
+import { notifyTaskDone } from '@/lib/notifications';
 
 // utils
 import {
@@ -69,7 +69,6 @@ export function useChatSocket(ctx: UseChatSocketContext) {
 
   // Raw lines kept for DB persistence when the run ends.
   const streamingRawLines: string[] = [];
-  const notifiedTodoIds = new Set<string>();
   const seenVibeMessageIds = new Set<string>();
   const seenVibeToolCallIds = new Set<string>();
 
@@ -111,7 +110,6 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     streamingItems.value = [];
     streamingRawLines.length = 0;
     streamingThinkingText.value = '';
-    notifiedTodoIds.clear();
     bIsStreaming.value = msg.streaming === true;
     ctx.onHistoryLoaded();
   }
@@ -161,15 +159,6 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     if (nextPlanCount > previousPlanCount) {
       ctx.onNewPlanItem(`live-plan-${nextPlanCount - 1}`);
     }
-    for (const item of streamingItems.value) {
-      if (item.kind !== 'todos' || !item.todoItems) continue;
-      for (const t of item.todoItems) {
-        if (t.status === 'TODO_STATUS_COMPLETED' && !notifiedTodoIds.has(t.id)) {
-          notifiedTodoIds.add(t.id);
-          notifyTodoCompleted(t.content);
-        }
-      }
-    }
     ctx.onContentAppended();
   }
 
@@ -186,7 +175,6 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     streamingRawLines.length = 0;
     streamingThinkingText.value = '';
     streamingUsage.value = null;
-    notifiedTodoIds.clear();
     bIsStreaming.value = false;
     ctx.onDone();
     ctx.onContentAppended();
@@ -205,7 +193,6 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     streamingRawLines.length = 0;
     streamingThinkingText.value = '';
     streamingUsage.value = null;
-    notifiedTodoIds.clear();
     bIsStreaming.value = false;
   }
 
@@ -364,7 +351,6 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     streamingRawLines.length = 0;
     streamingThinkingText.value = '';
     streamingUsage.value = null;
-    notifiedTodoIds.clear();
     queuedPrompts.value = [];
     bHasMore.value = false;
     bLoadingMore.value = false;

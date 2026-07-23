@@ -160,11 +160,3 @@ export function notifyTaskDone(
     requireInteraction: true
   });
 }
-
-export function notifyTodoCompleted(todoContent: string): void {
-  void showNotification('Todo completed', {
-    body: todoContent,
-    icon: DEFAULT_ICON,
-    tag: `todo-${todoContent}`,
-  });
-}
