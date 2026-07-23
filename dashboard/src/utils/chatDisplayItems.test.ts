@@ -174,6 +174,183 @@ describe('ACP native events', () => {
     expect(items[0].todoItems).toEqual([]);
   });
 
+  it('parses vibe-style todos when rawInput is a JSON string', () => {
+    const parser = createChatStreamParser();
+    const items: DisplayItem[] = [];
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 't1',
+          kind: 'other',
+          title: '3 todos',
+          rawInput: JSON.stringify({
+            action: 'write',
+            todos: [
+              { id: 'a', content: 'one', status: 'completed', priority: 'medium' },
+              { id: 'b', content: 'two', status: 'in_progress', priority: 'high' },
+              { id: 'c', content: 'three', status: 'pending', priority: 'low' }
+            ]
+          })
+        }
+      }),
+      items
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('todos');
+    expect(items[0].todoItems?.map((todo) => todo.status)).toEqual([
+      'TODO_STATUS_COMPLETED',
+      'TODO_STATUS_IN_PROGRESS',
+      'TODO_STATUS_PENDING'
+    ]);
+    expect(items[0].todoItems?.[0]?.id).toBe('a');
+  });
+
+  it('refreshes todos from a rawOutput JSON string on tool_call_update', () => {
+    const parser = createChatStreamParser();
+    const items: DisplayItem[] = [];
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 't1',
+          kind: 'other',
+          title: '2 todos',
+          rawInput: JSON.stringify({
+            action: 'write',
+            todos: [
+              { id: 'a', content: 'one', status: 'in_progress' },
+              { id: 'b', content: 'two', status: 'pending' }
+            ]
+          })
+        }
+      }),
+      items
+    );
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 't1',
+          status: 'completed',
+          rawOutput: JSON.stringify({
+            message: 'ok',
+            total_count: 2,
+            todos: [
+              { id: 'a', content: 'one', status: 'completed' },
+              { id: 'b', content: 'two', status: 'completed' }
+            ]
+          })
+        }
+      }),
+      items
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('todos');
+    expect(items[0].status).toBe('success');
+    expect(items[0].todoItems?.every((todo) => todo.status === 'TODO_STATUS_COMPLETED')).toBe(true);
+  });
+
+  it('converts a generic tool item when todos only arrive in the result (todo read)', () => {
+    const parser = createChatStreamParser();
+    const items: DisplayItem[] = [];
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 't1',
+          kind: 'other',
+          title: 'Read todos',
+          rawInput: JSON.stringify({ action: 'read', todos: null })
+        }
+      }),
+      items
+    );
+    expect(items[0].kind).toBe('tool');
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 't1',
+          status: 'completed',
+          rawOutput: JSON.stringify({
+            message: 'ok',
+            total_count: 1,
+            todos: [{ id: 'a', content: 'one', status: 'in_progress' }]
+          })
+        }
+      }),
+      items
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('todos');
+    expect(items[0].status).toBe('success');
+    expect(items[0].todoItems?.[0]?.status).toBe('TODO_STATUS_IN_PROGRESS');
+  });
+
+  it('parses opencode todowrite (id-less todos, output-only rawOutput on completion)', () => {
+    // Exact wire sequence opencode v1.18 emits: title is "<n> todos", kind
+    // 'other', rawInput is the input object; completion carries only
+    // rawOutput { output, metadata } — the call-time list must be kept.
+    const parser = createChatStreamParser();
+    const items: DisplayItem[] = [];
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 't1',
+          kind: 'other',
+          title: '3 todos',
+          status: 'pending',
+          rawInput: {
+            todos: [
+              { content: 'Analyze nav redesign', status: 'in_progress', priority: 'high' },
+              { content: 'Audit dated UI patterns', status: 'pending', priority: 'medium' },
+              { content: 'Write report', status: 'pending', priority: 'low' }
+            ]
+          }
+        }
+      }),
+      items
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('todos');
+    expect(items[0].status).toBe('running');
+    expect(items[0].todoItems?.map((todo) => todo.status)).toEqual([
+      'TODO_STATUS_IN_PROGRESS',
+      'TODO_STATUS_PENDING',
+      'TODO_STATUS_PENDING'
+    ]);
+    expect(items[0].todoItems?.[0]?.id).toBe('todo-0');
+
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 't1',
+          status: 'completed',
+          content: [{ type: 'content', content: { type: 'text', text: '[{"content":"..."}]' } }],
+          rawOutput: {
+            output: '[{"content":"Analyze nav redesign"}]',
+            metadata: { todos: [{ content: 'Analyze nav redesign', status: 'in_progress' }] }
+          }
+        }
+      }),
+      items
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('todos');
+    expect(items[0].status).toBe('success');
+    expect(items[0].todoItems).toHaveLength(3);
+  });
+
   it('keeps non-todo tool calls as generic tool items', () => {
     const parser = createChatStreamParser();
     const items: DisplayItem[] = [];

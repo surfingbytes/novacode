@@ -103,6 +103,44 @@ describe('ACP native events', () => {
     expect(extractStreamNotificationPreview(events)).toBe('Todos: 2/2 completed');
   });
 
+  it('summarizes vibe-style todos from a JSON-string rawInput/rawOutput', () => {
+    const events = [
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 't1',
+          kind: 'other',
+          title: '2 todos',
+          rawInput: JSON.stringify({
+            action: 'write',
+            todos: [
+              { id: 'a', content: 'one', status: 'completed' },
+              { id: 'b', content: 'two', status: 'in_progress' }
+            ]
+          })
+        }
+      }),
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 't1',
+          status: 'completed',
+          rawOutput: JSON.stringify({
+            message: 'ok',
+            total_count: 2,
+            todos: [
+              { id: 'a', content: 'one', status: 'completed' },
+              { id: 'b', content: 'two', status: 'completed' }
+            ]
+          })
+        }
+      })
+    ];
+    expect(extractStreamNotificationPreview(events)).toBe('Todos: 2/2 completed');
+  });
+
   it('summarizes plan entries', () => {
     const events = [
       JSON.stringify({

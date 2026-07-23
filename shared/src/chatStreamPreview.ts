@@ -57,13 +57,35 @@ function normalizeTodoStatus(status: unknown): string {
 }
 
 /**
+ * Unwraps an ACP rawInput/rawOutput carrier into an object that may hold a
+ * `todos` array. Most adapters send structured objects; vibe-acp serializes
+ * tool args/results with pydantic's model_dump_json(), i.e. a JSON *string*.
+ */
+function todosCarrierFromRaw(raw: unknown): { todos?: unknown } | null {
+  if (!raw || typeof raw !== 'object') {
+    if (typeof raw !== 'string' || !raw.includes('todos')) {
+      return null;
+    }
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as { todos?: unknown })
+        : null;
+    } catch {
+      return null;
+    }
+  }
+  return raw as { todos?: unknown };
+}
+
+/**
  * Extracts a todo list from an ACP tool_call / tool_call_update payload when the
  * tool carries one (rawInput.todos / rawOutput.todos) — e.g. Claude's TodoWrite.
  * Returns null for non-todo tools.
  */
 function todosFromAcpUpdate(update: Record<string, unknown>): TodoDisplayItem[] | null {
-  const rawInput = update.rawInput as { todos?: unknown } | undefined;
-  const rawOutput = update.rawOutput as { todos?: unknown } | undefined;
+  const rawInput = todosCarrierFromRaw(update.rawInput);
+  const rawOutput = todosCarrierFromRaw(update.rawOutput);
   const rawTodos = Array.isArray(rawInput?.todos)
     ? rawInput.todos
     : Array.isArray(rawOutput?.todos)
@@ -174,6 +196,17 @@ function processAcpUpdate(update: Record<string, unknown>, items: StreamDisplayI
       const updatedTodos = todosFromAcpUpdate(update);
       if (updatedTodos?.length) {
         item.todoItems = updatedTodos;
+      }
+    }
+    if (item.kind === 'tool') {
+      // Late todos (e.g. vibe's todo 'read' action): adopt the todos row.
+      const lateTodos = todosFromAcpUpdate(update);
+      if (lateTodos?.length) {
+        item.kind = 'todos';
+        item.todoItems = lateTodos;
+        item.toolName = undefined;
+        item.toolSummary = undefined;
+        return;
       }
     }
     if (item.kind === 'tool' && typeof update.title === 'string') {
