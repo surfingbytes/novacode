@@ -10,6 +10,7 @@ import {
   getActiveRun,
   cancelRun,
   dispatchPrompt,
+  subscribeBusy,
   type ChatSubscriber
 } from '../classes/chatEngine';
 
@@ -106,14 +107,15 @@ async function tryProcessQueue(sessionId: string): Promise<void> {
       }
     });
     const sub: ChatSubscriber = {
-      onStream: (line) => broadcastChat(sessionId, { type: 'stream', data: line }),
+      // Stream/done/error delivery to chat sockets is handled by the run's
+      // session-broadcast subscriber (installed via the busy hook below);
+      // this subscriber only sequences the queue.
+      onStream: () => {},
       onDone: () => {
-        broadcastChat(sessionId, { type: 'done' });
         void broadcastQueueUpdate(sessionId);
         void tryProcessQueue(sessionId);
       },
-      onError: (message, code) => {
-        broadcastChat(sessionId, { type: 'error', message, code });
+      onError: () => {
         void broadcastQueueUpdate(sessionId);
         void tryProcessQueue(sessionId);
       },
@@ -164,6 +166,28 @@ async function loadSessionMessages(sessionId: string): Promise<ChatMessage[]> {
 
 // ---------------------------------- Routes ----------------------------------
 export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
+  // Install once: give EVERY run (queue-dispatched, orchestrator, automation,
+  // auto-continue) a single session-wide broadcast subscriber, attached
+  // synchronously at run start (busy fires before the agent emits anything).
+  // This is the ONLY live-delivery path — per-socket subscribers on top of it
+  // would deliver every line twice to mid-run joiners.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const globalAny = globalThis as any;
+  if (!globalAny.__chatBroadcastHookInstalled) {
+    globalAny.__chatBroadcastHookInstalled = true;
+    subscribeBusy((sessionId, _workspaceId, busy) => {
+      if (!busy) return;
+      const run = getActiveRun(sessionId);
+      if (!run) return;
+      run.subscribers.add({
+        onStream: (line) => broadcastChat(sessionId, { type: 'stream', data: line }),
+        onDone: () => broadcastChat(sessionId, { type: 'done' }),
+        onError: (message, code) => broadcastChat(sessionId, { type: 'error', message, code }),
+        onHistory: () => {}
+      });
+    });
+  }
+
   fastify.get('/api/ws/chat/:id', { websocket: true }, async (socket: WebSocket, request) => {
     const token = extractWsToken(request);
     if (!token) {
@@ -184,27 +208,27 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
       return;
     }
 
-    registerChatSocket(id, socket);
-
-    const existingRun = getActiveRun(id);
     const queue = await loadQueue(id);
-    let activeRunSubscriber: ChatSubscriber | null = null;
+    const existingRun = getActiveRun(id);
     if (existingRun) {
-      const sub: ChatSubscriber = {
-        onStream: (line) => send(socket, { type: 'stream', data: line }),
-        onDone: () => send(socket, { type: 'done' }),
-        onError: (message, code) => send(socket, { type: 'error', message, code }),
-        onHistory: () => {}
-      };
-      existingRun.subscribers.add(sub);
-      activeRunSubscriber = sub;
-
+      // Snapshot the buffer, replay it, THEN register for the session broadcast:
+      // lines up to the snapshot are delivered once via the replay, lines after
+      // registration arrive once via the broadcast. There are no awaits between
+      // the snapshot and the registration, so no line can be missed or doubled.
+      const bufferedSnapshot = [...existingRun.bufferedLines];
       const { messages: page, hasMore } = paginateMessages(existingRun.messages, 0);
       send(socket, { type: 'history', messages: page, hasMore, streaming: true, queue });
-      for (const line of existingRun.bufferedLines) {
+      for (const line of bufferedSnapshot) {
         send(socket, { type: 'stream', data: line });
       }
+      registerChatSocket(id, socket);
+      if (!getActiveRun(id)) {
+        // The run finished while we replayed: every line is in the snapshot,
+        // but the 'done' broadcast fired before this socket registered.
+        send(socket, { type: 'done' });
+      }
     } else {
+      registerChatSocket(id, socket);
       let allMessages: ChatMessage[] = [];
       try {
         allMessages = JSON.parse(session.messageJson ?? '[]');
@@ -279,10 +303,6 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
 
     socket.on('close', () => {
       unregisterChatSocket(id, socket);
-      if (activeRunSubscriber) {
-        const active = getActiveRun(id);
-        active?.subscribers.delete(activeRunSubscriber);
-      }
     });
   });
 }

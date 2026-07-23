@@ -9,6 +9,7 @@ import {
   closeAcpSubprocessSession,
   runAcpSubprocessPrompt,
   type AcpEventHandler,
+  type AcpPromptAttachment,
   type SessionConfigSyncHandler,
 } from './acpSubprocessRunner';
 
@@ -18,6 +19,7 @@ export interface RunVibeAcpParams {
   acpSessionId: string | null;
   cwd: string;
   promptText: string;
+  attachments?: AcpPromptAttachment[];
   mode?: string;
 }
 
@@ -42,6 +44,7 @@ export async function runVibeAcp(
       novaSessionId,
       acpSessionId: params.acpSessionId,
       promptText: params.promptText,
+      attachments: params.attachments,
       mode: params.mode,
       logTag: 'vibeAcp',
     },

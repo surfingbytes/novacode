@@ -294,7 +294,7 @@ watch(AGENT_OPTIONS, (options) => {
     />
 
           <!-- Body -->
-          <div class="modal-body">
+          <div class="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
             <!-- Name -->
             <div class="field" :class="{ 'has-error': errors.name }">
               <div class="label">Workspace Name</div>
@@ -459,7 +459,7 @@ watch(AGENT_OPTIONS, (options) => {
           </div>
 
           <!-- Footer -->
-          <div class="modal-footer flex items-center justify-between gap-2">
+          <div class="flex shrink-0 items-center justify-between gap-2 border-t border-border px-6 py-4">
             <button class="button is-transparent" @click="close">Cancel</button>
 
             <button class="button is-primary" :disabled="bSaving" @click="submit">

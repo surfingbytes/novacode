@@ -10,6 +10,7 @@ import {
   closeAcpSubprocessSession,
   runAcpSubprocessPrompt,
   type AcpEventHandler,
+  type AcpPromptAttachment,
   type SessionConfigSyncHandler,
 } from './acpSubprocessRunner';
 
@@ -19,6 +20,7 @@ export interface RunOpenCodeAcpParams {
   acpSessionId: string | null;
   cwd: string;
   promptText: string;
+  attachments?: AcpPromptAttachment[];
   model?: string;
   mode?: string;
   configJson?: Record<string, string>;
@@ -46,6 +48,7 @@ export async function runOpenCodeAcp(
       novaSessionId,
       acpSessionId: params.acpSessionId,
       promptText: params.promptText,
+      attachments: params.attachments,
       model: params.model,
       mode: params.mode,
       configJson: params.configJson,

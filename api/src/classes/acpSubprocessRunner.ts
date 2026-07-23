@@ -5,6 +5,7 @@
 // node_modules
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import {
   client,
   methods,
@@ -13,6 +14,7 @@ import {
 } from '@agentclientprotocol/sdk';
 import type {
   ClientContext,
+  ContentBlock,
   LoadSessionResponse,
   NewSessionResponse,
   RequestPermissionRequest,
@@ -33,6 +35,38 @@ export type SessionConfigSyncHandler = (sync: {
   config?: Record<string, string>;
 }) => void;
 
+/**
+ * An image attachment sent as a native ACP `image` content block. Only image/*
+ * MIME types are portable: every ACP agent we integrate advertises `image` and
+ * converts it to real model input, while `resource`/blob blocks are ignored or
+ * unsupported by several agents — so non-image files must stay path-in-prompt.
+ */
+export interface AcpPromptAttachment {
+  /** MIME type — must be image/*. */
+  mimeType: string;
+  /** Base64-encoded file contents (the only block form all agents accept). */
+  data: string;
+  /** Absolute local path — used only to derive the filename for the block's uri. */
+  path: string;
+}
+
+/** Build the session/prompt content array: text block first, then one image block per attachment. */
+export function buildPromptContent(
+  promptText: string,
+  attachments: AcpPromptAttachment[] = []
+): ContentBlock[] {
+  const content: ContentBlock[] = [{ type: 'text', text: promptText }];
+  for (const attachment of attachments) {
+    content.push({
+      type: 'image',
+      data: attachment.data,
+      mimeType: attachment.mimeType,
+      uri: pathToFileURL(attachment.path).href,
+    });
+  }
+  return content;
+}
+
 export interface AcpSubprocessRunParams {
   command: string;
   args: string[];
@@ -40,6 +74,8 @@ export interface AcpSubprocessRunParams {
   novaSessionId: string;
   acpSessionId: string | null;
   promptText: string;
+  /** Image attachments sent as native ACP image blocks alongside the text block. */
+  attachments?: AcpPromptAttachment[];
   model?: string;
   mode?: string;
   configJson?: Record<string, string>;
@@ -602,7 +638,7 @@ export async function runAcpSubprocessPrompt(
           : promptText;
         const resp = (await ctx.request(methods.agent.session.prompt, {
           sessionId: resolvedSessionId,
-          prompt: [{ type: 'text', text: finalPromptText }],
+          prompt: buildPromptContent(finalPromptText, params.attachments),
         })) as { stopReason?: string };
         phase('session:prompt:done');
         return {

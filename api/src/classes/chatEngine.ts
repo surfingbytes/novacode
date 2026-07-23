@@ -1,5 +1,5 @@
 // node_modules
-import { join } from 'node:path';
+import { extname, join } from 'node:path';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
 
@@ -14,7 +14,7 @@ import { runOpenCodeAcp, cancelOpenCodeAcp } from './openCodeAcp';
 import { runCodexAcp, cancelCodexAcp } from './codexAcp';
 import { sendTaskDonePush } from './push';
 import { normalizeSessionMode } from './sessionMode';
-import type { SessionConfigSyncHandler } from './acpSubprocessRunner';
+import type { AcpPromptAttachment, SessionConfigSyncHandler } from './acpSubprocessRunner';
 import { computeLastListPreview } from './chatPreview';
 import { extractStreamNotificationPreview } from './chatStreamPreviewFromEvents';
 import { broadcastSessionListUpsert } from './sessionListBroadcast';
@@ -207,6 +207,42 @@ async function buildWorkspaceRulesPrefix(workspacePath: string): Promise<string>
   ].join('\n');
 }
 
+/**
+ * Image attachments are sent to agents as native ACP image blocks (base64 data) —
+ * every integrated ACP agent advertises the `image` prompt capability and converts
+ * it to real model input. All other file types stay path-in-prompt so agents can
+ * read them with their own file tools (ACP `resource`/blob blocks are ignored or
+ * unsupported by several agents, and no agent accepts video over ACP).
+ */
+const IMAGE_MIME_BY_EXT: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+};
+
+async function resolvePromptAttachments(
+  imagePaths: string[]
+): Promise<{ attachments: AcpPromptAttachment[]; textPaths: string[] }> {
+  const attachments: AcpPromptAttachment[] = [];
+  const textPaths: string[] = [];
+  for (const path of imagePaths) {
+    const mimeType = IMAGE_MIME_BY_EXT[extname(path).toLowerCase()];
+    if (mimeType) {
+      try {
+        const data = await readFile(path);
+        attachments.push({ mimeType, data: data.toString('base64'), path });
+        continue;
+      } catch {
+        // unreadable (e.g. cleaned up) — fall back to path-in-prompt
+      }
+    }
+    textPaths.push(path);
+  }
+  return { attachments, textPaths };
+}
+
 export async function dispatchPrompt(
   opts: DispatchPromptOpts
 ): Promise<{ error?: string; errorCode?: AgentErrorCode }> {
@@ -269,7 +305,8 @@ export async function dispatchPrompt(
     return { error: 'Failed to save message' };
   }
 
-  const effectiveText = imagePaths.length > 0 ? `${text}\n\n${imagePaths.join('\n')}` : text;
+  const { attachments, textPaths } = await resolvePromptAttachments(imagePaths);
+  const effectiveText = textPaths.length > 0 ? `${text}\n\n${textPaths.join('\n')}` : text;
   const workspacePath = join('/data-root', workspace.path);
   if (!workspacePath.startsWith('/data-root/') && workspacePath !== '/data-root') {
     return { error: 'Invalid workspace path' };
@@ -385,7 +422,7 @@ export async function dispatchPrompt(
 
     if (agentType === 'mistral-vibe') {
       result = await runVibeAcp(
-        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt, mode: sessionMode },
+        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt, attachments, mode: sessionMode },
         onEvent,
         sessionId,
         onConfigSync
@@ -396,6 +433,7 @@ export async function dispatchPrompt(
           acpSessionId: currentAcpSessionId,
           cwd: workspacePath,
           promptText: agentPrompt,
+          attachments,
           model,
           mode: sessionMode,
           configJson: sessionConfig,
@@ -410,6 +448,7 @@ export async function dispatchPrompt(
           acpSessionId: currentAcpSessionId,
           cwd: workspacePath,
           promptText: agentPrompt,
+          attachments,
           model,
           mode: sessionMode,
           configJson: sessionConfig,
@@ -424,6 +463,7 @@ export async function dispatchPrompt(
           acpSessionId: currentAcpSessionId,
           cwd: workspacePath,
           promptText: agentPrompt,
+          attachments,
           model,
           mode: sessionMode,
           configJson: sessionConfig,
@@ -438,6 +478,7 @@ export async function dispatchPrompt(
           acpSessionId: currentAcpSessionId,
           cwd: workspacePath,
           promptText: agentPrompt,
+          attachments,
           claudeToken,
           model,
           mode: sessionMode,

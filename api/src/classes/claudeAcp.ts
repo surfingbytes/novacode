@@ -17,7 +17,8 @@ import type {
 // classes
 import { applySessionMode, applySessionModel, applySessionConfig } from './acpSessionHelpers';
 import type { AcpSessionResponse } from './acpSessionHelpers';
-import type { SessionConfigSyncHandler } from './acpSubprocessRunner';
+import { buildPromptContent } from './acpSubprocessRunner';
+import type { AcpPromptAttachment, SessionConfigSyncHandler } from './acpSubprocessRunner';
 
 export type AcpEventHandler = (line: string) => void;
 // Re-used by any ACP agent added later (Mistral, etc.).
@@ -127,6 +128,8 @@ export interface RunClaudeAcpParams {
   acpSessionId: string | null;
   cwd: string;
   promptText: string;
+  /** Image attachments sent as native ACP image blocks (Claude converts them to Anthropic image parts). */
+  attachments?: AcpPromptAttachment[];
   /** Optional OAuth token forwarded as CLAUDE_CODE_OAUTH_TOKEN. */
   claudeToken?: string | null;
   model?: string;
@@ -197,7 +200,7 @@ export async function runClaudeAcp(
   try {
     const resp = await agent.prompt({
       sessionId: resolvedSessionId,
-      prompt: [{ type: 'text', text: promptText }],
+      prompt: buildPromptContent(promptText, params.attachments),
     });
     return { acpSessionId: resolvedSessionId, stopReason: resp.stopReason };
   } catch (err) {
