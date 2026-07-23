@@ -63,12 +63,6 @@ const navItems = [
     label: 'Automations',
     to: '/automations',
     svgPath: 'M12 7v5l3 2 M12 21a9 9 0 100-18 9 9 0 000 18z'
-  },
-  {
-    id: 'rules',
-    label: 'Rule templates',
-    to: '/role-templates',
-    svgPath: 'M4 14l10-10 6 6-10 10z M8 10l2 2 M11 7l2 2 M5 13l2 2'
   }
 ];
 

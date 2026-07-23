@@ -86,6 +86,114 @@ describe('ACP native events', () => {
     expect(items[0].toolOutput).toBe('ok');
   });
 
+  it('parses a todowrite tool_call (rawInput.todos) into a todos item with normalized statuses', () => {
+    const parser = createChatStreamParser();
+    const items: DisplayItem[] = [];
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 't1',
+          kind: 'other',
+          title: 'TodoWrite',
+          rawInput: {
+            todos: [
+              { content: 'First task', status: 'completed' },
+              { content: 'Second task', status: 'in_progress' },
+              { content: 'Third task', status: 'pending' },
+              { content: 'Fourth task', status: 'cancelled' }
+            ]
+          }
+        }
+      }),
+      items
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('todos');
+    expect(items[0].status).toBe('running');
+    expect(items[0].todoItems?.map((todo) => todo.status)).toEqual([
+      'TODO_STATUS_COMPLETED',
+      'TODO_STATUS_IN_PROGRESS',
+      'TODO_STATUS_PENDING',
+      'TODO_STATUS_CANCELLED'
+    ]);
+    expect(items[0].todoItems?.[0]?.id).toBe('todo-0');
+  });
+
+  it('refreshes todos and status on tool_call_update', () => {
+    const parser = createChatStreamParser();
+    const items: DisplayItem[] = [];
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 't1',
+          kind: 'other',
+          rawInput: { todos: [{ content: 'Task', status: 'in_progress' }] }
+        }
+      }),
+      items
+    );
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 't1',
+          status: 'completed',
+          rawOutput: { todos: [{ content: 'Task', status: 'completed' }] }
+        }
+      }),
+      items
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('todos');
+    expect(items[0].status).toBe('success');
+    expect(items[0].todoItems?.[0]?.status).toBe('TODO_STATUS_COMPLETED');
+  });
+
+  it('treats an empty todos array as a cleared list', () => {
+    const parser = createChatStreamParser();
+    const items: DisplayItem[] = [];
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 't1',
+          kind: 'other',
+          rawInput: { todos: [] }
+        }
+      }),
+      items
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('todos');
+    expect(items[0].todoItems).toEqual([]);
+  });
+
+  it('keeps non-todo tool calls as generic tool items', () => {
+    const parser = createChatStreamParser();
+    const items: DisplayItem[] = [];
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 't1',
+          kind: 'other',
+          title: 'Some other tool',
+          rawInput: { query: 'not todos' }
+        }
+      }),
+      items
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('tool');
+  });
+
   it('updates plan entries in place', () => {
     const parser = createChatStreamParser();
     const items: DisplayItem[] = [];
@@ -184,6 +292,33 @@ describe('ACP native events', () => {
       { liveThinking: true }
     );
     expect(thinkingText.value).toBe('hmm');
+  });
+});
+
+// ---------------------------------- Server notices ----------------------------------
+
+describe('session_reset_notice events', () => {
+  it('produces a notice display item with the notice text', () => {
+    const parser = createChatStreamParser();
+    const items: DisplayItem[] = [];
+    parser.processEventLine(
+      JSON.stringify({
+        type: 'session_reset_notice',
+        text: 'Previous conversation context could not be resumed.'
+      }),
+      items
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('notice');
+    expect(items[0].text).toBe('Previous conversation context could not be resumed.');
+  });
+
+  it('ignores notice events with empty or missing text', () => {
+    const parser = createChatStreamParser();
+    const items: DisplayItem[] = [];
+    parser.processEventLine(JSON.stringify({ type: 'session_reset_notice', text: '   ' }), items);
+    parser.processEventLine(JSON.stringify({ type: 'session_reset_notice' }), items);
+    expect(items).toHaveLength(0);
   });
 });
 

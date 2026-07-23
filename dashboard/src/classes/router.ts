@@ -84,10 +84,9 @@ const router = createRouter({
         import('@/views/AutomationsView.vue')
     },
     {
+      // Rule templates moved into Settings → Templates; keep the old URL working.
       path: '/role-templates',
-      name: 'role-templates',
-      component: (): Promise<typeof import('@/views/RoleTemplatesView.vue')> =>
-        import('@/views/RoleTemplatesView.vue')
+      redirect: { name: 'settings', query: { tab: 'templates' } }
     },
     {
       path: '/settings',

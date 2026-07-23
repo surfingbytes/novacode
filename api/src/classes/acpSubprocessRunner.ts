@@ -114,6 +114,22 @@ const activeRuns = new Map<string, ActiveRun>();
 const activeHandlers = new Map<string, AcpEventHandler>();
 const configSyncHandlers = new Map<string, SessionConfigSyncHandler>();
 
+/** Grace period for the agent to honour session/cancel before the subprocess is killed. */
+const CANCEL_GRACE_MS = 3_000;
+
+/** User-visible notice emitted when a failed session/load silently resets the conversation. */
+const CONTEXT_RESET_NOTICE_TEXT =
+  'Previous conversation context could not be resumed — the agent started a fresh conversation and cannot see earlier messages.';
+
+/** Serialized stream event for the reset notice (persisted in messageJson, rendered by the dashboard). */
+export function sessionResetNoticeEventLine(): string {
+  return JSON.stringify({ type: 'session_reset_notice', text: CONTEXT_RESET_NOTICE_TEXT });
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function autoApprovePermission(
   params: RequestPermissionRequest
 ): RequestPermissionResponse {
@@ -129,11 +145,30 @@ function autoApprovePermission(
 function nodeReadableToWeb(readable: NodeJS.ReadableStream): ReadableStream<Uint8Array> {
   return new ReadableStream<Uint8Array>({
     start(controller) {
+      // A killed subprocess races socket 'error'/'end' events against the consumer
+      // (ACP SDK) cancelling the stream — the controller throws on any transition
+      // after the first, so every controller call is best-effort.
       readable.on('data', (chunk: Buffer | string) => {
-        controller.enqueue(typeof chunk === 'string' ? Buffer.from(chunk) : new Uint8Array(chunk));
+        try {
+          controller.enqueue(typeof chunk === 'string' ? Buffer.from(chunk) : new Uint8Array(chunk));
+        } catch {
+          // stream already closed/cancelled
+        }
       });
-      readable.on('end', () => controller.close());
-      readable.on('error', (err) => controller.error(err));
+      readable.on('end', () => {
+        try {
+          controller.close();
+        } catch {
+          // stream already closed/cancelled
+        }
+      });
+      readable.on('error', (err) => {
+        try {
+          controller.error(err);
+        } catch {
+          // stream already closed/cancelled
+        }
+      });
     },
   });
 }
@@ -488,6 +523,10 @@ export async function runAcpSubprocessPrompt(
 
   let ctxRef: ClientContext | null = null;
   let sessionIdForCancel: string | null = acpSessionId;
+  let resolvePromptSettled: () => void = () => {};
+  const promptSettled = new Promise<void>((resolve) => {
+    resolvePromptSettled = resolve;
+  });
   const stream = ndJsonStream(nodeWritableToWeb(proc.stdin!), nodeReadableToWeb(proc.stdout!));
   const app = buildClientApp(onConfigSync, params.cursorExtensions, () => sessionIdForCancel);
 
@@ -514,6 +553,11 @@ export async function runAcpSubprocessPrompt(
         } catch {
           // ignore
         }
+        // Give the agent a chance to end the turn gracefully (stopReason: 'cancelled')
+        // and flush the aborted turn to its session store — a hard kill here can
+        // leave the on-disk transcript without the cancelled prompt, so the next
+        // session/load would resume a conversation missing the user's message.
+        await Promise.race([promptSettled, delay(CANCEL_GRACE_MS)]);
       }
       killProc();
     })();
@@ -572,6 +616,8 @@ export async function runAcpSubprocessPrompt(
           phase('session:load:done');
         } catch (err) {
           console.warn(`[${logTag}] loadSession failed, starting fresh session:`, err);
+          // Surface the silent context reset to the user (persisted via onEvent).
+          onEvent(sessionResetNoticeEventLine());
           activeHandlers.delete(acpSessionId);
           phase('session:new:start');
           const created = (await ctx.request(methods.agent.session.new, {
@@ -650,6 +696,7 @@ export async function runAcpSubprocessPrompt(
       } catch (err) {
         return { acpSessionId: resolvedSessionId, error: String(err), resolvedModeId, resolvedModelId };
       } finally {
+        resolvePromptSettled();
         activeHandlers.delete(resolvedSessionId);
         // connectWith waits for the transport to close; close the per-turn subprocess
         // as soon as the ACP prompt request has completed.
@@ -657,7 +704,12 @@ export async function runAcpSubprocessPrompt(
       }
     });
   } catch (err) {
-    return { acpSessionId: acpSessionId ?? '', error: String(err) };
+    resolvePromptSettled();
+    // Preserve the ACP session id resolved this turn (session/new or session/load):
+    // when a cancel kills the subprocess mid-prompt, connectWith rejects even though
+    // the id is known — returning '' here would drop it, and the next prompt would
+    // start a fresh agent conversation that cannot see this turn's messages.
+    return { acpSessionId: sessionIdForCancel ?? '', error: String(err) };
   } finally {
     activeRuns.delete(novaSessionId);
     configSyncHandlers.delete(novaSessionId);

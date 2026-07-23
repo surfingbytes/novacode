@@ -11,11 +11,17 @@ describe('ACP native events', () => {
     const events = [
       JSON.stringify({
         sessionId: 's1',
-        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Hello ' } }
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'Hello ' }
+        }
       }),
       JSON.stringify({
         sessionId: 's1',
-        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'world' } }
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'world' }
+        }
       })
     ];
     expect(extractStreamNotificationPreview(events)).toBe('Hello world');
@@ -28,24 +34,73 @@ describe('ACP native events', () => {
     const events = chunks.map((text) =>
       JSON.stringify({
         sessionId: 's1',
-        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } }
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text }
+        }
       })
     );
-    expect(extractStreamNotificationPreview(events)).toBe('| A | B |\n|----------|----------|\n| a  | b |');
+    expect(extractStreamNotificationPreview(events)).toBe(
+      '| A | B |\n|----------|----------|\n| a  | b |'
+    );
   });
 
   it('falls back to the last tool summary when the run ends on a tool call', () => {
     const events = [
       JSON.stringify({
         sessionId: 's1',
-        update: { sessionUpdate: 'tool_call', toolCallId: 't1', kind: 'edit', title: 'src/app.ts' }
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 't1',
+          kind: 'edit',
+          title: 'src/app.ts'
+        }
       }),
       JSON.stringify({
         sessionId: 's1',
-        update: { sessionUpdate: 'tool_call_update', toolCallId: 't1', status: 'completed' }
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 't1',
+          status: 'completed'
+        }
       })
     ];
     expect(extractStreamNotificationPreview(events)).toBe('Edit: src/app.ts');
+  });
+
+  it('summarizes a todowrite tool_call (rawInput.todos) with normalized statuses', () => {
+    const events = [
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 't1',
+          kind: 'other',
+          title: 'TodoWrite',
+          rawInput: {
+            todos: [
+              { content: 'one', status: 'completed' },
+              { content: 'two', status: 'in_progress' }
+            ]
+          }
+        }
+      }),
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 't1',
+          status: 'completed',
+          rawOutput: {
+            todos: [
+              { content: 'one', status: 'completed' },
+              { content: 'two', status: 'completed' }
+            ]
+          }
+        }
+      })
+    ];
+    expect(extractStreamNotificationPreview(events)).toBe('Todos: 2/2 completed');
   });
 
   it('summarizes plan entries', () => {
@@ -70,7 +125,10 @@ describe('ACP native events', () => {
 describe('legacy cursor-style events', () => {
   it('merges cumulative assistant text without duplication', () => {
     const events = [
-      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Task' }] } }),
+      JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'Task' }] }
+      }),
       JSON.stringify({
         type: 'assistant',
         message: { content: [{ type: 'text', text: 'Task completed.' }] }
@@ -133,7 +191,9 @@ describe('legacy cursor-style events', () => {
         }
       })
     ];
-    expect(extractStreamNotificationPreview(events)).toBe('Glob: *.ts in src → 2 files: a.ts, b.ts');
+    expect(extractStreamNotificationPreview(events)).toBe(
+      'Glob: *.ts in src → 2 files: a.ts, b.ts'
+    );
   });
 });
 

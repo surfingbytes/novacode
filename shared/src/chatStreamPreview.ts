@@ -34,6 +34,67 @@ export interface StreamDisplayItem {
 
 // ---------------------------------- ACP helpers ----------------------------------
 
+/** Mirrors the dashboard parser: normalizes agent todo statuses to TODO_STATUS_*. */
+function normalizeTodoStatus(status: unknown): string {
+  if (typeof status !== 'string' || !status.trim()) {
+    return 'TODO_STATUS_PENDING';
+  }
+  const trimmed = status.trim();
+  if (trimmed.startsWith('TODO_STATUS_')) {
+    return trimmed;
+  }
+  const normalized = trimmed.toLowerCase().replace(/[\s-]+/g, '_');
+  if (normalized === 'completed' || normalized === 'done') {
+    return 'TODO_STATUS_COMPLETED';
+  }
+  if (normalized === 'in_progress' || normalized === 'active') {
+    return 'TODO_STATUS_IN_PROGRESS';
+  }
+  if (normalized === 'cancelled' || normalized === 'canceled') {
+    return 'TODO_STATUS_CANCELLED';
+  }
+  return 'TODO_STATUS_PENDING';
+}
+
+/**
+ * Extracts a todo list from an ACP tool_call / tool_call_update payload when the
+ * tool carries one (rawInput.todos / rawOutput.todos) — e.g. Claude's TodoWrite.
+ * Returns null for non-todo tools.
+ */
+function todosFromAcpUpdate(update: Record<string, unknown>): TodoDisplayItem[] | null {
+  const rawInput = update.rawInput as { todos?: unknown } | undefined;
+  const rawOutput = update.rawOutput as { todos?: unknown } | undefined;
+  const rawTodos = Array.isArray(rawInput?.todos)
+    ? rawInput.todos
+    : Array.isArray(rawOutput?.todos)
+      ? rawOutput.todos
+      : null;
+  if (!rawTodos) {
+    return null;
+  }
+  const items: TodoDisplayItem[] = [];
+  for (let index = 0; index < rawTodos.length; index++) {
+    const raw = rawTodos[index];
+    if (!raw || typeof raw !== 'object') {
+      continue;
+    }
+    const candidate = raw as {
+      id?: unknown;
+      content?: unknown;
+      status?: unknown;
+    };
+    if (typeof candidate.content !== 'string' || !candidate.content.trim()) {
+      continue;
+    }
+    items.push({
+      id: typeof candidate.id === 'string' && candidate.id ? candidate.id : `todo-${index}`,
+      content: candidate.content,
+      status: normalizeTodoStatus(candidate.status)
+    });
+  }
+  return items;
+}
+
 function acpKindToToolName(kind: string | undefined): string {
   const names: Record<string, string> = {
     read: 'Read',
@@ -72,6 +133,16 @@ function processAcpUpdate(update: Record<string, unknown>, items: StreamDisplayI
     if (!toolCallId) {
       return;
     }
+    const todoItems = todosFromAcpUpdate(update);
+    if (todoItems?.length) {
+      items.push({
+        kind: 'todos',
+        callId: toolCallId,
+        status: 'running',
+        todoItems
+      });
+      return;
+    }
     items.push({
       kind: 'tool',
       callId: toolCallId,
@@ -98,6 +169,12 @@ function processAcpUpdate(update: Record<string, unknown>, items: StreamDisplayI
       item.status = 'success';
     } else if (status === 'failed') {
       item.status = 'rejected';
+    }
+    if (item.kind === 'todos') {
+      const updatedTodos = todosFromAcpUpdate(update);
+      if (updatedTodos?.length) {
+        item.todoItems = updatedTodos;
+      }
     }
     if (item.kind === 'tool' && typeof update.title === 'string') {
       item.toolSummary = update.title;
@@ -361,7 +438,11 @@ function processEventLine(line: string, items: StreamDisplayItem[]): void {
           kind: 'todos',
           callId: event.call_id as string,
           status: 'running',
-          todoItems: rawTodos.map((t) => ({ id: t.id, content: t.content, status: t.status }))
+          todoItems: rawTodos.map((t) => ({
+            id: t.id,
+            content: t.content,
+            status: t.status
+          }))
         });
       } else {
         items.push({

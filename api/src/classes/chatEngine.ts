@@ -483,7 +483,12 @@ export async function dispatchPrompt(
           model,
           mode: sessionMode,
           configJson: sessionConfig,
-          onSessionId: (id) => { currentAcpSessionId = id; },
+          onSessionId: (id) => {
+            currentAcpSessionId = id;
+            // Stop pressed during session startup (before the ACP session id was
+            // known) — honour it as soon as the id arrives instead of dropping it.
+            if (cancelled) cancelClaudeAcp(id);
+          },
         },
         onEvent,
         onConfigSync

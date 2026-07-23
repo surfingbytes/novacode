@@ -4,8 +4,6 @@ import { ref, computed, onMounted } from 'vue';
 
 // components
 import ConfirmModal from '@/components/ConfirmModal.vue';
-import PageShell from '@/components/layout/PageShell.vue';
-import PageHeader from '@/components/layout/PageHeader.vue';
 
 // classes
 import { roleTemplatesApi } from '@/classes/api';
@@ -256,14 +254,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <PageShell>
-    <!-- Header -->
-    <PageHeader
-      icon="manage_accounts"
-      title="Rule templates"
-      subtitle="Define reusable system prompts for Cursor agents. Available to all workspaces."
-    />
-
+  <div>
     <div class="flex justify-between sm:justify-end mb-3">
       <div class="button-select-small mr-2 mt-0">
         <button
@@ -552,5 +543,5 @@ onMounted(() => {
     >
       {{ deleteError }}
     </div>
-  </PageShell>
+  </div>
 </template>

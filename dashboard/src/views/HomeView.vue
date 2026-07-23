@@ -107,10 +107,14 @@ onMounted(() => {
           />
           <span class="session-row__name">{{ session.name || 'Untitled session' }}</span>
           <span class="session-row__ws nc-mono">
-            <span :style="{ color: workspaceColor(workspaceById(session.workspaceId)) }">{{
-              workspaceName(session.workspaceId)
-            }}</span>
-            <template v-if="session.agentType"> · {{ agentTypeShortLabel(session.agentType) }}</template>
+            <span
+              class="session-row__ws-name"
+              :style="{ color: workspaceColor(workspaceById(session.workspaceId)) }"
+              >{{ workspaceName(session.workspaceId) }}</span
+            >
+            <span v-if="session.agentType" class="session-row__ws-agent"
+              >· {{ agentTypeShortLabel(session.agentType) }}</span
+            >
           </span>
           <span class="session-row__age nc-mono">{{ relativeTimeLong(session.updatedAt) }}</span>
         </RouterLink>
@@ -259,21 +263,36 @@ onMounted(() => {
 }
 
 .session-row__ws {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
   font-size: 12px;
   color: var(--fg-subtle);
-  min-width: 140px;
+  white-space: nowrap;
+}
+
+.session-row__ws-name {
+  width: 12ch;
   text-align: right;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.session-row__ws-agent {
+  width: 10ch;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .session-row__age {
   font-size: 12px;
   color: var(--fg-subtle);
-  min-width: 36px;
+  width: 14ch;
   text-align: right;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .home-empty {

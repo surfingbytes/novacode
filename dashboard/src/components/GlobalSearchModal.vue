@@ -285,7 +285,7 @@ function navigateToResult(result: SearchResult): void {
       }
       break;
     case 'role-template':
-      router.push('/role-templates');
+      router.push({ name: 'settings', query: { tab: 'templates' } });
       break;
     case 'automation':
       router.push('/automations');

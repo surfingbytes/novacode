@@ -689,7 +689,11 @@ onMounted(async () => {
         </h2>
         <p class="text-xs text-text-muted mb-3">
           Create a basic rule file or start from a template you configured under
-          <span class="font-semibold">Settings → Templates</span>.
+          <RouterLink
+            :to="{ name: 'settings', query: { tab: 'templates' } }"
+            class="font-semibold text-primary hover:underline"
+            >Settings → Templates</RouterLink
+          >.
         </p>
 
         <!-- Mode toggle -->
@@ -741,7 +745,12 @@ onMounted(async () => {
           <div v-else-if="ruleTemplates.length === 0" class="text-xs text-text-muted">
             No templates yet. Create one with the button below.
           </div>
-          <div class="flex justify-end">
+          <div class="flex items-center justify-end gap-3">
+            <RouterLink
+              :to="{ name: 'settings', query: { tab: 'templates' } }"
+              class="text-xs text-primary hover:underline"
+              >Manage templates →</RouterLink
+            >
             <button
               type="button"
               class="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-text-muted border border-fg/20 rounded-lg hover:text-text-primary hover:border-fg/35 hover:bg-fg/[0.04] transition-colors"

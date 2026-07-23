@@ -1,0 +1,165 @@
+<script setup lang="ts">
+/**
+ * Persistent todo panel for the chat tab — shows the agent's current todo list
+ * (latest todowrite call, derived via useTodoList) instead of letting it scroll
+ * away in the message stream. Two layouts:
+ *  - 'strip': mobile — collapsible strip pinned above the composer
+ *  - 'panel': desktop — right-side column of the chat tab, closable (bClosable)
+ * Tapping the header cycles tri-state: collapsed (header + counter only) →
+ * preview (up to 3 items, current work first) → full list.
+ */
+
+// node_modules
+import { computed } from 'vue';
+import { ChevronUp, ChevronDown, ChevronsUpDown, X } from 'lucide-vue-next';
+
+// components
+import TodoStatusIcon from '@/components/chat/TodoStatusIcon.vue';
+
+// utils
+import { getToolIconSvg, type TodoDisplayItem } from '@/utils/chatDisplayItems';
+
+// types
+import type { TodoPanelState } from '@/composables/useTodoList';
+
+// -------------------------------------------------- Props --------------------------------------------------
+
+const props = withDefaults(
+  defineProps<{
+    todoItems: TodoDisplayItem[];
+    doneCount: number;
+    panelState: TodoPanelState;
+    layout: 'strip' | 'panel';
+    bRunning?: boolean;
+    bClosable?: boolean;
+  }>(),
+  { bRunning: false, bClosable: false }
+);
+
+// -------------------------------------------------- Emits --------------------------------------------------
+
+const emit = defineEmits<{
+  (e: 'cycle'): void;
+  (e: 'close'): void;
+}>();
+
+// -------------------------------------------------- Constants --------------------------------------------------
+
+const checklistSvg = getToolIconSvg('checklist');
+
+// -------------------------------------------------- Computed --------------------------------------------------
+
+/** Preview surfaces current work first: in-progress, then pending, then done. */
+const previewItems = computed(() => {
+  const rank = (status: string): number => {
+    if (status === 'TODO_STATUS_IN_PROGRESS') {
+      return 0;
+    }
+    if (status === 'TODO_STATUS_COMPLETED' || status === 'TODO_STATUS_CANCELLED') {
+      return 2;
+    }
+    return 1;
+  };
+  return [...props.todoItems].sort((a, b) => rank(a.status) - rank(b.status)).slice(0, 3);
+});
+
+const visibleItems = computed(() =>
+  props.panelState === 'full' ? props.todoItems : previewItems.value
+);
+
+// -------------------------------------------------- Methods --------------------------------------------------
+
+function bDone(status: string): boolean {
+  return status === 'TODO_STATUS_COMPLETED' || status === 'TODO_STATUS_CANCELLED';
+}
+</script>
+
+<template>
+  <div
+    class="flex flex-col overflow-hidden"
+    :class="
+      layout === 'strip'
+        ? 'chat-card mx-3 mb-2 rounded-lg shrink-0'
+        : 'todo-panel-surface h-full min-h-0 border-l border-fg/10'
+    "
+  >
+    <!-- Header — always visible, tap to cycle collapsed → preview → full -->
+    <div
+      class="flex items-center shrink-0"
+      :class="panelState === 'collapsed' ? '' : 'border-b border-fg/10'"
+    >
+      <button
+        type="button"
+        class="flex flex-1 items-center gap-2 px-3 py-1.5 min-w-0"
+        @click="emit('cycle')"
+      >
+        <span class="shrink-0 select-none text-text-muted" v-html="checklistSvg" />
+        <span class="text-xs font-medium text-text-primary shrink-0">Tasks</span>
+        <span class="ml-auto flex items-center gap-1.5 shrink-0">
+          <svg
+            v-if="bRunning"
+            class="animate-spin text-primary select-none"
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <polyline points="23 4 23 10 17 10" />
+            <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
+          </svg>
+          <span v-else class="text-xs text-text-muted">{{ doneCount }}/{{ todoItems.length }}</span>
+          <ChevronUp v-if="panelState === 'collapsed'" :size="13" class="text-text-muted" />
+          <ChevronsUpDown v-else-if="panelState === 'preview'" :size="13" class="text-text-muted" />
+          <ChevronDown v-else :size="13" class="text-text-muted" />
+        </span>
+      </button>
+      <button
+        v-if="bClosable"
+        type="button"
+        class="shrink-0 px-2.5 py-1.5 text-text-muted hover:text-text-primary transition-colors"
+        aria-label="Close tasks panel"
+        @click.stop="emit('close')"
+      >
+        <X :size="13" />
+      </button>
+    </div>
+
+    <!-- Body -->
+    <ul
+      v-if="panelState !== 'collapsed'"
+      class="px-3 py-1.5 space-y-1"
+      :class="
+        layout === 'panel'
+          ? 'flex-1 min-h-0 overflow-y-auto'
+          : panelState === 'full'
+            ? 'max-h-[45vh] overflow-y-auto'
+            : ''
+      "
+    >
+      <li v-for="todo in visibleItems" :key="todo.id" class="flex items-start gap-2 text-xs">
+        <TodoStatusIcon :status="todo.status" />
+        <span
+          class="leading-snug"
+          :class="bDone(todo.status) ? 'text-text-muted line-through' : 'text-text-primary'"
+          >{{ todo.content }}</span
+        >
+      </li>
+    </ul>
+  </div>
+</template>
+
+<style scoped>
+/* Same flat second-level surface as the chat cards (scoped copies per component). */
+.chat-card {
+  background: var(--bg-elev-2);
+  border: 1px solid var(--line);
+}
+.todo-panel-surface {
+  background: var(--bg-elev-2);
+}
+</style>

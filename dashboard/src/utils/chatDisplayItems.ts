@@ -27,7 +27,7 @@ export interface PlanEntry {
 }
 
 export interface DisplayItem {
-  kind: 'text' | 'tool' | 'todos' | 'plan';
+  kind: 'text' | 'tool' | 'todos' | 'plan' | 'notice';
   // text
   text?: string;
   renderedHtml?: string;
@@ -70,6 +70,89 @@ export interface StreamUsage {
   used: number;
   size: number;
   cost?: { amount: number; currency: string };
+}
+
+// ---------------------------------- Todo normalization ----------------------------------
+
+/**
+ * Normalizes todo statuses across agents to the canonical TODO_STATUS_* strings
+ * used by the todos row, done-counters and completion notifications. Cursor
+ * sends TODO_STATUS_* natively; ACP agents (e.g. Claude's TodoWrite) send
+ * lowercase 'pending' | 'in_progress' | 'completed' | 'cancelled'.
+ */
+export function normalizeTodoStatus(status: unknown): string {
+  if (typeof status !== 'string' || !status.trim()) {
+    return 'TODO_STATUS_PENDING';
+  }
+  const trimmed = status.trim();
+  if (trimmed.startsWith('TODO_STATUS_')) {
+    return trimmed;
+  }
+  const normalized = trimmed.toLowerCase().replace(/[\s-]+/g, '_');
+  if (normalized === 'completed' || normalized === 'done') {
+    return 'TODO_STATUS_COMPLETED';
+  }
+  if (normalized === 'in_progress' || normalized === 'active') {
+    return 'TODO_STATUS_IN_PROGRESS';
+  }
+  if (normalized === 'cancelled' || normalized === 'canceled') {
+    return 'TODO_STATUS_CANCELLED';
+  }
+  return 'TODO_STATUS_PENDING';
+}
+
+export function normalizeTodoItems(rawTodos: unknown[]): TodoDisplayItem[] {
+  const items: TodoDisplayItem[] = [];
+  for (let index = 0; index < rawTodos.length; index++) {
+    const raw = rawTodos[index];
+    if (!raw || typeof raw !== 'object') {
+      continue;
+    }
+    const candidate = raw as {
+      id?: unknown;
+      content?: unknown;
+      title?: unknown;
+      text?: unknown;
+      status?: unknown;
+    };
+    let content = '';
+    for (const value of [candidate.content, candidate.title, candidate.text]) {
+      if (typeof value === 'string' && value.trim()) {
+        content = value;
+        break;
+      }
+    }
+    if (!content) {
+      continue;
+    }
+    items.push({
+      id: typeof candidate.id === 'string' && candidate.id ? candidate.id : `todo-${index}`,
+      content,
+      status: normalizeTodoStatus(candidate.status)
+    });
+  }
+  return items;
+}
+
+/**
+ * Extracts a todo list from an ACP tool_call / tool_call_update payload when the
+ * tool carries one (rawInput.todos on the initial call, rawInput/rawOutput on
+ * updates) — e.g. Claude's TodoWrite or any todowrite-style tool, detected
+ * name-agnostically. Returns null for non-todo tools so callers fall back to a
+ * generic tool row. An empty array means the agent cleared the list.
+ */
+export function todosFromAcpUpdate(update: Record<string, unknown>): TodoDisplayItem[] | null {
+  const rawInput = update.rawInput as { todos?: unknown } | undefined;
+  const rawOutput = update.rawOutput as { todos?: unknown } | undefined;
+  const rawTodos = Array.isArray(rawInput?.todos)
+    ? rawInput.todos
+    : Array.isArray(rawOutput?.todos)
+      ? rawOutput.todos
+      : null;
+  if (!rawTodos) {
+    return null;
+  }
+  return normalizeTodoItems(rawTodos);
 }
 
 // ---------------------------------- Markdown ----------------------------------
@@ -210,18 +293,26 @@ const ACP_KIND_TO_ICON: Record<string, string> = {
 
 export function getToolIconSvg(icon: string): string {
   const paths: Record<string, string> = {
-    description: '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
+    description:
+      '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
     edit: '<path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/>',
-    delete: '<path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>',
-    drive_file_move: '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M9 15l3-3 3 3"/><line x1="12" y1="12" x2="12" y2="18"/>',
-    manage_search: '<circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/><path d="M9 11h4M11 9v4"/>',
+    delete:
+      '<path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>',
+    drive_file_move:
+      '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M9 15l3-3 3 3"/><line x1="12" y1="12" x2="12" y2="18"/>',
+    manage_search:
+      '<circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/><path d="M9 11h4M11 9v4"/>',
     travel_explore: '<circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/>',
     terminal: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>',
-    psychology: '<path d="M9 12a3 3 0 006 0 3 3 0 00-6 0"/><path d="M12 2a7 7 0 00-7 7c0 2.38 1.19 4.47 3 5.74V17a2 2 0 002 2h4a2 2 0 002-2v-2.26A7 7 0 0012 2z"/>',
-    cloud_download: '<polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0018 9h-1.26A8 8 0 103 16.29"/>',
+    psychology:
+      '<path d="M9 12a3 3 0 006 0 3 3 0 00-6 0"/><path d="M12 2a7 7 0 00-7 7c0 2.38 1.19 4.47 3 5.74V17a2 2 0 002 2h4a2 2 0 002-2v-2.26A7 7 0 0012 2z"/>',
+    cloud_download:
+      '<polyline points="8 17 12 21 16 17"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.88 18.09A5 5 0 0018 9h-1.26A8 8 0 103 16.29"/>',
     tune: '<path d="M4 21V14M4 10V3M12 21V12M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
-    checklist: '<path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2M9 12l2 2 4-4"/>',
-    build: '<path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/>'
+    checklist:
+      '<path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2M9 12l2 2 4-4"/>',
+    build:
+      '<path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/>'
   };
   const d = paths[icon] ?? paths.build;
   return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
@@ -422,6 +513,11 @@ export function createChatStreamParser(hooks: ChatStreamParserHooks = {}) {
       if (!toolCallId) {
         return;
       }
+      const todoItems = todosFromAcpUpdate(update);
+      if (todoItems) {
+        items.push({ kind: 'todos', callId: toolCallId, status: 'running', todoItems });
+        return;
+      }
       const kind = update.kind as string | undefined;
       items.push({
         kind: 'tool',
@@ -451,14 +547,19 @@ export function createChatStreamParser(hooks: ChatStreamParserHooks = {}) {
       } else if (status === 'failed') {
         item.status = 'rejected';
       }
+      if (item.kind === 'todos') {
+        const updatedTodos = todosFromAcpUpdate(update);
+        if (updatedTodos) {
+          item.todoItems = updatedTodos;
+        }
+      }
       if (item.kind === 'tool') {
         if (typeof update.title === 'string') item.toolSummary = update.title;
         const rawLocs = update.locations as Array<{ path: string; line?: number }> | undefined;
         if (rawLocs?.length) item.locations = rawLocs;
         if (status === 'completed') {
           const rawContent = update.content as
-            | Array<{ type?: string; content?: { type?: string; text?: string } }>
-            | undefined;
+            Array<{ type?: string; content?: { type?: string; text?: string } }> | undefined;
           const text =
             rawContent
               ?.filter((c) => c.type === 'content' && c.content?.type === 'text')
@@ -496,7 +597,12 @@ export function createChatStreamParser(hooks: ChatStreamParserHooks = {}) {
     if (sessionUpdate === 'usage_update') {
       const used = update.used as number | undefined;
       const size = update.size as number | undefined;
-      if (opts?.liveThinking && hooks.usage && typeof used === 'number' && typeof size === 'number') {
+      if (
+        opts?.liveThinking &&
+        hooks.usage &&
+        typeof used === 'number' &&
+        typeof size === 'number'
+      ) {
         hooks.usage.value = {
           used,
           size,
@@ -515,8 +621,7 @@ export function createChatStreamParser(hooks: ChatStreamParserHooks = {}) {
     if (sessionUpdate === 'config_option_update') {
       if (opts?.applyConfigSync === false) return;
       const rawOpts = update.configOptions as
-        | Array<{ id: string; category?: string; type: string; currentValue?: string }>
-        | undefined;
+        Array<{ id: string; category?: string; type: string; currentValue?: string }> | undefined;
       if (!rawOpts?.length) return;
       const modelOpt = rawOpts.find((o) => o.category === 'model' || o.id === 'model');
       if (modelOpt?.type === 'select' && typeof modelOpt.currentValue === 'string') {
@@ -557,6 +662,13 @@ export function createChatStreamParser(hooks: ChatStreamParserHooks = {}) {
       if (modeId) hooks.onModeUpdate?.(modeId);
       if (modelId) hooks.onModelUpdate?.(modelId);
       if (config) hooks.onConfigUpdate?.(config);
+      return;
+    }
+
+    // Server-side notice: previous context could not be resumed (session/load failed).
+    if (event.type === 'session_reset_notice') {
+      const text = typeof event.text === 'string' ? event.text.trim() : '';
+      if (text) items.push({ kind: 'notice', text });
       return;
     }
 
@@ -758,7 +870,9 @@ export function isPlanEntryInProgress(status: string | undefined): boolean {
   );
 }
 
-export function planStatusIcon(status: string | undefined): 'completed' | 'in_progress' | 'pending' {
+export function planStatusIcon(
+  status: string | undefined
+): 'completed' | 'in_progress' | 'pending' {
   if (isPlanEntryCompleted(status)) return 'completed';
   if (isPlanEntryInProgress(status)) return 'in_progress';
   return 'pending';
@@ -835,7 +949,9 @@ export function entriesFromPlanMarkdown(markdown: string): PlanEntry[] {
   let fenceMarker: '`' | '~' | null = null;
 
   const addEntry = (target: PlanEntry[], content: string): PlanEntry => {
-    const existing = [...headingEntries, ...actionEntries].find((entry) => entry.content === content);
+    const existing = [...headingEntries, ...actionEntries].find(
+      (entry) => entry.content === content
+    );
     if (existing) return existing;
     const entry = { content, status: 'pending' };
     target.push(entry);
@@ -956,11 +1072,16 @@ export interface PlanMarkdownCandidate {
 }
 
 export function normalizePlanSearchText(value: string | undefined): string {
-  return (value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return (value ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 }
 
 function firstMarkdownHeading(markdown: string): string {
-  const heading = unwrapMarkdownFence(markdown).match(/^#{1,3}\s+(.+)$/m)?.[1]?.trim();
+  const heading = unwrapMarkdownFence(markdown)
+    .match(/^#{1,3}\s+(.+)$/m)?.[1]
+    ?.trim();
   return heading ?? '';
 }
 
@@ -984,7 +1105,9 @@ export function planMarkdownCandidatesFromDocuments(
       const markdown = unwrapMarkdownFence(doc.markdown);
       return {
         markdown,
-        normalized: normalizePlanSearchText(`${doc.title} ${firstMarkdownHeading(markdown)} ${markdown}`),
+        normalized: normalizePlanSearchText(
+          `${doc.title} ${firstMarkdownHeading(markdown)} ${markdown}`
+        ),
         index,
         planId: doc.id,
         sourceSessionId: doc.sessionId
@@ -996,14 +1119,12 @@ function scorePlanMarkdownCandidate(item: DisplayItem, candidate: PlanMarkdownCa
   const titleTokens = normalizePlanSearchText(item.planTitle)
     .split(' ')
     .filter((token) => token.length >= 3);
-  const entryTokens = (item.planEntries ?? [])
-    .slice(0, 3)
-    .flatMap((entry) =>
-      normalizePlanSearchText(entry.content)
-        .split(' ')
-        .filter((token) => token.length >= 4)
-        .slice(0, 4)
-    );
+  const entryTokens = (item.planEntries ?? []).slice(0, 3).flatMap((entry) =>
+    normalizePlanSearchText(entry.content)
+      .split(' ')
+      .filter((token) => token.length >= 4)
+      .slice(0, 4)
+  );
   const tokens = [...titleTokens, ...entryTokens];
   if (tokens.length === 0) return candidate.index;
   const matches = tokens.filter((token) => candidate.normalized.includes(token)).length;
@@ -1039,10 +1160,13 @@ export function planDocumentFromItem(
 ): PlanDocument | null {
   if (item.kind !== 'plan') return null;
   const entries = item.planEntries ?? [];
-  const markdown = item.planMarkdown?.trim() || fallback?.markdown.trim() || markdownFromPlanEntries(entries);
+  const markdown =
+    item.planMarkdown?.trim() || fallback?.markdown.trim() || markdownFromPlanEntries(entries);
   if (!markdown && entries.length === 0) return null;
   const startableEntries = entries.length ? entries : entriesFromPlanMarkdown(markdown);
-  const completedCount = startableEntries.filter((entry) => isPlanEntryCompleted(entry.status)).length;
+  const completedCount = startableEntries.filter((entry) =>
+    isPlanEntryCompleted(entry.status)
+  ).length;
   return {
     id,
     backendPlanId: fallback?.planId,
@@ -1069,7 +1193,8 @@ export function planDocumentFromFileSummary(
     id: `file-plan-${doc.id}`,
     backendPlanId: doc.id,
     planSourceSessionId: doc.sessionId,
-    title: doc.title || firstMarkdownHeading(markdown) || (index === 0 ? 'Plan' : `Plan ${index + 1}`),
+    title:
+      doc.title || firstMarkdownHeading(markdown) || (index === 0 ? 'Plan' : `Plan ${index + 1}`),
     markdown,
     entries: [],
     startableEntries,

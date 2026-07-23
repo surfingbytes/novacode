@@ -17,7 +17,7 @@ import type {
 // classes
 import { applySessionMode, applySessionModel, applySessionConfig } from './acpSessionHelpers';
 import type { AcpSessionResponse } from './acpSessionHelpers';
-import { buildPromptContent } from './acpSubprocessRunner';
+import { buildPromptContent, sessionResetNoticeEventLine } from './acpSubprocessRunner';
 import type { AcpPromptAttachment, SessionConfigSyncHandler } from './acpSubprocessRunner';
 
 export type AcpEventHandler = (line: string) => void;
@@ -170,6 +170,8 @@ export async function runClaudeAcp(
       sessionResponse = await agent.resumeSession({ sessionId: acpSessionId, cwd, mcpServers: [] });
       resolvedSessionId = acpSessionId;
     } catch {
+      // Surface the silent context reset to the user (persisted via onEvent).
+      onEvent(sessionResetNoticeEventLine());
       const created = await agent.newSession({ cwd, mcpServers: [] });
       sessionResponse = created;
       resolvedSessionId = created.sessionId;

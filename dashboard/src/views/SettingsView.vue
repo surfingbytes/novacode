@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // node_modules
-import { computed, ref, onMounted } from 'vue';
+import { computed, ref, watch, onMounted } from 'vue';
+import { useRoute } from 'vue-router';
 
 // components
 import ApiKeyModal from '@/components/ApiKeyModal.vue';
@@ -9,6 +10,7 @@ import BaseModal from '@/components/BaseModal.vue';
 import ModalHeader from '@/components/ModalHeader.vue';
 import PageShell from '@/components/layout/PageShell.vue';
 import PageHeader from '@/components/layout/PageHeader.vue';
+import RuleTemplatesPanel from '@/components/RuleTemplatesPanel.vue';
 
 // classes
 import { agentAuthApi, apiErrorMessage, settingsApi, type CursorAuthStatus } from '@/classes/api';
@@ -43,7 +45,11 @@ import type {
 } from '@/@types/index';
 
 // -------------------------------------------------- Refs --------------------------------------------------
-const activeTab = ref<'general' | 'git' | 'integrations' | 'mcp'>('general');
+const SETTINGS_TAB_IDS = ['general', 'git', 'integrations', 'mcp', 'templates'] as const;
+type SettingsTabId = (typeof SETTINGS_TAB_IDS)[number];
+
+const route = useRoute();
+const activeTab = ref<SettingsTabId>('general');
 const bCursorAuthenticated = ref<boolean>(false);
 const cursorAuthStatus = ref<CursorAuthStatus>('error');
 const cursorAuthMessage = ref<string>('');
@@ -978,6 +984,18 @@ const runMcpConnectivityCheck = async (): Promise<void> => {
 };
 
 // -------------------------------------------------- Lifecycle --------------------------------------------------
+
+// Deep links like /settings?tab=templates open a specific tab directly.
+watch(
+  () => route.query.tab,
+  (tab): void => {
+    if (typeof tab === 'string' && (SETTINGS_TAB_IDS as readonly string[]).includes(tab)) {
+      activeTab.value = tab as SettingsTabId;
+    }
+  },
+  { immediate: true }
+);
+
 onMounted((): void => {
   refreshAuthStatus();
   loadSettings();
@@ -1003,6 +1021,7 @@ onMounted((): void => {
             { id: 'git',          label: 'Git' },
             { id: 'integrations', label: 'Integrations' },
             { id: 'mcp',          label: 'MCP' },
+            { id: 'templates',    label: 'Templates' },
           ]"
           :key="tab.id"
           type="button"
@@ -1513,6 +1532,16 @@ onMounted((): void => {
             </ul>
           </div>
         </div>
+      </div>
+
+      <!-- Tab panel: Rule templates -->
+      <div v-show="activeTab === 'templates'" role="tabpanel">
+        <div class="settings-section-label nc-eyebrow">Rule templates</div>
+        <p class="settings-section-desc">
+          Define reusable system prompts for agents. Templates are available to all workspaces when
+          creating rule files under a workspace's Rules tab.
+        </p>
+        <RuleTemplatesPanel />
       </div>
   </PageShell>
 

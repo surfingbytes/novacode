@@ -76,6 +76,8 @@ const emit = defineEmits<{
 const messagesEl = ref<HTMLElement | null>(null);
 const messagesScrollAnchor = ref<HTMLElement | null>(null);
 const bShowScrollToBottom = ref(false);
+/** True while the user is parked at the bottom (updated from real scroll events). */
+const bPinnedToBottom = ref(true);
 
 // -------------------------------------------------- Computed --------------------------------------------------
 
@@ -160,12 +162,15 @@ function isScrolledToBottom(): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
 }
 
-async function scrollToBottom(smooth = false): Promise<void> {
+/** Wait for layout/paint so scrollHeight and the thinking block height are final. */
+async function waitForLayout(): Promise<void> {
   await nextTick();
-  // Wait for layout/paint so scrollHeight and the thinking block height are final.
   await new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   });
+}
+
+function applyScrollToBottom(smooth = false): void {
   const el = messagesEl.value;
   if (!el) return;
   bShowScrollToBottom.value = false;
@@ -177,12 +182,22 @@ async function scrollToBottom(smooth = false): Promise<void> {
   el.scrollTop = el.scrollHeight;
 }
 
+async function scrollToBottom(smooth = false): Promise<void> {
+  await waitForLayout();
+  applyScrollToBottom(smooth);
+}
+
 async function scrollToBottomIfPinned(): Promise<void> {
-  if (isScrolledToBottom()) await scrollToBottom();
+  if (!bPinnedToBottom.value) return;
+  await waitForLayout();
+  // The user may have scrolled away while we waited for layout — don't yank them back.
+  if (!bPinnedToBottom.value) return;
+  applyScrollToBottom();
 }
 
 function onMessagesScroll(): void {
-  bShowScrollToBottom.value = !isScrolledToBottom();
+  bPinnedToBottom.value = isScrolledToBottom();
+  bShowScrollToBottom.value = !bPinnedToBottom.value;
   if (!props.bHasMore || props.bLoadingMore) return;
   if (messagesEl.value && messagesEl.value.scrollTop < 100) {
     emit('loadOlder');
@@ -209,12 +224,14 @@ function forceInitialScrollToBottom(): void {
 
 // -------------------------------------------------- Watchers --------------------------------------------------
 
-// Follow new content while pinned to the bottom.
+// Follow new content while pinned to the bottom. The thinking box has a fixed
+// height, so its text streaming by can't move the chat — only the box
+// appearing/disappearing can, so watch its visibility rather than text length.
 watch(
   () => [
     props.displayMessages.length,
     props.streamingDisplayItems.length,
-    props.streamingThinkingText.length
+    props.streamingThinkingText.trim().length > 0 && !props.hideThinkingOutput
   ],
   () => {
     void scrollToBottomIfPinned();

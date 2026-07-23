@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // node_modules
 import { computed, ref, watch } from 'vue';
+import { ChevronDown, ChevronRight } from 'lucide-vue-next';
 
 // components
 import BaseModal from '@/components/BaseModal.vue';
@@ -72,6 +73,7 @@ const agentType = ref<AgentType>('cursor-agent');
 const modelSelection = ref('');
 const modelOptions = ref<AgentModelOption[]>([]);
 const bLoadingModels = ref(false);
+const bTagsExpanded = ref(false);
 
 // -------------------------------------------------- Computed --------------------------------------------------
 const availableAgents = computed(() => {
@@ -176,6 +178,7 @@ watch(
   (open) => {
     if (open) {
       formTags.value = [];
+      bTagsExpanded.value = false;
       defaultName.value = props.defaultSessionName || `Session ${new Date().toLocaleString()}`;
       // Prefill only when a suggested name is provided (e.g. plan handoff);
       // otherwise keep the datetime as placeholder so the user can type a fresh name.
@@ -210,105 +213,126 @@ watch(agentType, () => {
             title-id="new-session-title"
             @close="close"
           />
-          <div v-if="helperText" class="px-6 pt-2">
-            <p class="text-xs text-text-muted">{{ helperText }}</p>
-          </div>
-
-          <div class="px-6 flex flex-col gap-4 pb-5">
-            <!-- Name -->
-            <div class="nc-field">
-              <label class="nc-field-label" for="new-session-name">Name</label>
-              <input
-                id="new-session-name"
-                v-model="name"
-                type="text"
-                :placeholder="defaultName"
-                data-modal-autofocus
-                @keydown.escape="close"
-              />
+          <!-- Scrollable region: shrinks when the mobile keyboard reduces the viewport -->
+          <div class="min-h-0 flex-1 overflow-y-auto">
+            <div v-if="helperText" class="px-6 pt-2">
+              <p class="text-xs text-text-muted">{{ helperText }}</p>
             </div>
 
-            <!-- Tags -->
-            <div class="nc-field">
-              <span class="nc-field-label"
-                >Tags <span class="normal-case opacity-60">(optional)</span></span
-              >
-              <TagChipsInput
-                v-model="formTags"
-                :suggestions="existingTags ?? []"
-                datalist-id="new-session-tag-suggestions"
-                hint="Separate tags with a comma, or press Enter/Done. Suggestions from other sessions."
-              />
-            </div>
-
-            <!-- Agent selection -->
-            <div class="nc-field">
-              <span class="nc-field-label">
-                Agent
-                <span class="normal-case opacity-60">(required)</span>
-              </span>
-              <div
-                class="grid rounded-lg border border-fg/[0.12] bg-fg/[0.04] p-0.5 gap-1"
-                :class="gridColsClass"
-              >
-                <button
-                  v-for="agent in availableAgents"
-                  :key="agent"
-                  type="button"
-                  class="text-xs px-2 py-1.5 rounded-md border border-transparent transition-colors text-text-muted hover:text-text-primary hover:bg-fg/[0.06]"
-                  :style="agentType === agent ? agentSelectedStyle(agent) : {}"
-                  :title="
-                    agent === 'cursor-agent'
-                      ? 'Cursor Agent'
-                      : agent === 'mistral-vibe'
-                        ? 'Mistral Vibe'
-                        : agent === 'claude'
-                          ? 'Claude Code'
-                          : agent === 'codex'
-                            ? 'Codex'
-                            : 'OpenCode'
-                  "
-                  @click="selectAgentType(agent)"
-                >
-                  {{
-                    agent === 'cursor-agent'
-                      ? 'Cursor'
-                      : agent === 'mistral-vibe'
-                        ? 'Vibe'
-                        : agent === 'claude'
-                          ? 'Claude'
-                          : agent === 'codex'
-                            ? 'Codex'
-                            : 'OpenCode'
-                  }}
-                </button>
+            <div class="px-6 flex flex-col gap-4 pb-5">
+              <!-- Name -->
+              <div class="nc-field">
+                <label class="nc-field-label" for="new-session-name">Name</label>
+                <input
+                  id="new-session-name"
+                  v-model="name"
+                  type="text"
+                  :placeholder="defaultName"
+                  data-modal-autofocus
+                  @keydown.escape="close"
+                />
               </div>
-              <p v-if="availableAgents.length === 0" class="text-[11px] text-warning">
-                No agents available. Configure Cursor, Mistral Vibe, or Claude in Settings.
+
+              <!-- Tags (collapsed by default — rarely used, keeps the dialog short on mobile) -->
+              <div class="nc-field">
+                <button
+                  type="button"
+                  class="tags-toggle"
+                  :aria-expanded="bTagsExpanded"
+                  aria-controls="new-session-tags-panel"
+                  @click="bTagsExpanded = !bTagsExpanded"
+                >
+                  <ChevronRight v-if="!bTagsExpanded" :size="12" aria-hidden="true" />
+                  <ChevronDown v-else :size="12" aria-hidden="true" />
+                  <span class="nc-field-label"
+                    >Tags <span class="normal-case opacity-60">(optional)</span></span
+                  >
+                  <span
+                    v-if="formTags.length > 0 && !bTagsExpanded"
+                    class="rounded-md bg-primary/15 px-1.5 py-px text-[10.5px] leading-4 text-primary"
+                  >
+                    {{ formTags.length }}
+                  </span>
+                </button>
+                <div v-if="bTagsExpanded" id="new-session-tags-panel">
+                  <TagChipsInput
+                    v-model="formTags"
+                    :suggestions="existingTags ?? []"
+                    datalist-id="new-session-tag-suggestions"
+                    hint="Separate tags with a comma, or press Enter/Done. Suggestions from other sessions."
+                  />
+                </div>
+              </div>
+
+              <!-- Agent selection -->
+              <div class="nc-field">
+                <span class="nc-field-label">
+                  Agent
+                  <span class="normal-case opacity-60">(required)</span>
+                </span>
+                <div
+                  class="grid rounded-lg border border-fg/[0.12] bg-fg/[0.04] p-0.5 gap-1"
+                  :class="gridColsClass"
+                >
+                  <button
+                    v-for="agent in availableAgents"
+                    :key="agent"
+                    type="button"
+                    class="text-xs px-2 py-1.5 rounded-md border border-transparent transition-colors text-text-muted hover:text-text-primary hover:bg-fg/[0.06]"
+                    :style="agentType === agent ? agentSelectedStyle(agent) : {}"
+                    :title="
+                      agent === 'cursor-agent'
+                        ? 'Cursor Agent'
+                        : agent === 'mistral-vibe'
+                          ? 'Mistral Vibe'
+                          : agent === 'claude'
+                            ? 'Claude Code'
+                            : agent === 'codex'
+                              ? 'Codex'
+                              : 'OpenCode'
+                    "
+                    @click="selectAgentType(agent)"
+                  >
+                    {{
+                      agent === 'cursor-agent'
+                        ? 'Cursor'
+                        : agent === 'mistral-vibe'
+                          ? 'Vibe'
+                          : agent === 'claude'
+                            ? 'Claude'
+                            : agent === 'codex'
+                              ? 'Codex'
+                              : 'OpenCode'
+                    }}
+                  </button>
+                </div>
+                <p v-if="availableAgents.length === 0" class="text-[11px] text-warning">
+                  No agents available. Configure Cursor, Mistral Vibe, or Claude in Settings.
+                </p>
+              </div>
+
+              <!-- Model selection -->
+              <div v-if="showModelSelection" class="nc-field">
+                <span class="nc-field-label">
+                  Model
+                </span>
+                <AgentModelPicker
+                  v-model="modelSelection"
+                  :agent-type="agentType"
+                  :model-options="modelOptions"
+                  :disabled="loading || bLoadingModels"
+                  variant="modal"
+                />
+              </div>
+
+              <p v-if="error" class="text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded-lg px-3 py-2">
+                {{ error }}
               </p>
             </div>
-
-            <!-- Model selection -->
-            <div v-if="showModelSelection" class="nc-field">
-              <span class="nc-field-label">
-                Model
-              </span>
-              <AgentModelPicker
-                v-model="modelSelection"
-                :agent-type="agentType"
-                :model-options="modelOptions"
-                :disabled="loading || bLoadingModels"
-                variant="modal"
-              />
-            </div>
-
-            <p v-if="error" class="text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded-lg px-3 py-2">
-              {{ error }}
-            </p>
           </div>
 
-          <!-- Actions -->
-          <div class="flex items-center justify-end gap-2 px-6 pb-5">
+          <!-- Actions — pinned below the scrollable fields so Create stays reachable -->
+          <div class="flex flex-shrink-0 items-center justify-end gap-2 border-t border-fg/10 px-6 py-4">
             <button
               type="button"
               class="button"
@@ -332,3 +356,27 @@ watch(agentType, () => {
     </form>
   </BaseModal>
 </template>
+
+<style scoped>
+/* Disclosure toggle matching the field-label treatment */
+.tags-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg-subtle);
+  cursor: pointer;
+  transition: color 0.12s;
+}
+.tags-toggle:hover,
+.tags-toggle:focus-visible {
+  color: var(--fg);
+}
+.tags-toggle:hover .nc-field-label,
+.tags-toggle:focus-visible .nc-field-label {
+  color: var(--fg);
+}
+</style>

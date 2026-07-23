@@ -40,40 +40,66 @@ const emit = defineEmits<{
       ></div>
     </div>
 
-    <!-- Todos card -->
+    <!-- Todos row (compact trace — the live list itself lives in ChatTodoPanel) -->
     <div v-else-if="item.kind === 'todos'" class="flex justify-start">
-      <div class="max-w-full md:max-w-[85%] w-80 rounded-lg overflow-hidden chat-card">
-        <div class="flex items-center gap-2 px-3 py-1.5 border-b border-fg/10">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none text-text-muted shrink-0" aria-hidden="true"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2M9 12l2 2 4-4"/></svg>
-          <span class="text-xs font-medium text-text-primary">Todos</span>
-          <span v-if="bLive && item.status === 'running'" class="ml-auto">
-            <svg class="animate-spin text-primary select-none" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
-          </span>
-          <span v-else class="ml-auto text-xs text-text-muted">
-            {{ item.todoDoneCount }}/{{ item.todoItems?.length }}
-          </span>
-        </div>
-        <ul class="px-3 py-1.5 space-y-1">
-          <li
-            v-for="todo in item.todoItems"
-            :key="todo.id"
-            class="flex items-start gap-2 text-xs"
+      <div
+        class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-text-muted text-xs font-mono chat-card max-w-full md:max-w-[85%]"
+      >
+        <span class="shrink-0" v-html="getToolIconSvg('checklist')" />
+        <span class="font-sans font-medium text-text-primary shrink-0">Todos</span>
+        <span class="truncate"
+          >{{ item.todoDoneCount ?? 0 }}/{{ item.todoItems?.length ?? 0 }} completed</span
+        >
+        <span class="shrink-0 ml-auto pl-2">
+          <svg
+            v-if="bLive && item.status === 'running'"
+            class="animate-spin text-primary select-none"
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
           >
-            <svg v-if="todo.status === 'TODO_STATUS_COMPLETED'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-green-500 select-none shrink-0 mt-px" aria-hidden="true"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-            <svg v-else-if="todo.status === 'TODO_STATUS_IN_PROGRESS'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-primary select-none shrink-0 mt-px" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-            <svg v-else-if="todo.status === 'TODO_STATUS_CANCELLED'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-text-muted select-none shrink-0 mt-px" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg>
-            <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-text-muted select-none shrink-0 mt-px" aria-hidden="true"><circle cx="12" cy="12" r="10"/></svg>
-            <span
-              class="leading-snug"
-              :class="
-                todo.status === 'TODO_STATUS_COMPLETED' || todo.status === 'TODO_STATUS_CANCELLED'
-                  ? 'text-text-muted line-through'
-                  : 'text-text-primary'
-              "
-              >{{ todo.content }}</span
-            >
-          </li>
-        </ul>
+            <polyline points="23 4 23 10 17 10" />
+            <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
+          </svg>
+          <svg
+            v-else-if="item.status === 'success'"
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="text-green-500 select-none"
+            aria-hidden="true"
+          >
+            <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
+            <polyline points="22 4 12 14.01 9 11.01" />
+          </svg>
+          <svg
+            v-else-if="item.status === 'rejected'"
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="text-text-muted select-none"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+          </svg>
+        </span>
       </div>
     </div>
 
@@ -81,7 +107,21 @@ const emit = defineEmits<{
     <div v-else-if="item.kind === 'plan'" class="flex justify-start">
       <div class="max-w-full md:max-w-[85%] w-80 rounded-lg overflow-hidden chat-card">
         <div class="flex items-center gap-2 px-3 py-2">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none text-text-muted shrink-0" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="select-none text-text-muted shrink-0"
+            aria-hidden="true"
+          >
+            <path d="M9 11l3 3L22 4" />
+            <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
+          </svg>
           <div class="min-w-0 flex-1">
             <div class="truncate text-xs font-medium text-text-primary">
               {{ item.planTitle ?? 'Plan ready' }}
@@ -104,6 +144,33 @@ const emit = defineEmits<{
       </div>
     </div>
 
+    <!-- Context-reset notice -->
+    <div v-else-if="item.kind === 'notice'" class="flex justify-start">
+      <div
+        class="chat-card flex items-start gap-2 max-w-full md:max-w-[85%] px-3 py-2 rounded-lg text-xs text-text-muted"
+      >
+        <svg
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="select-none shrink-0 mt-px text-yellow-500"
+          aria-hidden="true"
+        >
+          <path
+            d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"
+          />
+          <line x1="12" y1="9" x2="12" y2="13" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
+        </svg>
+        <span class="leading-snug">{{ item.text }}</span>
+      </div>
+    </div>
+
     <!-- Tool card -->
     <div v-else class="flex justify-start">
       <div class="flex flex-col gap-0.5 max-w-full md:max-w-[85%]">
@@ -114,9 +181,54 @@ const emit = defineEmits<{
           <span class="font-sans font-medium text-text-primary shrink-0">{{ item.toolName }}</span>
           <span class="truncate">{{ item.toolSummary }}</span>
           <span class="shrink-0 ml-auto pl-2">
-            <svg v-if="bLive && item.status === 'running'" class="animate-spin text-primary select-none" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
-            <svg v-else-if="item.status === 'success'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-green-500 select-none" aria-hidden="true"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-            <svg v-else-if="item.status === 'rejected'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-text-muted select-none" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+            <svg
+              v-if="bLive && item.status === 'running'"
+              class="animate-spin text-primary select-none"
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="23 4 23 10 17 10" />
+              <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
+            </svg>
+            <svg
+              v-else-if="item.status === 'success'"
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="text-green-500 select-none"
+              aria-hidden="true"
+            >
+              <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
+              <polyline points="22 4 12 14.01 9 11.01" />
+            </svg>
+            <svg
+              v-else-if="item.status === 'rejected'"
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="text-text-muted select-none"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+            </svg>
           </span>
         </div>
         <!-- Locations -->
@@ -134,15 +246,40 @@ const emit = defineEmits<{
             class="flex items-center gap-0.5 text-[11px] text-text-muted/50 hover:text-text-muted transition-colors"
             @click="emit('toggleToolOutput', item.callId!)"
           >
-            <svg v-if="expandedToolOutputIds.has(item.callId!)" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 15 12 9 6 15"/></svg>
-            <svg v-else width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+            <svg
+              v-if="expandedToolOutputIds.has(item.callId!)"
+              width="10"
+              height="10"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="18 15 12 9 6 15" />
+            </svg>
+            <svg
+              v-else
+              width="10"
+              height="10"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
             output
           </button>
           <pre
             v-if="expandedToolOutputIds.has(item.callId!)"
             class="mt-1 text-[11px] font-mono text-text-muted/80 whitespace-pre-wrap break-words max-h-32 overflow-y-auto rounded bg-fg/[0.04] px-2 py-1"
-            >{{ item.toolOutput }}</pre
-          >
+            >{{ item.toolOutput }}</pre>
         </div>
       </div>
     </div>

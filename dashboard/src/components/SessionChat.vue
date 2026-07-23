@@ -13,6 +13,7 @@ import SessionEditModal from '@/components/SessionEditModal.vue';
 import ClaudeLimitPopup from '@/components/ClaudeLimitPopup.vue';
 import ChatMessageList from '@/components/chat/ChatMessageList.vue';
 import ChatComposer, { type PendingAttachment } from '@/components/chat/ChatComposer.vue';
+import ChatTodoPanel from '@/components/chat/ChatTodoPanel.vue';
 import EntityDetailHeader from '@/components/ui/EntityDetailHeader.vue';
 import BottomTabBar from '@/components/ui/BottomTabBar.vue';
 
@@ -20,6 +21,7 @@ import BottomTabBar from '@/components/ui/BottomTabBar.vue';
 import { sessionsApi, settingsApi, buildSessionTerminalWsUrl } from '@/classes/api';
 import { renderMermaidDiagrams } from '@/lib/mermaid';
 import {
+  getToolIconSvg,
   isPlanEntryCompleted,
   parseHistoryEventsCached,
   planStatusIcon,
@@ -31,6 +33,7 @@ import {
 import { useAgentOptions } from '@/composables/useAgentOptions';
 import { useChatSocket } from '@/composables/useChatSocket';
 import { usePlanDocuments } from '@/composables/usePlanDocuments';
+import { useTodoList } from '@/composables/useTodoList';
 
 // stores
 import { useWorkspacesStore } from '@/stores/workspaces';
@@ -51,14 +54,17 @@ const props = defineProps<{
 // -------------------------------------------------- Emits --------------------------------------------------
 const emit = defineEmits<{
   (e: 'toggle-sidebar'): void;
-  (e: 'start-plan-session', payload: {
-    defaultName: string;
-    draftPrompt: string;
-    linkedPlanContext?: LinkedPlanContext;
-    defaultAgentType?: Session['agentType'];
-    defaultModelSelection?: string;
-    defaultSessionMode?: string;
-  }): void;
+  (
+    e: 'start-plan-session',
+    payload: {
+      defaultName: string;
+      draftPrompt: string;
+      linkedPlanContext?: LinkedPlanContext;
+      defaultAgentType?: Session['agentType'];
+      defaultModelSelection?: string;
+      defaultSessionMode?: string;
+    }
+  ): void;
 }>();
 
 // -------------------------------------------------- Store --------------------------------------------------
@@ -277,6 +283,21 @@ const planDocs = usePlanDocuments({
 });
 const { selectedPlanId, planDocuments, selectedPlanDocument, bShowPlanTab } = planDocs;
 
+// -------------------------------------------------- Todo list panel --------------------------------------------------
+const todoChecklistSvg = getToolIconSvg('checklist');
+const todoList = useTodoList({ displayMessages, streamingDisplayItems });
+const {
+  todoItems,
+  todoDoneCount,
+  bAnyTodos,
+  bTodosRunning,
+  panelState: todoPanelState,
+  bPanelClosed: bTodoPanelClosed,
+  cyclePanelState: cycleTodoPanelState,
+  closePanel: closeTodoPanel,
+  openPanel: openTodoPanel
+} = todoList;
+
 // -------------------------------------------------- Composer state --------------------------------------------------
 const promptText = ref<string>('');
 const pendingImages = ref<PendingAttachment[]>([]);
@@ -452,7 +473,11 @@ async function fetchSession(): Promise<boolean> {
     bLoading.value = true;
     error.value = null;
     const response = await sessionsApi.get(workspaceId, sessionId);
-    if (seq !== fetchSessionSeq || workspaceId !== props.workspaceId || sessionId !== props.sessionId) {
+    if (
+      seq !== fetchSessionSeq ||
+      workspaceId !== props.workspaceId ||
+      sessionId !== props.sessionId
+    ) {
       return false;
     }
     session.value = response.data;
@@ -460,14 +485,22 @@ async function fetchSession(): Promise<boolean> {
     void loadAgentOptions();
     return true;
   } catch (e) {
-    if (seq !== fetchSessionSeq || workspaceId !== props.workspaceId || sessionId !== props.sessionId) {
+    if (
+      seq !== fetchSessionSeq ||
+      workspaceId !== props.workspaceId ||
+      sessionId !== props.sessionId
+    ) {
       return false;
     }
     error.value = 'Failed to load session';
     console.error('Failed to fetch session:', e);
     return false;
   } finally {
-    if (seq === fetchSessionSeq && workspaceId === props.workspaceId && sessionId === props.sessionId) {
+    if (
+      seq === fetchSessionSeq &&
+      workspaceId === props.workspaceId &&
+      sessionId === props.sessionId
+    ) {
       bLoading.value = false;
     }
   }
@@ -521,7 +554,7 @@ watch(
     chatSocket.resetChatState();
     chatSocket.disconnect();
     expandedToolOutputIds.value = new Set();
-    if (activeTab.value === 'plan') activeTab.value = 'chat';
+    activeTab.value = 'chat';
     session.value = null;
     bLoading.value = true;
     pendingImages.value = [];
@@ -607,96 +640,138 @@ onUnmounted(() => {
     <!-- Tab content -->
     <div class="flex-1 overflow-hidden flex flex-col min-h-0">
       <!-- Chat -->
-      <div v-show="activeTab === 'chat'" class="flex-1 overflow-hidden flex flex-col min-h-0">
-        <ChatMessageList
-          ref="chatListRef"
-          :b-loading="bLoading"
-          :b-history-loaded="bHistoryLoaded"
-          :display-messages="displayMessages"
-          :streaming-display-items="streamingDisplayItems"
-          :streaming-thinking-text="streamingThinkingText"
-          :streaming-usage="streamingUsage"
-          :b-is-streaming="bIsStreaming"
-          :b-has-more="bHasMore"
-          :b-loading-more="bLoadingMore"
-          :chat-error="chatError"
-          :chat-error-action-label="chatErrorActionLabel"
-          :hide-thinking-output="hideThinkingOutput"
-          :expanded-tool-output-ids="expandedToolOutputIds"
-          :agent-type="session?.agentType"
-          :user-name="auth.username"
-          :viewport-height="viewportHeight"
-          @load-older="chatSocket.loadOlderMessages"
-          @toggle-tool-output="toggleToolOutput"
-          @open-plan="planDocs.openPlan"
-          @lightbox="(src) => (lightboxSrc = src)"
-          @chat-error-action="handleChatErrorAction"
-          @cancel="chatSocket.cancelPrompt"
-        />
+      <div
+        v-show="activeTab === 'chat'"
+        class="flex-1 overflow-hidden flex flex-col min-h-0 lg:flex-row"
+      >
+        <div class="flex-1 min-w-0 flex flex-col min-h-0">
+          <ChatMessageList
+            ref="chatListRef"
+            :b-loading="bLoading"
+            :b-history-loaded="bHistoryLoaded"
+            :display-messages="displayMessages"
+            :streaming-display-items="streamingDisplayItems"
+            :streaming-thinking-text="streamingThinkingText"
+            :streaming-usage="streamingUsage"
+            :b-is-streaming="bIsStreaming"
+            :b-has-more="bHasMore"
+            :b-loading-more="bLoadingMore"
+            :chat-error="chatError"
+            :chat-error-action-label="chatErrorActionLabel"
+            :hide-thinking-output="hideThinkingOutput"
+            :expanded-tool-output-ids="expandedToolOutputIds"
+            :agent-type="session?.agentType"
+            :user-name="auth.username"
+            :viewport-height="viewportHeight"
+            @load-older="chatSocket.loadOlderMessages"
+            @toggle-tool-output="toggleToolOutput"
+            @open-plan="planDocs.openPlan"
+            @lightbox="(src) => (lightboxSrc = src)"
+            @chat-error-action="handleChatErrorAction"
+            @cancel="chatSocket.cancelPrompt"
+          />
 
-        <!-- Reconnecting indicator -->
-        <div v-if="bWsReconnecting" class="flex justify-center py-1.5 shrink-0">
-          <span class="text-xs text-text-muted flex items-center gap-1.5">
-            <span
-              class="w-3 h-3 border border-text-muted/40 border-t-text-muted rounded-full animate-spin inline-block"
-            ></span>
-            Reconnecting…
-          </span>
+          <!-- Todo panel (mobile strip above the composer) -->
+          <ChatTodoPanel
+            v-if="bAnyTodos"
+            layout="strip"
+            class="lg:hidden"
+            :todo-items="todoItems"
+            :done-count="todoDoneCount"
+            :b-running="bTodosRunning && bIsStreaming"
+            :panel-state="todoPanelState"
+            @cycle="cycleTodoPanelState"
+          />
+
+          <!-- Reconnecting indicator -->
+          <div v-if="bWsReconnecting" class="flex justify-center py-1.5 shrink-0">
+            <span class="text-xs text-text-muted flex items-center gap-1.5">
+              <span
+                class="w-3 h-3 border border-text-muted/40 border-t-text-muted rounded-full animate-spin inline-block"
+              ></span>
+              Reconnecting…
+            </span>
+          </div>
+
+          <!-- Desktop: reopen chip when the todo panel is closed -->
+          <div
+            v-if="bAnyTodos && bTodoPanelClosed"
+            class="hidden lg:flex justify-end px-4 pb-1 shrink-0"
+          >
+            <button
+              type="button"
+              class="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-fg/15 bg-fg/[0.02] text-xs text-text-muted hover:text-text-primary transition-colors"
+              @click="openTodoPanel"
+            >
+              <span class="select-none" v-html="todoChecklistSvg" />
+              Tasks {{ todoDoneCount }}/{{ todoItems.length }}
+            </button>
+          </div>
+
+          <ChatComposer
+            ref="composerRef"
+            v-model:prompt-text="promptText"
+            v-model:pending-images="pendingImages"
+            :b-is-streaming="bIsStreaming"
+            :b-ws-connected="bWsConnected"
+            :queued-prompts="queuedPrompts"
+            :mode-options="modeOptions"
+            :display-session-mode="displaySessionMode"
+            :selected-mode-label="selectedModeOption.label"
+            :selected-mode-icon="selectedModeIconName"
+            :b-modes-loading="bModesLoading"
+            :b-saving-session-mode="bSavingSessionMode"
+            :agent-type="session?.agentType"
+            :model-selection="modelSelection"
+            :model-options="modelOptions"
+            :thinking-options="thinkingOptions"
+            :thinking-value="thinkingOptions ? sessionConfig[thinkingOptions.configId] : null"
+            :b-models-loading="bModelsLoading"
+            :b-saving-model-selection="bSavingModelSelection"
+            :b-selected-model-missing="bSelectedModelMissing"
+            :agent-config-options="agentConfigOptions"
+            :agent-config-display-value="agentConfigDisplayValue"
+            :b-config-loading="bConfigLoading"
+            :b-saving-session-config="bSavingSessionConfig"
+            :hide-thinking-output="hideThinkingOutput"
+            :b-md-up="bChatInputMdUp"
+            :b-uploading-image="bUploadingImage"
+            @send="onComposerSend"
+            @cancel="chatSocket.cancelPrompt"
+            @push-queue="chatSocket.pushQueuedPrompt"
+            @delete-queue="chatSocket.deleteQueuedPrompt"
+            @select-mode="onSessionModeChange"
+            @config-change="onAgentConfigChange"
+            @model-update="onSharedModelPickerUpdate"
+            @thinking-update="onSharedThinkingPickerUpdate"
+            @hide-thinking-toggle="onHideThinkingToggle"
+            @lightbox="(src) => (lightboxSrc = src)"
+            @upload-files="onUploadFiles"
+          />
         </div>
 
-        <ChatComposer
-          ref="composerRef"
-          v-model:prompt-text="promptText"
-          v-model:pending-images="pendingImages"
-          :b-is-streaming="bIsStreaming"
-          :b-ws-connected="bWsConnected"
-          :queued-prompts="queuedPrompts"
-          :mode-options="modeOptions"
-          :display-session-mode="displaySessionMode"
-          :selected-mode-label="selectedModeOption.label"
-          :selected-mode-icon="selectedModeIconName"
-          :b-modes-loading="bModesLoading"
-          :b-saving-session-mode="bSavingSessionMode"
-          :agent-type="session?.agentType"
-          :model-selection="modelSelection"
-          :model-options="modelOptions"
-          :thinking-options="thinkingOptions"
-          :thinking-value="thinkingOptions ? sessionConfig[thinkingOptions.configId] : null"
-          :b-models-loading="bModelsLoading"
-          :b-saving-model-selection="bSavingModelSelection"
-          :b-selected-model-missing="bSelectedModelMissing"
-          :agent-config-options="agentConfigOptions"
-          :agent-config-display-value="agentConfigDisplayValue"
-          :b-config-loading="bConfigLoading"
-          :b-saving-session-config="bSavingSessionConfig"
-          :hide-thinking-output="hideThinkingOutput"
-          :b-md-up="bChatInputMdUp"
-          :b-uploading-image="bUploadingImage"
-          @send="onComposerSend"
-          @cancel="chatSocket.cancelPrompt"
-          @push-queue="chatSocket.pushQueuedPrompt"
-          @delete-queue="chatSocket.deleteQueuedPrompt"
-          @select-mode="onSessionModeChange"
-          @config-change="onAgentConfigChange"
-          @model-update="onSharedModelPickerUpdate"
-          @thinking-update="onSharedThinkingPickerUpdate"
-          @hide-thinking-toggle="onHideThinkingToggle"
-          @lightbox="(src) => (lightboxSrc = src)"
-          @upload-files="onUploadFiles"
+        <!-- Todo panel (desktop right column) -->
+        <ChatTodoPanel
+          v-if="bAnyTodos && !bTodoPanelClosed"
+          layout="panel"
+          class="hidden lg:flex lg:w-80 xl:w-96 shrink-0"
+          :todo-items="todoItems"
+          :done-count="todoDoneCount"
+          :b-running="bTodosRunning && bIsStreaming"
+          :panel-state="todoPanelState"
+          b-closable
+          @cycle="cycleTodoPanelState"
+          @close="closeTodoPanel"
         />
       </div>
 
       <!-- Plan -->
-      <div
-        v-if="activeTab === 'plan'"
-        class="flex-1 min-h-0 overflow-hidden flex flex-col bg-bg"
-      >
-        <div class="shrink-0 border-b border-fg/10 px-4 md:px-6 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+      <div v-if="activeTab === 'plan'" class="flex-1 min-h-0 overflow-hidden flex flex-col bg-bg">
+        <div
+          class="shrink-0 border-b border-fg/10 px-4 md:px-6 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3"
+        >
           <div class="min-w-0 sm:flex-1">
-            <div
-              v-if="planDocuments.length <= 1"
-              class="flex items-center gap-2"
-            >
+            <div v-if="planDocuments.length <= 1" class="flex items-center gap-2">
               <span class="truncate text-sm font-semibold text-text-primary">
                 {{ selectedPlanDocument?.title ?? 'Plan' }}
               </span>
@@ -707,12 +782,12 @@ onUnmounted(() => {
                 Live
               </span>
             </div>
-            <div
-              v-if="selectedPlanDocument"
-              class="text-xs text-text-muted whitespace-nowrap"
-            >
+            <div v-if="selectedPlanDocument" class="text-xs text-text-muted whitespace-nowrap">
               <template v-if="selectedPlanDocument.startableEntries.length">
-                {{ selectedPlanDocument.completedCount }}/{{ selectedPlanDocument.startableEntries.length }} completed
+                {{ selectedPlanDocument.completedCount }}/{{
+                  selectedPlanDocument.startableEntries.length
+                }}
+                completed
               </template>
               <template v-else>Plan document</template>
             </div>
@@ -726,11 +801,7 @@ onUnmounted(() => {
               aria-label="Select plan document"
               @change="selectedPlanId = ($event.target as HTMLSelectElement).value"
             >
-              <option
-                v-for="plan in planDocuments"
-                :key="plan.id"
-                :value="plan.id"
-              >
+              <option v-for="plan in planDocuments" :key="plan.id" :value="plan.id">
                 {{ plan.title }}{{ plan.live ? ' (live)' : '' }}
               </option>
             </select>
@@ -740,51 +811,57 @@ onUnmounted(() => {
               ref="planActionsMenuRef"
               class="relative inline-flex shrink-0"
             >
-            <button
-              type="button"
-              class="button is-transparent rounded-r-none! text-xs"
-              title="Download plan as Markdown"
-              @click="closePlanActionsMenu(); planDocs.downloadPlan(selectedPlanDocument)"
-            >
-              Download
-            </button>
-            <button
-              type="button"
-              class="button is-transparent is-icon rounded-l-none! border-l border-fg/10"
-              title="Plan actions"
-              aria-label="Plan actions"
-              @click.stop="bPlanActionsMenuOpen = !bPlanActionsMenuOpen"
-            >
-              <ChevronDown class="h-3.5 w-3.5" />
-            </button>
-            <div
-              v-if="bPlanActionsMenuOpen"
-              class="absolute right-0 top-full z-30 mt-1 min-w-56 overflow-hidden rounded-lg border border-fg/10 bg-surface shadow-xl"
-            >
               <button
                 type="button"
-                class="flex w-full items-center px-3 py-2 text-left text-xs text-text-primary hover:bg-fg/[0.06]"
-                @click="closePlanActionsMenu(); planDocs.startSessionFromFullPlan(selectedPlanDocument)"
+                class="button is-transparent rounded-r-none! text-xs"
+                title="Download plan as Markdown"
+                @click="
+                  closePlanActionsMenu();
+                  planDocs.downloadPlan(selectedPlanDocument);
+                "
               >
-                Start whole plan in new session
+                Download
               </button>
               <button
                 type="button"
-                class="flex w-full items-center px-3 py-2 text-left text-xs text-text-primary hover:bg-fg/[0.06]"
-                @click="closePlanActionsMenu(); planDocs.downloadPlan(selectedPlanDocument)"
+                class="button is-transparent is-icon rounded-l-none! border-l border-fg/10"
+                title="Plan actions"
+                aria-label="Plan actions"
+                @click.stop="bPlanActionsMenuOpen = !bPlanActionsMenuOpen"
               >
-                Download markdown
+                <ChevronDown class="h-3.5 w-3.5" />
               </button>
-            </div>
+              <div
+                v-if="bPlanActionsMenuOpen"
+                class="absolute right-0 top-full z-30 mt-1 min-w-56 overflow-hidden rounded-lg border border-fg/10 bg-surface shadow-xl"
+              >
+                <button
+                  type="button"
+                  class="flex w-full items-center px-3 py-2 text-left text-xs text-text-primary hover:bg-fg/[0.06]"
+                  @click="
+                    closePlanActionsMenu();
+                    planDocs.startSessionFromFullPlan(selectedPlanDocument);
+                  "
+                >
+                  Start whole plan in new session
+                </button>
+                <button
+                  type="button"
+                  class="flex w-full items-center px-3 py-2 text-left text-xs text-text-primary hover:bg-fg/[0.06]"
+                  @click="
+                    closePlanActionsMenu();
+                    planDocs.downloadPlan(selectedPlanDocument);
+                  "
+                >
+                  Download markdown
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
         <div class="flex-1 min-h-0 overflow-y-auto px-4 md:px-8 py-6">
-          <div
-            v-if="selectedPlanDocument"
-            class="mx-auto flex max-w-3xl flex-col gap-4"
-          >
+          <div v-if="selectedPlanDocument" class="mx-auto flex max-w-3xl flex-col gap-4">
             <div class="rounded-2xl border border-fg/10 bg-fg/[0.03] px-5 py-4 md:px-8 md:py-6">
               <div
                 class="chat-markdown plan-markdown text-sm text-text-primary"
@@ -797,10 +874,27 @@ onUnmounted(() => {
               class="rounded-2xl border border-fg/10 bg-fg/[0.03] overflow-hidden"
             >
               <div class="flex items-center gap-2 border-b border-fg/10 px-4 py-2.5">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none text-text-muted shrink-0" aria-hidden="true"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2M9 12l2 2 4-4"/></svg>
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class="select-none text-text-muted shrink-0"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2M9 12l2 2 4-4"
+                  />
+                </svg>
                 <span class="text-xs font-medium text-text-primary">Plan points</span>
                 <span class="ml-auto text-xs text-text-muted">
-                  {{ selectedPlanDocument.completedCount }}/{{ selectedPlanDocument.startableEntries.length }}
+                  {{ selectedPlanDocument.completedCount }}/{{
+                    selectedPlanDocument.startableEntries.length
+                  }}
                 </span>
               </div>
               <ul class="space-y-1.5 px-4 py-3">
@@ -809,9 +903,53 @@ onUnmounted(() => {
                   :key="`${selectedPlanDocument.id}-todo-${index}`"
                   class="flex items-start gap-2 text-xs"
                 >
-                  <svg v-if="planStatusIcon(entry.status) === 'completed'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-green-500 select-none shrink-0 mt-px" aria-hidden="true"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                  <svg v-else-if="planStatusIcon(entry.status) === 'in_progress'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-primary select-none shrink-0 mt-px" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                  <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="text-text-muted select-none shrink-0 mt-px" aria-hidden="true"><circle cx="12" cy="12" r="10"/></svg>
+                  <svg
+                    v-if="planStatusIcon(entry.status) === 'completed'"
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    class="text-green-500 select-none shrink-0 mt-px"
+                    aria-hidden="true"
+                  >
+                    <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
+                    <polyline points="22 4 12 14.01 9 11.01" />
+                  </svg>
+                  <svg
+                    v-else-if="planStatusIcon(entry.status) === 'in_progress'"
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    class="text-primary select-none shrink-0 mt-px"
+                    aria-hidden="true"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
+                  <svg
+                    v-else
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    class="text-text-muted select-none shrink-0 mt-px"
+                    aria-hidden="true"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                  </svg>
                   <span
                     class="min-w-0 flex-1 leading-snug"
                     :class="
@@ -903,7 +1041,19 @@ onUnmounted(() => {
             aria-label="Close image preview"
             @click="lightboxSrc = null"
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
           </button>
           <img
             :src="lightboxSrc"
