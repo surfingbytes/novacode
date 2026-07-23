@@ -72,7 +72,7 @@ const mergedQuickSessions = computed(() => {
   const recentSessions = workspacesStore.allSessions
     .filter((s) => !s.archived && !activeIds.has(s.id))
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  return [...activeQuickSessions.value, ...recentSessions].slice(0, 6);
+  return [...activeQuickSessions.value, ...recentSessions].slice(0, 10);
 });
 
 function workspaceById(id: string): Workspace | undefined {

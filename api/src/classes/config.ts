@@ -55,6 +55,16 @@ export const config = {
     return existsSync('/root/.local/bin/codex-acp') ? '/root/.local/bin/codex-acp' : 'codex-acp';
   },
   configDir: '/config',
+  /**
+   * Body limit for the attachment-upload route, in MiB (env UPLOAD_BODY_LIMIT_MB).
+   * Uploads are base64-in-JSON, so the body is ~4/3× the file size — the default
+   * 512 MiB body allows roughly 380 MiB video files. Other routes keep the
+   * smaller global limit (BODY_LIMIT_BYTES in index.ts).
+   */
+  get uploadBodyLimitBytes(): number {
+    const mb = parseInt(optional('UPLOAD_BODY_LIMIT_MB', '512'), 10);
+    return (Number.isFinite(mb) && mb > 0 ? mb : 512) * 1024 * 1024;
+  },
   /** Root directory on the host; workspace paths are relative to this. */
   workspaceBrowseRoot: '/data-root',
 

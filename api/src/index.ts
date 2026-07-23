@@ -44,7 +44,8 @@ process.on('uncaughtException', (err) => {
   console.error('[process] uncaught exception:', err);
 });
 
-/** Max JSON/raw body size (e.g. session image uploads). Default Fastify limit is 1MiB and returns 413. */
+/** Max JSON/raw body size for most routes. Default Fastify limit is 1MiB and returns 413.
+ *  The attachment-upload route overrides this with config.uploadBodyLimitBytes (video-sized). */
 const BODY_LIMIT_BYTES = 25 * 1024 * 1024;
 
 // --------------------------------------------- Methods ---------------------------------------------

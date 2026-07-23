@@ -101,10 +101,11 @@ export async function deleteSessionImages(sessionId: string): Promise<void> {
 // --------------------------------------------- Routes ---------------------------------------------
 
 export async function imageRoutes(fastify: FastifyInstance): Promise<void> {
-  // POST /api/sessions/:sessionId/images — upload a base64-encoded attachment
+  // POST /api/sessions/:sessionId/images — upload a base64-encoded attachment.
+  // Route-level bodyLimit: much larger than the global cap so videos fit (see config).
   fastify.post(
     '/api/sessions/:sessionId/images',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, bodyLimit: config.uploadBodyLimitBytes },
     async (request, reply) => {
       const { sessionId } = request.params as { sessionId: string };
       const body = request.body as { data: string; mimeType: string; filename?: string };
