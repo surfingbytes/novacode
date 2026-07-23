@@ -60,6 +60,9 @@ RUN curl -fsSL https://opencode.ai/install | bash
 # Install Codex + Codex ACP adapter
 RUN npm install -g @openai/codex @zed-industries/codex-acp
 
+# Install Playwright core so agents can connect to a Playwright server
+RUN npm install -g playwright-core
+
 WORKDIR /app
 
 # Copy compiled API
