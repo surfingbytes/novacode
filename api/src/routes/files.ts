@@ -97,7 +97,11 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         params: Type.Object({ workspaceId: Type.String() }),
         querystring: Type.Object({ path: Type.String({ minLength: 1 }) }),
         response: {
-          200: Type.Object({ content: Type.String(), path: Type.String() }),
+          200: Type.Object({
+            content: Type.String(),
+            path: Type.String(),
+            encoding: Type.Union([Type.Literal('utf8'), Type.Literal('base64')])
+          }),
           404: Type.Object({ error: Type.String() }),
           400: Type.Object({ error: Type.String() })
         }
@@ -122,8 +126,13 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       try {
-        const content = await readFile(targetPath, 'utf8');
-        return { content, path: relativePath };
+        const buffer = await readFile(targetPath);
+        // Binary heuristic: a NUL byte in the first 8KB means it is not displayable text.
+        const isBinary = buffer.subarray(0, 8192).includes(0);
+        if (isBinary) {
+          return { content: buffer.toString('base64'), path: relativePath, encoding: 'base64' as const };
+        }
+        return { content: buffer.toString('utf8'), path: relativePath, encoding: 'utf8' as const };
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to read file';
         return reply.code(400).send({ error: message });

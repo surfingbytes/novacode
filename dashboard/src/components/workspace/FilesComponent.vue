@@ -31,6 +31,8 @@ const entriesByPath = ref<Record<string, FileEntry[]>>({});
 const expandedPaths = ref<Set<string>>(new Set());
 const selectedPath = ref<string | null>(null);
 const fileContent = ref<string>('');
+const fileEncoding = ref<'utf8' | 'base64'>('utf8');
+const imageObjectUrl = ref<string | null>(null);
 const bListLoading = ref<boolean>(false);
 const loadingPath = ref<string | null>(null);
 const bReadLoading = ref<boolean>(false);
@@ -72,6 +74,45 @@ function languageForPath(path: string): string {
   return EXT_LANG[extension] ?? 'plaintext';
 }
 
+// Extension to image MIME type (files rendered as pictures instead of text)
+const IMAGE_MIME: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  bmp: 'image/bmp',
+  ico: 'image/x-icon',
+  avif: 'image/avif'
+};
+
+function extensionForPath(path: string): string {
+  return path.split('.').pop()?.toLowerCase() ?? '';
+}
+
+function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
+  const binaryString = atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let index = 0; index < binaryString.length; index++) {
+    bytes[index] = binaryString.charCodeAt(index);
+  }
+  return bytes;
+}
+
+/** Raw bytes of the currently selected file, decoded according to its encoding. */
+function currentFileBytes(): Uint8Array<ArrayBuffer> {
+  if (fileEncoding.value === 'base64') {
+    return base64ToBytes(fileContent.value);
+  }
+  // Copy into a fresh ArrayBuffer-backed array so the result is a valid BlobPart.
+  return new Uint8Array(new TextEncoder().encode(fileContent.value));
+}
+
+function mimeForPath(path: string): string {
+  return IMAGE_MIME[extensionForPath(path)] ?? 'application/octet-stream';
+}
+
 // -------------------------------------------------- Computed --------------------------------------------------
 const rootEntries = computed((): FileEntry[] => entriesByPath.value[''] ?? []);
 
@@ -98,6 +139,21 @@ const selectedPathFileName = computed((): string => {
 });
 const bIsMarkdownFile = computed((): boolean => {
   return selectedPath.value?.toLowerCase().endsWith('.md') ?? false;
+});
+const bIsImageFile = computed((): boolean => {
+  return selectedPath.value !== null && extensionForPath(selectedPath.value) in IMAGE_MIME;
+});
+/** Non-image binary file (detected after read): cannot be previewed or edited. */
+const bIsBinaryFile = computed((): boolean => {
+  return !bIsImageFile.value && fileEncoding.value === 'base64';
+});
+/** Files shown in a text editor (Monaco or the markdown editor). */
+const bIsEditorFile = computed((): boolean => {
+  return !bIsImageFile.value && !bIsBinaryFile.value;
+});
+/** Text files that use Monaco (markdown uses MdEditor instead). */
+const bIsMonacoFile = computed((): boolean => {
+  return bIsEditorFile.value && !bIsMarkdownFile.value;
 });
 const bIsDarkTheme = computed((): boolean => {
   const themeId = resolveStoredThemeId(localStorage.getItem('theme') ?? DEFAULT_THEME_ID);
@@ -147,15 +203,32 @@ const readFilePath = async (path: string): Promise<void> => {
   readError.value = null;
   bReadLoading.value = true;
   fileContent.value = '';
+  fileEncoding.value = 'utf8';
   try {
     const response = await filesApi.read(props.workspaceId, path);
     fileContent.value = response.data.content;
+    fileEncoding.value = response.data.encoding;
   } catch (error: unknown) {
     const errorWithMessage = error as { response?: { data?: { error?: string } }; message?: string };
     readError.value = errorWithMessage?.response?.data?.error ?? errorWithMessage?.message ?? 'Failed to read file';
   } finally {
     bReadLoading.value = false;
   }
+};
+
+const downloadFile = (): void => {
+  if (!selectedPath.value) {
+    return;
+  }
+  const blob = new Blob([currentFileBytes()], { type: mimeForPath(selectedPath.value) });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = selectedPathFileName.value || 'download';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 };
 
 const selectFile = async (entry: FileEntry): Promise<void> => {
@@ -168,12 +241,12 @@ const selectFile = async (entry: FileEntry): Promise<void> => {
 const isExpanded = (path: string): boolean => expandedPaths.value.has(path);
 
 async function initEditor(): Promise<void> {
-  if (!editorContainerRef.value || !props.active || bIsMarkdownFile.value) {
+  if (!editorContainerRef.value || !props.active || !bIsMonacoFile.value) {
     return;
   }
   const monaco = await getMonaco();
   // Another initEditor() call may have finished while we awaited getMonaco(); only one instance per container.
-  if (editor || bIsMarkdownFile.value || !editorContainerRef.value) {
+  if (editor || !bIsMonacoFile.value || !editorContainerRef.value) {
     return;
   }
   editor = monaco.editor.create(editorContainerRef.value, {
@@ -196,7 +269,7 @@ function disposeEditor(): void {
 }
 
 async function updateEditorContent(): Promise<void> {
-  if (!editor || bIsMarkdownFile.value) {
+  if (!editor || !bIsMonacoFile.value) {
     return;
   }
   const monaco = await getMonaco();
@@ -319,9 +392,9 @@ watch([fileContent, selectedPath], () => {
 });
 
 watch(
-  bIsMarkdownFile,
-  async (isMarkdown: boolean) => {
-    if (isMarkdown) {
+  bIsMonacoFile,
+  async (isMonaco: boolean) => {
+    if (!isMonaco) {
       disposeEditor();
       return;
     }
@@ -332,6 +405,18 @@ watch(
   },
   { immediate: true }
 );
+
+// Build/revoke the blob URL backing the image preview.
+watch([fileContent, fileEncoding, selectedPath], () => {
+  if (imageObjectUrl.value) {
+    URL.revokeObjectURL(imageObjectUrl.value);
+    imageObjectUrl.value = null;
+  }
+  if (bIsImageFile.value && fileContent.value) {
+    const blob = new Blob([currentFileBytes()], { type: mimeForPath(selectedPath.value ?? '') });
+    imageObjectUrl.value = URL.createObjectURL(blob);
+  }
+});
 
 watch(
   () => props.workspaceId,
@@ -351,6 +436,10 @@ onMounted(async (): Promise<void> => {
 
 onUnmounted((): void => {
   disposeEditor();
+  if (imageObjectUrl.value) {
+    URL.revokeObjectURL(imageObjectUrl.value);
+    imageObjectUrl.value = null;
+  }
 });
 </script>
 
@@ -490,16 +579,30 @@ onUnmounted((): void => {
             {{ selectedPathFileName }}
           </span>
         </div>
-        <button
-          v-if="selectedPath"
-          type="button"
-          class="button is-primary is-transparent h-8!"
-          :disabled="bSaving"
-          @click="saveFile"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-          <span> Save </span>
-        </button>
+        <div class="flex items-center gap-1">
+          <button
+            v-if="selectedPath"
+            type="button"
+            class="button is-primary is-transparent h-8!"
+            :disabled="bReadLoading"
+            title="Download file"
+            aria-label="Download file"
+            @click="downloadFile"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span> Download </span>
+          </button>
+          <button
+            v-if="selectedPath && bIsEditorFile"
+            type="button"
+            class="button is-primary is-transparent h-8!"
+            :disabled="bSaving"
+            @click="saveFile"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            <span> Save </span>
+          </button>
+        </div>
       </div>
       <div v-if="readError" class="message is-error">
         {{ readError }}
@@ -524,6 +627,28 @@ onUnmounted((): void => {
           :preview="false"
           :toolbars-exclude="['github', 'save']"
         />
+        <div
+          v-else-if="bIsImageFile"
+          class="flex-1 min-h-[200px] w-full overflow-auto flex items-center justify-center p-4"
+        >
+          <img
+            v-if="imageObjectUrl"
+            :src="imageObjectUrl"
+            :alt="selectedPathFileName"
+            class="max-w-full max-h-full object-contain"
+          />
+        </div>
+        <div
+          v-else-if="bIsBinaryFile"
+          class="flex-1 min-h-[200px] w-full flex flex-col items-center justify-center gap-3 p-4 text-sm text-text-muted"
+        >
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <p>Binary file — preview not available.</p>
+          <button type="button" class="button is-primary h-8!" @click="downloadFile">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span> Download </span>
+          </button>
+        </div>
         <div v-else ref="editorContainerRef" class="flex-1 min-h-[200px] w-full" />
       </div>
     </div>

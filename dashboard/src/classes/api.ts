@@ -477,10 +477,13 @@ export const filesApi = {
   read: (
     workspaceId: string,
     path: string
-  ): ReturnType<typeof http.get<{ content: string; path: string }>> =>
-    http.get<{ content: string; path: string }>(`/workspaces/${workspaceId}/files/read`, {
-      params: { path }
-    }),
+  ): ReturnType<typeof http.get<{ content: string; path: string; encoding: 'utf8' | 'base64' }>> =>
+    http.get<{ content: string; path: string; encoding: 'utf8' | 'base64' }>(
+      `/workspaces/${workspaceId}/files/read`,
+      {
+        params: { path }
+      }
+    ),
 
   write: (
     workspaceId: string,
