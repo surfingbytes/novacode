@@ -31,6 +31,9 @@ import type { ChatMessage, ChatQueueItem, ChatWsServerMessage } from '@/@types/i
 export interface UseChatSocketContext {
   sessionId: () => string;
   workspaceId: () => string;
+  /** Cached snapshot shown instantly on cold start; the live history frame replaces it. */
+  initialMessages?: ChatMessage[];
+  initialHasMore?: boolean;
   /** Reconnect only while the chat tab is active (matches legacy behavior) */
   shouldBeConnected: () => boolean;
   isThinkingHidden: () => boolean;
@@ -44,6 +47,8 @@ export interface UseChatSocketContext {
   onHistoryPage: () => void;
   onContentAppended: () => void;
   onDone: () => void;
+  /** Fired whenever the persisted message list changes (history, pages, prompts, done). */
+  onMessagesChanged?: () => void;
   sessionName: () => string;
   workspaceName: () => string;
   onClaudeLimitDetected: (resetTime: string, resetTimeReadable: string) => void;
@@ -51,7 +56,7 @@ export interface UseChatSocketContext {
 
 export function useChatSocket(ctx: UseChatSocketContext) {
   // -------------------------------------------------- Refs --------------------------------------------------
-  const messages = ref<ChatMessage[]>([]);
+  const messages = ref<ChatMessage[]>(ctx.initialMessages ? [...ctx.initialMessages] : []);
   const bIsStreaming = ref(false);
   const chatError = ref<string | null>(null);
   const chatErrorCode = ref<AgentErrorCode | null>(null);
@@ -60,10 +65,10 @@ export function useChatSocket(ctx: UseChatSocketContext) {
   const streamingUsage = ref<StreamUsage | null>(null);
   const queuedPrompts = ref<ChatQueueItem[]>([]);
   const lastPromptRequest = ref<{ text: string; imagePaths: string[] } | null>(null);
-  const bHasMore = ref(false);
+  const bHasMore = ref(ctx.initialHasMore ?? false);
   const bLoadingMore = ref(false);
-  /** True once the first `history` frame for this session has arrived. */
-  const bHistoryLoaded = ref(false);
+  /** True once there is something to show (first `history` frame or a cached snapshot). */
+  const bHistoryLoaded = ref(ctx.initialMessages !== undefined);
   const bWsConnected = ref(false);
   const bWsReconnecting = ref(false);
 
@@ -112,6 +117,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     streamingThinkingText.value = '';
     bIsStreaming.value = msg.streaming === true;
     ctx.onHistoryLoaded();
+    ctx.onMessagesChanged?.();
   }
 
   function handleHistoryPage(msg: ChatWsServerMessage): void {
@@ -123,6 +129,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     bHasMore.value = msg.hasMore ?? false;
     bLoadingMore.value = false;
     ctx.onHistoryPage();
+    ctx.onMessagesChanged?.();
   }
 
   function handlePromptStarted(msg: ChatWsServerMessage): void {
@@ -139,6 +146,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
       createdAt: prompt.createdAt
     });
     ctx.onContentAppended();
+    ctx.onMessagesChanged?.();
   }
 
   function handleStream(msg: ChatWsServerMessage): void {
@@ -178,6 +186,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     bIsStreaming.value = false;
     ctx.onDone();
     ctx.onContentAppended();
+    ctx.onMessagesChanged?.();
     notifyTaskDone(
       ctx.sessionName(),
       ctx.workspaceName(),
@@ -345,6 +354,13 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     socket.send({ type: 'load-more', offset: messages.value.length });
   }
 
+  /** Show a cached snapshot (session switch); the fresh history frame replaces it. */
+  function hydrateHistory(cachedMessages: ChatMessage[], hasMore: boolean): void {
+    messages.value = [...cachedMessages];
+    bHasMore.value = hasMore;
+    bHistoryLoaded.value = true;
+  }
+
   /** Reset everything (session switch / unmount). */
   function resetChatState(): void {
     bHistoryLoaded.value = false;
@@ -391,6 +407,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     editQueuedPrompt,
     pushQueuedPrompt,
     loadOlderMessages,
+    hydrateHistory,
     resetChatState
   };
 }

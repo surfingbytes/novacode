@@ -151,6 +151,7 @@ Optional features include **scheduled automations**, **role templates**, and **b
 ## 16. Dashboard (Vue)
 
 - **Views**: Home (workspace list), workspace detail (sessions list, **Files**, **Git**, **Rules**), **Session** (chat), **Automations**, **Role templates**, **Settings**, **Account**, **Login**, **Setup** (4-step wizard: Profile → AI Agents [Claude + Mistral Vibe] → Git → Finalize).
+- **Session snapshot cache**: The session view persists the last known chat messages + session detail (incl. plan documents) per session in `localStorage` (`nova:sessionCache:*`, latest 50 messages, `messageJson`/`imageDataUrls` stripped). On mount or session switch the snapshot renders instantly (stale-while-revalidate) while REST + the chat WebSocket refresh it; the loading skeleton only appears when no snapshot exists. Token validation on navigation is non-blocking so a poor connection can't delay first paint.
 - **PWA**: Service worker (`sw.ts`) and Vite PWA plugin for installable/offline-capable behavior where configured.
 - **Terminal**: **xterm.js** for terminal rendering in the session experience.
 

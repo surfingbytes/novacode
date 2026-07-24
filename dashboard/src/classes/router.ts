@@ -103,7 +103,7 @@ const router = createRouter({
   ]
 });
 
-router.beforeEach(async (to) => {
+router.beforeEach((to) => {
   const auth = useAuthStore();
   if (to.meta.public) {
     return true;
@@ -112,10 +112,18 @@ router.beforeEach(async (to) => {
     return { name: 'login', query: to.fullPath !== '/' ? { redirect: to.fullPath } : {} };
   }
   if (!auth.bValidated) {
-    const ok = await auth.validate();
-    if (!ok) {
-      return { name: 'login', query: to.fullPath !== '/' ? { redirect: to.fullPath } : {} };
-    }
+    // Validate in the background — never block navigation on the network,
+    // otherwise a cold start on a poor connection hangs before any UI mounts.
+    // An invalid token is caught by validate() itself (logout) and by the
+    // global 401 handler on the first real API call.
+    void auth.validate().then((ok) => {
+      if (!ok) {
+        void router.push({
+          name: 'login',
+          query: to.fullPath !== '/' ? { redirect: to.fullPath } : {}
+        });
+      }
+    });
   }
   return true;
 });

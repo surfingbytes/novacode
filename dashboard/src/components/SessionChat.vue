@@ -20,6 +20,7 @@ import BottomTabBar from '@/components/ui/BottomTabBar.vue';
 // classes
 import { sessionsApi, settingsApi, buildSessionTerminalWsUrl } from '@/classes/api';
 import { renderMermaidDiagrams } from '@/lib/mermaid';
+import { readSessionCache, writeSessionCache } from '@/lib/sessionCache';
 import {
   getToolIconSvg,
   isPlanEntryCompleted,
@@ -74,8 +75,12 @@ const toastStore = useToastStore();
 const auth = useAuthStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
-const session = ref<Session | null>(null);
-const bLoading = ref(true);
+// Last-known snapshot for this session (chat + plan) — shown instantly while
+// REST/WebSocket revalidate, so a cold start on a poor connection doesn't
+// stare at a skeleton for data the app already had.
+const initialCache = readSessionCache(props.workspaceId, props.sessionId);
+const session = ref<Session | null>(initialCache?.session ?? null);
+const bLoading = ref(!initialCache);
 const error = ref<string | null>(null);
 const bShowEditModal = ref(false);
 const bSavingEdit = ref(false);
@@ -181,6 +186,8 @@ const {
 const chatSocket = useChatSocket({
   sessionId: () => props.sessionId,
   workspaceId: () => props.workspaceId,
+  initialMessages: initialCache?.messages,
+  initialHasMore: initialCache?.bHasMore,
   shouldBeConnected: () => activeTab.value === 'chat',
   isThinkingHidden: () => hideThinkingOutput.value,
   onModeUpdate: applyInboundModeUpdate,
@@ -202,6 +209,9 @@ const chatSocket = useChatSocket({
   onDone: () => {
     planDocs.schedulePlanDocumentsRefresh(250, { selectLatest: activeTab.value === 'plan' });
     planDocs.schedulePlanDocumentsRefresh(1500, { selectLatest: activeTab.value === 'plan' });
+  },
+  onMessagesChanged: () => {
+    scheduleSessionCachePersist();
   },
   sessionName: () => session.value?.name ?? 'Session',
   workspaceName: () => workspaceName.value,
@@ -226,6 +236,31 @@ const {
   bWsConnected,
   bWsReconnecting
 } = chatSocket;
+
+// -------------------------------------------------- Session snapshot cache --------------------------------------------------
+let persistCacheTimer: ReturnType<typeof setTimeout> | null = null;
+
+function persistSessionCache(): void {
+  writeSessionCache(props.workspaceId, props.sessionId, {
+    session: session.value,
+    messages: messages.value,
+    bHasMore: bHasMore.value
+  });
+}
+
+function scheduleSessionCachePersist(): void {
+  if (persistCacheTimer !== null) {
+    clearTimeout(persistCacheTimer);
+  }
+  persistCacheTimer = setTimeout(() => {
+    persistCacheTimer = null;
+    persistSessionCache();
+  }, 400);
+}
+
+watch(session, () => {
+  scheduleSessionCachePersist();
+});
 
 // -------------------------------------------------- Display items --------------------------------------------------
 interface DisplayChatMessage {
@@ -470,7 +505,11 @@ async function fetchSession(): Promise<boolean> {
   const workspaceId = props.workspaceId;
   const sessionId = props.sessionId;
   try {
-    bLoading.value = true;
+    // Keep any cached snapshot on screen while revalidating — the skeleton is
+    // only for when there is genuinely nothing to show.
+    if (!session.value) {
+      bLoading.value = true;
+    }
     error.value = null;
     const response = await sessionsApi.get(workspaceId, sessionId);
     if (
@@ -492,7 +531,9 @@ async function fetchSession(): Promise<boolean> {
     ) {
       return false;
     }
-    error.value = 'Failed to load session';
+    if (!session.value) {
+      error.value = 'Failed to load session';
+    }
     console.error('Failed to fetch session:', e);
     return false;
   } finally {
@@ -550,13 +591,21 @@ watch(
   () => props.sessionId,
   async (newId, oldId) => {
     if (!newId || newId === oldId) return;
+    if (persistCacheTimer !== null) {
+      clearTimeout(persistCacheTimer);
+      persistCacheTimer = null;
+    }
     planDocs.resetPlanDocuments();
     chatSocket.resetChatState();
     chatSocket.disconnect();
     expandedToolOutputIds.value = new Set();
     activeTab.value = 'chat';
-    session.value = null;
-    bLoading.value = true;
+    const cached = readSessionCache(props.workspaceId, newId);
+    session.value = cached?.session ?? null;
+    if (cached) {
+      chatSocket.hydrateHistory(cached.messages, cached.bHasMore);
+    }
+    bLoading.value = !cached;
     pendingImages.value = [];
     agentOptions.resetAgentOptions();
 
@@ -564,7 +613,9 @@ watch(
     promptText.value = savedPrompt ?? '';
 
     const loaded = await fetchSession();
-    if (!loaded) return;
+    // With a cached snapshot on screen, a failed refresh is fine — the socket
+    // still reconnects and the fresh history frame replaces it.
+    if (!loaded && !session.value) return;
     if (activeTab.value === 'chat') {
       chatSocket.connect();
       await nextTick();
@@ -603,6 +654,11 @@ onUnmounted(() => {
     clearTimeout(mermaidRenderTimer);
     mermaidRenderTimer = null;
   }
+  if (persistCacheTimer !== null) {
+    clearTimeout(persistCacheTimer);
+    persistCacheTimer = null;
+  }
+  persistSessionCache();
   if (chatInputMql) {
     chatInputMql.removeEventListener('change', syncChatInputBreakpoint);
     chatInputMql = null;

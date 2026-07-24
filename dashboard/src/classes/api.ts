@@ -102,7 +102,10 @@ export const authApi = {
     http.post<{ token: string }>('/auth/login', { username, password }),
 
   validate: (): ReturnType<typeof http.post<{ valid: boolean; username: string }>> =>
-    http.post<{ valid: boolean; username: string }>('/auth/validate'),
+    http.post<{ valid: boolean; username: string }>('/auth/validate', undefined, {
+      // Bound the wait — a timeout is treated as "stay logged in" by the caller.
+      timeout: 10000
+    }),
 
   changePassword: (
     currentPassword: string,
