@@ -6,15 +6,16 @@ import type { DisplayItem, TodoDisplayItem } from '@/utils/chatDisplayItems';
 
 /**
  * Derives the agent's current todo list from chat display items (live stream +
- * history) and owns the ChatTodoPanel UI state: tri-state expand cycle
- * (collapsed → preview → full) and the desktop close/reopen toggle, both
- * persisted in localStorage. Mirrors the usePlanDocuments pattern — state is
- * derived, never stored, so it works for live runs and history replays alike.
+ * history) and owns the ChatTodoPanel UI state: bi-state expand toggle
+ * (collapsed ↔ full, mobile strip only) and the desktop close/reopen toggle,
+ * both persisted in localStorage. Mirrors the usePlanDocuments pattern — state
+ * is derived, never stored, so it works for live runs and history replays
+ * alike.
  */
 
 // -------------------------------------------------- Types --------------------------------------------------
 
-export type TodoPanelState = 'collapsed' | 'preview' | 'full';
+export type TodoPanelState = 'collapsed' | 'full';
 
 interface DisplayChatMessageLike {
   items: DisplayItem[];
@@ -24,7 +25,7 @@ interface DisplayChatMessageLike {
 
 const PANEL_STATE_LS_KEY = 'nova:chat:todoPanelState';
 const PANEL_CLOSED_LS_KEY = 'nova:chat:todoPanelClosed';
-const PANEL_STATES: TodoPanelState[] = ['collapsed', 'preview', 'full'];
+const PANEL_STATES: TodoPanelState[] = ['collapsed', 'full'];
 
 function readInitialPanelState(): TodoPanelState {
   try {
@@ -39,7 +40,7 @@ function readInitialPanelState(): TodoPanelState {
     typeof window !== 'undefined' &&
     typeof window.matchMedia === 'function' &&
     window.matchMedia('(min-width: 1024px)').matches;
-  return bDesktop ? 'full' : 'preview';
+  return bDesktop ? 'full' : 'collapsed';
 }
 
 function readInitialClosed(): boolean {
@@ -91,14 +92,8 @@ export function useTodoList(options: {
 
   // -------------------------------------------------- Methods --------------------------------------------------
 
-  function cyclePanelState(): void {
-    if (panelState.value === 'preview') {
-      panelState.value = 'full';
-    } else if (panelState.value === 'full') {
-      panelState.value = 'collapsed';
-    } else {
-      panelState.value = 'preview';
-    }
+  function togglePanelState(): void {
+    panelState.value = panelState.value === 'full' ? 'collapsed' : 'full';
     try {
       localStorage.setItem(PANEL_STATE_LS_KEY, panelState.value);
     } catch {
@@ -131,7 +126,7 @@ export function useTodoList(options: {
     bTodosRunning,
     panelState,
     bPanelClosed,
-    cyclePanelState,
+    togglePanelState,
     closePanel,
     openPanel
   };

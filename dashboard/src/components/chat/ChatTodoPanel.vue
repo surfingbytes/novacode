@@ -3,15 +3,15 @@
  * Persistent todo panel for the chat tab — shows the agent's current todo list
  * (latest todowrite call, derived via useTodoList) instead of letting it scroll
  * away in the message stream. Two layouts:
- *  - 'strip': mobile — collapsible strip pinned above the composer
- *  - 'panel': desktop — right-side column of the chat tab, closable (bClosable)
- * Tapping the header cycles tri-state: collapsed (header + counter only) →
- * preview (up to 3 items, current work first) → full list.
+ *  - 'strip': mobile — collapsible strip pinned above the composer; tapping the
+ *    header toggles bi-state: collapsed (header + counter only) ↔ full list
+ *  - 'panel': desktop — right-side column of the chat tab, always expanded;
+ *    no collapse here, only closable (bClosable)
  */
 
 // node_modules
 import { computed } from 'vue';
-import { ChevronUp, ChevronDown, ChevronsUpDown, X } from 'lucide-vue-next';
+import { ChevronUp, ChevronDown, X } from 'lucide-vue-next';
 
 // components
 import TodoStatusIcon from '@/components/chat/TodoStatusIcon.vue';
@@ -39,7 +39,7 @@ const props = withDefaults(
 // -------------------------------------------------- Emits --------------------------------------------------
 
 const emit = defineEmits<{
-  (e: 'cycle'): void;
+  (e: 'toggle'): void;
   (e: 'close'): void;
 }>();
 
@@ -49,23 +49,8 @@ const checklistSvg = getToolIconSvg('checklist');
 
 // -------------------------------------------------- Computed --------------------------------------------------
 
-/** Preview surfaces current work first: in-progress, then pending, then done. */
-const previewItems = computed(() => {
-  const rank = (status: string): number => {
-    if (status === 'TODO_STATUS_IN_PROGRESS') {
-      return 0;
-    }
-    if (status === 'TODO_STATUS_COMPLETED' || status === 'TODO_STATUS_CANCELLED') {
-      return 2;
-    }
-    return 1;
-  };
-  return [...props.todoItems].sort((a, b) => rank(a.status) - rank(b.status)).slice(0, 3);
-});
-
-const visibleItems = computed(() =>
-  props.panelState === 'full' ? props.todoItems : previewItems.value
-);
+/** Desktop sidebar never collapses — it's either open (full) or closed. */
+const bExpanded = computed(() => props.layout === 'panel' || props.panelState === 'full');
 
 // -------------------------------------------------- Methods --------------------------------------------------
 
@@ -83,15 +68,16 @@ function bDone(status: string): boolean {
         : 'todo-panel-surface h-full min-h-0 border-l border-fg/10'
     "
   >
-    <!-- Header — always visible, tap to cycle collapsed → preview → full -->
+    <!-- Header — always visible; tap toggles collapsed ↔ full (strip only) -->
     <div
       class="flex items-center shrink-0"
-      :class="panelState === 'collapsed' ? '' : 'border-b border-fg/10'"
+      :class="bExpanded ? 'border-b border-fg/10' : ''"
     >
       <button
         type="button"
         class="flex flex-1 items-center gap-2 px-3 py-1.5 min-w-0"
-        @click="emit('cycle')"
+        :class="layout === 'panel' ? 'cursor-default' : ''"
+        @click="layout === 'strip' && emit('toggle')"
       >
         <span class="shrink-0 select-none text-text-muted" v-html="checklistSvg" />
         <span class="text-xs font-medium text-text-primary shrink-0">Tasks</span>
@@ -113,9 +99,10 @@ function bDone(status: string): boolean {
             <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
           </svg>
           <span v-else class="text-xs text-text-muted">{{ doneCount }}/{{ todoItems.length }}</span>
-          <ChevronUp v-if="panelState === 'collapsed'" :size="13" class="text-text-muted" />
-          <ChevronsUpDown v-else-if="panelState === 'preview'" :size="13" class="text-text-muted" />
-          <ChevronDown v-else :size="13" class="text-text-muted" />
+          <template v-if="layout === 'strip'">
+            <ChevronUp v-if="panelState === 'collapsed'" :size="13" class="text-text-muted" />
+            <ChevronDown v-else :size="13" class="text-text-muted" />
+          </template>
         </span>
       </button>
       <button
@@ -131,17 +118,11 @@ function bDone(status: string): boolean {
 
     <!-- Body -->
     <ul
-      v-if="panelState !== 'collapsed'"
+      v-if="bExpanded"
       class="px-3 py-1.5 space-y-1"
-      :class="
-        layout === 'panel'
-          ? 'flex-1 min-h-0 overflow-y-auto'
-          : panelState === 'full'
-            ? 'max-h-[45vh] overflow-y-auto'
-            : ''
-      "
+      :class="layout === 'panel' ? 'flex-1 min-h-0 overflow-y-auto' : 'max-h-[45vh] overflow-y-auto'"
     >
-      <li v-for="todo in visibleItems" :key="todo.id" class="flex items-start gap-2 text-xs">
+      <li v-for="todo in todoItems" :key="todo.id" class="flex items-start gap-2 text-xs">
         <TodoStatusIcon :status="todo.status" />
         <span
           class="leading-snug"

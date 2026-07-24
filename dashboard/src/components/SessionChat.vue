@@ -293,7 +293,7 @@ const {
   bTodosRunning,
   panelState: todoPanelState,
   bPanelClosed: bTodoPanelClosed,
-  cyclePanelState: cycleTodoPanelState,
+  togglePanelState: toggleTodoPanelState,
   closePanel: closeTodoPanel,
   openPanel: openTodoPanel
 } = todoList;
@@ -680,7 +680,7 @@ onUnmounted(() => {
             :done-count="todoDoneCount"
             :b-running="bTodosRunning && bIsStreaming"
             :panel-state="todoPanelState"
-            @cycle="cycleTodoPanelState"
+            @toggle="toggleTodoPanelState"
           />
 
           <!-- Reconnecting indicator -->
@@ -761,7 +761,6 @@ onUnmounted(() => {
           :b-running="bTodosRunning && bIsStreaming"
           :panel-state="todoPanelState"
           b-closable
-          @cycle="cycleTodoPanelState"
           @close="closeTodoPanel"
         />
       </div>
