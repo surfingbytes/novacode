@@ -740,6 +740,7 @@ onUnmounted(() => {
             @cancel="chatSocket.cancelPrompt"
             @push-queue="chatSocket.pushQueuedPrompt"
             @delete-queue="chatSocket.deleteQueuedPrompt"
+            @edit-queue="chatSocket.editQueuedPrompt"
             @select-mode="onSessionModeChange"
             @config-change="onAgentConfigChange"
             @model-update="onSharedModelPickerUpdate"

@@ -492,6 +492,30 @@ export const db = {
     return result.count > 0;
   },
 
+  async updateSessionQueueItemText(sessionId: string, id: string, text: string): Promise<boolean> {
+    const updated = await _prisma.$transaction(async (tx) => {
+      const existingQueueItem = await tx.sessionPromptQueue.findFirst({ where: { sessionId, id } });
+      if (!existingQueueItem) {
+        return undefined;
+      }
+      let imagePaths: string[] = [];
+      try {
+        imagePaths = JSON.parse(existingQueueItem.imagePaths ?? '[]') as string[];
+      } catch {
+        imagePaths = [];
+      }
+      if (!text && imagePaths.length === 0) {
+        // A queue item needs text or at least one image.
+        return undefined;
+      }
+      return tx.sessionPromptQueue.update({
+        where: { id: existingQueueItem.id },
+        data: { text }
+      });
+    });
+    return !!updated;
+  },
+
   async moveSessionQueueItemToFront(sessionId: string, id: string): Promise<boolean> {
     const updated = await _prisma.$transaction(async (tx) => {
       const existingQueueItem = await tx.sessionPromptQueue.findFirst({ where: { sessionId, id } });

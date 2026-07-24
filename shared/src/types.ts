@@ -103,7 +103,7 @@ export interface LinkedPlanContext {
 }
 
 export interface ChatWsClientMessage {
-  type: 'prompt' | 'cancel' | 'load-more' | 'queue-delete' | 'queue-push';
+  type: 'prompt' | 'cancel' | 'load-more' | 'queue-delete' | 'queue-push' | 'queue-edit';
   text?: string;
   /** Model id (e.g. 'auto', 'gpt-5.3-codex'). Default 'auto'. */
   model?: string;

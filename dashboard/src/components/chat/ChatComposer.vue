@@ -77,6 +77,7 @@ const emit = defineEmits<{
   (e: 'cancel'): void;
   (e: 'pushQueue', id: string): void;
   (e: 'deleteQueue', id: string): void;
+  (e: 'editQueue', id: string, text: string): void;
   (e: 'selectMode', id: string): void;
   (e: 'configChange', id: string, value: string): void;
   (e: 'modelUpdate', value: string): void;
@@ -96,6 +97,10 @@ const promptInputBoxRef = ref<HTMLElement | null>(null);
 const fileInputEl = ref<HTMLInputElement | null>(null);
 const modeMenuRef = ref<HTMLElement | null>(null);
 const bModeMenuOpen = ref(false);
+
+const queueListRef = ref<HTMLElement | null>(null);
+const editingQueueItemId = ref<string | null>(null);
+const editingQueueText = ref('');
 
 const PROMPT_SINGLE_LINE_HEIGHT = 32;
 const bPromptMultiline = ref(false);
@@ -185,6 +190,47 @@ function closeModeMenu(): void {
 function selectMode(id: string): void {
   closeModeMenu();
   emit('selectMode', id);
+}
+
+// -------------------------------------------------- Queue edit --------------------------------------------------
+
+function startQueueEdit(item: ChatQueueItem): void {
+  editingQueueItemId.value = item.id;
+  editingQueueText.value = item.text;
+  nextTick(() => {
+    const el = queueListRef.value?.querySelector('textarea');
+    el?.focus();
+    el?.setSelectionRange(el.value.length, el.value.length);
+  });
+}
+
+function cancelQueueEdit(): void {
+  editingQueueItemId.value = null;
+  editingQueueText.value = '';
+}
+
+function saveQueueEdit(item: ChatQueueItem): void {
+  const text = editingQueueText.value.trim();
+  if (!text && !item.imagePaths?.length) {
+    return;
+  }
+  if (text !== item.text.trim()) {
+    emit('editQueue', item.id, text);
+  }
+  cancelQueueEdit();
+}
+
+function onQueueEditKeydown(e: KeyboardEvent, item: ChatQueueItem): void {
+  if (e.isComposing) return;
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    cancelQueueEdit();
+    return;
+  }
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    saveQueueEdit(item);
+  }
 }
 
 function handleDocumentClick(e: MouseEvent): void {
@@ -286,6 +332,15 @@ watch(promptText, () => {
   nextTick(() => resizeTextarea());
 });
 
+watch(
+  () => props.queuedPrompts,
+  (items) => {
+    if (editingQueueItemId.value && !items.some((item) => item.id === editingQueueItemId.value)) {
+      cancelQueueEdit();
+    }
+  }
+);
+
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 
 onMounted(() => {
@@ -322,7 +377,7 @@ defineExpose({
   <div class="pt-2 pb-3 border-t border-fg/10 flex flex-col gap-2 shrink-0">
     <!-- Prompt queue -->
     <div v-if="queuedPrompts.length > 0" class="px-2">
-      <div class="rounded-md border border-fg/10 bg-fg/[0.03] p-2">
+      <div ref="queueListRef" class="rounded-md border border-fg/10 bg-fg/[0.03] p-2">
         <div class="text-[11px] font-medium text-text-muted uppercase tracking-wide">
           Queue ({{ queuedPrompts.length }})
         </div>
@@ -331,32 +386,72 @@ defineExpose({
           :key="item.id"
           class="flex items-start gap-2 px-1 py-1.5"
         >
-          <div class="flex-1 min-w-0">
-            <div class="text-xs text-text-primary break-words whitespace-pre-wrap line-clamp-2">
-              {{ item.text || '(Images only)' }}
+          <template v-if="editingQueueItemId === item.id">
+            <textarea
+              v-model="editingQueueText"
+              rows="2"
+              aria-label="Edit queued message"
+              class="flex-1 min-w-0 resize-none rounded border border-fg/10 bg-fg/[0.06] text-text-primary text-xs px-2 py-1 leading-5 focus:outline-none focus:border-primary/50 overflow-y-auto"
+              style="max-height: 120px"
+              @keydown="onQueueEditKeydown($event, item)"
+            ></textarea>
+            <button
+              type="button"
+              title="Save (Ctrl+Enter)"
+              aria-label="Save queued message"
+              :disabled="!editingQueueText.trim() && !item.imagePaths?.length"
+              class="button is-transparent is-icon h-7! w-7! min-w-7! px-0!"
+              @click="saveQueueEdit(item)"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+            </button>
+            <button
+              type="button"
+              title="Cancel edit (Esc)"
+              aria-label="Cancel edit"
+              class="button is-transparent is-icon h-7! w-7! min-w-7! px-0!"
+              @click="cancelQueueEdit"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+          </template>
+          <template v-else>
+            <div class="flex-1 min-w-0">
+              <div class="text-xs text-text-primary break-words whitespace-pre-wrap line-clamp-2">
+                {{ item.text || '(Images only)' }}
+              </div>
+              <div v-if="item.imagePaths?.length" class="text-[11px] text-text-muted mt-0.5">
+                {{ item.imagePaths.length }} attachment{{ item.imagePaths.length === 1 ? '' : 's' }}
+              </div>
             </div>
-            <div v-if="item.imagePaths?.length" class="text-[11px] text-text-muted mt-0.5">
-              {{ item.imagePaths.length }} attachment{{ item.imagePaths.length === 1 ? '' : 's' }}
-            </div>
-          </div>
-          <button
-            type="button"
-            title="Send next"
-            aria-label="Send next"
-            class="button is-transparent is-icon h-7! w-7! min-w-7! px-0!"
-            @click="emit('pushQueue', item.id)"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none" aria-hidden="true"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
-          </button>
-          <button
-            type="button"
-            title="Remove from queue"
-            aria-label="Remove from queue"
-            class="button is-transparent is-icon h-7! w-7! min-w-7! px-0!"
-            @click="emit('deleteQueue', item.id)"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
-          </button>
+            <button
+              type="button"
+              title="Send next"
+              aria-label="Send next"
+              class="button is-transparent is-icon h-7! w-7! min-w-7! px-0!"
+              @click="emit('pushQueue', item.id)"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none" aria-hidden="true"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+            </button>
+            <button
+              type="button"
+              title="Edit queued message"
+              aria-label="Edit queued message"
+              class="button is-transparent is-icon h-7! w-7! min-w-7! px-0!"
+              @click="startQueueEdit(item)"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+            </button>
+            <button
+              type="button"
+              title="Remove from queue"
+              aria-label="Remove from queue"
+              class="button is-transparent is-icon h-7! w-7! min-w-7! px-0!"
+              @click="emit('deleteQueue', item.id)"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+            </button>
+          </template>
         </div>
       </div>
     </div>

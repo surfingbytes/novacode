@@ -331,6 +331,10 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     socket?.send({ type: 'queue-delete', queueItemId });
   }
 
+  function editQueuedPrompt(queueItemId: string, text: string): void {
+    socket?.send({ type: 'queue-edit', queueItemId, text });
+  }
+
   function pushQueuedPrompt(queueItemId: string): void {
     socket?.send({ type: 'queue-push', queueItemId });
   }
@@ -384,6 +388,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     retryLastPrompt,
     cancelPrompt,
     deleteQueuedPrompt,
+    editQueuedPrompt,
     pushQueuedPrompt,
     loadOlderMessages,
     resetChatState

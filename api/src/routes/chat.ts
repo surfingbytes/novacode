@@ -265,6 +265,15 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
           return;
         }
 
+        if (clientMessage.type === 'queue-edit') {
+          if (!clientMessage.queueItemId || typeof clientMessage.text !== 'string') {
+            return;
+          }
+          await db.updateSessionQueueItemText(id, clientMessage.queueItemId, clientMessage.text.trim());
+          await broadcastQueueUpdate(id);
+          return;
+        }
+
         if (clientMessage.type === 'queue-push') {
           if (!clientMessage.queueItemId) {
             return;
