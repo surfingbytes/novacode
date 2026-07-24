@@ -541,7 +541,11 @@ export const sessionsApi = {
     }),
 
   get: (workspaceId: string, sessionId: string): ReturnType<typeof http.get<Session>> =>
-    http.get<Session>(`/workspaces/${workspaceId}/sessions/${sessionId}`),
+    http.get<Session>(`/workspaces/${workspaceId}/sessions/${sessionId}`, {
+      // Bound the wait — a timeout surfaces as the offline banner / error state
+      // instead of leaving the view silently fetching forever.
+      timeout: 20000
+    }),
 
   create: (
     workspaceId: string,

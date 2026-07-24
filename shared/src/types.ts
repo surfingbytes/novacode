@@ -175,7 +175,7 @@ export interface Session {
   modelSelection: string;
   sessionMode: string;
   sessionConfigJson?: Record<string, string> | null;
-  /** Present on session detail; omitted on list endpoints to save bandwidth */
+  /** Omitted on list endpoints and the session detail GET (chat history streams over the chat WebSocket) */
   messageJson?: string;
   /** Real Cursor plan documents from .cursor/plans, present on session detail when available */
   planDocuments?: PlanDocumentSummary[];

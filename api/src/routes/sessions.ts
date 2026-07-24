@@ -159,8 +159,11 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       if (!session || session.workspaceId !== workspaceId) {
         return reply.status(404).send({ error: 'Session not found' });
       }
+      // Chat history streams over the chat WebSocket — keep the potentially huge
+      // messageJson out of this response so long sessions load fast on slow links.
+      const { messageJson: _omit, ...sessionWithoutMessages } = normalizeSessionForApi(session);
       return reply.send({
-        ...normalizeSessionForApi(session),
+        ...sessionWithoutMessages,
         planDocuments: await getPlanDocumentsSource(session.agentType).listForSession(
           session.sessionId
         ),

@@ -135,6 +135,8 @@ const activeTab = ref<SessionTab>('chat');
 
 let mermaidRenderTimer: ReturnType<typeof setTimeout> | null = null;
 let fetchSessionSeq = 0;
+/** True while a cached snapshot is on screen and the first fresh history frame is pending. */
+let bCachedHistoryOnScreen = !!initialCache;
 
 function scheduleMermaidRender(): void {
   if (mermaidRenderTimer !== null) {
@@ -182,6 +184,13 @@ const {
   loadAgentOptions
 } = agentOptions;
 
+// The cached session already carries agentType/model/mode/config — apply it and
+// fetch model/mode options now instead of waiting on the session revalidation.
+if (initialCache?.session) {
+  agentOptions.applyFetchedSession(initialCache.session);
+  void loadAgentOptions();
+}
+
 // -------------------------------------------------- Chat socket --------------------------------------------------
 const chatSocket = useChatSocket({
   sessionId: () => props.sessionId,
@@ -198,6 +207,12 @@ const chatSocket = useChatSocket({
     activeTab.value = 'plan';
   },
   onHistoryLoaded: () => {
+    // A cached snapshot is already on screen: the list's pinned-bottom follow
+    // keeps the view correct — don't yank the user if they scrolled up to read.
+    if (bCachedHistoryOnScreen) {
+      bCachedHistoryOnScreen = false;
+      return;
+    }
     void nextTick(() => chatListRef.value?.forceInitialScrollToBottom());
   },
   onHistoryPage: () => {
@@ -602,20 +617,27 @@ watch(
     activeTab.value = 'chat';
     const cached = readSessionCache(props.workspaceId, newId);
     session.value = cached?.session ?? null;
+    bCachedHistoryOnScreen = !!cached;
     if (cached) {
       chatSocket.hydrateHistory(cached.messages, cached.bHasMore);
     }
     bLoading.value = !cached;
     pendingImages.value = [];
     agentOptions.resetAgentOptions();
+    if (cached?.session) {
+      agentOptions.applyFetchedSession(cached.session);
+      void loadAgentOptions();
+    }
+    if (cached?.messages.length) {
+      void nextTick(() => chatListRef.value?.forceInitialScrollToBottom());
+    }
 
     const savedPrompt = localStorage.getItem(promptStorageKey.value);
     promptText.value = savedPrompt ?? '';
 
-    const loaded = await fetchSession();
-    // With a cached snapshot on screen, a failed refresh is fine — the socket
-    // still reconnects and the fresh history frame replaces it.
-    if (!loaded && !session.value) return;
+    // Fetch and socket run in parallel — the WS history frame must not wait on
+    // the REST round-trip (a hung fetch would otherwise block chat + sending).
+    void fetchSession();
     if (activeTab.value === 'chat') {
       chatSocket.connect();
       await nextTick();
@@ -634,8 +656,13 @@ onMounted(async () => {
   const savedPrompt = localStorage.getItem(promptStorageKey.value);
   if (savedPrompt != null) promptText.value = savedPrompt;
 
-  await fetchSession();
+  // Fetch and socket run in parallel — the WS history frame must not wait on
+  // the REST round-trip (a hung fetch would otherwise block chat + sending).
+  void fetchSession();
   chatSocket.connect();
+  if (initialCache?.messages.length) {
+    void nextTick(() => chatListRef.value?.forceInitialScrollToBottom());
+  }
   try {
     const { data } = await settingsApi.get();
     if (typeof data.claudeAutoContinue === 'boolean') {
@@ -739,13 +766,13 @@ onUnmounted(() => {
             @toggle="toggleTodoPanelState"
           />
 
-          <!-- Reconnecting indicator -->
-          <div v-if="bWsReconnecting" class="flex justify-center py-1.5 shrink-0">
+          <!-- Connection indicator (initial connect and reconnects) -->
+          <div v-if="!bWsConnected" class="flex justify-center py-1.5 shrink-0">
             <span class="text-xs text-text-muted flex items-center gap-1.5">
               <span
                 class="w-3 h-3 border border-text-muted/40 border-t-text-muted rounded-full animate-spin inline-block"
               ></span>
-              Reconnecting…
+              {{ bWsReconnecting ? 'Reconnecting…' : 'Connecting…' }}
             </span>
           </div>
 
