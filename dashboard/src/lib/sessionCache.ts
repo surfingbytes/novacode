@@ -58,10 +58,23 @@ export function readSessionCache(
 export function writeSessionCache(
   workspaceId: string,
   sessionId: string,
-  snapshot: SessionCacheSnapshot
+  snapshot: SessionCacheSnapshot,
+  opts?: { allowEmptyMessages?: boolean }
 ): void {
+  let messages = snapshot.messages;
+  let bHasMore = snapshot.bHasMore;
+  // An empty message list usually means "fresh history hasn't arrived yet" —
+  // never clobber a good snapshot with it. Callers pass allowEmptyMessages when
+  // the emptiness is server-confirmed (history frame) and must win.
+  if (messages.length === 0 && !opts?.allowEmptyMessages) {
+    const existing = readSessionCache(workspaceId, sessionId);
+    if (existing && existing.messages.length > 0) {
+      messages = existing.messages;
+      bHasMore = existing.bHasMore;
+    }
+  }
   // Nothing worth keeping — never clobber an existing snapshot with emptiness.
-  if (!snapshot.session && snapshot.messages.length === 0) {
+  if (!snapshot.session && messages.length === 0) {
     return;
   }
   const base: SessionCachePayload = {
@@ -70,7 +83,7 @@ export function writeSessionCache(
     // messageJson duplicates the whole history — the messages are cached separately.
     session: snapshot.session ? { ...snapshot.session, messageJson: undefined } : null,
     // imageDataUrls hold base64 image payloads and are only needed pre-round-trip.
-    messages: snapshot.messages.map((m) => {
+    messages: messages.map((m) => {
       if (!m.imageDataUrls) {
         return m;
       }
@@ -78,7 +91,7 @@ export function writeSessionCache(
       delete copy.imageDataUrls;
       return copy;
     }),
-    bHasMore: snapshot.bHasMore
+    bHasMore
   };
   for (const limit of [MAX_CACHED_MESSAGES, RETRY_CACHED_MESSAGES]) {
     try {

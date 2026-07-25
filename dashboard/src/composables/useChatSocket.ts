@@ -67,8 +67,8 @@ export function useChatSocket(ctx: UseChatSocketContext) {
   const lastPromptRequest = ref<{ text: string; imagePaths: string[] } | null>(null);
   const bHasMore = ref(ctx.initialHasMore ?? false);
   const bLoadingMore = ref(false);
-  /** True once there is something to show (first `history` frame or a cached snapshot). */
-  const bHistoryLoaded = ref(ctx.initialMessages !== undefined);
+  /** True once there is something to show (first `history` frame or a non-empty cached snapshot). */
+  const bHistoryLoaded = ref((ctx.initialMessages?.length ?? 0) > 0);
   const bWsConnected = ref(false);
   const bWsReconnecting = ref(false);
 
@@ -358,7 +358,9 @@ export function useChatSocket(ctx: UseChatSocketContext) {
   function hydrateHistory(cachedMessages: ChatMessage[], hasMore: boolean): void {
     messages.value = [...cachedMessages];
     bHasMore.value = hasMore;
-    bHistoryLoaded.value = true;
+    // Empty snapshot = nothing to show yet: keep the loading state until the
+    // fresh history frame instead of lying with the empty state.
+    bHistoryLoaded.value = cachedMessages.length > 0;
   }
 
   /** Reset everything (session switch / unmount). */

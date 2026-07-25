@@ -226,7 +226,8 @@ const chatSocket = useChatSocket({
     planDocs.schedulePlanDocumentsRefresh(1500, { selectLatest: activeTab.value === 'plan' });
   },
   onMessagesChanged: () => {
-    scheduleSessionCachePersist();
+    // Server-confirmed message state — emptiness here is authoritative.
+    scheduleSessionCachePersist(true);
   },
   sessionName: () => session.value?.name ?? 'Session',
   workspaceName: () => workspaceName.value,
@@ -254,22 +255,31 @@ const {
 
 // -------------------------------------------------- Session snapshot cache --------------------------------------------------
 let persistCacheTimer: ReturnType<typeof setTimeout> | null = null;
+let persistCacheAllowEmpty = false;
 
-function persistSessionCache(): void {
-  writeSessionCache(props.workspaceId, props.sessionId, {
-    session: session.value,
-    messages: messages.value,
-    bHasMore: bHasMore.value
-  });
+function persistSessionCache(allowEmptyMessages = false): void {
+  writeSessionCache(
+    props.workspaceId,
+    props.sessionId,
+    {
+      session: session.value,
+      messages: messages.value,
+      bHasMore: bHasMore.value
+    },
+    { allowEmptyMessages }
+  );
 }
 
-function scheduleSessionCachePersist(): void {
+function scheduleSessionCachePersist(allowEmptyMessages = false): void {
+  persistCacheAllowEmpty = persistCacheAllowEmpty || allowEmptyMessages;
   if (persistCacheTimer !== null) {
     clearTimeout(persistCacheTimer);
   }
   persistCacheTimer = setTimeout(() => {
     persistCacheTimer = null;
-    persistSessionCache();
+    const allow = persistCacheAllowEmpty;
+    persistCacheAllowEmpty = false;
+    persistSessionCache(allow);
   }, 400);
 }
 
@@ -685,7 +695,8 @@ onUnmounted(() => {
     clearTimeout(persistCacheTimer);
     persistCacheTimer = null;
   }
-  persistSessionCache();
+  persistSessionCache(persistCacheAllowEmpty);
+  persistCacheAllowEmpty = false;
   if (chatInputMql) {
     chatInputMql.removeEventListener('change', syncChatInputBreakpoint);
     chatInputMql = null;

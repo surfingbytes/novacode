@@ -105,6 +105,43 @@ describe('sessionCache', () => {
     expect(cached?.messages).toHaveLength(2);
   });
 
+  it('preserves existing messages when writing a session-only snapshot', () => {
+    writeSessionCache('ws-1', 'session-1', {
+      session: makeSession({ name: 'Old name' }),
+      messages: makeMessages(3),
+      bHasMore: true
+    });
+    // Fresh session meta arrived before the history frame — must not wipe messages.
+    writeSessionCache('ws-1', 'session-1', {
+      session: makeSession({ name: 'New name' }),
+      messages: [],
+      bHasMore: false
+    });
+
+    const cached = readSessionCache('ws-1', 'session-1');
+    expect(cached?.session?.name).toBe('New name');
+    expect(cached?.messages).toHaveLength(3);
+    expect(cached?.bHasMore).toBe(true);
+  });
+
+  it('allows server-confirmed empty history to replace cached messages', () => {
+    writeSessionCache('ws-1', 'session-1', {
+      session: makeSession(),
+      messages: makeMessages(3),
+      bHasMore: true
+    });
+    writeSessionCache(
+      'ws-1',
+      'session-1',
+      { session: makeSession(), messages: [], bHasMore: false },
+      { allowEmptyMessages: true }
+    );
+
+    const cached = readSessionCache('ws-1', 'session-1');
+    expect(cached?.messages).toHaveLength(0);
+    expect(cached?.bHasMore).toBe(false);
+  });
+
   it('returns null for corrupt or foreign data', () => {
     localStorage.setItem('nova:sessionCache:ws-1:session-1', '{not json');
     expect(readSessionCache('ws-1', 'session-1')).toBeNull();
