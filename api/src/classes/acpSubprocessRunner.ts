@@ -116,6 +116,10 @@ const configSyncHandlers = new Map<string, SessionConfigSyncHandler>();
 
 /** Grace period for the agent to honour session/cancel before the subprocess is killed. */
 const CANCEL_GRACE_MS = 3_000;
+const promptIdleTimeoutEnv = Number.parseInt(process.env['ACP_PROMPT_IDLE_TIMEOUT_MS'] ?? '', 10);
+const PROMPT_IDLE_TIMEOUT_MS = Number.isFinite(promptIdleTimeoutEnv)
+  ? promptIdleTimeoutEnv
+  : 120_000;
 
 /** User-visible notice emitted when a failed session/load silently resets the conversation. */
 const CONTEXT_RESET_NOTICE_TEXT =
@@ -527,7 +531,36 @@ export async function runAcpSubprocessPrompt(
   const promptSettled = new Promise<void>((resolve) => {
     resolvePromptSettled = resolve;
   });
+  let bPromptInFlight = false;
+  let bPromptIdleTimedOut = false;
+  let promptIdleTimer: ReturnType<typeof setTimeout> | null = null;
   const stream = ndJsonStream(nodeWritableToWeb(proc.stdin!), nodeReadableToWeb(proc.stdout!));
+
+  const clearPromptIdleTimer = (): void => {
+    if (promptIdleTimer !== null) {
+      clearTimeout(promptIdleTimer);
+      promptIdleTimer = null;
+    }
+  };
+
+  const armPromptIdleTimer = (): void => {
+    if (!bPromptInFlight || PROMPT_IDLE_TIMEOUT_MS <= 0) return;
+    clearPromptIdleTimer();
+    promptIdleTimer = setTimeout(() => {
+      bPromptIdleTimedOut = true;
+      console.warn(`[${logTag}] prompt idle timeout`, {
+        novaSessionId,
+        timeoutMs: PROMPT_IDLE_TIMEOUT_MS,
+      });
+      killProc();
+    }, PROMPT_IDLE_TIMEOUT_MS);
+  };
+
+  const handleEvent: AcpEventHandler = (line) => {
+    onEvent(line);
+    armPromptIdleTimer();
+  };
+
   const app = buildClientApp(onConfigSync, params.cursorExtensions, () => sessionIdForCancel);
 
   const killProc = () => {
@@ -617,7 +650,7 @@ export async function runAcpSubprocessPrompt(
         } catch (err) {
           console.warn(`[${logTag}] loadSession failed, starting fresh session:`, err);
           // Surface the silent context reset to the user (persisted via onEvent).
-          onEvent(sessionResetNoticeEventLine());
+          handleEvent(sessionResetNoticeEventLine());
           activeHandlers.delete(acpSessionId);
           phase('session:new:start');
           const created = (await ctx.request(methods.agent.session.new, {
@@ -671,17 +704,19 @@ export async function runAcpSubprocessPrompt(
       const requestedModel = params.model?.trim();
       resolvedModeId = requestedMode && requestedMode !== 'default' ? requestedMode : resolvedModeId;
       resolvedModelId = requestedModel || resolvedModelId;
-      emitSessionConfigSync(onEvent, {
+      emitSessionConfigSync(handleEvent, {
         modeId: resolvedModeId,
         modelId: resolvedModelId,
       });
 
-      activeHandlers.set(resolvedSessionId, onEvent);
+      activeHandlers.set(resolvedSessionId, handleEvent);
       try {
         phase('session:prompt:start');
         const finalPromptText = params.transformPrompt
           ? params.transformPrompt(promptText, resolvedSessionId)
           : promptText;
+        bPromptInFlight = true;
+        armPromptIdleTimer();
         const resp = (await ctx.request(methods.agent.session.prompt, {
           sessionId: resolvedSessionId,
           prompt: buildPromptContent(finalPromptText, params.attachments),
@@ -694,8 +729,18 @@ export async function runAcpSubprocessPrompt(
           resolvedModelId,
         };
       } catch (err) {
+        if (bPromptIdleTimedOut) {
+          return {
+            acpSessionId: resolvedSessionId,
+            error: `Agent produced no output for ${Math.round(PROMPT_IDLE_TIMEOUT_MS / 1000)}s and was stopped.`,
+            resolvedModeId,
+            resolvedModelId,
+          };
+        }
         return { acpSessionId: resolvedSessionId, error: String(err), resolvedModeId, resolvedModelId };
       } finally {
+        bPromptInFlight = false;
+        clearPromptIdleTimer();
         resolvePromptSettled();
         activeHandlers.delete(resolvedSessionId);
         // connectWith waits for the transport to close; close the per-turn subprocess
@@ -705,12 +750,20 @@ export async function runAcpSubprocessPrompt(
     });
   } catch (err) {
     resolvePromptSettled();
+    clearPromptIdleTimer();
+    if (bPromptIdleTimedOut) {
+      return {
+        acpSessionId: sessionIdForCancel ?? '',
+        error: `Agent produced no output for ${Math.round(PROMPT_IDLE_TIMEOUT_MS / 1000)}s and was stopped.`,
+      };
+    }
     // Preserve the ACP session id resolved this turn (session/new or session/load):
     // when a cancel kills the subprocess mid-prompt, connectWith rejects even though
     // the id is known — returning '' here would drop it, and the next prompt would
     // start a fresh agent conversation that cannot see this turn's messages.
     return { acpSessionId: sessionIdForCancel ?? '', error: String(err) };
   } finally {
+    clearPromptIdleTimer();
     activeRuns.delete(novaSessionId);
     configSyncHandlers.delete(novaSessionId);
     killProc();
