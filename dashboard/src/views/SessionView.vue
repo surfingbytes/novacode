@@ -254,6 +254,7 @@ onUnmounted(() => {
         :viewport-height="viewportHeight"
         :show-sidebar-toggle="!isDesktop"
         @toggle-sidebar="handleSidebarToggle"
+        @new-session="openNewSessionModal"
         @start-plan-session="handleStartPlanSession"
       />
 
@@ -263,6 +264,7 @@ onUnmounted(() => {
         :orchestrator-id="orchestratorId"
         :show-sidebar-toggle="!isDesktop"
         @toggle-sidebar="handleSidebarToggle"
+        @new-session="openNewSessionModal"
       />
     </div>
   </div>

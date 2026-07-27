@@ -55,6 +55,7 @@ const props = defineProps<{
 // -------------------------------------------------- Emits --------------------------------------------------
 const emit = defineEmits<{
   (e: 'toggle-sidebar'): void;
+  (e: 'new-session'): void;
   (
     e: 'start-plan-session',
     payload: {
@@ -718,7 +719,9 @@ onUnmounted(() => {
       :b-loading="bLoading"
       :archived="session?.archived ?? false"
       :b-show-sidebar-toggle="props.showSidebarToggle"
+      :show-new-session="true"
       @toggle-sidebar="emit('toggle-sidebar')"
+      @new-session="emit('new-session')"
       @edit="openEditModal"
       @archive="toggleArchive"
       @delete="bShowDeleteModal = true"

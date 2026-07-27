@@ -35,6 +35,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'toggle-sidebar'): void;
+  (e: 'new-session'): void;
 }>();
 
 // -------------------------------------------------- Store --------------------------------------------------
@@ -174,8 +175,10 @@ watch(
       :b-loading="bLoading"
       :archived="orchestrator?.archived ?? false"
       :b-show-sidebar-toggle="props.showSidebarToggle"
+      :show-new-session="true"
       entity-label="orchestrator"
       @toggle-sidebar="emit('toggle-sidebar')"
+      @new-session="emit('new-session')"
       @edit="openEditOrchestratorName"
       @archive="toggleArchive"
       @delete="bShowDeleteModal = true"

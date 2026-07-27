@@ -22,6 +22,8 @@ const props = withDefaults(
     showAppMenu?: boolean;
     /** Lowercase noun used in action tooltips, e.g. 'session' / 'orchestrator' */
     entityLabel?: string;
+    /** Show 'New session' as the first item in the mobile overflow menu */
+    showNewSession?: boolean;
   }>(),
   {
     subtitle: undefined,
@@ -30,7 +32,8 @@ const props = withDefaults(
     archived: false,
     bShowSidebarToggle: false,
     showAppMenu: true,
-    entityLabel: 'session'
+    entityLabel: 'session',
+    showNewSession: false
   }
 );
 
@@ -40,6 +43,7 @@ const emit = defineEmits<{
   (e: 'edit'): void;
   (e: 'archive'): void;
   (e: 'delete'): void;
+  (e: 'newSession'): void;
 }>();
 
 // -------------------------------------------------- Store --------------------------------------------------
@@ -70,6 +74,11 @@ function handleKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape' && bMobileMenuOpen.value) {
     closeMobileMenu();
   }
+}
+
+function onMobileMenuNewSession(): void {
+  closeMobileMenu();
+  emit('newSession');
 }
 
 function onMobileMenuEdit(): void {
@@ -182,7 +191,7 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <!-- Mobile: overflow menu (Edit / Archive / Delete) -->
+    <!-- Mobile: overflow menu (New session? / Edit / Archive / Delete) -->
     <div v-if="!bLoading" ref="mobileMenuRef" class="relative lg:hidden shrink-0">
       <button
         type="button"
@@ -202,6 +211,18 @@ onUnmounted(() => {
           role="menu"
           @click.stop
         >
+          <template v-if="showNewSession">
+            <button
+              type="button"
+              class="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-text-primary hover:bg-fg/[0.06] transition-colors"
+              role="menuitem"
+              @click="onMobileMenuNewSession"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="shrink-0" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              New session
+            </button>
+            <div class="my-1 border-t border-border" role="separator" />
+          </template>
           <button
             type="button"
             class="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-text-primary hover:bg-fg/[0.06] transition-colors"
