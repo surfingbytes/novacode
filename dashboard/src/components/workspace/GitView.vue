@@ -737,16 +737,16 @@ const statusBadgeClass = (status: string): string => {
 };
 
 const diffRowClass = (line: string): string => {
-  if (line.startsWith('+') && !line.startsWith('+++')) return 'bg-green-950/50';
-  if (line.startsWith('-') && !line.startsWith('---')) return 'bg-red-950/50';
-  if (line.startsWith('@@')) return 'bg-primary/10';
+  if (line.startsWith('+') && !line.startsWith('+++')) return 'diff-row--added';
+  if (line.startsWith('-') && !line.startsWith('---')) return 'diff-row--removed';
+  if (line.startsWith('@@')) return 'diff-row--hunk';
   if (
     line.startsWith('diff ') ||
     line.startsWith('index ') ||
     line.startsWith('--- ') ||
     line.startsWith('+++ ')
   )
-    return 'bg-surface';
+    return 'diff-row--meta';
   return '';
 };
 
@@ -1475,3 +1475,37 @@ onUnmounted((): void => {
     @confirm="confirmDiscardFiles"
   />
 </template>
+
+<style scoped>
+/* Cursor-style diff rows: tinted bg + colored text + left gutter bar.
+   Derived from theme tokens so they adapt to every dark/light theme. */
+.diff-row--added {
+  background: color-mix(in oklab, var(--success) 14%, transparent);
+  color: var(--success);
+  box-shadow: inset 2px 0 0 color-mix(in oklab, var(--success) 55%, transparent);
+}
+
+.diff-row--removed {
+  background: color-mix(in oklab, var(--danger) 14%, transparent);
+  color: var(--danger);
+  box-shadow: inset 2px 0 0 color-mix(in oklab, var(--danger) 55%, transparent);
+}
+
+.diff-row--hunk {
+  background: var(--accent-soft);
+  color: var(--fg-muted);
+}
+
+.diff-row--meta {
+  color: var(--fg-subtle);
+}
+
+/* Light themes: deepen text colors so they stay readable on the tinted rows. */
+:global(html[data-theme='light']) .diff-row--added {
+  color: color-mix(in oklab, var(--success), #000 25%);
+}
+
+:global(html[data-theme='light']) .diff-row--removed {
+  color: color-mix(in oklab, var(--danger), #000 20%);
+}
+</style>
