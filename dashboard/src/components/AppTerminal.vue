@@ -4,6 +4,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+import { SerializeAddon } from '@xterm/addon-serialize';
 import '@xterm/xterm/css/xterm.css';
 
 // classes
@@ -34,14 +35,22 @@ const emit = defineEmits<{
 const containerEl = ref<HTMLElement | undefined>(undefined);
 
 const bIsAtBottom = ref<boolean>(true);
-let viewport: HTMLElement | null = null;
+const bShowCopyButton = ref<boolean>(false);
+const bCopied = ref<boolean>(false);
 
 let term: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
+let serializeAddon: SerializeAddon | null = null;
 let managedSocket: ManagedSocket | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let inputDisposable: { dispose(): void } | null = null;
+let scrollDisposable: { dispose(): void } | null = null;
+let copiedTimer: ReturnType<typeof setTimeout> | null = null;
 let bIsDestroyed: boolean = false;
+
+// Touch-drag scroll state (xterm.js 6.0.0 workaround, see below)
+let touchLastY: number | null = null;
+let touchRemainderPx: number = 0;
 
 let outputBuffer: string = '';
 let bInBox: boolean = false;
@@ -52,13 +61,76 @@ const emittedUrls = new Set<string>();
 // (none)
 
 // -------------------------------------------------- Methods --------------------------------------------------
-const onViewportScroll = (): void => {
-  if (!viewport) return;
-  bIsAtBottom.value = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 4;
-};
-
 const scrollToBottom = (): void => {
   term?.scrollToBottom();
+};
+
+// xterm.js 6.0.0 replaced the viewport with a VS Code-style scrollbar that has no
+// touch handling (upstream regression xtermjs/xterm.js#5489, fixed only in the
+// unreleased 7.0.0 line), so touch-drag scrolling is emulated here via scrollLines.
+const cellHeightPx = (): number => {
+  const rowEl = containerEl.value?.querySelector<HTMLElement>('.xterm-rows > div');
+  const measured = rowEl?.getBoundingClientRect().height;
+  return measured && measured > 0 ? measured : 13 * 1.2; // fontSize * lineHeight fallback
+};
+
+const onTouchStart = (e: TouchEvent): void => {
+  if (e.touches.length === 1) {
+    touchLastY = e.touches[0].clientY;
+    touchRemainderPx = 0;
+  } else {
+    touchLastY = null;
+  }
+};
+
+const onTouchMove = (e: TouchEvent): void => {
+  if (touchLastY === null || e.touches.length !== 1) {
+    return;
+  }
+  const y = e.touches[0].clientY;
+  touchRemainderPx += touchLastY - y;
+  touchLastY = y;
+  const cellPx = cellHeightPx();
+  const lines = Math.trunc(touchRemainderPx / cellPx);
+  if (lines !== 0) {
+    touchRemainderPx -= lines * cellPx;
+    term?.scrollLines(lines);
+  }
+  e.preventDefault();
+};
+
+const onTouchEnd = (): void => {
+  touchLastY = null;
+};
+
+const copyTerminalText = async (): Promise<void> => {
+  if (!term) {
+    return;
+  }
+  const text = term.getSelection() || serializeAddon?.serialize() || '';
+  if (!text) {
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Fallback for insecure contexts (http on LAN) where the clipboard API is unavailable
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+  }
+  bCopied.value = true;
+  if (copiedTimer) {
+    clearTimeout(copiedTimer);
+  }
+  copiedTimer = setTimeout(() => {
+    bCopied.value = false;
+  }, 1500);
 };
 
 /** Strip ANSI escape sequences (CSI, OSC, etc.) so only raw text remains. Cursor-forward (CUF) codes like \u001b[1C are replaced with spaces. */
@@ -290,13 +362,27 @@ onMounted((): void => {
   window.addEventListener('nc-theme-changed', handleThemeChanged);
 
   fitAddon = new FitAddon();
+  serializeAddon = new SerializeAddon();
   term.loadAddon(fitAddon);
+  term.loadAddon(serializeAddon);
   term.loadAddon(new WebLinksAddon());
   term.open(containerEl.value);
   fitAddon.fit();
 
-  viewport = containerEl.value.querySelector('.xterm-viewport');
-  if (viewport) viewport.addEventListener('scroll', onViewportScroll, { passive: true });
+  // xterm 6 removed the .xterm-viewport element; track at-bottom via the public API
+  scrollDisposable = term.onScroll(() => {
+    const buffer = term?.buffer.active;
+    if (buffer) {
+      bIsAtBottom.value = buffer.viewportY >= buffer.baseY;
+    }
+  });
+
+  // Touch scrolling workaround + copy affordance for coarse-pointer devices
+  bShowCopyButton.value = window.matchMedia('(pointer: coarse)').matches;
+  containerEl.value.addEventListener('touchstart', onTouchStart, { passive: true });
+  containerEl.value.addEventListener('touchmove', onTouchMove, { passive: false });
+  containerEl.value.addEventListener('touchend', onTouchEnd, { passive: true });
+  containerEl.value.addEventListener('touchcancel', onTouchEnd, { passive: true });
 
   const attachInput = (): void => {
     inputDisposable?.dispose();
@@ -355,18 +441,61 @@ onUnmounted((): void => {
   bIsDestroyed = true;
   managedSocket?.close();
   window.removeEventListener('nc-theme-changed', handleThemeChanged);
-  if (viewport) viewport.removeEventListener('scroll', onViewportScroll);
+  containerEl.value?.removeEventListener('touchstart', onTouchStart);
+  containerEl.value?.removeEventListener('touchmove', onTouchMove);
+  containerEl.value?.removeEventListener('touchend', onTouchEnd);
+  containerEl.value?.removeEventListener('touchcancel', onTouchEnd);
   inputDisposable?.dispose();
+  scrollDisposable?.dispose();
+  if (copiedTimer) {
+    clearTimeout(copiedTimer);
+  }
   resizeObserver?.disconnect();
   term?.dispose();
 });
 </script>
 
 <template>
-  <div ref="containerEl" class="app-terminal" :class="{ 'is-read-only': readOnly }"></div>
+  <div class="app-terminal-wrap">
+    <div ref="containerEl" class="app-terminal" :class="{ 'is-read-only': readOnly }"></div>
+    <button
+      v-if="bShowCopyButton"
+      type="button"
+      class="terminal-copy-button"
+      @click="copyTerminalText"
+    >
+      {{ bCopied ? 'Copied!' : 'Copy' }}
+    </button>
+  </div>
 </template>
 
 <style>
+.app-terminal-wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.terminal-copy-button {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 20;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--fg-muted, #a6a098);
+  background: var(--bg-hover, #23201d);
+  border: 1px solid rgb(245 241 234 / 0.12);
+  border-radius: 6px;
+  opacity: 0.85;
+}
+
+.terminal-copy-button:active {
+  opacity: 1;
+}
+
 .app-terminal {
   width: 100%;
   height: 100%;
@@ -374,15 +503,13 @@ onUnmounted((): void => {
   background: var(--bg-elev, #171614);
   border-radius: 4px;
   overflow: hidden;
+  /* Keep touch drags for the manual scroll workaround (xterm.js 6.0.0 has no touch handling) */
+  touch-action: none;
 }
 
 .app-terminal .xterm {
   height: 100%;
   padding: 8px;
-}
-
-.app-terminal .xterm-viewport {
-  overflow-y: auto !important;
 }
 
 .app-terminal.is-read-only .xterm-cursor-layer {
