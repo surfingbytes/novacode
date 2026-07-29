@@ -961,15 +961,6 @@ function stripMarkdownSyntax(value: string): string {
     .trim();
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
 export function unwrapMarkdownFence(markdown: string): string {
   const trimmed = markdown.trim();
   const match = trimmed.match(/^```(?:md|markdown)?\s*\n([\s\S]*?)\n```$/i);
@@ -1029,17 +1020,6 @@ export function entriesFromPlanMarkdown(markdown: string): PlanEntry[] {
       : headingEntries;
 }
 
-function planActionRows(entries: PlanEntry[]): string {
-  if (!entries.length) return '';
-  const rows = entries
-    .map((entry, index) => {
-      const label = escapeHtml(entry.content.trim());
-      return `<li class="plan-start-action-row"><span>${label}</span><button type="button" class="plan-start-session-btn" data-plan-entry-index="${index}">Start session</button></li>`;
-    })
-    .join('');
-  return `<div class="plan-start-actions-card"><div class="plan-start-actions-title">Start from plan point</div><ol>${rows}</ol></div>`;
-}
-
 export function renderPlanMarkdownWithActions(markdown: string, entries: PlanEntry[]): string {
   if (!entries.length) return renderMdCached(markdown);
 
@@ -1089,8 +1069,7 @@ export function renderPlanMarkdownWithActions(markdown: string, entries: PlanEnt
     }
   }
 
-  const fallbackEntries = entryIndex < entries.length ? entries.slice(entryIndex) : [];
-  return `${renderMdCached(out.join('\n'))}${planActionRows(fallbackEntries)}`;
+  return renderMdCached(out.join('\n'));
 }
 
 function planTitle(item: DisplayItem, fallbackIndex: number): string {

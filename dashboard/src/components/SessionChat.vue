@@ -1258,46 +1258,6 @@ onUnmounted(() => {
   padding-left: 0.15rem;
 }
 
-.plan-markdown :deep(.plan-start-actions-card) {
-  margin: 1.25rem 0 0;
-  border: 1px solid color-mix(in srgb, var(--color-fg) 10%, transparent);
-  border-radius: 0.85rem;
-  background: color-mix(in srgb, var(--color-fg) 4%, transparent);
-  overflow: hidden;
-}
-
-.plan-markdown :deep(.plan-start-actions-title) {
-  border-bottom: 1px solid color-mix(in srgb, var(--color-fg) 10%, transparent);
-  padding: 0.65rem 0.85rem;
-  color: var(--color-text-primary);
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
-.plan-markdown :deep(.plan-start-actions-card ol) {
-  margin: 0;
-  padding: 0.5rem 0.75rem;
-  list-style: none;
-}
-
-.plan-markdown :deep(.plan-start-action-row) {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.7rem;
-  margin: 0;
-  padding: 0.45rem 0;
-}
-
-.plan-markdown :deep(.plan-start-action-row + .plan-start-action-row) {
-  border-top: 1px solid color-mix(in srgb, var(--color-fg) 8%, transparent);
-}
-
-.plan-markdown :deep(.plan-start-action-row span) {
-  min-width: 0;
-  flex: 1;
-  line-height: 1.35;
-}
-
 .plan-markdown :deep(.plan-start-action-inline) {
   margin: -0.25rem 0 0.75rem;
 }
