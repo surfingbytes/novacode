@@ -18,7 +18,7 @@ import type {
 import { applySessionMode, applySessionModel, applySessionConfig } from './acpSessionHelpers';
 import type { AcpSessionResponse } from './acpSessionHelpers';
 import { buildPromptContent, sessionResetNoticeEventLine } from './acpSubprocessRunner';
-import type { AcpPromptAttachment, SessionConfigSyncHandler } from './acpSubprocessRunner';
+import type { AcpPermissionHandler, AcpPromptAttachment, SessionConfigSyncHandler } from './acpSubprocessRunner';
 
 export type AcpEventHandler = (line: string) => void;
 // Re-used by any ACP agent added later (Mistral, etc.).
@@ -26,6 +26,7 @@ export type AcpEventHandler = (line: string) => void;
 // Routes streaming notifications per ACP session ID to the active prompt's handler.
 const activeHandlers = new Map<string, AcpEventHandler>();
 const activeConfigSyncHandlers = new Map<string, SessionConfigSyncHandler>();
+const activePermissionHandlers = new Map<string, AcpPermissionHandler>();
 
 function emitClaudeConfigSync(
   sessionId: string,
@@ -71,6 +72,10 @@ function extractClaudeConfigSync(
 async function handlePermissionRequest(
   params: RequestPermissionRequest
 ): Promise<RequestPermissionResponse> {
+  const activeHandler = activePermissionHandlers.get(params.sessionId);
+  if (activeHandler) {
+    return activeHandler(params);
+  }
   const allowOption = params.options.find(
     (o) => o.kind === 'allow_once' || o.kind === 'allow_always'
   );
@@ -149,7 +154,8 @@ export interface RunClaudeAcpResult {
 export async function runClaudeAcp(
   params: RunClaudeAcpParams,
   onEvent: AcpEventHandler,
-  onConfigSync?: SessionConfigSyncHandler
+  onConfigSync?: SessionConfigSyncHandler,
+  onRequestPermission?: AcpPermissionHandler
 ): Promise<RunClaudeAcpResult> {
   const { acpSessionId, cwd, promptText, claudeToken, model, mode, configJson, onSessionId } = params;
 
@@ -199,6 +205,7 @@ export async function runClaudeAcp(
   onSessionId?.(resolvedSessionId);
   activeHandlers.set(resolvedSessionId, onEvent);
   if (onConfigSync) activeConfigSyncHandlers.set(resolvedSessionId, onConfigSync);
+  if (onRequestPermission) activePermissionHandlers.set(resolvedSessionId, onRequestPermission);
   try {
     const resp = await agent.prompt({
       sessionId: resolvedSessionId,
@@ -210,6 +217,7 @@ export async function runClaudeAcp(
   } finally {
     activeHandlers.delete(resolvedSessionId);
     activeConfigSyncHandlers.delete(resolvedSessionId);
+    activePermissionHandlers.delete(resolvedSessionId);
   }
 }
 

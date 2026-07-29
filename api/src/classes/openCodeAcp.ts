@@ -10,6 +10,7 @@ import {
   closeAcpSubprocessSession,
   runAcpSubprocessPrompt,
   type AcpEventHandler,
+  type AcpPermissionHandler,
   type AcpPromptAttachment,
   type SessionConfigSyncHandler,
 } from './acpSubprocessRunner';
@@ -38,7 +39,8 @@ export async function runOpenCodeAcp(
   params: RunOpenCodeAcpParams,
   onEvent: AcpEventHandler,
   novaSessionId: string,
-  onConfigSync?: SessionConfigSyncHandler
+  onConfigSync?: SessionConfigSyncHandler,
+  onRequestPermission?: AcpPermissionHandler
 ): Promise<RunOpenCodeAcpResult> {
   return runAcpSubprocessPrompt(
     {
@@ -63,7 +65,8 @@ export async function runOpenCodeAcp(
       logTag: 'openCodeAcp',
     },
     onEvent,
-    onConfigSync
+    onConfigSync,
+    onRequestPermission
   );
 }
 

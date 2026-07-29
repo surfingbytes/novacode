@@ -28,6 +28,9 @@ import { applySessionMode, applySessionModel, applySessionConfig, findConfigOpti
 import type { AcpSessionResponse } from './acpSessionHelpers';
 
 export type AcpEventHandler = (line: string) => void;
+export type AcpPermissionHandler = (
+  params: RequestPermissionRequest
+) => RequestPermissionResponse | Promise<RequestPermissionResponse>;
 
 export type SessionConfigSyncHandler = (sync: {
   modeId?: string;
@@ -434,7 +437,8 @@ function emitCursorPlanRequest(
 function buildClientApp(
   onConfigSync?: SessionConfigSyncHandler,
   cursorExtensions?: boolean,
-  getActiveSessionId: () => string | null = () => null
+  getActiveSessionId: () => string | null = () => null,
+  onRequestPermission: AcpPermissionHandler = autoApprovePermission
 ) {
   let app = client({ name: 'nova-code' })
     .onNotification(methods.client.session.update, ({ params }) => {
@@ -443,7 +447,7 @@ function buildClientApp(
         handleSessionNotification(params, handler, onConfigSync);
       }
     })
-    .onRequest(methods.client.session.requestPermission, ({ params }) => autoApprovePermission(params))
+    .onRequest(methods.client.session.requestPermission, ({ params }) => onRequestPermission(params))
     .onRequest(methods.client.fs.readTextFile, async () => ({ content: '' }))
     .onRequest(methods.client.fs.writeTextFile, async () => ({}));
 
@@ -506,7 +510,8 @@ function createPhaseLogger(logTag: string, novaSessionId: string) {
 export async function runAcpSubprocessPrompt(
   params: AcpSubprocessRunParams,
   onEvent: AcpEventHandler,
-  onConfigSync?: SessionConfigSyncHandler
+  onConfigSync?: SessionConfigSyncHandler,
+  onRequestPermission?: AcpPermissionHandler
 ): Promise<AcpSubprocessRunResult> {
   const { command, args, cwd, novaSessionId, acpSessionId, promptText, logTag } = params;
   const env = { ...process.env, ...config.agentEnv() };
@@ -561,7 +566,12 @@ export async function runAcpSubprocessPrompt(
     armPromptIdleTimer();
   };
 
-  const app = buildClientApp(onConfigSync, params.cursorExtensions, () => sessionIdForCancel);
+  const app = buildClientApp(
+    onConfigSync,
+    params.cursorExtensions,
+    () => sessionIdForCancel,
+    onRequestPermission
+  );
 
   const killProc = () => {
     try {

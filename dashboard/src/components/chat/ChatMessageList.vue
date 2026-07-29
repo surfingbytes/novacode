@@ -22,7 +22,7 @@ import { agentTypeShortLabel } from '@/utils/agentTypeMeta';
 import type { DisplayItem, StreamUsage } from '@/utils/chatDisplayItems';
 
 // types
-import type { AgentType, ChatMessage } from '@/@types/index';
+import type { AgentType, ChatApprovalRequest, ChatMessage } from '@/@types/index';
 
 // -------------------------------------------------- Props --------------------------------------------------
 
@@ -40,6 +40,7 @@ const props = withDefaults(
     bHistoryLoaded: boolean;
     displayMessages: DisplayChatMessage[];
     streamingDisplayItems: DisplayItem[];
+    pendingApprovals: ChatApprovalRequest[];
     streamingThinkingText: string;
     streamingUsage: StreamUsage | null;
     bIsStreaming: boolean;
@@ -69,6 +70,7 @@ const emit = defineEmits<{
   (e: 'lightbox', src: string): void;
   (e: 'chatErrorAction'): void;
   (e: 'cancel'): void;
+  (e: 'approvalResponse', approvalRequestId: string, approvalOptionId: string): void;
 }>();
 
 // -------------------------------------------------- Refs --------------------------------------------------
@@ -231,6 +233,7 @@ watch(
   () => [
     props.displayMessages.length,
     props.streamingDisplayItems.length,
+    props.pendingApprovals.length,
     props.streamingThinkingText.trim().length > 0 && !props.hideThinkingOutput
   ],
   () => {
@@ -256,6 +259,21 @@ watch(
     await scrollToBottom();
   }
 );
+
+function approvalOptionClass(kind: string): string {
+  if (kind.startsWith('reject')) {
+    return 'border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/15';
+  }
+  if (kind === 'allow_always') {
+    return 'border-primary/30 bg-primary/10 text-primary hover:bg-primary/15';
+  }
+  return 'border-fg/15 bg-fg/[0.04] text-text-primary hover:bg-fg/[0.08]';
+}
+
+function approvalSubtitle(approval: ChatApprovalRequest): string {
+  if (approval.toolName && approval.toolKind) return `${approval.toolName} · ${approval.toolKind}`;
+  return approval.toolName ?? approval.toolKind ?? 'Tool permission';
+}
 
 defineExpose({ scrollToBottom, notifyHistoryPage, forceInitialScrollToBottom });
 </script>
@@ -399,6 +417,56 @@ defineExpose({ scrollToBottom, notifyHistoryPage, forceInitialScrollToBottom });
               @open-plan="(planId) => emit('openPlan', planId)"
               @markdown-click="onChatMarkdownClick"
             />
+
+            <!-- ACP approval requests -->
+            <div
+              v-for="approval in pendingApprovals"
+              :key="approval.id"
+              class="flex justify-start"
+            >
+              <div class="chat-card max-w-full md:max-w-[85%] w-[34rem] rounded-lg px-3 py-3 text-sm">
+                <div class="flex items-start gap-2">
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    class="mt-0.5 shrink-0 text-yellow-500"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+                  </svg>
+                  <div class="min-w-0 flex-1">
+                    <div class="font-medium text-text-primary">{{ approval.title }}</div>
+                    <div class="mt-0.5 text-xs text-text-muted">{{ approvalSubtitle(approval) }}</div>
+                    <pre
+                      v-if="approval.command"
+                      class="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded bg-fg/[0.04] px-2 py-1.5 font-mono text-[11px] text-text-muted"
+                      >{{ approval.command }}</pre
+                    >
+                    <div v-if="approval.cwd" class="mt-1 truncate font-mono text-[11px] text-text-muted/70">
+                      cwd: {{ approval.cwd }}
+                    </div>
+                    <div class="mt-3 flex flex-wrap gap-2">
+                      <button
+                        v-for="option in approval.options"
+                        :key="option.optionId"
+                        type="button"
+                        class="rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors"
+                        :class="approvalOptionClass(option.kind)"
+                        @click="emit('approvalResponse', approval.id, option.optionId)"
+                      >
+                        {{ option.name }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <!-- Token usage meter -->
             <div v-if="streamingUsage" class="flex justify-start">

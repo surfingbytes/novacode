@@ -9,6 +9,7 @@ import {
   closeAcpSubprocessSession,
   runAcpSubprocessPrompt,
   type AcpEventHandler,
+  type AcpPermissionHandler,
   type AcpPromptAttachment,
   type SessionConfigSyncHandler,
 } from './acpSubprocessRunner';
@@ -34,7 +35,8 @@ export async function runVibeAcp(
   params: RunVibeAcpParams,
   onEvent: AcpEventHandler,
   novaSessionId: string,
-  onConfigSync?: SessionConfigSyncHandler
+  onConfigSync?: SessionConfigSyncHandler,
+  onRequestPermission?: AcpPermissionHandler
 ): Promise<RunVibeAcpResult> {
   return runAcpSubprocessPrompt(
     {
@@ -49,7 +51,8 @@ export async function runVibeAcp(
       logTag: 'vibeAcp',
     },
     onEvent,
-    onConfigSync
+    onConfigSync,
+    onRequestPermission
   );
 }
 

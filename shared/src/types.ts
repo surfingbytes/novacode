@@ -88,6 +88,27 @@ export interface ChatQueueItem {
   createdAt: string;
 }
 
+export type ChatApprovalOptionKind = 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always';
+
+export interface ChatApprovalOption {
+  optionId: string;
+  name: string;
+  kind: ChatApprovalOptionKind;
+}
+
+export interface ChatApprovalRequest {
+  id: string;
+  sessionId: string;
+  title: string;
+  toolCallId?: string;
+  toolName?: string;
+  toolKind?: string;
+  command?: string;
+  cwd?: string;
+  rawInput?: unknown;
+  options: ChatApprovalOption[];
+}
+
 export type LinkedPlanContextMode = 'target-only' | 'full';
 
 export interface LinkedPlanContext {
@@ -103,7 +124,14 @@ export interface LinkedPlanContext {
 }
 
 export interface ChatWsClientMessage {
-  type: 'prompt' | 'cancel' | 'load-more' | 'queue-delete' | 'queue-push' | 'queue-edit';
+  type:
+    | 'prompt'
+    | 'cancel'
+    | 'load-more'
+    | 'queue-delete'
+    | 'queue-push'
+    | 'queue-edit'
+    | 'approval-response';
   text?: string;
   /** Model id (e.g. 'auto', 'gpt-5.3-codex'). Default 'auto'. */
   model?: string;
@@ -112,6 +140,8 @@ export interface ChatWsClientMessage {
   offset?: number;
   imagePaths?: string[];
   queueItemId?: string;
+  approvalRequestId?: string;
+  approvalOptionId?: string;
 }
 
 export interface ChatWsServerMessage {
@@ -124,7 +154,9 @@ export interface ChatWsServerMessage {
     | 'error'
     | 'server-shutdown'
     | 'queue-updated'
-    | 'prompt-started';
+    | 'prompt-started'
+    | 'approval-requested'
+    | 'approval-resolved';
   messages?: ChatMessage[];
   data?: string;
   message?: string;
@@ -132,6 +164,8 @@ export interface ChatWsServerMessage {
   streaming?: boolean;
   hasMore?: boolean;
   queue?: ChatQueueItem[];
+  approval?: ChatApprovalRequest;
+  approvalRequestId?: string;
   queueItemId?: string;
   prompt?: {
     text: string;

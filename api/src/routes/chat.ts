@@ -10,6 +10,7 @@ import {
   getActiveRun,
   cancelRun,
   dispatchPrompt,
+  respondToAcpPermission,
   subscribeBusy,
   type ChatSubscriber
 } from '../classes/chatEngine';
@@ -17,6 +18,7 @@ import {
 // types
 import type {
   ChatMessage,
+  ChatApprovalRequest,
   ChatQueueItem,
   ChatWsClientMessage,
   ChatWsServerMessage
@@ -183,7 +185,11 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
         onStream: (line) => broadcastChat(sessionId, { type: 'stream', data: line }),
         onDone: () => broadcastChat(sessionId, { type: 'done' }),
         onError: (message, code) => broadcastChat(sessionId, { type: 'error', message, code }),
-        onHistory: () => {}
+        onHistory: () => {},
+        onApprovalRequested: (approval: ChatApprovalRequest) =>
+          broadcastChat(sessionId, { type: 'approval-requested', approval }),
+        onApprovalResolved: (approvalRequestId: string) =>
+          broadcastChat(sessionId, { type: 'approval-resolved', approvalRequestId })
       });
     });
   }
@@ -216,10 +222,14 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
       // registration arrive once via the broadcast. There are no awaits between
       // the snapshot and the registration, so no line can be missed or doubled.
       const bufferedSnapshot = [...existingRun.bufferedLines];
+      const pendingApprovals = [...existingRun.pendingApprovals.values()].map((pending) => pending.approval);
       const { messages: page, hasMore } = paginateMessages(existingRun.messages, 0);
       send(socket, { type: 'history', messages: page, hasMore, streaming: true, queue });
       for (const line of bufferedSnapshot) {
         send(socket, { type: 'stream', data: line });
+      }
+      for (const approval of pendingApprovals) {
+        send(socket, { type: 'approval-requested', approval });
       }
       registerChatSocket(id, socket);
       if (!getActiveRun(id)) {
@@ -245,6 +255,14 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
 
         if (clientMessage.type === 'cancel') {
           cancelRun(id);
+          return;
+        }
+
+        if (clientMessage.type === 'approval-response') {
+          if (!clientMessage.approvalRequestId || !clientMessage.approvalOptionId) {
+            return;
+          }
+          respondToAcpPermission(id, clientMessage.approvalRequestId, clientMessage.approvalOptionId);
           return;
         }
 

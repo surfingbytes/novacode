@@ -15,6 +15,7 @@ import {
   closeAcpSubprocessSession,
   runAcpSubprocessPrompt,
   type AcpEventHandler,
+  type AcpPermissionHandler,
   type AcpPromptAttachment,
   type SessionConfigSyncHandler,
 } from './acpSubprocessRunner';
@@ -43,7 +44,8 @@ export async function runCursorAcp(
   params: RunCursorAcpParams,
   onEvent: AcpEventHandler,
   novaSessionId: string,
-  onConfigSync?: SessionConfigSyncHandler
+  onConfigSync?: SessionConfigSyncHandler,
+  onRequestPermission?: AcpPermissionHandler
 ): Promise<RunCursorAcpResult> {
   // `cursor-agent --model <id> acp` — pin the model at startup (the reliable path, since Cursor
   // ignores runtime config-option model changes). `auto` is a real model id (its own router that
@@ -68,7 +70,8 @@ export async function runCursorAcp(
       skipModelConfigOption: true,
     },
     onEvent,
-    onConfigSync
+    onConfigSync,
+    onRequestPermission
   );
 }
 

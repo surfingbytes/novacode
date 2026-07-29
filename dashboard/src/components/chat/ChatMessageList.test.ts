@@ -17,6 +17,7 @@ function mountList(overrides: Record<string, unknown> = {}) {
       bHistoryLoaded: true,
       displayMessages: [],
       streamingDisplayItems: [],
+      pendingApprovals: [],
       streamingThinkingText: '',
       streamingUsage: null,
       bIsStreaming: false,

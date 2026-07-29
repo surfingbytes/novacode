@@ -1,7 +1,12 @@
 // node_modules
+import { randomUUID } from 'node:crypto';
 import { extname, join } from 'node:path';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
+import type {
+  RequestPermissionRequest,
+  RequestPermissionResponse,
+} from '@agentclientprotocol/sdk';
 
 // classes
 import { db } from './database';
@@ -26,6 +31,11 @@ import {
 
 // types
 import type { ChatMessage, AgentType } from '../@types/index';
+import type {
+  ChatApprovalOption,
+  ChatApprovalOptionKind,
+  ChatApprovalRequest,
+} from '../@types/index';
 
 export interface ActiveRun {
   cancel: () => void;
@@ -34,6 +44,7 @@ export interface ActiveRun {
   assistantEvents: string[];
   bufferedLines: string[];
   subscribers: Set<ChatSubscriber>;
+  pendingApprovals: Map<string, PendingApproval>;
 }
 
 export interface ChatSubscriber {
@@ -41,6 +52,13 @@ export interface ChatSubscriber {
   onDone(messages: ChatMessage[]): void;
   onError(message: string, code?: AgentErrorCode): void;
   onHistory(messages: ChatMessage[], streaming: boolean): void;
+  onApprovalRequested?(approval: ChatApprovalRequest): void;
+  onApprovalResolved?(approvalRequestId: string): void;
+}
+
+interface PendingApproval {
+  approval: ChatApprovalRequest;
+  resolve: (response: RequestPermissionResponse) => void;
 }
 
 // --------------------------------------------- State ---------------------------------------------
@@ -97,6 +115,7 @@ export function cancelRun(sessionId: string): void {
   if (!run) return;
   try {
     console.log('[chatEngine] cancelling active run for session', sessionId);
+    cancelPendingApprovals(run);
     run.cancel();
   } catch (err) {
     console.error('[chatEngine] Failed to cancel run:', err);
@@ -110,6 +129,151 @@ export interface DispatchPromptOpts {
   mode?: string;
   imagePaths?: string[];
   subscriber: ChatSubscriber;
+}
+
+function cancelledPermissionResponse(): RequestPermissionResponse {
+  return { outcome: { outcome: 'cancelled' } };
+}
+
+function selectedPermissionResponse(optionId: string): RequestPermissionResponse {
+  return { outcome: { outcome: 'selected', optionId } };
+}
+
+function isApprovalOptionKind(value: unknown): value is ChatApprovalOptionKind {
+  return (
+    value === 'allow_once' ||
+    value === 'allow_always' ||
+    value === 'reject_once' ||
+    value === 'reject_always'
+  );
+}
+
+function approvalOptionsFromRequest(params: RequestPermissionRequest): ChatApprovalOption[] {
+  return params.options
+    .filter((option) => isApprovalOptionKind(option.kind))
+    .map((option) => ({
+      optionId: option.optionId,
+      name: option.name,
+      kind: option.kind,
+    }));
+}
+
+function stringifyCommand(command: string, args: unknown): string {
+  if (!Array.isArray(args) || args.length === 0) return command;
+  const renderedArgs = args
+    .filter((arg): arg is string => typeof arg === 'string')
+    .map((arg) => (/\s/.test(arg) ? JSON.stringify(arg) : arg));
+  return [command, ...renderedArgs].join(' ');
+}
+
+function commandFromRawInput(rawInput: unknown): { command?: string; cwd?: string } {
+  if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) {
+    return {};
+  }
+  const obj = rawInput as Record<string, unknown>;
+  for (const key of ['command', 'cmd', 'shellCommand']) {
+    const value = obj[key];
+    if (typeof value === 'string' && value.trim()) {
+      return {
+        command: stringifyCommand(value.trim(), obj.args),
+        cwd: typeof obj.cwd === 'string' && obj.cwd.trim() ? obj.cwd.trim() : undefined,
+      };
+    }
+  }
+  return {
+    cwd: typeof obj.cwd === 'string' && obj.cwd.trim() ? obj.cwd.trim() : undefined,
+  };
+}
+
+function approvalRequestFromAcp(params: RequestPermissionRequest): ChatApprovalRequest | null {
+  const options = approvalOptionsFromRequest(params);
+  if (options.length === 0) return null;
+
+  const raw = params as RequestPermissionRequest & { title?: unknown };
+  const toolCall = params.toolCall as {
+    toolCallId?: unknown;
+    title?: unknown;
+    name?: unknown;
+    kind?: unknown;
+    rawInput?: unknown;
+  };
+  const { command, cwd } = commandFromRawInput(toolCall.rawInput);
+  const toolTitle =
+    (typeof raw.title === 'string' && raw.title.trim()) ||
+    (typeof toolCall.title === 'string' && toolCall.title.trim()) ||
+    (typeof toolCall.name === 'string' && toolCall.name.trim()) ||
+    'Approve tool action';
+
+  return {
+    id: randomUUID(),
+    sessionId: params.sessionId,
+    title: toolTitle,
+    toolCallId: typeof toolCall.toolCallId === 'string' ? toolCall.toolCallId : undefined,
+    toolName: typeof toolCall.name === 'string' ? toolCall.name : undefined,
+    toolKind: typeof toolCall.kind === 'string' ? toolCall.kind : undefined,
+    command,
+    cwd,
+    rawInput: toolCall.rawInput,
+    options,
+  };
+}
+
+function broadcastApprovalRequested(run: ActiveRun, approval: ChatApprovalRequest): void {
+  for (const sub of run.subscribers) {
+    sub.onApprovalRequested?.(approval);
+  }
+}
+
+function broadcastApprovalResolved(run: ActiveRun, approvalRequestId: string): void {
+  for (const sub of run.subscribers) {
+    sub.onApprovalResolved?.(approvalRequestId);
+  }
+}
+
+function resolvePendingApproval(
+  run: ActiveRun,
+  pending: PendingApproval,
+  response: RequestPermissionResponse
+): void {
+  if (!run.pendingApprovals.delete(pending.approval.id)) return;
+  pending.resolve(response);
+  broadcastApprovalResolved(run, pending.approval.id);
+}
+
+function cancelPendingApprovals(run: ActiveRun): void {
+  for (const pending of [...run.pendingApprovals.values()]) {
+    resolvePendingApproval(run, pending, cancelledPermissionResponse());
+  }
+}
+
+export function requestAcpPermissionForSession(
+  sessionId: string,
+  params: RequestPermissionRequest
+): Promise<RequestPermissionResponse> {
+  const run = activeRuns.get(sessionId);
+  const approval = approvalRequestFromAcp(params);
+  if (!run || !approval) {
+    return Promise.resolve(cancelledPermissionResponse());
+  }
+
+  return new Promise((resolve) => {
+    const pending: PendingApproval = { approval, resolve };
+    run.pendingApprovals.set(approval.id, pending);
+    broadcastApprovalRequested(run, approval);
+  });
+}
+
+export function respondToAcpPermission(
+  sessionId: string,
+  approvalRequestId: string,
+  optionId: string
+): boolean {
+  const run = activeRuns.get(sessionId);
+  const pending = run?.pendingApprovals.get(approvalRequestId);
+  if (!run || !pending) return false;
+  if (!pending.approval.options.some((option) => option.optionId === optionId)) return false;
+  resolvePendingApproval(run, pending, selectedPermissionResponse(optionId));
+  return true;
 }
 
 function parseClaudeRateLimitError(rawError: string): { resetAtIso?: string; resetAtReadable?: string } | null {
@@ -354,6 +518,7 @@ export async function dispatchPrompt(
     assistantEvents,
     bufferedLines: [],
     subscribers: new Set([subscriber]),
+    pendingApprovals: new Map(),
   };
   activeRuns.set(sessionId, run);
   emitBusy(sessionId, session.workspaceId, true);
@@ -425,7 +590,8 @@ export async function dispatchPrompt(
         { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt, attachments, mode: sessionMode },
         onEvent,
         sessionId,
-        onConfigSync
+        onConfigSync,
+        (permission) => requestAcpPermissionForSession(sessionId, permission)
       );
     } else if (agentType === 'cursor-agent') {
       result = await runCursorAcp(
@@ -440,7 +606,8 @@ export async function dispatchPrompt(
         },
         onEvent,
         sessionId,
-        onConfigSync
+        onConfigSync,
+        (permission) => requestAcpPermissionForSession(sessionId, permission)
       );
     } else if (agentType === 'open-code') {
       result = await runOpenCodeAcp(
@@ -455,7 +622,8 @@ export async function dispatchPrompt(
         },
         onEvent,
         sessionId,
-        onConfigSync
+        onConfigSync,
+        (permission) => requestAcpPermissionForSession(sessionId, permission)
       );
     } else if (agentType === 'codex') {
       result = await runCodexAcp(
@@ -470,7 +638,8 @@ export async function dispatchPrompt(
         },
         onEvent,
         sessionId,
-        onConfigSync
+        onConfigSync,
+        (permission) => requestAcpPermissionForSession(sessionId, permission)
       );
     } else {
       result = await runClaudeAcp(
@@ -491,7 +660,8 @@ export async function dispatchPrompt(
           },
         },
         onEvent,
-        onConfigSync
+        onConfigSync,
+        (permission) => requestAcpPermissionForSession(sessionId, permission)
       );
     }
 
@@ -579,6 +749,7 @@ export async function dispatchPrompt(
       console.error('[chatEngine] Failed to send task completion push:', err);
     }
 
+    cancelPendingApprovals(run);
     activeRuns.delete(sessionId);
     emitBusy(sessionId, session.workspaceId, false);
     broadcast((sub) => sub.onDone(currentMessages));

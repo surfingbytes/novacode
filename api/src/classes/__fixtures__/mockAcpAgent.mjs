@@ -7,6 +7,7 @@
  *             'hang-until-cancel'    — session/prompt responds only after session/cancel
  *             'ignore-cancel'        — session/prompt never responds (forces hard kill)
  *             'fail-load'            — session/load responds with a JSON-RPC error
+ *             'prompt-permission'    — session/prompt asks the client for tool permission first
  *   MOCK_LOG  — path; every incoming message is appended as one JSON line.
  */
 
@@ -32,6 +33,7 @@ function send(msg) {
 }
 
 let pendingPromptId = null;
+let pendingPermissionRequestId = null;
 
 function settlePrompt(stopReason) {
   if (pendingPromptId !== null) {
@@ -55,6 +57,12 @@ rl.on('line', (line) => {
 
   const isNotification = msg.id === undefined && typeof msg.method === 'string';
   const isRequest = msg.id !== undefined && typeof msg.method === 'string';
+
+  if (!isRequest && msg.id === pendingPermissionRequestId) {
+    pendingPermissionRequestId = null;
+    settlePrompt(msg.result?.outcome?.outcome === 'selected' ? 'end_turn' : 'rejected');
+    return;
+  }
 
   if (isNotification) {
     if (msg.method === 'session/cancel' && mode !== 'ignore-cancel') {
@@ -93,6 +101,32 @@ rl.on('line', (line) => {
     case 'session/prompt':
       if (mode === 'hang-until-cancel' || mode === 'ignore-cancel') {
         pendingPromptId = msg.id;
+      } else if (mode === 'prompt-permission') {
+        pendingPromptId = msg.id;
+        pendingPermissionRequestId = 'mock-permission-request-1';
+        send({
+          jsonrpc: '2.0',
+          id: pendingPermissionRequestId,
+          method: 'session/request_permission',
+          params: {
+            sessionId: msg.params?.sessionId ?? SESSION_ID,
+            toolCall: {
+              toolCallId: 'mock-tool-1',
+              kind: 'execute',
+              title: 'Run command',
+              name: 'shell',
+              rawInput: {
+                command: 'npm',
+                args: ['test'],
+                cwd: process.cwd(),
+              },
+            },
+            options: [
+              { optionId: 'allow-once', name: 'Allow', kind: 'allow_once' },
+              { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' },
+            ],
+          },
+        });
       } else {
         send({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } });
       }

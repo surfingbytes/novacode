@@ -247,6 +247,7 @@ const {
   streamingThinkingText,
   streamingUsage,
   queuedPrompts,
+  pendingApprovals,
   bHasMore,
   bLoadingMore,
   bHistoryLoaded,
@@ -748,6 +749,7 @@ onUnmounted(() => {
             :b-history-loaded="bHistoryLoaded"
             :display-messages="displayMessages"
             :streaming-display-items="streamingDisplayItems"
+            :pending-approvals="pendingApprovals"
             :streaming-thinking-text="streamingThinkingText"
             :streaming-usage="streamingUsage"
             :b-is-streaming="bIsStreaming"
@@ -766,6 +768,7 @@ onUnmounted(() => {
             @lightbox="(src) => (lightboxSrc = src)"
             @chat-error-action="handleChatErrorAction"
             @cancel="chatSocket.cancelPrompt"
+            @approval-response="chatSocket.sendApprovalResponse"
           />
 
           <!-- Todo panel (mobile strip above the composer) -->

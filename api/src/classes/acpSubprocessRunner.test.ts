@@ -16,6 +16,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 
 // classes
 import { cancelAcpSubprocess, runAcpSubprocessPrompt } from './acpSubprocessRunner';
+import type { AcpPermissionHandler } from './acpSubprocessRunner';
 
 const MOCK_AGENT_PATH = join(process.cwd(), 'src', 'classes', '__fixtures__', 'mockAcpAgent.mjs');
 const MOCK_SESSION_ID = 'mock-acp-session-1';
@@ -69,7 +70,8 @@ function runMock(
   novaSessionId: string,
   acpSessionId: string | null,
   workDir: string,
-  onEvent: (line: string) => void = () => {}
+  onEvent: (line: string) => void = () => {},
+  onRequestPermission?: AcpPermissionHandler
 ): ReturnType<typeof runAcpSubprocessPrompt> {
   return runAcpSubprocessPrompt(
     {
@@ -81,7 +83,9 @@ function runMock(
       promptText: 'hello',
       logTag: 'testAcp',
     },
-    onEvent
+    onEvent,
+    undefined,
+    onRequestPermission
   );
 }
 
@@ -163,5 +167,29 @@ describe('runAcpSubprocessPrompt', () => {
     const methods = readMockLog(logPath).map((m) => m.method);
     expect(methods).toContain('session/load');
     expect(methods).toContain('session/new');
+  });
+
+  it('routes ACP permission requests through the injected handler', async () => {
+    const { workDir, logPath } = setupMock('prompt-permission');
+    const requests: string[] = [];
+
+    const result = await runMock(
+      'nova-permission',
+      null,
+      workDir,
+      () => {},
+      async (params) => {
+        requests.push(params.toolCall.toolCallId);
+        expect(params.toolCall.kind).toBe('execute');
+        expect(params.options.map((option) => option.optionId)).toContain('allow-once');
+        return { outcome: { outcome: 'selected', optionId: 'allow-once' } };
+      }
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.stopReason).toBe('end_turn');
+    expect(requests).toEqual(['mock-tool-1']);
+    const permissionResponse = readMockLog(logPath).find((m) => m.id === 'mock-permission-request-1');
+    expect(permissionResponse).toBeTruthy();
   });
 });

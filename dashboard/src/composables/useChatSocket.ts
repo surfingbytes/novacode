@@ -24,7 +24,7 @@ import {
 } from '@/utils/chatDisplayItems';
 
 // types
-import type { ChatMessage, ChatQueueItem, ChatWsServerMessage } from '@/@types/index';
+import type { ChatApprovalRequest, ChatMessage, ChatQueueItem, ChatWsServerMessage } from '@/@types/index';
 
 // -------------------------------------------------- Context --------------------------------------------------
 
@@ -64,6 +64,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
   const streamingThinkingText = ref('');
   const streamingUsage = ref<StreamUsage | null>(null);
   const queuedPrompts = ref<ChatQueueItem[]>([]);
+  const pendingApprovals = ref<ChatApprovalRequest[]>([]);
   const lastPromptRequest = ref<{ text: string; imagePaths: string[] } | null>(null);
   const bHasMore = ref(ctx.initialHasMore ?? false);
   const bLoadingMore = ref(false);
@@ -115,6 +116,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     streamingItems.value = [];
     streamingRawLines.length = 0;
     streamingThinkingText.value = '';
+    pendingApprovals.value = [];
     bIsStreaming.value = msg.streaming === true;
     ctx.onHistoryLoaded();
     ctx.onMessagesChanged?.();
@@ -183,6 +185,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     streamingRawLines.length = 0;
     streamingThinkingText.value = '';
     streamingUsage.value = null;
+    pendingApprovals.value = [];
     bIsStreaming.value = false;
     ctx.onDone();
     ctx.onContentAppended();
@@ -202,7 +205,23 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     streamingRawLines.length = 0;
     streamingThinkingText.value = '';
     streamingUsage.value = null;
+    pendingApprovals.value = [];
     bIsStreaming.value = false;
+  }
+
+  function handleApprovalRequested(msg: ChatWsServerMessage): void {
+    if (!msg.approval) return;
+    pendingApprovals.value = [
+      ...pendingApprovals.value.filter((approval) => approval.id !== msg.approval?.id),
+      msg.approval
+    ];
+  }
+
+  function handleApprovalResolved(msg: ChatWsServerMessage): void {
+    if (!msg.approvalRequestId) return;
+    pendingApprovals.value = pendingApprovals.value.filter(
+      (approval) => approval.id !== msg.approvalRequestId
+    );
   }
 
   function parseControlStreamMessage(
@@ -238,6 +257,10 @@ export function useChatSocket(ctx: UseChatSocketContext) {
         handleDone();
       } else if (msg.type === 'error') {
         handleError(msg);
+      } else if (msg.type === 'approval-requested') {
+        handleApprovalRequested(msg);
+      } else if (msg.type === 'approval-resolved') {
+        handleApprovalResolved(msg);
       } else if (msg.type === 'server-shutdown') {
         setChatError('Server disconnected');
         streamingThinkingText.value = '';
@@ -336,6 +359,15 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     socket.send({ type: 'cancel' });
   }
 
+  function sendApprovalResponse(approvalRequestId: string, approvalOptionId: string): void {
+    if (!socket || !bWsConnected.value) return;
+    socket.send({
+      type: 'approval-response',
+      approvalRequestId,
+      approvalOptionId
+    });
+  }
+
   function deleteQueuedPrompt(queueItemId: string): void {
     socket?.send({ type: 'queue-delete', queueItemId });
   }
@@ -374,6 +406,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     streamingThinkingText.value = '';
     streamingUsage.value = null;
     queuedPrompts.value = [];
+    pendingApprovals.value = [];
     bHasMore.value = false;
     bLoadingMore.value = false;
     clearChatError();
@@ -390,6 +423,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     streamingThinkingText,
     streamingUsage,
     queuedPrompts,
+    pendingApprovals,
     lastPromptRequest,
     bHasMore,
     bLoadingMore,
@@ -405,6 +439,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     sendPrompt,
     retryLastPrompt,
     cancelPrompt,
+    sendApprovalResponse,
     deleteQueuedPrompt,
     editQueuedPrompt,
     pushQueuedPrompt,

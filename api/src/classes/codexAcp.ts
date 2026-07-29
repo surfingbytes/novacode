@@ -8,6 +8,7 @@ import {
   cancelAcpSubprocess,
   runAcpSubprocessPrompt,
   type AcpEventHandler,
+  type AcpPermissionHandler,
   type AcpPromptAttachment,
   type SessionConfigSyncHandler,
 } from './acpSubprocessRunner';
@@ -36,7 +37,8 @@ export async function runCodexAcp(
   params: RunCodexAcpParams,
   onEvent: AcpEventHandler,
   novaSessionId: string,
-  onConfigSync?: SessionConfigSyncHandler
+  onConfigSync?: SessionConfigSyncHandler,
+  onRequestPermission?: AcpPermissionHandler
 ): Promise<RunCodexAcpResult> {
   return runAcpSubprocessPrompt(
     {
@@ -53,7 +55,8 @@ export async function runCodexAcp(
       logTag: 'codexAcp',
     },
     onEvent,
-    onConfigSync
+    onConfigSync,
+    onRequestPermission
   );
 }
 
