@@ -19,6 +19,7 @@ import { runOpenCodeAcp, cancelOpenCodeAcp } from './openCodeAcp';
 import { runCodexAcp, cancelCodexAcp } from './codexAcp';
 import { sendTaskDonePush } from './push';
 import { normalizeSessionMode } from './sessionMode';
+import { normalizeApprovalPolicy } from './approvalPolicy';
 import type { AcpPromptAttachment, SessionConfigSyncHandler } from './acpSubprocessRunner';
 import { computeLastListPreview } from './chatPreview';
 import { extractStreamNotificationPreview } from './chatStreamPreviewFromEvents';
@@ -30,7 +31,7 @@ import {
 } from './linkedPlanContext';
 
 // types
-import type { ChatMessage, AgentType } from '../@types/index';
+import type { ChatMessage, AgentType, ApprovalPolicy } from '../@types/index';
 import type {
   ChatApprovalOption,
   ChatApprovalOptionKind,
@@ -45,6 +46,7 @@ export interface ActiveRun {
   bufferedLines: string[];
   subscribers: Set<ChatSubscriber>;
   pendingApprovals: Map<string, PendingApproval>;
+  approvalPolicy: ApprovalPolicy;
 }
 
 export interface ChatSubscriber {
@@ -246,6 +248,46 @@ function cancelPendingApprovals(run: ActiveRun): void {
   }
 }
 
+function allowOptionId(options: ChatApprovalOption[]): string | null {
+  const allowOnce = options.find((option) => option.kind === 'allow_once');
+  if (allowOnce) return allowOnce.optionId;
+  const allowAlways = options.find((option) => option.kind === 'allow_always');
+  return allowAlways?.optionId ?? null;
+}
+
+function autoAllowPermissionResponse(
+  params: RequestPermissionRequest
+): RequestPermissionResponse | null {
+  const options = approvalOptionsFromRequest(params);
+  const optionId = allowOptionId(options);
+  if (!optionId) return null;
+  return selectedPermissionResponse(optionId);
+}
+
+function resolvePendingApprovalsWithAllowAll(run: ActiveRun): void {
+  for (const pending of [...run.pendingApprovals.values()]) {
+    const optionId = allowOptionId(pending.approval.options);
+    if (!optionId) {
+      resolvePendingApproval(run, pending, cancelledPermissionResponse());
+      continue;
+    }
+    resolvePendingApproval(run, pending, selectedPermissionResponse(optionId));
+  }
+}
+
+/** Update live-run approval policy; allow_all flushes any waiting prompts. */
+export function setActiveRunApprovalPolicy(
+  sessionId: string,
+  policy: string | null | undefined
+): void {
+  const run = activeRuns.get(sessionId);
+  if (!run) return;
+  run.approvalPolicy = normalizeApprovalPolicy(policy);
+  if (run.approvalPolicy === 'allow_all') {
+    resolvePendingApprovalsWithAllowAll(run);
+  }
+}
+
 export function requestAcpPermissionForSession(
   sessionId: string,
   params: RequestPermissionRequest
@@ -253,6 +295,12 @@ export function requestAcpPermissionForSession(
   const run = activeRuns.get(sessionId);
   const approval = approvalRequestFromAcp(params);
   if (!run || !approval) {
+    return Promise.resolve(cancelledPermissionResponse());
+  }
+
+  if (run.approvalPolicy === 'allow_all') {
+    const auto = autoAllowPermissionResponse(params);
+    if (auto) return Promise.resolve(auto);
     return Promise.resolve(cancelledPermissionResponse());
   }
 
@@ -519,6 +567,7 @@ export async function dispatchPrompt(
     bufferedLines: [],
     subscribers: new Set([subscriber]),
     pendingApprovals: new Map(),
+    approvalPolicy: normalizeApprovalPolicy(session.approvalPolicy),
   };
   activeRuns.set(sessionId, run);
   emitBusy(sessionId, session.workspaceId, true);

@@ -8,6 +8,8 @@ import { jwtPreHandler } from '../classes/auth';
 import { createSessionWithAgent } from '../classes/sessionService';
 import { closeAcpSessionForNovaSession } from '../classes/acpSessionClose';
 import { mergeInternalSessionConfig } from '../classes/linkedPlanContext';
+import { normalizeApprovalPolicy } from '../classes/approvalPolicy';
+import { setActiveRunApprovalPolicy } from '../classes/chatEngine';
 import { getPlanDocumentsSource } from '../classes/planDocumentSources';
 import { workspaceTerminalManager } from '../classes/workspaceTerminalManager';
 import { getActiveSessionIds, cancelRun } from './chat';
@@ -186,6 +188,7 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         archived?: boolean;
         modelSelection?: string;
         sessionMode?: string;
+        approvalPolicy?: string;
         sessionConfigJson?: Record<string, string> | null;
       };
       const session = await db.getSession(sessionId);
@@ -198,6 +201,7 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         archived?: boolean;
         modelSelection?: string;
         sessionMode?: string;
+        approvalPolicy?: string;
         sessionConfigJson?: string | null;
       } = {};
       if (body.name !== undefined) {
@@ -215,6 +219,9 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       if (body.sessionMode !== undefined) {
         patch.sessionMode = body.sessionMode;
       }
+      if (body.approvalPolicy !== undefined) {
+        patch.approvalPolicy = normalizeApprovalPolicy(body.approvalPolicy);
+      }
       if (body.sessionConfigJson !== undefined) {
         patch.sessionConfigJson = mergeInternalSessionConfig(
           session.sessionConfigJson,
@@ -224,6 +231,9 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       const updated = await db.updateSession(sessionId, patch);
       if (!updated) {
         return reply.status(500).send({ error: 'Failed to update session' });
+      }
+      if (patch.approvalPolicy !== undefined) {
+        setActiveRunApprovalPolicy(sessionId, patch.approvalPolicy);
       }
       const normalized = normalizeSessionForApi(updated);
       broadcastWorkspaceSessionUpsert(workspaceId, normalized);

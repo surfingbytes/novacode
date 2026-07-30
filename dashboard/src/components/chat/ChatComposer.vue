@@ -7,7 +7,15 @@
 
 // node_modules
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { Bug, ChevronDown, Infinity as InfinityIcon, ListChecks, ListTodo, MessageSquare } from 'lucide-vue-next';
+import {
+  Bug,
+  ChevronDown,
+  Infinity as InfinityIcon,
+  ListChecks,
+  ListTodo,
+  MessageSquare,
+  Shield
+} from 'lucide-vue-next';
 
 // components
 import AgentModelPicker from '@/components/AgentModelPicker.vue';
@@ -20,6 +28,7 @@ import type {
   AgentModelOption,
   AgentThinkingOptionGroup,
   AgentType,
+  ApprovalPolicy,
   ChatQueueItem
 } from '@/@types/index';
 
@@ -61,12 +70,16 @@ const props = withDefaults(
     bConfigLoading: boolean;
     bSavingSessionConfig: boolean;
     hideThinkingOutput: boolean;
+    approvalPolicy: ApprovalPolicy;
+    bSavingApprovalPolicy: boolean;
     bMdUp: boolean;
     bUploadingImage: boolean;
   }>(),
   {
     agentType: null,
-    thinkingValue: null
+    thinkingValue: null,
+    approvalPolicy: 'ask',
+    bSavingApprovalPolicy: false
   }
 );
 
@@ -83,6 +96,7 @@ const emit = defineEmits<{
   (e: 'modelUpdate', value: string): void;
   (e: 'thinkingUpdate', value: string): void;
   (e: 'hideThinkingToggle', checked: boolean): void;
+  (e: 'approvalPolicyChange', policy: ApprovalPolicy): void;
   (e: 'lightbox', src: string): void;
   (e: 'uploadFiles', files: File[]): void;
 }>();
@@ -97,6 +111,27 @@ const promptInputBoxRef = ref<HTMLElement | null>(null);
 const fileInputEl = ref<HTMLInputElement | null>(null);
 const modeMenuRef = ref<HTMLElement | null>(null);
 const bModeMenuOpen = ref(false);
+const approvalMenuRef = ref<HTMLElement | null>(null);
+const bApprovalMenuOpen = ref(false);
+
+const approvalPolicyOptions: Array<{ id: ApprovalPolicy; label: string; description: string }> = [
+  { id: 'ask', label: 'Ask', description: 'Prompt before tool actions' },
+  { id: 'allow_all', label: 'Allow all', description: 'Auto-approve tool actions' }
+];
+
+function openApprovalMenu(): void {
+  bApprovalMenuOpen.value = !bApprovalMenuOpen.value;
+}
+
+function closeApprovalMenu(): void {
+  bApprovalMenuOpen.value = false;
+}
+
+function selectApprovalPolicy(policy: ApprovalPolicy): void {
+  closeApprovalMenu();
+  if (policy === props.approvalPolicy) return;
+  emit('approvalPolicyChange', policy);
+}
 
 const queueListRef = ref<HTMLElement | null>(null);
 const editingQueueItemId = ref<string | null>(null);
@@ -234,16 +269,20 @@ function onQueueEditKeydown(e: KeyboardEvent, item: ChatQueueItem): void {
 }
 
 function handleDocumentClick(e: MouseEvent): void {
-  const el = modeMenuRef.value;
-  if (bModeMenuOpen.value && el && !el.contains(e.target as Node)) {
+  const modeEl = modeMenuRef.value;
+  if (bModeMenuOpen.value && modeEl && !modeEl.contains(e.target as Node)) {
     closeModeMenu();
+  }
+  const approvalEl = approvalMenuRef.value;
+  if (bApprovalMenuOpen.value && approvalEl && !approvalEl.contains(e.target as Node)) {
+    closeApprovalMenu();
   }
 }
 
 function handleDocumentKeydown(e: KeyboardEvent): void {
-  if (e.key === 'Escape' && bModeMenuOpen.value) {
-    closeModeMenu();
-  }
+  if (e.key !== 'Escape') return;
+  if (bModeMenuOpen.value) closeModeMenu();
+  if (bApprovalMenuOpen.value) closeApprovalMenu();
 }
 
 // -------------------------------------------------- Textarea autosize --------------------------------------------------
@@ -620,32 +659,80 @@ defineExpose({
           @update:thinking-value="(v) => emit('thinkingUpdate', v)"
         />
       </div>
-      <button
-        type="button"
-        class="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:text-text-primary sm:hidden"
-        :class="!hideThinkingOutput ? 'text-yellow-400 hover:text-yellow-300' : 'text-text-muted'"
-        :aria-pressed="!hideThinkingOutput"
-        :aria-label="hideThinkingOutput ? 'Show thinking process' : 'Hide thinking process'"
-        :title="hideThinkingOutput ? 'Show thinking process' : 'Hide thinking process'"
-        @click="emit('hideThinkingToggle', !hideThinkingOutput)"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M9 18h6" />
-          <path d="M10 22h4" />
-          <path d="M8.5 14.5A6 6 0 1 1 15.5 14.5c-.8.7-1.3 1.6-1.5 2.5h-4c-.2-.9-.7-1.8-1.5-2.5Z" />
-        </svg>
-      </button>
-      <label
-        class="ml-auto hidden cursor-pointer items-center gap-1.5 text-text-muted hover:text-text-primary sm:flex"
-      >
-        <input
-          type="checkbox"
-          class="h-3 w-3 shrink-0 rounded border-fg/[0.2] text-primary focus:ring-primary/40"
-          :checked="!hideThinkingOutput"
-          @change="emit('hideThinkingToggle', !($event.target as HTMLInputElement).checked)"
-        />
-        <span>Show thinking process</span>
-      </label>
+      <div class="ml-auto flex items-center gap-2">
+        <div ref="approvalMenuRef" class="relative">
+          <button
+            type="button"
+            class="flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors"
+            :class="
+              approvalPolicy === 'allow_all'
+                ? 'text-warning hover:text-warning/80'
+                : 'text-text-muted hover:text-text-primary'
+            "
+            :disabled="bSavingApprovalPolicy"
+            :aria-expanded="bApprovalMenuOpen"
+            aria-haspopup="menu"
+            :aria-label="
+              approvalPolicy === 'allow_all'
+                ? 'Approval policy: Allow all'
+                : 'Approval policy: Ask'
+            "
+            :title="
+              approvalPolicy === 'allow_all'
+                ? 'Approval: Allow all'
+                : 'Approval: Ask'
+            "
+            @click.stop="openApprovalMenu"
+          >
+            <Shield :size="14" :stroke-width="1.8" aria-hidden="true" />
+          </button>
+          <div
+            v-if="bApprovalMenuOpen"
+            class="absolute right-0 bottom-full z-50 mb-1 min-w-[168px] overflow-hidden rounded-lg border border-border bg-surface py-1 shadow-lg"
+            role="menu"
+            @click.stop
+          >
+            <button
+              v-for="option in approvalPolicyOptions"
+              :key="option.id"
+              type="button"
+              class="flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left transition-colors hover:bg-fg/[0.08]"
+              :class="option.id === approvalPolicy ? 'bg-fg/[0.08]' : ''"
+              role="menuitem"
+              @click="selectApprovalPolicy(option.id)"
+            >
+              <span class="text-sm text-text-primary">{{ option.label }}</span>
+              <span class="text-[10px] leading-tight text-text-muted">{{ option.description }}</span>
+            </button>
+          </div>
+        </div>
+        <button
+          type="button"
+          class="flex h-5 w-5 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:text-text-primary sm:hidden"
+          :class="!hideThinkingOutput ? 'text-yellow-400 hover:text-yellow-300' : 'text-text-muted'"
+          :aria-pressed="!hideThinkingOutput"
+          :aria-label="hideThinkingOutput ? 'Show thinking process' : 'Hide thinking process'"
+          :title="hideThinkingOutput ? 'Show thinking process' : 'Hide thinking process'"
+          @click="emit('hideThinkingToggle', !hideThinkingOutput)"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9 18h6" />
+            <path d="M10 22h4" />
+            <path d="M8.5 14.5A6 6 0 1 1 15.5 14.5c-.8.7-1.3 1.6-1.5 2.5h-4c-.2-.9-.7-1.8-1.5-2.5Z" />
+          </svg>
+        </button>
+        <label
+          class="hidden cursor-pointer items-center gap-1.5 text-text-muted hover:text-text-primary sm:flex"
+        >
+          <input
+            type="checkbox"
+            class="h-3 w-3 shrink-0 rounded border-fg/[0.2] text-primary focus:ring-primary/40"
+            :checked="!hideThinkingOutput"
+            @change="emit('hideThinkingToggle', !($event.target as HTMLInputElement).checked)"
+          />
+          <span>Show thinking process</span>
+        </label>
+      </div>
       <span v-if="bSelectedModelMissing" class="w-full text-[10px] text-warning">
         Saved model not found: {{ modelSelection }}
       </span>

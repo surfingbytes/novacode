@@ -347,6 +347,7 @@ export const db = {
     agentType?: string | null;
     modelSelection?: string | null;
     sessionMode?: string | null;
+    approvalPolicy?: string | null;
     sessionConfigJson?: string | null;
   }): Promise<Session> {
     const id = randomUUID();
@@ -366,6 +367,7 @@ export const db = {
         agentType: data.agentType ?? 'cursor-agent',
         modelSelection: data.modelSelection ?? 'auto',
         sessionMode: data.sessionMode ?? 'default',
+        approvalPolicy: data.approvalPolicy ?? 'ask',
         sessionConfigJson: data.sessionConfigJson ?? null,
         messageJson: '[]',
         workspaceId: data.workspaceId,
@@ -389,6 +391,7 @@ export const db = {
       sessionId?: string | null;
       modelSelection?: string;
       sessionMode?: string;
+      approvalPolicy?: string;
       sessionConfigJson?: string | null;
       messageJson?: string;
       lastPreviewText?: string | null;
@@ -419,6 +422,7 @@ export const db = {
         sessionId: patch.sessionId ?? existingSession.sessionId,
         modelSelection: patch.modelSelection ?? existingSession.modelSelection,
         sessionMode: patch.sessionMode ?? existingSession.sessionMode,
+        approvalPolicy: patch.approvalPolicy ?? existingSession.approvalPolicy,
         ...(patch.sessionConfigJson !== undefined && { sessionConfigJson: patch.sessionConfigJson }),
         messageJson: patch.messageJson ?? existingSession.messageJson,
         ...(patch.lastPreviewText !== undefined && { lastPreviewText: patch.lastPreviewText }),

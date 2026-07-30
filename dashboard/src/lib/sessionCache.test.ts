@@ -20,6 +20,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     agentType: 'claude',
     modelSelection: 'auto',
     sessionMode: 'agent',
+    approvalPolicy: 'ask',
     workspaceId: 'ws-1',
     createdAt: '2026-07-24T10:00:00.000Z',
     updatedAt: '2026-07-24T10:00:00.000Z',

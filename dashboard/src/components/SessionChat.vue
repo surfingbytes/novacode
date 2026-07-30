@@ -42,7 +42,7 @@ import { useToastStore } from '@/stores/toasts';
 import { useAuthStore } from '@/stores/auth';
 
 // types
-import type { ChatMessage, LinkedPlanContext, Session } from '@/@types/index';
+import type { ApprovalPolicy, ChatMessage, LinkedPlanContext, Session } from '@/@types/index';
 
 // -------------------------------------------------- Props --------------------------------------------------
 const props = defineProps<{
@@ -122,6 +122,39 @@ function onHideThinkingToggle(checked: boolean): void {
   }
 }
 
+const approvalPolicy = ref<ApprovalPolicy>('ask');
+const bSavingApprovalPolicy = ref(false);
+let approvalPolicySaveSeq = 0;
+
+function normalizeApprovalPolicy(value: string | null | undefined): ApprovalPolicy {
+  return value === 'allow_all' ? 'allow_all' : 'ask';
+}
+
+async function onApprovalPolicyChange(policy: ApprovalPolicy): Promise<void> {
+  if (!session.value || policy === approvalPolicy.value) return;
+  const seq = ++approvalPolicySaveSeq;
+  const prev = approvalPolicy.value;
+  const prevSession = session.value;
+  approvalPolicy.value = policy;
+  session.value = { ...session.value, approvalPolicy: policy };
+  bSavingApprovalPolicy.value = true;
+  try {
+    const { data: updated } = await sessionsApi.update(props.workspaceId, props.sessionId, {
+      approvalPolicy: policy
+    });
+    if (seq !== approvalPolicySaveSeq) return;
+    session.value = updated;
+    approvalPolicy.value = normalizeApprovalPolicy(updated.approvalPolicy);
+  } catch {
+    if (seq !== approvalPolicySaveSeq) return;
+    approvalPolicy.value = prev;
+    session.value = prevSession;
+    toastStore.error('Failed to update approval policy');
+  } finally {
+    if (seq === approvalPolicySaveSeq) bSavingApprovalPolicy.value = false;
+  }
+}
+
 const expandedToolOutputIds = ref(new Set<string>());
 
 function toggleToolOutput(callId: string): void {
@@ -189,6 +222,7 @@ const {
 // fetch model/mode options now instead of waiting on the session revalidation.
 if (initialCache?.session) {
   agentOptions.applyFetchedSession(initialCache.session);
+  approvalPolicy.value = normalizeApprovalPolicy(initialCache.session.approvalPolicy);
   void loadAgentOptions();
 }
 
@@ -548,6 +582,7 @@ async function fetchSession(): Promise<boolean> {
     }
     session.value = response.data;
     agentOptions.applyFetchedSession(response.data);
+    approvalPolicy.value = normalizeApprovalPolicy(response.data.approvalPolicy);
     void loadAgentOptions();
     return true;
   } catch (e) {
@@ -636,6 +671,7 @@ watch(
     bLoading.value = !cached;
     pendingImages.value = [];
     agentOptions.resetAgentOptions();
+    approvalPolicy.value = normalizeApprovalPolicy(cached?.session?.approvalPolicy);
     if (cached?.session) {
       agentOptions.applyFetchedSession(cached.session);
       void loadAgentOptions();
@@ -834,6 +870,8 @@ onUnmounted(() => {
             :b-config-loading="bConfigLoading"
             :b-saving-session-config="bSavingSessionConfig"
             :hide-thinking-output="hideThinkingOutput"
+            :approval-policy="approvalPolicy"
+            :b-saving-approval-policy="bSavingApprovalPolicy"
             :b-md-up="bChatInputMdUp"
             :b-uploading-image="bUploadingImage"
             @send="onComposerSend"
@@ -846,6 +884,7 @@ onUnmounted(() => {
             @model-update="onSharedModelPickerUpdate"
             @thinking-update="onSharedThinkingPickerUpdate"
             @hide-thinking-toggle="onHideThinkingToggle"
+            @approval-policy-change="onApprovalPolicyChange"
             @lightbox="(src) => (lightboxSrc = src)"
             @upload-files="onUploadFiles"
           />

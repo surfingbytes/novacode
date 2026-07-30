@@ -19,6 +19,7 @@ import type {
   WorkspaceRuleFileSummary,
   WorkspaceRuleFileContent,
   AgentType,
+  ApprovalPolicy,
   Automation,
   AutomationRun,
   AgentModelOption,
@@ -575,6 +576,7 @@ export const sessionsApi = {
       archived?: boolean;
       modelSelection?: string;
       sessionMode?: string;
+      approvalPolicy?: ApprovalPolicy;
       sessionConfigJson?: Record<string, string> | null;
     }
   ): ReturnType<typeof http.patch<Session>> =>

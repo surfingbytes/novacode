@@ -90,6 +90,9 @@ export interface ChatQueueItem {
 
 export type ChatApprovalOptionKind = 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always';
 
+/** Nova-owned session policy for ACP tool permission prompts. */
+export type ApprovalPolicy = 'ask' | 'allow_all';
+
 export interface ChatApprovalOption {
   optionId: string;
   name: string;
@@ -208,6 +211,8 @@ export interface Session {
   agentType: AgentType;
   modelSelection: string;
   sessionMode: string;
+  /** Nova chat approval policy: ask before tools, or auto-allow. */
+  approvalPolicy: ApprovalPolicy;
   sessionConfigJson?: Record<string, string> | null;
   /** Omitted on list endpoints and the session detail GET (chat history streams over the chat WebSocket) */
   messageJson?: string;
