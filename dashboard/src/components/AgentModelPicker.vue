@@ -42,8 +42,8 @@ const BASIC_CURSOR_MODEL_PRESETS = [
   { label: 'GPT 5.5', thinking: 'Medium', modelNames: ['GPT 5.5'] },
   { label: 'Fable 5', thinking: 'High', modelNames: ['Claude Fable 5'] },
   { label: 'Sonnet 5', thinking: 'High', modelNames: ['Claude Sonnet 5'] },
-  { label: 'Sonnet 4.6', thinking: 'Medium', modelNames: ['Claude 4.6 Sonnet'] },
-  { label: 'Codex 5.3', thinking: 'Medium', modelNames: ['GPT 5.3 Codex'] }
+  { label: 'GPT 5.6', thinking: 'Medium', modelNames: ['GPT 5.6'] },
+  { label: 'Grok 4.5', thinking: 'Medium', modelNames: ['Grok 4.5'] }
 ];
 type CursorModelPreset = (typeof BASIC_CURSOR_MODEL_PRESETS)[number];
 type ModelSelectOption = { value: string; label: string };
