@@ -12,7 +12,7 @@
 
 // node_modules
 import type { Dirent } from 'fs';
-import { readdir, readFile } from 'fs/promises';
+import { readdir, readFile, unlink } from 'fs/promises';
 import { join } from 'path';
 
 export interface PlanDocumentSummary {
@@ -83,6 +83,29 @@ export async function getPlanDocumentById(
     return doc;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Deletes a plan file after verifying it belongs to the given ACP session.
+ * Returns true when the file was removed, false when it was missing/unsafe/
+ * owned by another session.
+ */
+export async function deletePlanDocumentById(
+  convention: PlanDocumentFileConvention,
+  id: string,
+  acpSessionId: string | null | undefined
+): Promise<boolean> {
+  if (!acpSessionId || !convention.isSafeId(id)) return false;
+
+  const existing = await getPlanDocumentById(convention, id, { sessionId: acpSessionId });
+  if (!existing) return false;
+
+  try {
+    await unlink(join(convention.dir, id));
+    return true;
+  } catch {
+    return false;
   }
 }
 

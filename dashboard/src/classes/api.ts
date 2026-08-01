@@ -585,6 +585,15 @@ export const sessionsApi = {
   remove: (workspaceId: string, sessionId: string): ReturnType<typeof http.delete> =>
     http.delete(`/workspaces/${workspaceId}/sessions/${sessionId}`),
 
+  deletePlanDocument: (
+    workspaceId: string,
+    sessionId: string,
+    planId: string
+  ): ReturnType<typeof http.delete> =>
+    http.delete(
+      `/workspaces/${workspaceId}/sessions/${sessionId}/plan-documents/${encodeURIComponent(planId)}`
+    ),
+
   bulkDelete: (
     workspaceId: string,
     ids: string[]

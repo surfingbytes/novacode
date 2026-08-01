@@ -59,15 +59,25 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
   // -------------------------------------------------- Refs --------------------------------------------------
   const selectedPlanId = ref<string | null>(null);
   const planDocumentsRefreshTimers = new Set<ReturnType<typeof setTimeout>>();
+  /** Backend plan ids / markdown keys removed this session so chat copies don't reappear. */
+  const dismissedPlanKeys = ref(new Set<string>());
 
   // -------------------------------------------------- Computed --------------------------------------------------
 
   const planDocuments = computed<PlanDocument[]>(() => {
     const docs: PlanDocument[] = [];
     const seenMarkdown = new Map<string, number>();
+    const dismissed = dismissedPlanKeys.value;
     const addPlanDocument = (doc: PlanDocument | null): void => {
       if (!doc) return;
       const key = normalizePlanSearchText(doc.markdown);
+      if (
+        dismissed.has(`id:${doc.id}`) ||
+        (doc.backendPlanId && dismissed.has(`id:${doc.backendPlanId}`)) ||
+        (key && dismissed.has(`md:${key}`))
+      ) {
+        return;
+      }
       if (key && seenMarkdown.has(key)) {
         const existing = docs[seenMarkdown.get(key)!];
         if (doc.backendPlanId && !existing.backendPlanId) {
@@ -205,6 +215,37 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
     URL.revokeObjectURL(url);
   }
 
+  function dismissPlanFromList(plan: PlanDocument): void {
+    const next = new Set(dismissedPlanKeys.value);
+    if (plan.backendPlanId) next.add(`id:${plan.backendPlanId}`);
+    const key = normalizePlanSearchText(plan.markdown);
+    if (key) next.add(`md:${key}`);
+    next.add(`id:${plan.id}`);
+    dismissedPlanKeys.value = next;
+  }
+
+  async function deletePlan(plan: PlanDocument | null): Promise<boolean> {
+    if (!plan) return false;
+    if (plan.backendPlanId) {
+      await sessionsApi.deletePlanDocument(ctx.workspaceId(), ctx.sessionId(), plan.backendPlanId);
+      if (ctx.session.value?.planDocuments) {
+        ctx.session.value = {
+          ...ctx.session.value,
+          planDocuments: ctx.session.value.planDocuments.filter(
+            (doc) => doc.id !== plan.backendPlanId
+          )
+        };
+      }
+    }
+    dismissPlanFromList(plan);
+    await nextTick();
+    const remaining = planDocuments.value;
+    if (!remaining.some((doc) => doc.id === selectedPlanId.value)) {
+      selectedPlanId.value = remaining.at(-1)?.id ?? null;
+    }
+    return true;
+  }
+
   function shortPlanEntry(content: string): string {
     return content.replace(/\s+/g, ' ').trim();
   }
@@ -305,6 +346,7 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
   function resetPlanDocuments(): void {
     clearPlanDocumentsRefreshTimers();
     selectedPlanId.value = null;
+    dismissedPlanKeys.value = new Set();
   }
 
   // -------------------------------------------------- Export --------------------------------------------------
@@ -321,6 +363,7 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
     schedulePlanDocumentsRefresh,
     clearPlanDocumentsRefreshTimers,
     downloadPlan,
+    deletePlan,
     startSessionFromFullPlan,
     startSessionFromPlanEntry,
     onPlanMarkdownClick,

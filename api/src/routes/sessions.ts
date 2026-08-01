@@ -241,6 +241,33 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
+  // -------------------------------------------------- Plan documents --------------------------------------------------
+
+  // DELETE /api/workspaces/:workspaceId/sessions/:sessionId/plan-documents/:planId
+  fastify.delete(
+    '/api/workspaces/:workspaceId/sessions/:sessionId/plan-documents/:planId',
+    { preHandler: jwtPreHandler },
+    async (request, reply) => {
+      const { workspaceId, sessionId, planId } = request.params as {
+        workspaceId: string;
+        sessionId: string;
+        planId: string;
+      };
+      const session = await db.getSession(sessionId);
+      if (!session || session.workspaceId !== workspaceId) {
+        return reply.status(404).send({ error: 'Session not found' });
+      }
+      const deleted = await getPlanDocumentsSource(session.agentType).deleteById(
+        planId,
+        session.sessionId
+      );
+      if (!deleted) {
+        return reply.status(404).send({ error: 'Plan document not found' });
+      }
+      return reply.status(204).send();
+    }
+  );
+
   // -------------------------------------------------- Session bulk actions --------------------------------------------------
 
   // POST /api/workspaces/:workspaceId/sessions/bulk-delete

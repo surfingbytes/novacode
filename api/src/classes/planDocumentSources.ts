@@ -18,6 +18,7 @@ import { join } from 'path';
 // classes
 import { config } from './config';
 import {
+  deletePlanDocumentById,
   getPlanDocumentById,
   listPlanDocumentsForAcpSession,
   type PlanDocumentFileConvention,
@@ -27,6 +28,7 @@ import {
 export interface PlanDocumentsSource {
   listForSession(acpSessionId: string | null | undefined): Promise<PlanDocumentSummary[]>;
   getById(planId: string, acpSessionId: string | null | undefined): Promise<PlanDocumentSummary | null>;
+  deleteById(planId: string, acpSessionId: string | null | undefined): Promise<boolean>;
 }
 
 function cursorPlansDir(): string {
@@ -63,12 +65,14 @@ function sourceFromConvention(convention: () => PlanDocumentFileConvention): Pla
     listForSession: (acpSessionId) => listPlanDocumentsForAcpSession(convention(), acpSessionId),
     getById: (planId, acpSessionId) =>
       getPlanDocumentById(convention(), planId, { sessionId: acpSessionId || null }),
+    deleteById: (planId, acpSessionId) => deletePlanDocumentById(convention(), planId, acpSessionId),
   };
 }
 
 const noopSource: PlanDocumentsSource = {
   listForSession: async () => [],
   getById: async () => null,
+  deleteById: async () => false,
 };
 
 const cursorSource = sourceFromConvention(cursorConvention);

@@ -1,12 +1,16 @@
 // node_modules
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 // classes
 import { config } from './config';
-import { listPlanDocumentsForAcpSession, getPlanDocumentById } from './planDocuments';
+import {
+  deletePlanDocumentById,
+  getPlanDocumentById,
+  listPlanDocumentsForAcpSession,
+} from './planDocuments';
 import {
   buildOpenCodePlanModeInstruction,
   getPlanDocumentsSource,
@@ -67,6 +71,21 @@ describe('planDocuments engine', () => {
     expect(await getPlanDocumentById(convention, '../one.md', { sessionId: 'sess-1' })).toBeNull();
     expect(await getPlanDocumentById(convention, 'one.md', { sessionId: 'other' })).toBeNull();
   });
+
+  it('deletes a plan belonging to the session and rejects others', async () => {
+    writePlan('keep.md', 'sess-1');
+    writePlan('drop.md', 'sess-1');
+    writePlan('foreign.md', 'sess-2');
+
+    expect(await deletePlanDocumentById(convention, 'drop.md', 'sess-1')).toBe(true);
+    expect(existsSync(join(dir, 'drop.md'))).toBe(false);
+    expect(existsSync(join(dir, 'keep.md'))).toBe(true);
+
+    expect(await deletePlanDocumentById(convention, 'foreign.md', 'sess-1')).toBe(false);
+    expect(existsSync(join(dir, 'foreign.md'))).toBe(true);
+    expect(await deletePlanDocumentById(convention, '../keep.md', 'sess-1')).toBe(false);
+    expect(await deletePlanDocumentById(convention, 'missing.md', 'sess-1')).toBe(false);
+  });
 });
 
 // ---------------------------------- Per-agent sources ----------------------------------
@@ -94,6 +113,7 @@ describe('getPlanDocumentsSource', () => {
       const source = getPlanDocumentsSource(agentType);
       expect(await source.listForSession('whatever')).toEqual([]);
       expect(await source.getById('x.md', 'whatever')).toBeNull();
+      expect(await source.deleteById('x.md', 'whatever')).toBe(false);
     }
   });
 
@@ -123,6 +143,8 @@ describe('getPlanDocumentsSource', () => {
     expect(docs.map((d) => d.id)).toEqual(['add-greet.md']);
     expect(docs[0]?.title).toBe('Add greet');
     expect((await source.getById('add-greet.md', acpSessionId))?.markdown).toContain('Steps…');
+    expect(await source.deleteById('add-greet.md', acpSessionId)).toBe(true);
+    expect(await source.listForSession(acpSessionId)).toEqual([]);
   });
 
   it('resolves the open-code plans dir under configDir when XDG_DATA_HOME is unset', () => {

@@ -87,6 +87,8 @@ const bShowEditModal = ref(false);
 const bSavingEdit = ref(false);
 const bShowDeleteModal = ref(false);
 const bDeletingSession = ref(false);
+const bShowDeletePlanModal = ref(false);
+const bDeletingPlan = ref(false);
 const bPlanActionsMenuOpen = ref(false);
 const planActionsMenuRef = ref<HTMLElement | null>(null);
 const sessionChatRootRef = ref<HTMLElement | null>(null);
@@ -548,6 +550,20 @@ async function deleteSession(): Promise<void> {
   }
 }
 
+async function deleteSelectedPlan(): Promise<void> {
+  const plan = selectedPlanDocument.value;
+  if (!plan) return;
+  bDeletingPlan.value = true;
+  try {
+    await planDocs.deletePlan(plan);
+    bShowDeletePlanModal.value = false;
+  } catch {
+    toastStore.error('Failed to delete plan');
+  } finally {
+    bDeletingPlan.value = false;
+  }
+}
+
 async function toggleArchive(): Promise<void> {
   if (!session.value) return;
   try {
@@ -994,6 +1010,16 @@ onUnmounted(() => {
                 >
                   Download markdown
                 </button>
+                <button
+                  type="button"
+                  class="flex w-full items-center px-3 py-2 text-left text-xs text-red-400 hover:bg-fg/[0.06]"
+                  @click="
+                    closePlanActionsMenu();
+                    bShowDeletePlanModal = true;
+                  "
+                >
+                  Delete plan
+                </button>
               </div>
             </div>
           </div>
@@ -1161,6 +1187,20 @@ onUnmounted(() => {
       confirm-label="Delete"
       :loading="bDeletingSession"
       @confirm="deleteSession"
+    />
+
+    <ConfirmModal
+      v-model="bShowDeletePlanModal"
+      title="Delete plan"
+      eyebrow="// delete plan"
+      :description="
+        selectedPlanDocument?.backendPlanId
+          ? `Delete '${selectedPlanDocument.title}'? The plan file will be permanently removed.`
+          : `Remove '${selectedPlanDocument?.title ?? 'this plan'}' from the Plan tab?`
+      "
+      confirm-label="Delete"
+      :loading="bDeletingPlan"
+      @confirm="deleteSelectedPlan"
     />
 
     <!-- Image lightbox -->
