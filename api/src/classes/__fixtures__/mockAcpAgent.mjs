@@ -8,6 +8,8 @@
  *             'ignore-cancel'        — session/prompt never responds (forces hard kill)
  *             'fail-load'            — session/load responds with a JSON-RPC error
  *             'prompt-permission'    — session/prompt asks the client for tool permission first
+ *             'prompt-ask-question'  — session/prompt asks via cursor/ask_question first
+ *             'prompt-update-todos'  — session/prompt sends cursor/update_todos first
  *   MOCK_LOG  — path; every incoming message is appended as one JSON line.
  */
 
@@ -34,6 +36,8 @@ function send(msg) {
 
 let pendingPromptId = null;
 let pendingPermissionRequestId = null;
+let pendingAskQuestionRequestId = null;
+let pendingUpdateTodosRequestId = null;
 
 function settlePrompt(stopReason) {
   if (pendingPromptId !== null) {
@@ -61,6 +65,19 @@ rl.on('line', (line) => {
   if (!isRequest && msg.id === pendingPermissionRequestId) {
     pendingPermissionRequestId = null;
     settlePrompt(msg.result?.outcome?.outcome === 'selected' ? 'end_turn' : 'rejected');
+    return;
+  }
+
+  if (!isRequest && msg.id === pendingAskQuestionRequestId) {
+    pendingAskQuestionRequestId = null;
+    const outcome = msg.result?.outcome?.outcome;
+    settlePrompt(outcome === 'answered' || outcome === 'skipped' ? 'end_turn' : 'cancelled');
+    return;
+  }
+
+  if (!isRequest && msg.id === pendingUpdateTodosRequestId) {
+    pendingUpdateTodosRequestId = null;
+    settlePrompt(msg.result?.outcome?.outcome === 'accepted' ? 'end_turn' : 'rejected');
     return;
   }
 
@@ -124,6 +141,46 @@ rl.on('line', (line) => {
             options: [
               { optionId: 'allow-once', name: 'Allow', kind: 'allow_once' },
               { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' },
+            ],
+          },
+        });
+      } else if (mode === 'prompt-ask-question') {
+        pendingPromptId = msg.id;
+        pendingAskQuestionRequestId = 'mock-ask-question-request-1';
+        send({
+          jsonrpc: '2.0',
+          id: pendingAskQuestionRequestId,
+          method: 'cursor/ask_question',
+          params: {
+            toolCallId: 'mock-ask-1',
+            title: 'Need input',
+            questions: [
+              {
+                id: 'q1',
+                prompt: 'Which mode should I use?',
+                options: [
+                  { id: 'agent', label: 'Agent' },
+                  { id: 'plan', label: 'Plan' },
+                ],
+                allowMultiple: false,
+              },
+            ],
+          },
+        });
+      } else if (mode === 'prompt-update-todos') {
+        pendingPromptId = msg.id;
+        pendingUpdateTodosRequestId = 'mock-update-todos-request-1';
+        send({
+          jsonrpc: '2.0',
+          id: pendingUpdateTodosRequestId,
+          method: 'cursor/update_todos',
+          params: {
+            toolCallId: 'mock-todos-1',
+            merge: false,
+            todos: [
+              { id: '1', content: 'Set up project structure', status: 'completed' },
+              { id: '2', content: 'Add authentication', status: 'in_progress' },
+              { id: '3', content: 'Write unit tests', status: 'pending' },
             ],
           },
         });

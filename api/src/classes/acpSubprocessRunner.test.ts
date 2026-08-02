@@ -15,8 +15,12 @@ import { join } from 'node:path';
 import { describe, it, expect, afterEach } from 'vitest';
 
 // classes
-import { cancelAcpSubprocess, runAcpSubprocessPrompt } from './acpSubprocessRunner';
-import type { AcpPermissionHandler } from './acpSubprocessRunner';
+import {
+  cancelAcpSubprocess,
+  mergeCursorTodos,
+  runAcpSubprocessPrompt,
+} from './acpSubprocessRunner';
+import type { AcpAskQuestionHandler, AcpPermissionHandler } from './acpSubprocessRunner';
 
 const MOCK_AGENT_PATH = join(process.cwd(), 'src', 'classes', '__fixtures__', 'mockAcpAgent.mjs');
 const MOCK_SESSION_ID = 'mock-acp-session-1';
@@ -71,7 +75,9 @@ function runMock(
   acpSessionId: string | null,
   workDir: string,
   onEvent: (line: string) => void = () => {},
-  onRequestPermission?: AcpPermissionHandler
+  onRequestPermission?: AcpPermissionHandler,
+  onAskQuestion?: AcpAskQuestionHandler,
+  cursorExtensions = false
 ): ReturnType<typeof runAcpSubprocessPrompt> {
   return runAcpSubprocessPrompt(
     {
@@ -82,10 +88,12 @@ function runMock(
       acpSessionId,
       promptText: 'hello',
       logTag: 'testAcp',
+      cursorExtensions,
     },
     onEvent,
     undefined,
-    onRequestPermission
+    onRequestPermission,
+    onAskQuestion
   );
 }
 
@@ -191,5 +199,144 @@ describe('runAcpSubprocessPrompt', () => {
     expect(requests).toEqual(['mock-tool-1']);
     const permissionResponse = readMockLog(logPath).find((m) => m.id === 'mock-permission-request-1');
     expect(permissionResponse).toBeTruthy();
+  });
+
+  it('routes cursor/ask_question through the injected handler when answered', async () => {
+    const { workDir, logPath } = setupMock('prompt-ask-question');
+    const prompts: string[] = [];
+
+    const result = await runMock(
+      'nova-ask-question',
+      null,
+      workDir,
+      () => {},
+      undefined,
+      async (params) => {
+        prompts.push(params.questions[0]?.prompt ?? '');
+        expect(params.toolCallId).toBe('mock-ask-1');
+        return {
+          outcome: {
+            outcome: 'answered',
+            answers: [{ questionId: 'q1', selectedOptionIds: ['plan'] }],
+          },
+        };
+      },
+      true
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.stopReason).toBe('end_turn');
+    expect(prompts).toEqual(['Which mode should I use?']);
+    const askResponse = readMockLog(logPath).find((m) => m.id === 'mock-ask-question-request-1');
+    expect(askResponse).toMatchObject({
+      result: {
+        outcome: {
+          outcome: 'answered',
+          answers: [{ questionId: 'q1', selectedOptionIds: ['plan'] }],
+        },
+      },
+    });
+  });
+
+  it('skips cursor/ask_question when no handler is provided', async () => {
+    const { workDir, logPath } = setupMock('prompt-ask-question');
+
+    const result = await runMock(
+      'nova-ask-question-skip',
+      null,
+      workDir,
+      () => {},
+      undefined,
+      undefined,
+      true
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.stopReason).toBe('end_turn');
+    const askResponse = readMockLog(logPath).find((m) => m.id === 'mock-ask-question-request-1');
+    expect(askResponse).toMatchObject({
+      result: {
+        outcome: {
+          outcome: 'skipped',
+        },
+      },
+    });
+  });
+
+  it('accepts cursor/update_todos and emits synthetic tool_call events for the Tasks panel', async () => {
+    const { workDir, logPath } = setupMock('prompt-update-todos');
+    const events: Array<Record<string, unknown>> = [];
+
+    const result = await runMock(
+      'nova-update-todos',
+      null,
+      workDir,
+      (line) => {
+        try {
+          events.push(JSON.parse(line) as Record<string, unknown>);
+        } catch {
+          // ignore non-json
+        }
+      },
+      undefined,
+      undefined,
+      true
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.stopReason).toBe('end_turn');
+
+    const todosResponse = readMockLog(logPath).find((m) => m.id === 'mock-update-todos-request-1') as {
+      result?: { outcome?: { outcome?: string; todos?: unknown[] } };
+    };
+    expect(todosResponse?.result?.outcome?.outcome).toBe('accepted');
+    expect(todosResponse?.result?.outcome?.todos).toHaveLength(3);
+
+    const toolCalls = events.filter((event) => {
+      const update = event.update as { sessionUpdate?: string; toolCallId?: string } | undefined;
+      return update?.sessionUpdate === 'tool_call' && update.toolCallId === 'mock-todos-1';
+    });
+    const toolUpdates = events.filter((event) => {
+      const update = event.update as { sessionUpdate?: string; status?: string } | undefined;
+      return update?.sessionUpdate === 'tool_call_update' && update.status === 'completed';
+    });
+    expect(toolCalls).toHaveLength(1);
+    expect(toolUpdates.length).toBeGreaterThanOrEqual(1);
+    const rawInput = (toolCalls[0].update as { rawInput?: { todos?: unknown[] } }).rawInput;
+    expect(rawInput?.todos).toEqual([
+      { id: '1', content: 'Set up project structure', status: 'completed' },
+      { id: '2', content: 'Add authentication', status: 'in_progress' },
+      { id: '3', content: 'Write unit tests', status: 'pending' },
+    ]);
+  });
+});
+
+describe('mergeCursorTodos', () => {
+  it('replaces the full list when merge is false', () => {
+    const merged = mergeCursorTodos(
+      [{ id: 'a', content: 'old', status: 'pending' }],
+      [{ id: 'b', content: 'new', status: 'in_progress' }],
+      false
+    );
+    expect(merged).toEqual([{ id: 'b', content: 'new', status: 'in_progress' }]);
+  });
+
+  it('upserts by id and appends new items when merge is true', () => {
+    const merged = mergeCursorTodos(
+      [
+        { id: 'a', content: 'first', status: 'pending' },
+        { id: 'b', content: 'second', status: 'pending' },
+      ],
+      [
+        { id: 'b', content: 'second updated', status: 'completed' },
+        { id: 'c', content: 'third', status: 'in_progress' },
+      ],
+      true
+    );
+    expect(merged).toEqual([
+      { id: 'a', content: 'first', status: 'pending' },
+      { id: 'b', content: 'second updated', status: 'completed' },
+      { id: 'c', content: 'third', status: 'in_progress' },
+    ]);
   });
 });

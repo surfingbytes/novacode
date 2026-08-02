@@ -24,7 +24,14 @@ import {
 } from '@/utils/chatDisplayItems';
 
 // types
-import type { ChatApprovalRequest, ChatMessage, ChatQueueItem, ChatWsServerMessage } from '@/@types/index';
+import type {
+  ChatApprovalRequest,
+  ChatMessage,
+  ChatQuestionAnswer,
+  ChatQuestionRequest,
+  ChatQueueItem,
+  ChatWsServerMessage
+} from '@/@types/index';
 
 // -------------------------------------------------- Context --------------------------------------------------
 
@@ -65,6 +72,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
   const streamingUsage = ref<StreamUsage | null>(null);
   const queuedPrompts = ref<ChatQueueItem[]>([]);
   const pendingApprovals = ref<ChatApprovalRequest[]>([]);
+  const pendingQuestions = ref<ChatQuestionRequest[]>([]);
   const lastPromptRequest = ref<{ text: string; imagePaths: string[] } | null>(null);
   const bHasMore = ref(ctx.initialHasMore ?? false);
   const bLoadingMore = ref(false);
@@ -117,6 +125,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     streamingRawLines.length = 0;
     streamingThinkingText.value = '';
     pendingApprovals.value = [];
+    pendingQuestions.value = [];
     bIsStreaming.value = msg.streaming === true;
     ctx.onHistoryLoaded();
     ctx.onMessagesChanged?.();
@@ -186,6 +195,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     streamingThinkingText.value = '';
     streamingUsage.value = null;
     pendingApprovals.value = [];
+    pendingQuestions.value = [];
     bIsStreaming.value = false;
     ctx.onDone();
     ctx.onContentAppended();
@@ -206,6 +216,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     streamingThinkingText.value = '';
     streamingUsage.value = null;
     pendingApprovals.value = [];
+    pendingQuestions.value = [];
     bIsStreaming.value = false;
   }
 
@@ -221,6 +232,21 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     if (!msg.approvalRequestId) return;
     pendingApprovals.value = pendingApprovals.value.filter(
       (approval) => approval.id !== msg.approvalRequestId
+    );
+  }
+
+  function handleQuestionRequested(msg: ChatWsServerMessage): void {
+    if (!msg.question) return;
+    pendingQuestions.value = [
+      ...pendingQuestions.value.filter((question) => question.id !== msg.question?.id),
+      msg.question
+    ];
+  }
+
+  function handleQuestionResolved(msg: ChatWsServerMessage): void {
+    if (!msg.questionRequestId) return;
+    pendingQuestions.value = pendingQuestions.value.filter(
+      (question) => question.id !== msg.questionRequestId
     );
   }
 
@@ -261,6 +287,10 @@ export function useChatSocket(ctx: UseChatSocketContext) {
         handleApprovalRequested(msg);
       } else if (msg.type === 'approval-resolved') {
         handleApprovalResolved(msg);
+      } else if (msg.type === 'question-requested') {
+        handleQuestionRequested(msg);
+      } else if (msg.type === 'question-resolved') {
+        handleQuestionResolved(msg);
       } else if (msg.type === 'server-shutdown') {
         setChatError('Server disconnected');
         streamingThinkingText.value = '';
@@ -368,6 +398,27 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     });
   }
 
+  function sendQuestionResponse(
+    questionRequestId: string,
+    payload: { skipped: true } | { answers: ChatQuestionAnswer[] }
+  ): void {
+    if (!socket || !bWsConnected.value) return;
+    if ('skipped' in payload && payload.skipped) {
+      socket.send({
+        type: 'question-response',
+        questionRequestId,
+        questionSkipped: true
+      });
+      return;
+    }
+    if (!('answers' in payload)) return;
+    socket.send({
+      type: 'question-response',
+      questionRequestId,
+      questionAnswers: payload.answers
+    });
+  }
+
   function deleteQueuedPrompt(queueItemId: string): void {
     socket?.send({ type: 'queue-delete', queueItemId });
   }
@@ -407,6 +458,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     streamingUsage.value = null;
     queuedPrompts.value = [];
     pendingApprovals.value = [];
+    pendingQuestions.value = [];
     bHasMore.value = false;
     bLoadingMore.value = false;
     clearChatError();
@@ -424,6 +476,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     streamingUsage,
     queuedPrompts,
     pendingApprovals,
+    pendingQuestions,
     lastPromptRequest,
     bHasMore,
     bLoadingMore,
@@ -440,6 +493,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     retryLastPrompt,
     cancelPrompt,
     sendApprovalResponse,
+    sendQuestionResponse,
     deleteQueuedPrompt,
     editQueuedPrompt,
     pushQueuedPrompt,

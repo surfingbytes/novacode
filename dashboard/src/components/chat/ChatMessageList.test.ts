@@ -18,6 +18,7 @@ function mountList(overrides: Record<string, unknown> = {}) {
       displayMessages: [],
       streamingDisplayItems: [],
       pendingApprovals: [],
+      pendingQuestions: [],
       streamingThinkingText: '',
       streamingUsage: null,
       bIsStreaming: false,

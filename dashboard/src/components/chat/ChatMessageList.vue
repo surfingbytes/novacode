@@ -22,7 +22,13 @@ import { agentTypeShortLabel } from '@/utils/agentTypeMeta';
 import type { DisplayItem, StreamUsage } from '@/utils/chatDisplayItems';
 
 // types
-import type { AgentType, ChatApprovalRequest, ChatMessage } from '@/@types/index';
+import type {
+  AgentType,
+  ChatApprovalRequest,
+  ChatMessage,
+  ChatQuestionAnswer,
+  ChatQuestionRequest
+} from '@/@types/index';
 
 // -------------------------------------------------- Props --------------------------------------------------
 
@@ -41,6 +47,7 @@ const props = withDefaults(
     displayMessages: DisplayChatMessage[];
     streamingDisplayItems: DisplayItem[];
     pendingApprovals: ChatApprovalRequest[];
+    pendingQuestions: ChatQuestionRequest[];
     streamingThinkingText: string;
     streamingUsage: StreamUsage | null;
     bIsStreaming: boolean;
@@ -71,6 +78,11 @@ const emit = defineEmits<{
   (e: 'chatErrorAction'): void;
   (e: 'cancel'): void;
   (e: 'approvalResponse', approvalRequestId: string, approvalOptionId: string): void;
+  (
+    e: 'questionResponse',
+    questionRequestId: string,
+    payload: { skipped: true } | { answers: ChatQuestionAnswer[] }
+  ): void;
 }>();
 
 // -------------------------------------------------- Refs --------------------------------------------------
@@ -234,6 +246,7 @@ watch(
     props.displayMessages.length,
     props.streamingDisplayItems.length,
     props.pendingApprovals.length,
+    props.pendingQuestions.length,
     props.streamingThinkingText.trim().length > 0 && !props.hideThinkingOutput
   ],
   () => {
@@ -273,6 +286,71 @@ function approvalOptionClass(kind: string): string {
 function approvalSubtitle(approval: ChatApprovalRequest): string {
   if (approval.toolName && approval.toolKind) return `${approval.toolName} · ${approval.toolKind}`;
   return approval.toolName ?? approval.toolKind ?? 'Tool permission';
+}
+
+/** questionRequestId -> questionId -> selected option ids */
+const questionSelections = ref<Record<string, Record<string, string[]>>>({});
+
+watch(
+  () => props.pendingQuestions.map((question) => question.id).join(','),
+  () => {
+    const next: Record<string, Record<string, string[]>> = {};
+    for (const question of props.pendingQuestions) {
+      next[question.id] = questionSelections.value[question.id] ?? {};
+    }
+    questionSelections.value = next;
+  }
+);
+
+function selectedOptionIds(questionRequestId: string, questionId: string): string[] {
+  return questionSelections.value[questionRequestId]?.[questionId] ?? [];
+}
+
+function isOptionSelected(questionRequestId: string, questionId: string, optionId: string): boolean {
+  return selectedOptionIds(questionRequestId, questionId).includes(optionId);
+}
+
+function toggleQuestionOption(
+  request: ChatQuestionRequest,
+  questionId: string,
+  optionId: string,
+  allowMultiple: boolean
+): void {
+  const current = selectedOptionIds(request.id, questionId);
+  let next: string[];
+  if (allowMultiple) {
+    next = current.includes(optionId)
+      ? current.filter((id) => id !== optionId)
+      : [...current, optionId];
+  } else {
+    next = current.includes(optionId) && current.length === 1 ? [] : [optionId];
+  }
+  questionSelections.value = {
+    ...questionSelections.value,
+    [request.id]: {
+      ...(questionSelections.value[request.id] ?? {}),
+      [questionId]: next
+    }
+  };
+}
+
+function canSubmitQuestion(request: ChatQuestionRequest): boolean {
+  return request.questions.every(
+    (question) => selectedOptionIds(request.id, question.id).length > 0
+  );
+}
+
+function submitQuestion(request: ChatQuestionRequest): void {
+  if (!canSubmitQuestion(request)) return;
+  const answers: ChatQuestionAnswer[] = request.questions.map((question) => ({
+    questionId: question.id,
+    selectedOptionIds: selectedOptionIds(request.id, question.id)
+  }));
+  emit('questionResponse', request.id, { answers });
+}
+
+function skipQuestion(request: ChatQuestionRequest): void {
+  emit('questionResponse', request.id, { skipped: true });
 }
 
 defineExpose({ scrollToBottom, notifyHistoryPage, forceInitialScrollToBottom });
@@ -461,6 +539,95 @@ defineExpose({ scrollToBottom, notifyHistoryPage, forceInitialScrollToBottom });
                         @click="emit('approvalResponse', approval.id, option.optionId)"
                       >
                         {{ option.name }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Cursor ACP ask_question prompts -->
+            <div
+              v-for="questionRequest in pendingQuestions"
+              :key="questionRequest.id"
+              class="flex justify-start"
+            >
+              <div class="chat-card max-w-full md:max-w-[85%] w-[34rem] rounded-lg px-3 py-3 text-sm">
+                <div class="flex items-start gap-2">
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    class="mt-0.5 shrink-0 text-sky-500"
+                    aria-hidden="true"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                    <path d="M12 17h.01" />
+                  </svg>
+                  <div class="min-w-0 flex-1">
+                    <div class="font-medium text-text-primary">
+                      {{ questionRequest.title || 'Agent needs input' }}
+                    </div>
+                    <div class="mt-0.5 text-xs text-text-muted">Answer to continue</div>
+                    <div class="mt-3 space-y-3">
+                      <div
+                        v-for="question in questionRequest.questions"
+                        :key="question.id"
+                        class="rounded-md bg-fg/[0.03] px-2.5 py-2"
+                      >
+                        <div class="text-sm text-text-primary">{{ question.prompt }}</div>
+                        <div
+                          v-if="question.allowMultiple"
+                          class="mt-1 text-[11px] text-text-muted/70"
+                        >
+                          Select one or more
+                        </div>
+                        <div class="mt-2 flex flex-wrap gap-2">
+                          <button
+                            v-for="option in question.options"
+                            :key="option.id"
+                            type="button"
+                            class="rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors"
+                            :class="
+                              isOptionSelected(questionRequest.id, question.id, option.id)
+                                ? 'border-sky-500/40 bg-sky-500/15 text-sky-200'
+                                : 'border-fg/15 bg-fg/[0.04] text-text-primary hover:bg-fg/[0.08]'
+                            "
+                            @click="
+                              toggleQuestionOption(
+                                questionRequest,
+                                question.id,
+                                option.id,
+                                question.allowMultiple === true
+                              )
+                            "
+                          >
+                            {{ option.label }}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        class="rounded-md border border-sky-500/40 bg-sky-500/15 px-2.5 py-1.5 text-xs font-medium text-sky-200 transition-colors hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                        :disabled="!canSubmitQuestion(questionRequest)"
+                        @click="submitQuestion(questionRequest)"
+                      >
+                        Submit
+                      </button>
+                      <button
+                        type="button"
+                        class="rounded-md border border-fg/15 bg-fg/[0.04] px-2.5 py-1.5 text-xs font-medium text-text-muted transition-colors hover:bg-fg/[0.08]"
+                        @click="skipQuestion(questionRequest)"
+                      >
+                        Skip
                       </button>
                     </div>
                   </div>

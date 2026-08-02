@@ -112,6 +112,34 @@ export interface ChatApprovalRequest {
   options: ChatApprovalOption[];
 }
 
+/** Cursor ACP cursor/ask_question option. */
+export interface ChatQuestionOption {
+  id: string;
+  label: string;
+}
+
+/** Cursor ACP cursor/ask_question item. */
+export interface ChatQuestionItem {
+  id: string;
+  prompt: string;
+  options: ChatQuestionOption[];
+  allowMultiple?: boolean;
+}
+
+/** Nova-owned pending AskQuestion prompt surfaced in chat. */
+export interface ChatQuestionRequest {
+  id: string;
+  sessionId: string;
+  toolCallId: string;
+  title?: string;
+  questions: ChatQuestionItem[];
+}
+
+export interface ChatQuestionAnswer {
+  questionId: string;
+  selectedOptionIds: string[];
+}
+
 export type LinkedPlanContextMode = 'target-only' | 'full';
 
 export interface LinkedPlanContext {
@@ -134,7 +162,8 @@ export interface ChatWsClientMessage {
     | 'queue-delete'
     | 'queue-push'
     | 'queue-edit'
-    | 'approval-response';
+    | 'approval-response'
+    | 'question-response';
   text?: string;
   /** Model id (e.g. 'auto', 'gpt-5.3-codex'). Default 'auto'. */
   model?: string;
@@ -145,6 +174,10 @@ export interface ChatWsClientMessage {
   queueItemId?: string;
   approvalRequestId?: string;
   approvalOptionId?: string;
+  questionRequestId?: string;
+  /** When true, skip answering and let the agent continue. */
+  questionSkipped?: boolean;
+  questionAnswers?: ChatQuestionAnswer[];
 }
 
 export interface ChatWsServerMessage {
@@ -159,7 +192,9 @@ export interface ChatWsServerMessage {
     | 'queue-updated'
     | 'prompt-started'
     | 'approval-requested'
-    | 'approval-resolved';
+    | 'approval-resolved'
+    | 'question-requested'
+    | 'question-resolved';
   messages?: ChatMessage[];
   data?: string;
   message?: string;
@@ -169,6 +204,8 @@ export interface ChatWsServerMessage {
   queue?: ChatQueueItem[];
   approval?: ChatApprovalRequest;
   approvalRequestId?: string;
+  question?: ChatQuestionRequest;
+  questionRequestId?: string;
   queueItemId?: string;
   prompt?: {
     text: string;

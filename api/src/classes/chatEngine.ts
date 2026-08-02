@@ -20,7 +20,12 @@ import { runCodexAcp, cancelCodexAcp } from './codexAcp';
 import { sendTaskDonePush } from './push';
 import { normalizeSessionMode } from './sessionMode';
 import { normalizeApprovalPolicy } from './approvalPolicy';
-import type { AcpPromptAttachment, SessionConfigSyncHandler } from './acpSubprocessRunner';
+import type {
+  AcpAskQuestionParams,
+  AcpAskQuestionResponse,
+  AcpPromptAttachment,
+  SessionConfigSyncHandler,
+} from './acpSubprocessRunner';
 import { computeLastListPreview } from './chatPreview';
 import { extractStreamNotificationPreview } from './chatStreamPreviewFromEvents';
 import { broadcastSessionListUpsert } from './sessionListBroadcast';
@@ -36,6 +41,8 @@ import type {
   ChatApprovalOption,
   ChatApprovalOptionKind,
   ChatApprovalRequest,
+  ChatQuestionAnswer,
+  ChatQuestionRequest,
 } from '../@types/index';
 
 export interface ActiveRun {
@@ -46,6 +53,7 @@ export interface ActiveRun {
   bufferedLines: string[];
   subscribers: Set<ChatSubscriber>;
   pendingApprovals: Map<string, PendingApproval>;
+  pendingQuestions: Map<string, PendingQuestion>;
   approvalPolicy: ApprovalPolicy;
 }
 
@@ -56,11 +64,18 @@ export interface ChatSubscriber {
   onHistory(messages: ChatMessage[], streaming: boolean): void;
   onApprovalRequested?(approval: ChatApprovalRequest): void;
   onApprovalResolved?(approvalRequestId: string): void;
+  onQuestionRequested?(question: ChatQuestionRequest): void;
+  onQuestionResolved?(questionRequestId: string): void;
 }
 
 interface PendingApproval {
   approval: ChatApprovalRequest;
   resolve: (response: RequestPermissionResponse) => void;
+}
+
+interface PendingQuestion {
+  question: ChatQuestionRequest;
+  resolve: (response: AcpAskQuestionResponse) => void;
 }
 
 // --------------------------------------------- State ---------------------------------------------
@@ -118,6 +133,7 @@ export function cancelRun(sessionId: string): void {
   try {
     console.log('[chatEngine] cancelling active run for session', sessionId);
     cancelPendingApprovals(run);
+    cancelPendingQuestions(run);
     run.cancel();
   } catch (err) {
     console.error('[chatEngine] Failed to cancel run:', err);
@@ -321,6 +337,145 @@ export function respondToAcpPermission(
   if (!run || !pending) return false;
   if (!pending.approval.options.some((option) => option.optionId === optionId)) return false;
   resolvePendingApproval(run, pending, selectedPermissionResponse(optionId));
+  return true;
+}
+
+function cancelledAskQuestionResponse(): AcpAskQuestionResponse {
+  return { outcome: { outcome: 'cancelled' } };
+}
+
+function skippedAskQuestionResponse(reason?: string): AcpAskQuestionResponse {
+  return { outcome: { outcome: 'skipped', reason } };
+}
+
+function questionRequestFromAcp(
+  sessionId: string,
+  params: AcpAskQuestionParams
+): ChatQuestionRequest {
+  return {
+    id: randomUUID(),
+    sessionId,
+    toolCallId: params.toolCallId,
+    title: params.title,
+    questions: params.questions.map((question) => ({
+      id: question.id,
+      prompt: question.prompt,
+      allowMultiple: question.allowMultiple === true,
+      options: question.options.map((option) => ({
+        id: option.id,
+        label: option.label,
+      })),
+    })),
+  };
+}
+
+function broadcastQuestionRequested(run: ActiveRun, question: ChatQuestionRequest): void {
+  for (const sub of run.subscribers) {
+    sub.onQuestionRequested?.(question);
+  }
+}
+
+function broadcastQuestionResolved(run: ActiveRun, questionRequestId: string): void {
+  for (const sub of run.subscribers) {
+    sub.onQuestionResolved?.(questionRequestId);
+  }
+}
+
+function resolvePendingQuestion(
+  run: ActiveRun,
+  pending: PendingQuestion,
+  response: AcpAskQuestionResponse
+): void {
+  if (!run.pendingQuestions.delete(pending.question.id)) return;
+  pending.resolve(response);
+  broadcastQuestionResolved(run, pending.question.id);
+}
+
+function cancelPendingQuestions(run: ActiveRun): void {
+  for (const pending of [...run.pendingQuestions.values()]) {
+    resolvePendingQuestion(run, pending, cancelledAskQuestionResponse());
+  }
+}
+
+function validateQuestionAnswers(
+  question: ChatQuestionRequest,
+  answers: ChatQuestionAnswer[]
+): ChatQuestionAnswer[] | null {
+  if (!Array.isArray(answers) || answers.length === 0) return null;
+
+  const byId = new Map(question.questions.map((item) => [item.id, item]));
+  const seen = new Set<string>();
+  const normalized: ChatQuestionAnswer[] = [];
+
+  for (const answer of answers) {
+    if (!answer || typeof answer.questionId !== 'string') return null;
+    if (seen.has(answer.questionId)) return null;
+    const item = byId.get(answer.questionId);
+    if (!item) return null;
+    if (!Array.isArray(answer.selectedOptionIds) || answer.selectedOptionIds.length === 0) {
+      return null;
+    }
+    if (!item.allowMultiple && answer.selectedOptionIds.length !== 1) return null;
+
+    const optionIds = new Set(item.options.map((option) => option.id));
+    const selected: string[] = [];
+    const selectedSeen = new Set<string>();
+    for (const optionId of answer.selectedOptionIds) {
+      if (typeof optionId !== 'string' || !optionIds.has(optionId) || selectedSeen.has(optionId)) {
+        return null;
+      }
+      selectedSeen.add(optionId);
+      selected.push(optionId);
+    }
+
+    seen.add(answer.questionId);
+    normalized.push({ questionId: answer.questionId, selectedOptionIds: selected });
+  }
+
+  // Require an answer for every question in the request.
+  if (normalized.length !== question.questions.length) return null;
+  return normalized;
+}
+
+export function requestAcpAskQuestionForSession(
+  sessionId: string,
+  params: AcpAskQuestionParams
+): Promise<AcpAskQuestionResponse> {
+  const run = activeRuns.get(sessionId);
+  if (!run) {
+    return Promise.resolve(cancelledAskQuestionResponse());
+  }
+
+  const question = questionRequestFromAcp(sessionId, params);
+  return new Promise((resolve) => {
+    const pending: PendingQuestion = { question, resolve };
+    run.pendingQuestions.set(question.id, pending);
+    broadcastQuestionRequested(run, question);
+  });
+}
+
+export function respondToAcpAskQuestion(
+  sessionId: string,
+  questionRequestId: string,
+  response:
+    | { skipped: true; reason?: string }
+    | { skipped?: false; answers: ChatQuestionAnswer[] }
+): boolean {
+  const run = activeRuns.get(sessionId);
+  const pending = run?.pendingQuestions.get(questionRequestId);
+  if (!run || !pending) return false;
+
+  if (response.skipped) {
+    resolvePendingQuestion(run, pending, skippedAskQuestionResponse(response.reason));
+    return true;
+  }
+
+  const answers = validateQuestionAnswers(pending.question, response.answers);
+  if (!answers) return false;
+
+  resolvePendingQuestion(run, pending, {
+    outcome: { outcome: 'answered', answers },
+  });
   return true;
 }
 
@@ -567,6 +722,7 @@ export async function dispatchPrompt(
     bufferedLines: [],
     subscribers: new Set([subscriber]),
     pendingApprovals: new Map(),
+    pendingQuestions: new Map(),
     approvalPolicy: normalizeApprovalPolicy(session.approvalPolicy),
   };
   activeRuns.set(sessionId, run);
@@ -656,7 +812,8 @@ export async function dispatchPrompt(
         onEvent,
         sessionId,
         onConfigSync,
-        (permission) => requestAcpPermissionForSession(sessionId, permission)
+        (permission) => requestAcpPermissionForSession(sessionId, permission),
+        (question) => requestAcpAskQuestionForSession(sessionId, question)
       );
     } else if (agentType === 'open-code') {
       result = await runOpenCodeAcp(
@@ -799,6 +956,7 @@ export async function dispatchPrompt(
     }
 
     cancelPendingApprovals(run);
+    cancelPendingQuestions(run);
     activeRuns.delete(sessionId);
     emitBusy(sessionId, session.workspaceId, false);
     broadcast((sub) => sub.onDone(currentMessages));

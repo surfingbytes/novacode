@@ -11,6 +11,7 @@ import {
   cancelRun,
   dispatchPrompt,
   respondToAcpPermission,
+  respondToAcpAskQuestion,
   subscribeBusy,
   type ChatSubscriber
 } from '../classes/chatEngine';
@@ -19,6 +20,7 @@ import {
 import type {
   ChatMessage,
   ChatApprovalRequest,
+  ChatQuestionRequest,
   ChatQueueItem,
   ChatWsClientMessage,
   ChatWsServerMessage
@@ -189,7 +191,11 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
         onApprovalRequested: (approval: ChatApprovalRequest) =>
           broadcastChat(sessionId, { type: 'approval-requested', approval }),
         onApprovalResolved: (approvalRequestId: string) =>
-          broadcastChat(sessionId, { type: 'approval-resolved', approvalRequestId })
+          broadcastChat(sessionId, { type: 'approval-resolved', approvalRequestId }),
+        onQuestionRequested: (question: ChatQuestionRequest) =>
+          broadcastChat(sessionId, { type: 'question-requested', question }),
+        onQuestionResolved: (questionRequestId: string) =>
+          broadcastChat(sessionId, { type: 'question-resolved', questionRequestId })
       });
     });
   }
@@ -223,6 +229,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
       // the snapshot and the registration, so no line can be missed or doubled.
       const bufferedSnapshot = [...existingRun.bufferedLines];
       const pendingApprovals = [...existingRun.pendingApprovals.values()].map((pending) => pending.approval);
+      const pendingQuestions = [...existingRun.pendingQuestions.values()].map((pending) => pending.question);
       const { messages: page, hasMore } = paginateMessages(existingRun.messages, 0);
       send(socket, { type: 'history', messages: page, hasMore, streaming: true, queue });
       for (const line of bufferedSnapshot) {
@@ -230,6 +237,9 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
       }
       for (const approval of pendingApprovals) {
         send(socket, { type: 'approval-requested', approval });
+      }
+      for (const question of pendingQuestions) {
+        send(socket, { type: 'question-requested', question });
       }
       registerChatSocket(id, socket);
       if (!getActiveRun(id)) {
@@ -263,6 +273,23 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
             return;
           }
           respondToAcpPermission(id, clientMessage.approvalRequestId, clientMessage.approvalOptionId);
+          return;
+        }
+
+        if (clientMessage.type === 'question-response') {
+          if (!clientMessage.questionRequestId) {
+            return;
+          }
+          if (clientMessage.questionSkipped) {
+            respondToAcpAskQuestion(id, clientMessage.questionRequestId, { skipped: true });
+            return;
+          }
+          if (!clientMessage.questionAnswers) {
+            return;
+          }
+          respondToAcpAskQuestion(id, clientMessage.questionRequestId, {
+            answers: clientMessage.questionAnswers,
+          });
           return;
         }
 

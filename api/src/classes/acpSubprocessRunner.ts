@@ -32,6 +32,36 @@ export type AcpPermissionHandler = (
   params: RequestPermissionRequest
 ) => RequestPermissionResponse | Promise<RequestPermissionResponse>;
 
+/** Cursor ACP cursor/ask_question request params. */
+export interface AcpAskQuestionParams {
+  toolCallId: string;
+  title?: string;
+  questions: Array<{
+    id: string;
+    prompt: string;
+    options: Array<{ id: string; label: string }>;
+    allowMultiple?: boolean;
+  }>;
+}
+
+/** Cursor ACP cursor/ask_question response. */
+export interface AcpAskQuestionResponse {
+  outcome:
+    | {
+        outcome: 'answered';
+        answers: Array<{
+          questionId: string;
+          selectedOptionIds: string[];
+        }>;
+      }
+    | { outcome: 'skipped'; reason?: string }
+    | { outcome: 'cancelled' };
+}
+
+export type AcpAskQuestionHandler = (
+  params: AcpAskQuestionParams
+) => AcpAskQuestionResponse | Promise<AcpAskQuestionResponse>;
+
 export type SessionConfigSyncHandler = (sync: {
   modeId?: string;
   modelId?: string;
@@ -434,11 +464,232 @@ function emitCursorPlanRequest(
   );
 }
 
+/** Cursor ACP cursor/update_todos item. */
+interface CursorTodoItem {
+  id: string;
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
+}
+
+interface CursorUpdateTodosParams {
+  toolCallId: string;
+  todos: CursorTodoItem[];
+  merge: boolean;
+}
+
+/** Last accepted todos from cursor/update_todos, keyed by ACP session id (survives per-turn subprocess restarts). */
+const cursorTodoStateBySession = new Map<string, CursorTodoItem[]>();
+
+function normalizeCursorTodoStatus(status: unknown): CursorTodoItem['status'] {
+  if (typeof status !== 'string') return 'pending';
+  const normalized = status.toLowerCase().replace(/^todo_status_/, '').replace(/[\s-]+/g, '_');
+  if (normalized === 'completed' || normalized === 'done') return 'completed';
+  if (normalized === 'in_progress' || normalized === 'active' || normalized === 'running') {
+    return 'in_progress';
+  }
+  if (normalized === 'cancelled' || normalized === 'canceled') return 'cancelled';
+  return 'pending';
+}
+
+function parseCursorTodoItem(value: unknown): CursorTodoItem | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const obj = value as Record<string, unknown>;
+  if (typeof obj.id !== 'string' || !obj.id.trim()) return null;
+  const content =
+    typeof obj.content === 'string'
+      ? obj.content.trim()
+      : typeof obj.title === 'string'
+        ? obj.title.trim()
+        : typeof obj.text === 'string'
+          ? obj.text.trim()
+          : '';
+  if (!content) return null;
+  return {
+    id: obj.id,
+    content,
+    status: normalizeCursorTodoStatus(obj.status),
+  };
+}
+
+function parseCursorUpdateTodosParams(params: unknown): CursorUpdateTodosParams | null {
+  if (!params || typeof params !== 'object' || Array.isArray(params)) return null;
+  const obj = params as Record<string, unknown>;
+  if (typeof obj.toolCallId !== 'string' || !obj.toolCallId.trim()) return null;
+  if (!Array.isArray(obj.todos)) return null;
+
+  const todos: CursorTodoItem[] = [];
+  for (const raw of obj.todos) {
+    const item = parseCursorTodoItem(raw);
+    if (!item) return null;
+    todos.push(item);
+  }
+
+  return {
+    toolCallId: obj.toolCallId,
+    todos,
+    merge: obj.merge === true,
+  };
+}
+
+/** Apply Cursor merge semantics: replace when merge=false; upsert by id when merge=true. */
+export function mergeCursorTodos(
+  existing: CursorTodoItem[],
+  incoming: CursorTodoItem[],
+  merge: boolean
+): CursorTodoItem[] {
+  if (!merge) return incoming.map((todo) => ({ ...todo }));
+
+  const byId = new Map<string, CursorTodoItem>();
+  for (const todo of existing) {
+    byId.set(todo.id, { ...todo });
+  }
+  for (const todo of incoming) {
+    byId.set(todo.id, { ...todo });
+  }
+
+  const ordered: CursorTodoItem[] = [];
+  const seen = new Set<string>();
+  for (const todo of existing) {
+    const next = byId.get(todo.id);
+    if (!next || seen.has(todo.id)) continue;
+    ordered.push(next);
+    seen.add(todo.id);
+  }
+  for (const todo of incoming) {
+    if (seen.has(todo.id)) continue;
+    ordered.push({ ...todo });
+    seen.add(todo.id);
+  }
+  return ordered;
+}
+
+/**
+ * Emit synthetic ACP tool_call(+update) events so dashboard/shared parsers surface
+ * todos in the existing Tasks panel (latest todos display item wins).
+ */
+function emitCursorTodosUpdate(
+  params: CursorUpdateTodosParams,
+  acceptedTodos: CursorTodoItem[],
+  getSessionId: () => string | null
+): void {
+  const sessionId = getSessionId();
+  if (!sessionId) return;
+
+  const handler = activeHandlers.get(sessionId);
+  if (!handler) return;
+
+  const rawInput = { todos: acceptedTodos };
+  handler(
+    JSON.stringify({
+      sessionId,
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: params.toolCallId,
+        title: 'Update Todos',
+        kind: 'other',
+        status: 'pending',
+        rawInput,
+      },
+    })
+  );
+  handler(
+    JSON.stringify({
+      sessionId,
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: params.toolCallId,
+        status: 'completed',
+        rawInput,
+      },
+    })
+  );
+}
+
+function handleCursorUpdateTodos(
+  params: unknown,
+  getSessionId: () => string | null
+): {
+  outcome:
+    | { outcome: 'accepted'; todos: CursorTodoItem[] }
+    | { outcome: 'rejected'; reason: string }
+    | { outcome: 'cancelled' };
+} {
+  const parsed = parseCursorUpdateTodosParams(params);
+  if (!parsed) {
+    return {
+      outcome: { outcome: 'rejected', reason: 'Invalid update_todos request.' },
+    };
+  }
+
+  const sessionId = getSessionId();
+  const existing = sessionId ? (cursorTodoStateBySession.get(sessionId) ?? []) : [];
+  const acceptedTodos = mergeCursorTodos(existing, parsed.todos, parsed.merge);
+
+  if (sessionId) {
+    cursorTodoStateBySession.set(sessionId, acceptedTodos);
+  }
+
+  emitCursorTodosUpdate(parsed, acceptedTodos, getSessionId);
+
+  return {
+    outcome: {
+      outcome: 'accepted',
+      todos: acceptedTodos,
+    },
+  };
+}
+
+function parseAskQuestionParams(params: unknown): AcpAskQuestionParams | null {
+  if (!params || typeof params !== 'object' || Array.isArray(params)) return null;
+  const obj = params as Record<string, unknown>;
+  if (typeof obj.toolCallId !== 'string' || !obj.toolCallId.trim()) return null;
+  if (!Array.isArray(obj.questions) || obj.questions.length === 0) return null;
+
+  const questions: AcpAskQuestionParams['questions'] = [];
+  for (const raw of obj.questions) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const q = raw as Record<string, unknown>;
+    if (typeof q.id !== 'string' || !q.id.trim()) return null;
+    if (typeof q.prompt !== 'string' || !q.prompt.trim()) return null;
+    if (!Array.isArray(q.options) || q.options.length === 0) return null;
+    const options: Array<{ id: string; label: string }> = [];
+    for (const rawOpt of q.options) {
+      if (!rawOpt || typeof rawOpt !== 'object' || Array.isArray(rawOpt)) return null;
+      const opt = rawOpt as Record<string, unknown>;
+      if (typeof opt.id !== 'string' || !opt.id.trim()) return null;
+      if (typeof opt.label !== 'string' || !opt.label.trim()) return null;
+      options.push({ id: opt.id, label: opt.label });
+    }
+    questions.push({
+      id: q.id,
+      prompt: q.prompt,
+      options,
+      allowMultiple: q.allowMultiple === true,
+    });
+  }
+
+  return {
+    toolCallId: obj.toolCallId,
+    title: typeof obj.title === 'string' && obj.title.trim() ? obj.title.trim() : undefined,
+    questions,
+  };
+}
+
+async function defaultAskQuestionResponse(): Promise<AcpAskQuestionResponse> {
+  return {
+    outcome: {
+      outcome: 'skipped',
+      reason: 'Nova Code does not support interactive questions yet.',
+    },
+  };
+}
+
 function buildClientApp(
   onConfigSync?: SessionConfigSyncHandler,
   cursorExtensions?: boolean,
   getActiveSessionId: () => string | null = () => null,
-  onRequestPermission: AcpPermissionHandler = autoApprovePermission
+  onRequestPermission: AcpPermissionHandler = autoApprovePermission,
+  onAskQuestion?: AcpAskQuestionHandler
 ) {
   let app = client({ name: 'nova-code' })
     .onNotification(methods.client.session.update, ({ params }) => {
@@ -457,21 +708,25 @@ function buildClientApp(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const extApp = app as any;
     extApp
-      .onRequest('cursor/ask_question', parseUnknown, async () => ({
-        outcome: { outcome: 'skipped', reason: 'Nova Code does not support interactive questions yet.' },
-      }))
+      .onRequest('cursor/ask_question', parseUnknown, async ({ params }: { params: unknown }) => {
+        const parsed = parseAskQuestionParams(params);
+        if (!parsed) {
+          return {
+            outcome: { outcome: 'skipped', reason: 'Invalid ask_question request.' },
+          } satisfies AcpAskQuestionResponse;
+        }
+        if (!onAskQuestion) {
+          return defaultAskQuestionResponse();
+        }
+        return onAskQuestion(parsed);
+      })
       .onRequest('cursor/create_plan', parseUnknown, async ({ params }: { params: unknown }) => {
         emitCursorPlanRequest(params, getActiveSessionId);
         return { outcome: { outcome: 'accepted' } };
       })
-      .onRequest('cursor/update_todos', parseUnknown, async ({ params }: { params: unknown }) => ({
-        outcome: {
-          outcome: 'accepted',
-          todos: Array.isArray((params as { todos?: unknown }).todos)
-            ? (params as { todos: unknown[] }).todos
-            : [],
-        },
-      }))
+      .onRequest('cursor/update_todos', parseUnknown, async ({ params }: { params: unknown }) =>
+        handleCursorUpdateTodos(params, getActiveSessionId)
+      )
       .onRequest('cursor/task', parseUnknown, async () => ({ outcome: { outcome: 'completed' } }))
       .onRequest('cursor/generate_image', parseUnknown, async () => ({
         outcome: { outcome: 'rejected', reason: 'Nova Code does not support image generation yet.' },
@@ -511,7 +766,8 @@ export async function runAcpSubprocessPrompt(
   params: AcpSubprocessRunParams,
   onEvent: AcpEventHandler,
   onConfigSync?: SessionConfigSyncHandler,
-  onRequestPermission?: AcpPermissionHandler
+  onRequestPermission?: AcpPermissionHandler,
+  onAskQuestion?: AcpAskQuestionHandler
 ): Promise<AcpSubprocessRunResult> {
   const { command, args, cwd, novaSessionId, acpSessionId, promptText, logTag } = params;
   const env = { ...process.env, ...config.agentEnv() };
@@ -570,7 +826,8 @@ export async function runAcpSubprocessPrompt(
     onConfigSync,
     params.cursorExtensions,
     () => sessionIdForCancel,
-    onRequestPermission
+    onRequestPermission,
+    onAskQuestion
   );
 
   const killProc = () => {
