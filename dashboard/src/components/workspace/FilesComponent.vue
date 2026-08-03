@@ -33,6 +33,7 @@ const selectedPath = ref<string | null>(null);
 const fileContent = ref<string>('');
 const fileEncoding = ref<'utf8' | 'base64'>('utf8');
 const imageObjectUrl = ref<string | null>(null);
+const htmlPreviewObjectUrl = ref<string | null>(null);
 const bListLoading = ref<boolean>(false);
 const loadingPath = ref<string | null>(null);
 const bReadLoading = ref<boolean>(false);
@@ -42,6 +43,8 @@ const editorContainerRef = ref<HTMLDivElement | null>(null);
 const bSaving = ref<boolean>(false);
 const saveResult = ref<'success' | 'error' | null>(null);
 const bFullscreen = ref<boolean>(false);
+/** Edit vs rendered preview for markdown / HTML files in the files pane. */
+const contentViewMode = ref<'edit' | 'preview'>('edit');
 const bCreatingFile = ref<boolean>(false);
 const bCreatingFileLoading = ref<boolean>(false);
 const newFilePath = ref<string>('');
@@ -56,6 +59,7 @@ const EXT_LANG: Record<string, string> = {
   tsx: 'typescript',
   json: 'json',
   html: 'html',
+  htm: 'html',
   css: 'css',
   scss: 'scss',
   md: 'markdown',
@@ -140,6 +144,17 @@ const selectedPathFileName = computed((): string => {
 const bIsMarkdownFile = computed((): boolean => {
   return selectedPath.value?.toLowerCase().endsWith('.md') ?? false;
 });
+const bIsHtmlFile = computed((): boolean => {
+  if (!selectedPath.value) {
+    return false;
+  }
+  const extension = extensionForPath(selectedPath.value);
+  return extension === 'html' || extension === 'htm';
+});
+/** Markdown or HTML: header gets an edit/preview toggle. */
+const bIsPreviewableMarkup = computed((): boolean => {
+  return bIsMarkdownFile.value || bIsHtmlFile.value;
+});
 const bIsImageFile = computed((): boolean => {
   return selectedPath.value !== null && extensionForPath(selectedPath.value) in IMAGE_MIME;
 });
@@ -151,9 +166,15 @@ const bIsBinaryFile = computed((): boolean => {
 const bIsEditorFile = computed((): boolean => {
   return !bIsImageFile.value && !bIsBinaryFile.value;
 });
-/** Text files that use Monaco (markdown uses MdEditor instead). */
+const bMarkdownPreview = computed((): boolean => {
+  return bIsMarkdownFile.value && contentViewMode.value === 'preview';
+});
+const bHtmlPreview = computed((): boolean => {
+  return bIsHtmlFile.value && contentViewMode.value === 'preview';
+});
+/** Text files that use Monaco (markdown uses MdEditor; HTML preview uses a sandboxed iframe). */
 const bIsMonacoFile = computed((): boolean => {
-  return bIsEditorFile.value && !bIsMarkdownFile.value;
+  return bIsEditorFile.value && !bIsMarkdownFile.value && !bHtmlPreview.value;
 });
 const bIsDarkTheme = computed((): boolean => {
   const themeId = resolveStoredThemeId(localStorage.getItem('theme') ?? DEFAULT_THEME_ID);
@@ -418,6 +439,19 @@ watch([fileContent, fileEncoding, selectedPath], () => {
   }
 });
 
+// Sandboxed HTML preview: blob URL + allow-scripts without allow-same-origin
+// so mockup JS can run but cannot touch the app origin / token storage.
+watch([fileContent, fileEncoding, selectedPath, bHtmlPreview], () => {
+  if (htmlPreviewObjectUrl.value) {
+    URL.revokeObjectURL(htmlPreviewObjectUrl.value);
+    htmlPreviewObjectUrl.value = null;
+  }
+  if (bHtmlPreview.value && fileEncoding.value === 'utf8' && fileContent.value !== '') {
+    const blob = new Blob([fileContent.value], { type: 'text/html;charset=utf-8' });
+    htmlPreviewObjectUrl.value = URL.createObjectURL(blob);
+  }
+});
+
 watch(
   () => props.workspaceId,
   () => {
@@ -439,6 +473,10 @@ onUnmounted((): void => {
   if (imageObjectUrl.value) {
     URL.revokeObjectURL(imageObjectUrl.value);
     imageObjectUrl.value = null;
+  }
+  if (htmlPreviewObjectUrl.value) {
+    URL.revokeObjectURL(htmlPreviewObjectUrl.value);
+    htmlPreviewObjectUrl.value = null;
   }
 });
 </script>
@@ -580,6 +618,35 @@ onUnmounted((): void => {
           </span>
         </div>
         <div class="flex items-center gap-1">
+          <div
+            v-if="bIsPreviewableMarkup"
+            class="button-select-small h-8! p-0.5! mr-1"
+            role="group"
+            aria-label="View mode"
+          >
+            <button
+              type="button"
+              class="button is-icon"
+              :class="{ 'is-active': contentViewMode === 'edit' }"
+              aria-label="Edit"
+              :aria-pressed="contentViewMode === 'edit'"
+              title="Edit"
+              @click="contentViewMode = 'edit'"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            </button>
+            <button
+              type="button"
+              class="button is-icon"
+              :class="{ 'is-active': contentViewMode === 'preview' }"
+              aria-label="Preview"
+              :aria-pressed="contentViewMode === 'preview'"
+              title="Preview"
+              @click="contentViewMode = 'preview'"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
           <button
             v-if="selectedPath"
             type="button"
@@ -624,8 +691,18 @@ onUnmounted((): void => {
           class="flex-1 min-h-[200px]"
           language="en-US"
           :theme="bIsDarkTheme ? 'dark' : 'light'"
-          :preview="false"
-          :toolbars-exclude="['github', 'save']"
+          :preview="bMarkdownPreview"
+          :preview-only="bMarkdownPreview"
+          :toolbars="bMarkdownPreview ? [] : undefined"
+          :toolbars-exclude="['github', 'save', 'preview', 'previewOnly', 'htmlPreview']"
+        />
+        <iframe
+          v-else-if="bHtmlPreview"
+          :src="htmlPreviewObjectUrl ?? undefined"
+          class="flex-1 min-h-[200px] w-full border-0 bg-white"
+          title="HTML preview"
+          sandbox="allow-scripts"
+          referrerpolicy="no-referrer"
         />
         <div
           v-else-if="bIsImageFile"
