@@ -9,6 +9,9 @@ import 'md-editor-v3/lib/style.css';
 import { filesApi } from '@/classes/api';
 import { DEFAULT_THEME_ID, resolveStoredThemeId, themes } from '@/lib/themes';
 
+// composables
+import { usePaneLayout } from '@/composables/usePaneLayout';
+
 // types
 import type { FileEntry } from '@/classes/api';
 
@@ -25,6 +28,15 @@ const props = defineProps<{
   workspaceId: string;
   active: boolean;
 }>();
+
+const {
+  bWidePane,
+  bSidePanelOpen,
+  bSidePanelToggleVisible,
+  setSidePanelOpen,
+  listVisible,
+  detailVisible
+} = usePaneLayout('novacode:filesSidePanel');
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const entriesByPath = ref<Record<string, FileEntry[]>>({});
@@ -181,6 +193,9 @@ const bIsDarkTheme = computed((): boolean => {
   const theme = themes.find((themeOption) => themeOption.id === themeId);
   return theme?.dark ?? false;
 });
+
+const bShowFileTree = computed((): boolean => listVisible(selectedPath.value !== null));
+const bShowEditor = computed((): boolean => detailVisible(selectedPath.value !== null));
 
 // -------------------------------------------------- Methods --------------------------------------------------
 const loadList = async (path: string): Promise<void> => {
@@ -483,11 +498,12 @@ onUnmounted((): void => {
 
 <template>
   <div class="flex h-full min-h-0" :class="bFullscreen ? 'fixed inset-0 z-50 top-0 left-0 ' : ''">
-    <!-- File tree: full width on mobile (shown when no file selected), sidebar on desktop -->
+    <!-- File tree: full width on narrow; fixed sidebar on wide (foldable / tablet+) -->
     <div
-      class="shrink-0 border-border flex-col overflow-hidden w-full md:w-64 bg-surface"
+      v-show="bShowFileTree"
+      class="shrink-0 border-border flex flex-col overflow-hidden bg-surface"
       :class="[
-        selectedPath !== null ? 'hidden md:flex' : 'flex',
+        bWidePane ? 'w-64' : 'w-full',
         !bFullscreen ? 'mr-2 rounded-md border' : ''
       ]"
     >
@@ -511,6 +527,17 @@ onUnmounted((): void => {
           >
             <svg v-if="bFullscreen" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3"/></svg>
             <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg>
+          </button>
+
+          <button
+            v-if="bSidePanelToggleVisible"
+            type="button"
+            class="button is-icon is-transparent h-8!"
+            aria-label="Hide file list"
+            title="Hide file list"
+            @click="setSidePanelOpen(false)"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M14 9l-3 3 3 3"/></svg>
           </button>
         </div>
       </div>
@@ -588,33 +615,39 @@ onUnmounted((): void => {
       </div>
     </div>
 
-    <!-- Editor area: full width on mobile (shown when file selected), flex-1 on desktop -->
+    <!-- Editor area: full width on narrow when a file is open; always present on wide -->
     <div
-      class="flex-1 flex-col min-w-0 border border-border rounded-md bg-surface overflow-hidden"
-      :class="selectedPath !== null ? 'flex' : 'hidden md:flex'"
+      v-show="bShowEditor"
+      class="flex-1 flex flex-col min-w-0 border border-border rounded-md bg-surface overflow-hidden"
     >
       <div
         class="shrink-0 px-3 py-1.5 bg-surface flex items-center justify-between gap-2 h-11.5! border-b border-border"
       >
         <div class="flex items-center gap-2 min-w-0 flex-1 h-8">
-          <!-- Back to file list on mobile -->
           <button
+            v-if="bSidePanelToggleVisible && !bSidePanelOpen"
             type="button"
-            class="button is-icon is-transparent md:hidden! h-8! w-8!"
+            class="button is-icon is-transparent h-8! w-8!"
+            aria-label="Show file list"
+            title="Show file list"
+            @click="setSidePanelOpen(true)"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M11 9l3 3-3 3"/></svg>
+          </button>
+          <!-- Back to file list on narrow viewports -->
+          <button
+            v-if="!bWidePane"
+            type="button"
+            class="button is-icon is-transparent h-8! w-8!"
             aria-label="Back to file list"
             @click="selectedPath = null"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           </button>
           <span
-            class="text-xs text-text-text-primary font-mono mt-1 truncate min-w-0 hidden md:block"
+            class="text-xs text-text-text-primary font-mono mt-1 truncate min-w-0"
           >
-            {{ selectedPath ?? 'Select a file' }}
-          </span>
-          <span
-            class="text-xs text-text-text-primary font-mono mt-1 truncate min-w-0 block md:hidden"
-          >
-            {{ selectedPathFileName }}
+            {{ bWidePane ? (selectedPath ?? 'Select a file') : selectedPathFileName }}
           </span>
         </div>
         <div class="flex items-center gap-1">
@@ -671,7 +704,14 @@ onUnmounted((): void => {
           </button>
         </div>
       </div>
-      <div v-if="readError" class="message is-error">
+      <div
+        v-if="!selectedPath"
+        class="flex-1 flex flex-col items-center justify-center gap-2 px-6 text-center text-sm text-text-muted"
+      >
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="opacity-50"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <p>Select a file to view or edit</p>
+      </div>
+      <div v-else-if="readError" class="message is-error">
         {{ readError }}
       </div>
       <div v-else class="flex-1 flex flex-col min-h-0 relative">

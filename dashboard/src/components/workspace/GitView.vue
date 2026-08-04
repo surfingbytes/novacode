@@ -19,6 +19,9 @@ import {
 // classes
 import { gitApi, type GitBranch, type GitFile, type GitRepoStatus } from '@/classes/api';
 
+// composables
+import { usePaneLayout } from '@/composables/usePaneLayout';
+
 // components
 import BaseModal from '@/components/BaseModal.vue';
 import ModalHeader from '@/components/ModalHeader.vue';
@@ -39,6 +42,15 @@ const props = withDefaults(
 const emit = defineEmits<{
   'update:selectedFilePath': [path: string | null];
 }>();
+
+const {
+  bWidePane,
+  bSidePanelOpen,
+  bSidePanelToggleVisible,
+  setSidePanelOpen,
+  listVisible,
+  detailVisible
+} = usePaneLayout('novacode:gitSidePanel');
 
 // -------------------------------------------------- Types --------------------------------------------------
 // (none)
@@ -95,6 +107,8 @@ let gitActionResultTimer: ReturnType<typeof setTimeout> | null = null;
 
 // -------------------------------------------------- Computed --------------------------------------------------
 const diffLines = computed((): string[] => diffContent.value.split('\n'));
+const bShowList = computed((): boolean => listVisible(selectedFile.value !== null));
+const bShowDetail = computed((): boolean => detailVisible(selectedFile.value !== null));
 const allSelected = computed((): boolean => {
   const list = filesInSelectedRepo.value;
   return (
@@ -816,9 +830,13 @@ onUnmounted((): void => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full overflow-hidden bg-bg">
-    <!-- File list -->
-    <template v-if="!selectedFile">
+  <div class="flex h-full min-h-0 overflow-hidden bg-bg">
+    <!-- Changed-files list: full width on narrow; sidebar on wide (foldable / tablet+) -->
+    <div
+      v-show="bShowList"
+      class="flex flex-col min-h-0 overflow-hidden shrink-0"
+      :class="bWidePane ? 'w-[min(22rem,40%)] border-r border-fg/[0.08]' : 'w-full'"
+    >
       <div
         class="flex flex-col gap-2 px-3 py-2 border-b border-fg/[0.08] flex-shrink-0"
       >
@@ -915,14 +933,26 @@ onUnmounted((): void => {
               >
             </span>
           </div>
-          <button
-            class="text-text-muted hover:text-text-primary transition-colors px-1 flex-shrink-0"
-            :class="{ 'animate-spin': bIsLoading }"
-            title="Refresh"
-            @click="refresh"
-          >
-            <RefreshCw :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
-          </button>
+          <div class="flex items-center gap-1 flex-shrink-0">
+            <button
+              class="text-text-muted hover:text-text-primary transition-colors px-1"
+              :class="{ 'animate-spin': bIsLoading }"
+              title="Refresh"
+              @click="refresh"
+            >
+              <RefreshCw :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
+            </button>
+            <button
+              v-if="bSidePanelToggleVisible"
+              type="button"
+              class="text-text-muted hover:text-text-primary transition-colors px-1"
+              title="Hide file list"
+              aria-label="Hide file list"
+              @click="setSidePanelOpen(false)"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M14 9l-3 3 3 3"/></svg>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -976,11 +1006,14 @@ onUnmounted((): void => {
         <p class="text-text-muted/50 text-xs">Switch repository above to see other files</p>
       </div>
 
-      <div v-else class="flex-1 overflow-y-auto">
+      <div v-else class="flex-1 overflow-y-auto min-h-0">
         <div
           v-for="f in filesInSelectedRepo"
           :key="fileKey(f)"
           class="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-fg/[0.04] transition-colors text-left border-b border-fg/[0.03]"
+          :class="
+            selectedFile && fileKey(selectedFile) === fileKey(f) ? 'bg-primary/15' : ''
+          "
         >
           <button
             class="flex items-center justify-center w-4 h-4 rounded border transition-colors flex-shrink-0"
@@ -999,10 +1032,22 @@ onUnmounted((): void => {
               :class="statusBadgeClass(f.status)"
               >{{ f.status || '?' }}</span
             >
-            <span class="text-xs text-text-primary truncate font-mono flex-1 text-left">{{
-              f.file
-            }}</span>
-            <ChevronRight :size="14" :stroke-width="1.6" class="select-none flex-shrink-0 text-text-muted/50" aria-hidden="true" />
+            <span
+              class="text-xs truncate font-mono flex-1 text-left"
+              :class="
+                selectedFile && fileKey(selectedFile) === fileKey(f)
+                  ? 'text-primary'
+                  : 'text-text-primary'
+              "
+              >{{ f.file }}</span
+            >
+            <ChevronRight
+              v-if="!bWidePane"
+              :size="14"
+              :stroke-width="1.6"
+              class="select-none flex-shrink-0 text-text-muted/50"
+              aria-hidden="true"
+            />
           </button>
           <button
             class="flex-shrink-0 text-text-muted hover:text-destructive transition-colors p-1 disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1192,37 +1237,63 @@ onUnmounted((): void => {
           </p>
         </template>
       </div>
-    </template>
+    </div>
 
-    <!-- Diff view -->
-    <template v-else>
+    <!-- Diff pane: always on wide; replaces list on narrow when a file is open -->
+    <div
+      v-show="bShowDetail"
+      class="flex flex-col min-h-0 min-w-0 overflow-hidden"
+      :class="bWidePane ? 'flex-1' : 'w-full flex-1'"
+    >
       <div
         class="flex items-center gap-2 px-3 py-2 border-b border-fg/[0.08] flex-shrink-0 min-w-0"
       >
         <button
+          v-if="bSidePanelToggleVisible && !bSidePanelOpen"
+          type="button"
+          class="flex-shrink-0 h-8 px-2 rounded-lg border border-fg/10 text-text-muted hover:text-text-primary hover:bg-fg/[0.04] transition-colors"
+          title="Show file list"
+          aria-label="Show file list"
+          @click="setSidePanelOpen(true)"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M11 9l3 3-3 3"/></svg>
+        </button>
+        <button
+          v-if="!bWidePane && selectedFile"
           class="flex-shrink-0 text-xs text-primary hover:text-primary-hover transition-colors"
           @click="clearSelectedFile"
         >
           <ArrowLeft :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
           Back
         </button>
-        <span
-          class="flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded font-mono"
-          :class="statusBadgeClass(selectedFile.status)"
-          >{{ selectedFile.status || '?' }}</span
-        >
-        <span class="text-xs text-text-muted font-mono truncate">{{ selectedFile.file }}</span>
-        <button
-          class="ml-auto flex-shrink-0 text-xs text-destructive hover:text-destructive/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          :disabled="bDiscarding"
-          @click="discardFiles([selectedFile.file], selectedFile.repo)"
-        >
-          Discard
-        </button>
+        <template v-if="selectedFile">
+          <span
+            class="flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded font-mono"
+            :class="statusBadgeClass(selectedFile.status)"
+            >{{ selectedFile.status || '?' }}</span
+          >
+          <span class="text-xs text-text-muted font-mono truncate">{{ selectedFile.file }}</span>
+          <button
+            class="ml-auto flex-shrink-0 text-xs text-destructive hover:text-destructive/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            :disabled="bDiscarding"
+            @click="discardFiles([selectedFile.file], selectedFile.repo)"
+          >
+            Discard
+          </button>
+        </template>
+        <span v-else class="text-xs text-text-muted truncate">Select a file to view diff</span>
+      </div>
+
+      <div
+        v-if="!selectedFile"
+        class="flex flex-1 flex-col items-center justify-center gap-1 px-6 text-center"
+      >
+        <p class="text-text-muted text-sm">Select a changed file</p>
+        <p class="text-text-muted/50 text-xs">Diff preview appears here</p>
       </div>
 
       <!-- Diff skeleton -->
-      <div v-if="bDiffLoading" class="flex-1 overflow-auto px-3 py-2 space-y-1">
+      <div v-else-if="bDiffLoading" class="flex-1 overflow-auto px-3 py-2 space-y-1">
         <div class="h-3 rounded bg-fg/10 animate-pulse w-full max-w-[280px]" />
         <div class="h-3 rounded bg-fg/10 animate-pulse w-full max-w-[180px]" />
         <div class="h-3 rounded bg-fg/10 animate-pulse w-full" />
@@ -1254,7 +1325,7 @@ onUnmounted((): void => {
           {{ line || '\u00a0' }}
         </div>
       </div>
-    </template>
+    </div>
   </div>
 
   <BaseModal
