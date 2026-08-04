@@ -2,7 +2,7 @@
 // node_modules
 import { ref, computed, watch, onMounted, onUnmounted, shallowRef, nextTick } from 'vue';
 import type * as Monaco from 'monaco-editor';
-import { MdEditor } from 'md-editor-v3';
+import { MdEditor, MdPreview } from 'md-editor-v3';
 import 'md-editor-v3/lib/style.css';
 
 // classes
@@ -685,15 +685,20 @@ onUnmounted((): void => {
           />
           Loading file…
         </div>
+        <MdPreview
+          v-if="bIsMarkdownFile && bMarkdownPreview"
+          :model-value="fileContent"
+          class="flex-1 min-h-[200px] overflow-auto"
+          language="en-US"
+          :theme="bIsDarkTheme ? 'dark' : 'light'"
+        />
         <MdEditor
-          v-if="bIsMarkdownFile"
+          v-else-if="bIsMarkdownFile"
           v-model="fileContent"
           class="flex-1 min-h-[200px]"
           language="en-US"
           :theme="bIsDarkTheme ? 'dark' : 'light'"
-          :preview="bMarkdownPreview"
-          :preview-only="bMarkdownPreview"
-          :toolbars="bMarkdownPreview ? [] : undefined"
+          :preview="false"
           :toolbars-exclude="['github', 'save', 'preview', 'previewOnly', 'htmlPreview']"
         />
         <iframe
