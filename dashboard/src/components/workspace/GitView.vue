@@ -1092,10 +1092,53 @@ onUnmounted((): void => {
               </button>
             </div>
           </template>
-          <div class="flex items-center gap-2">
+          <!-- Wide split: Commit full-width, Push/Discard share a row. Laptop: one even row. -->
+          <div v-if="bWidePane" class="flex flex-col gap-2">
             <button
               v-if="files.length"
-              class="text-sm px-3 py-2 btn-primary-solid rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              class="h-9 w-full text-sm px-3 btn-primary-solid rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5"
+              :disabled="!canCommit"
+              @click="commitChanges(repos[0].repo)"
+            >
+              <div
+                v-if="committingRepo === repos[0].repo"
+                class="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin"
+              ></div>
+              <Check v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
+              Commit ({{ selectedFiles.size }})
+            </button>
+            <div class="flex gap-2 w-full min-w-0">
+              <button
+                class="h-9 flex-1 text-sm px-3 text-text-primary border border-fg/10 hover:border-primary/30 hover:bg-primary/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5 min-w-0"
+                :disabled="!canPushSingleRepo"
+                @click="pushChanges(repos[0].repo)"
+              >
+                <div
+                  v-if="pushingRepo === repos[0].repo"
+                  class="w-3 h-3 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
+                ></div>
+                <CloudUpload v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
+                Push<template v-if="repos[0].aheadCount > 0"> ({{ repos[0].aheadCount }})</template>
+              </button>
+              <button
+                v-if="files.length"
+                class="h-9 flex-1 text-sm px-3 text-destructive border border-destructive/20 hover:border-destructive/40 hover:bg-destructive/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5 min-w-0"
+                :disabled="!canDiscardSelected"
+                @click="discardFiles(selectedFilesInActiveRepo, repos[0].repo)"
+              >
+                <div
+                  v-if="bDiscarding"
+                  class="w-3 h-3 border border-destructive/30 border-t-destructive rounded-full animate-spin"
+                ></div>
+                <Trash2 v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
+                Discard ({{ selectedFilesInActiveRepo.length }})
+              </button>
+            </div>
+          </div>
+          <div v-else class="flex flex-wrap gap-2">
+            <button
+              v-if="files.length"
+              class="h-9 text-sm px-3 btn-primary-solid rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5"
               :disabled="!canCommit"
               @click="commitChanges(repos[0].repo)"
             >
@@ -1107,7 +1150,7 @@ onUnmounted((): void => {
               Commit ({{ selectedFiles.size }})
             </button>
             <button
-              class="text-sm px-3 py-2 text-text-primary border border-fg/10 hover:border-primary/30 hover:bg-primary/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              class="h-9 text-sm px-3 text-text-primary border border-fg/10 hover:border-primary/30 hover:bg-primary/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5"
               :disabled="!canPushSingleRepo"
               @click="pushChanges(repos[0].repo)"
             >
@@ -1120,7 +1163,7 @@ onUnmounted((): void => {
             </button>
             <button
               v-if="files.length"
-              class="text-sm px-3 py-2 text-destructive border border-destructive/20 hover:border-destructive/40 hover:bg-destructive/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              class="h-9 text-sm px-3 text-destructive border border-destructive/20 hover:border-destructive/40 hover:bg-destructive/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5"
               :disabled="!canDiscardSelected"
               @click="discardFiles(selectedFilesInActiveRepo, repos[0].repo)"
             >
@@ -1178,10 +1221,52 @@ onUnmounted((): void => {
               </button>
             </div>
           </template>
-          <div class="flex items-center gap-2 flex-wrap">
+          <div v-if="bWidePane" class="flex flex-col gap-2">
             <button
               v-if="activeRepo.files.length"
-              class="text-sm px-3 py-2 btn-primary-solid rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              class="h-9 w-full text-sm px-3 btn-primary-solid rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5"
+              :disabled="!canCommitActiveRepo"
+              @click="commitChanges(activeRepo.repo)"
+            >
+              <div
+                v-if="committingRepo === activeRepo.repo"
+                class="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin"
+              ></div>
+              <Check v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
+              Commit ({{ selectedCountInRepo(activeRepo.repo) }})
+            </button>
+            <div class="flex gap-2 w-full min-w-0">
+              <button
+                class="h-9 flex-1 text-sm px-3 text-text-primary border border-fg/10 hover:border-primary/30 hover:bg-primary/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5 min-w-0"
+                :disabled="!canPushActiveRepo"
+                @click="pushChanges(activeRepo.repo)"
+              >
+                <div
+                  v-if="pushingRepo === activeRepo.repo"
+                  class="w-3 h-3 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
+                ></div>
+                <CloudUpload v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
+                Push<template v-if="activeRepo.aheadCount > 0"> ({{ activeRepo.aheadCount }})</template>
+              </button>
+              <button
+                v-if="activeRepo.files.length"
+                class="h-9 flex-1 text-sm px-3 text-destructive border border-destructive/20 hover:border-destructive/40 hover:bg-destructive/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5 min-w-0"
+                :disabled="!canDiscardSelected"
+                @click="discardFiles(selectedFilesInActiveRepo, activeRepo.repo)"
+              >
+                <div
+                  v-if="bDiscarding"
+                  class="w-3 h-3 border border-destructive/30 border-t-destructive rounded-full animate-spin"
+                ></div>
+                <Trash2 v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
+                Discard ({{ selectedFilesInActiveRepo.length }})
+              </button>
+            </div>
+          </div>
+          <div v-else class="flex flex-wrap gap-2">
+            <button
+              v-if="activeRepo.files.length"
+              class="h-9 text-sm px-3 btn-primary-solid rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5"
               :disabled="!canCommitActiveRepo"
               @click="commitChanges(activeRepo.repo)"
             >
@@ -1193,7 +1278,7 @@ onUnmounted((): void => {
               Commit ({{ selectedCountInRepo(activeRepo.repo) }})
             </button>
             <button
-              class="text-sm px-3 py-2 text-text-primary border border-fg/10 hover:border-primary/30 hover:bg-primary/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              class="h-9 text-sm px-3 text-text-primary border border-fg/10 hover:border-primary/30 hover:bg-primary/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5"
               :disabled="!canPushActiveRepo"
               @click="pushChanges(activeRepo.repo)"
             >
@@ -1206,7 +1291,7 @@ onUnmounted((): void => {
             </button>
             <button
               v-if="activeRepo.files.length"
-              class="text-sm px-3 py-2 text-destructive border border-destructive/20 hover:border-destructive/40 hover:bg-destructive/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+              class="h-9 text-sm px-3 text-destructive border border-destructive/20 hover:border-destructive/40 hover:bg-destructive/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5"
               :disabled="!canDiscardSelected"
               @click="discardFiles(selectedFilesInActiveRepo, activeRepo.repo)"
             >

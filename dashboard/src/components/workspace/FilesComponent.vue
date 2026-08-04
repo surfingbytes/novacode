@@ -186,7 +186,15 @@ const bHtmlPreview = computed((): boolean => {
 });
 /** Text files that use Monaco (markdown uses MdEditor; HTML preview uses a sandboxed iframe). */
 const bIsMonacoFile = computed((): boolean => {
-  return bIsEditorFile.value && !bIsMarkdownFile.value && !bHtmlPreview.value;
+  // Require a selection — the Monaco host is only mounted when a file is open.
+  // Without this, bIsMonacoFile stays true for the empty state and selecting a
+  // file never re-triggers the init watch.
+  return (
+    selectedPath.value !== null &&
+    bIsEditorFile.value &&
+    !bIsMarkdownFile.value &&
+    !bHtmlPreview.value
+  );
 });
 const bIsDarkTheme = computed((): boolean => {
   const themeId = resolveStoredThemeId(localStorage.getItem('theme') ?? DEFAULT_THEME_ID);
@@ -438,9 +446,20 @@ watch(
     if (props.active && editorContainerRef.value && !editor) {
       await initEditor();
     }
+    editor?.layout();
   },
   { immediate: true }
 );
+
+// Selecting a file mounts the Monaco host; ensure layout after the pane sizes.
+watch(selectedPath, async (path) => {
+  if (!path || !bIsMonacoFile.value) return;
+  await nextTick();
+  if (props.active && editorContainerRef.value && !editor) {
+    await initEditor();
+  }
+  editor?.layout();
+});
 
 // Build/revoke the blob URL backing the image preview.
 watch([fileContent, fileEncoding, selectedPath], () => {

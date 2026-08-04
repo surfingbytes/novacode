@@ -39,6 +39,12 @@ function handleClose(): void {
 }
 
 function handleBrandClick(event: MouseEvent): void {
+  // Collapsed rail: logo expands the sidebar (Home is the nav item below).
+  if (bIsCollapsed.value) {
+    event.preventDefault();
+    emit('toggle-collapsed');
+    return;
+  }
   if (!bRailMode.value && props.isOpen) {
     if (route.path === '/') {
       event.preventDefault();
@@ -121,7 +127,13 @@ onBeforeUnmount(() => {
   >
     <!-- Brand -->
     <div class="sidebar__brand">
-      <RouterLink to="/" class="sidebar__logo-link" @click="handleBrandClick">
+      <RouterLink
+        to="/"
+        class="sidebar__logo-link"
+        :title="bIsCollapsed ? 'Expand sidebar' : undefined"
+        :aria-label="bIsCollapsed ? 'Expand sidebar' : 'Nova Code home'"
+        @click="handleBrandClick"
+      >
         <svg
           width="22"
           height="22"
@@ -262,31 +274,6 @@ onBeforeUnmount(() => {
 
     <!-- Settings + Account + theme pinned -->
     <div class="sidebar__footer">
-      <button
-        v-if="bRailMode && bIsCollapsed"
-        type="button"
-        class="sidebar__nav-item sidebar__footer-link"
-        aria-label="Expand sidebar"
-        title="Expand sidebar"
-        @click="emit('toggle-collapsed')"
-      >
-        <span class="sidebar__nav-bar" aria-hidden="true" />
-        <svg
-          width="15"
-          height="15"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.6"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          class="sidebar__nav-icon"
-          aria-hidden="true"
-        >
-          <rect x="3" y="3" width="18" height="18" rx="2" />
-          <path d="M9 3v18" />
-        </svg>
-      </button>
       <div class="sidebar__footer-row">
         <RouterLink
           to="/settings"
@@ -624,6 +611,17 @@ onBeforeUnmount(() => {
 
 .sidebar--collapsed .sidebar__footer {
   padding: 10px 8px;
+}
+
+.sidebar--collapsed .sidebar__footer-row {
+  justify-content: center;
+}
+
+.sidebar--collapsed .sidebar__footer-link {
+  flex: none;
+  width: 100%;
+  justify-content: center;
+  padding: 0;
 }
 
 @media (min-width: 37.5rem) {

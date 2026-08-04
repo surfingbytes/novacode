@@ -12,7 +12,7 @@ defineProps<{
 </script>
 
 <template>
-  <div class="h-full">
-    <FilesView :workspace-id="workspace.id" :active="true" />
+  <div class="h-full min-h-0 flex flex-col">
+    <FilesView class="flex-1 min-h-0" :workspace-id="workspace.id" :active="true" />
   </div>
 </template>

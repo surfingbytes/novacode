@@ -1156,6 +1156,7 @@ onUnmounted(() => {
       <!-- Files -->
       <FilesView
         v-if="activeTab === 'files'"
+        class="flex-1 min-h-0"
         :workspace-id="workspaceId"
         :active="activeTab === 'files'"
       />
