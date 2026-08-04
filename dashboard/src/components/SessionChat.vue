@@ -33,6 +33,7 @@ import {
 // composables
 import { useAgentOptions } from '@/composables/useAgentOptions';
 import { useChatSocket } from '@/composables/useChatSocket';
+import { usePaneLayout } from '@/composables/usePaneLayout';
 import { usePlanDocuments } from '@/composables/usePlanDocuments';
 import { useTodoList } from '@/composables/useTodoList';
 
@@ -384,6 +385,7 @@ const { selectedPlanId, planDocuments, selectedPlanDocument, bShowPlanTab } = pl
 
 // -------------------------------------------------- Todo list panel --------------------------------------------------
 const todoChecklistSvg = getToolIconSvg('checklist');
+const { bWidePane } = usePaneLayout();
 const todoList = useTodoList({ displayMessages, streamingDisplayItems });
 const {
   todoItems,
@@ -793,7 +795,8 @@ onUnmounted(() => {
       <!-- Chat -->
       <div
         v-show="activeTab === 'chat'"
-        class="flex-1 overflow-hidden flex flex-col min-h-0 lg:flex-row"
+        class="flex-1 overflow-hidden flex min-h-0"
+        :class="bWidePane ? 'flex-row' : 'flex-col'"
       >
         <div class="flex-1 min-w-0 flex flex-col min-h-0">
           <ChatMessageList
@@ -826,11 +829,10 @@ onUnmounted(() => {
             @question-response="chatSocket.sendQuestionResponse"
           />
 
-          <!-- Todo panel (mobile strip above the composer) -->
+          <!-- Todo panel (narrow: strip above the composer) -->
           <ChatTodoPanel
-            v-if="bAnyTodos"
+            v-if="bAnyTodos && !bWidePane"
             layout="strip"
-            class="lg:hidden"
             :todo-items="todoItems"
             :done-count="todoDoneCount"
             :b-running="bTodosRunning && bIsStreaming"
@@ -848,10 +850,10 @@ onUnmounted(() => {
             </span>
           </div>
 
-          <!-- Desktop: reopen chip when the todo panel is closed -->
+          <!-- Wide: reopen chip when the todo panel is closed -->
           <div
-            v-if="bAnyTodos && bTodoPanelClosed"
-            class="hidden lg:flex justify-end px-4 pb-1 shrink-0"
+            v-if="bAnyTodos && bTodoPanelClosed && bWidePane"
+            class="flex justify-end px-4 pb-1 shrink-0"
           >
             <button
               type="button"
@@ -909,11 +911,11 @@ onUnmounted(() => {
           />
         </div>
 
-        <!-- Todo panel (desktop right column) -->
+        <!-- Todo panel (wide: right column) -->
         <ChatTodoPanel
-          v-if="bAnyTodos && !bTodoPanelClosed"
+          v-if="bAnyTodos && !bTodoPanelClosed && bWidePane"
           layout="panel"
-          class="hidden lg:flex lg:w-80 xl:w-96 shrink-0"
+          class="flex w-80 xl:w-96 shrink-0"
           :todo-items="todoItems"
           :done-count="todoDoneCount"
           :b-running="bTodosRunning && bIsStreaming"

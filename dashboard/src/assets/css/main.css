@@ -22,6 +22,8 @@
     'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
     sans-serif;
   --font-family-mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+  /* Foldable / tablet+ rail & master-detail — keep in sync with PANE_LAYOUT_MIN_WIDTH */
+  --breakpoint-pane: 37.5rem;
 }
 
 /* Design token fallbacks (overridden at runtime by applyTheme) */

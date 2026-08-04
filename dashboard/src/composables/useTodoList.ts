@@ -1,13 +1,16 @@
 // node_modules
 import { computed, ref, type ComputedRef } from 'vue';
 
+// constants
+import { PANE_LAYOUT_MIN_WIDTH } from '@/constants/layout';
+
 // utils
 import type { DisplayItem, TodoDisplayItem } from '@/utils/chatDisplayItems';
 
 /**
  * Derives the agent's current todo list from chat display items (live stream +
  * history) and owns the ChatTodoPanel UI state: bi-state expand toggle
- * (collapsed ↔ full, mobile strip only) and the desktop close/reopen toggle,
+ * (collapsed ↔ full, narrow strip only) and the wide-pane close/reopen toggle,
  * both persisted in localStorage. Mirrors the usePlanDocuments pattern — state
  * is derived, never stored, so it works for live runs and history replays
  * alike.
@@ -36,11 +39,11 @@ function readInitialPanelState(): TodoPanelState {
   } catch {
     // ignore quota / private mode
   }
-  const bDesktop =
+  const bWidePane =
     typeof window !== 'undefined' &&
     typeof window.matchMedia === 'function' &&
-    window.matchMedia('(min-width: 1024px)').matches;
-  return bDesktop ? 'full' : 'collapsed';
+    window.matchMedia(`(min-width: ${PANE_LAYOUT_MIN_WIDTH}px)`).matches;
+  return bWidePane ? 'full' : 'collapsed';
 }
 
 function readInitialClosed(): boolean {

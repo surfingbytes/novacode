@@ -4,7 +4,11 @@ import { useRoute } from 'vue-router';
 import NavSidebar from '@/components/NavSidebar.vue';
 import NavTopBar from '@/components/NavTopBar.vue';
 import GlobalSearchModal from '@/components/GlobalSearchModal.vue';
-import { APP_NAV_TOGGLE_KEY, FULL_HEIGHT_ROUTE_NAMES } from '@/constants/layout';
+import {
+  APP_NAV_TOGGLE_KEY,
+  FULL_HEIGHT_ROUTE_NAMES,
+  PANE_LAYOUT_MIN_WIDTH
+} from '@/constants/layout';
 const SIDEBAR_COLLAPSED_KEY = 'sidebarCollapsed';
 
 const route = useRoute();
@@ -34,9 +38,9 @@ function closeSidebar(): void {
 }
 
 function toggleCollapsed(): void {
-  // On desktop: toggle collapsed rail
-  // On mobile: toggle open/close
-  if (window.innerWidth >= 1024) {
+  // Fold / tablet / desktop: toggle icon rail ↔ expanded
+  // Phone: toggle drawer open/close
+  if (window.innerWidth >= PANE_LAYOUT_MIN_WIDTH) {
     bSidebarCollapsed.value = !bSidebarCollapsed.value;
   } else {
     toggleSidebar();
@@ -80,6 +84,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', handleKeyDown); })
       :collapsed="bSidebarCollapsed"
       @close="closeSidebar"
       @search="handleMobileSearch"
+      @toggle-collapsed="toggleCollapsed"
     />
 
     <!-- Main content -->

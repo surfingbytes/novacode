@@ -18,7 +18,7 @@ const props = withDefaults(
     bLoading?: boolean;
     archived?: boolean;
     bShowSidebarToggle?: boolean;
-    /** Show the lg:hidden app-nav button (uses the injected app-nav toggle) */
+    /** Show the phone-only app-nav button (uses the injected app-nav toggle) */
     showAppMenu?: boolean;
     /** Lowercase noun used in action tooltips, e.g. 'session' / 'orchestrator' */
     entityLabel?: string;
@@ -116,7 +116,7 @@ onUnmounted(() => {
         <button
           v-if="showAppMenu && toggleAppNav"
           type="button"
-          class="button is-transparent is-icon mr-1 lg:hidden! shrink-0"
+          class="button is-transparent is-icon mr-1 pane:hidden! shrink-0"
           title="App menu"
           aria-label="App menu"
           @click="toggleAppNav()"

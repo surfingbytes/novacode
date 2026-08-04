@@ -3,6 +3,7 @@ import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import ThemeToggleButton from '@/components/ThemeToggleButton.vue';
+import { PANE_LAYOUT_MIN_WIDTH } from '@/constants/layout';
 import { agentTypeShortLabel } from '@/utils/agentTypeMeta';
 import { sessionStatusDotStyle, workspaceColor } from '@/utils/workspaceColor';
 import type { Workspace } from '@/@types/index';
@@ -18,13 +19,16 @@ const props = withDefaults(
 const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'search'): void;
+  (e: 'toggle-collapsed'): void;
 }>();
 
 const route = useRoute();
 const workspacesStore = useWorkspacesStore();
 
-const bIsCollapsed = computed(() => props.collapsed && windowWidth.value > 1024);
 const windowWidth = ref(window.innerWidth);
+/** Persistent nav rail (foldable / tablet+), vs phone drawer. */
+const bRailMode = computed(() => windowWidth.value >= PANE_LAYOUT_MIN_WIDTH);
+const bIsCollapsed = computed(() => props.collapsed && bRailMode.value);
 
 function onWindowResize(): void {
   windowWidth.value = window.innerWidth;
@@ -35,14 +39,16 @@ function handleClose(): void {
 }
 
 function handleBrandClick(event: MouseEvent): void {
-  if (windowWidth.value <= 1024 && props.isOpen) {
+  if (!bRailMode.value && props.isOpen) {
     if (route.path === '/') {
       event.preventDefault();
     }
     handleClose();
     return;
   }
-  handleClose();
+  if (!bRailMode.value) {
+    handleClose();
+  }
 }
 
 const navItems = [
@@ -97,18 +103,18 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <!-- Mobile backdrop -->
+  <!-- Phone drawer backdrop -->
   <div
     v-if="isOpen"
-    class="lg:hidden fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm transition-opacity duration-200"
+    class="pane:hidden fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm transition-opacity duration-200"
     aria-hidden="true"
     @click="handleClose"
   />
 
   <aside
-    class="sidebar flex flex-col fixed lg:relative inset-y-0 left-0 z-[70] transition-all duration-200 ease-out"
+    class="sidebar flex flex-col fixed pane:relative inset-y-0 left-0 z-[70] transition-all duration-200 ease-out"
     :class="[
-      isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
+      isOpen || bRailMode ? 'translate-x-0' : '-translate-x-full',
       bIsCollapsed ? 'sidebar--collapsed' : 'sidebar--expanded'
     ]"
     aria-label="Main navigation"
@@ -145,9 +151,32 @@ onBeforeUnmount(() => {
         <span v-if="!bIsCollapsed" class="sidebar__wordmark">Nova Code</span>
       </RouterLink>
       <button
-        v-if="!bIsCollapsed && windowWidth <= 1024"
+        v-if="bRailMode && !bIsCollapsed"
         type="button"
-        class="sidebar__close lg:hidden"
+        class="sidebar__collapse-toggle"
+        aria-label="Collapse sidebar"
+        title="Collapse sidebar"
+        @click="emit('toggle-collapsed')"
+      >
+        <svg
+          width="15"
+          height="15"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <path d="M9 3v18" />
+        </svg>
+      </button>
+      <button
+        v-else-if="!bRailMode"
+        type="button"
+        class="sidebar__close pane:hidden"
         aria-label="Close menu"
         @click="handleClose"
       >
@@ -233,6 +262,31 @@ onBeforeUnmount(() => {
 
     <!-- Settings + Account + theme pinned -->
     <div class="sidebar__footer">
+      <button
+        v-if="bRailMode && bIsCollapsed"
+        type="button"
+        class="sidebar__nav-item sidebar__footer-link"
+        aria-label="Expand sidebar"
+        title="Expand sidebar"
+        @click="emit('toggle-collapsed')"
+      >
+        <span class="sidebar__nav-bar" aria-hidden="true" />
+        <svg
+          width="15"
+          height="15"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="sidebar__nav-icon"
+          aria-hidden="true"
+        >
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <path d="M9 3v18" />
+        </svg>
+      </button>
       <div class="sidebar__footer-row">
         <RouterLink
           to="/settings"
@@ -347,7 +401,8 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.sidebar__close {
+.sidebar__close,
+.sidebar__collapse-toggle {
   position: absolute;
   right: 10px;
   top: 50%;
@@ -367,7 +422,8 @@ onBeforeUnmount(() => {
     color 0.1s;
 }
 
-.sidebar__close:hover {
+.sidebar__close:hover,
+.sidebar__collapse-toggle:hover {
   background: var(--bg-hover);
   color: var(--fg);
 }
@@ -570,7 +626,7 @@ onBeforeUnmount(() => {
   padding: 10px 8px;
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 37.5rem) {
   .sidebar__footer-mobile {
     display: none;
   }

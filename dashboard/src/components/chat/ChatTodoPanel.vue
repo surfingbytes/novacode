@@ -3,10 +3,10 @@
  * Persistent todo panel for the chat tab — shows the agent's current todo list
  * (latest todowrite call, derived via useTodoList) instead of letting it scroll
  * away in the message stream. Two layouts:
- *  - 'strip': mobile — collapsible strip pinned above the composer; tapping the
- *    header toggles bi-state: collapsed (header + counter only) ↔ full list
- *  - 'panel': desktop — right-side column of the chat tab, always expanded;
- *    no collapse here, only closable (bClosable)
+ *  - 'strip': narrow viewports — collapsible strip pinned above the composer;
+ *    tapping the header toggles bi-state: collapsed ↔ full list
+ *  - 'panel': wide viewports (foldable / tablet+, >= PANE_LAYOUT_MIN_WIDTH) —
+ *    right-side column of the chat tab, always expanded; closable (bClosable)
  */
 
 // node_modules

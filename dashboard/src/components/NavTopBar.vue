@@ -47,10 +47,10 @@ function userInitial(): string {
       </svg>
     </button>
 
-    <!-- Mobile menu toggle (shows on small screens only, separate from collapse) -->
+    <!-- Phone drawer toggle (hidden once the persistent nav rail is active) -->
     <button
       type="button"
-      class="topbar__mobile-menu lg:hidden!"
+      class="topbar__mobile-menu pane:hidden!"
       aria-label="Toggle navigation menu"
       :aria-expanded="sidebarOpen"
       @click="onMenuClick"
@@ -254,6 +254,7 @@ function userInitial(): string {
   white-space: nowrap;
 }
 
+/* Full-height routes still hide the top bar below desktop; phone chrome below pane. */
 @media (max-width: 1023px) {
   .topbar.topbar--hide-mobile {
     display: none;
@@ -268,7 +269,10 @@ function userInitial(): string {
   .topbar__actions--hide-mobile {
     display: none;
   }
-  /* Hide desktop toggle on mobile, show hamburger instead */
+}
+
+/* Phone only: collapse control lives in the drawer; show hamburger instead */
+@media (max-width: 37.49rem) {
   .topbar__toggle {
     display: none;
   }

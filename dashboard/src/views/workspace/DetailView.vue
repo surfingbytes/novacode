@@ -117,7 +117,7 @@ onBeforeUnmount(() => {
         <button
           v-if="toggleAppNav && isFilesRoute"
           type="button"
-          class="button is-transparent is-icon wd-app-menu lg:hidden shrink-0"
+          class="button is-transparent is-icon wd-app-menu pane:hidden shrink-0"
           title="App menu"
           aria-label="App menu"
           @click="toggleAppNav()"
