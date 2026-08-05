@@ -745,13 +745,17 @@ onUnmounted((): void => {
           />
           Loading file…
         </div>
-        <MdPreview
+        <div
           v-if="bIsMarkdownFile && bMarkdownPreview"
-          :model-value="fileContent"
-          class="flex-1 min-h-[200px] overflow-auto"
-          language="en-US"
-          :theme="bIsDarkTheme ? 'dark' : 'light'"
-        />
+          class="flex-1 min-h-0 overflow-auto"
+        >
+          <MdPreview
+            :model-value="fileContent"
+            class="border-0!"
+            language="en-US"
+            :theme="bIsDarkTheme ? 'dark' : 'light'"
+          />
+        </div>
         <MdEditor
           v-else-if="bIsMarkdownFile"
           v-model="fileContent"
@@ -802,5 +806,15 @@ onUnmounted((): void => {
 :deep(.md-editor-preview) {
   word-break: normal;
   overflow-wrap: break-word;
+}
+
+/*
+ * MdPreview sets height:auto + overflow:visible, which grows past the pane and gets
+ * clipped by the parent overflow:hidden. Keep content natural height so the wrapper scrolls.
+ */
+:deep(.md-editor-previewOnly) {
+  height: auto;
+  max-height: none;
+  overflow: visible;
 }
 </style>
