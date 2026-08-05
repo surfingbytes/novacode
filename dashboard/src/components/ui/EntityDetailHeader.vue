@@ -126,7 +126,7 @@ onUnmounted(() => {
         <button
           v-if="bShowSidebarToggle"
           type="button"
-          class="button is-transparent is-icon mr-2 lg:hidden! shrink-0"
+          class="button is-transparent is-icon mr-2 shrink-0"
           title="Sessions list"
           aria-label="Sessions list"
           @click="emit('toggleSidebar')"

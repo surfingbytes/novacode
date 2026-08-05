@@ -43,6 +43,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'new-session'): void;
   (e: 'close-mobile'): void;
+  (e: 'close-desktop'): void;
   (e: 'back'): void;
 }>();
 
@@ -419,6 +420,16 @@ watch(
         @click="emit('new-session')"
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <button
+        v-if="!props.showOnMobile"
+        type="button"
+        class="inline-flex items-center justify-center w-9 h-9 rounded-lg text-text-muted hover:text-text-primary transition-colors"
+        title="Hide session list"
+        aria-label="Hide session list"
+        @click="emit('close-desktop')"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M14 9l-3 3 3 3"/></svg>
       </button>
     </div>
 

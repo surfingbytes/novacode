@@ -593,16 +593,17 @@ onUnmounted((): void => {
           {{ createFileError }}
         </p>
       </div>
-      <div class="flex-1 overflow-y-auto py-1">
+      <div class="flex-1 overflow-auto py-1">
         <div v-if="listError" class="px-3 py-2 text-xs text-destructive">
           {{ listError }}
         </div>
-        <template v-else>
+        <!-- w-max/min-w-full: rows size to the widest entry so long names scroll horizontally -->
+        <div v-else class="w-max min-w-full">
           <button
             v-for="{ entry, depth } in visibleEntries"
             :key="entry.path"
             type="button"
-            class="group w-full flex items-center gap-1.5 py-1 text-left text-sm truncate transition-colors hover:bg-primary/10 cursor-pointer"
+            class="group w-full flex items-center gap-1.5 py-1 pr-2 text-left text-sm whitespace-nowrap transition-colors hover:bg-primary/10 cursor-pointer"
             :class="
               !entry.isDirectory && selectedPath === entry.path
                 ? 'bg-primary/15 text-primary hover:bg-primary/10'
@@ -622,9 +623,9 @@ onUnmounted((): void => {
               </template>
             </span>
 
-            <span class="truncate">{{ entry.name }}</span>
+            <span>{{ entry.name }}</span>
           </button>
-        </template>
+        </div>
         <div
           v-if="bListLoading && rootEntries.length === 0"
           class="px-3 py-2 text-xs text-text-muted"

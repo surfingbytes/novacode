@@ -36,6 +36,8 @@ const activeId = computed(() => sessionId.value ?? orchestratorId.value ?? null)
 const mobileTab = ref<'sessions' | 'chat'>('chat');
 const isDesktop = ref(false);
 const desktopSidebarVisible = ref(true);
+/** sessionStorage key for the desktop session-list collapse state (mirrors the files panel). */
+const SESSION_LIST_PANEL_KEY = 'novacode:sessionListSidePanel';
 let desktopMediaQuery: MediaQueryList | null = null;
 const handleDesktopMediaQueryChange = (event: MediaQueryListEvent): void => {
   setDesktopState(event.matches);
@@ -141,17 +143,33 @@ function handleStartPlanSession(payload: {
   showNewSessionModal.value = true;
 }
 
+function readStoredDesktopSidebarVisible(): boolean {
+  try {
+    return sessionStorage.getItem(SESSION_LIST_PANEL_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+function setDesktopSidebarVisible(visible: boolean): void {
+  desktopSidebarVisible.value = visible;
+  try {
+    sessionStorage.setItem(SESSION_LIST_PANEL_KEY, visible ? '1' : '0');
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
 function setDesktopState(matchesDesktop: boolean): void {
   isDesktop.value = matchesDesktop;
   if (!matchesDesktop) {
-    desktopSidebarVisible.value = true;
     mobileTab.value = 'chat';
   }
 }
 
 function handleSidebarToggle(): void {
   if (isDesktop.value) {
-    desktopSidebarVisible.value = !desktopSidebarVisible.value;
+    setDesktopSidebarVisible(!desktopSidebarVisible.value);
     return;
   }
   mobileTab.value = 'sessions';
@@ -171,6 +189,7 @@ function onViewportResize() {
 
 onMounted(() => {
   desktopMediaQuery = window.matchMedia('(min-width: 1024px)');
+  desktopSidebarVisible.value = readStoredDesktopSidebarVisible();
   setDesktopState(desktopMediaQuery.matches);
   desktopMediaQuery.addEventListener('change', handleDesktopMediaQueryChange);
   if (window.visualViewport) {
@@ -222,6 +241,7 @@ onUnmounted(() => {
         :show-back-button="activeKind === 'session'"
         @back="handleBackToWorkspaceSessions"
         @new-session="openNewSessionModal"
+        @close-desktop="setDesktopSidebarVisible(false)"
       />
 
       <Transition
@@ -252,7 +272,7 @@ onUnmounted(() => {
         :workspace-id="workspaceId"
         :session-id="sessionId"
         :viewport-height="viewportHeight"
-        :show-sidebar-toggle="!isDesktop"
+        :show-sidebar-toggle="!isDesktop || !desktopSidebarVisible"
         @toggle-sidebar="handleSidebarToggle"
         @new-session="openNewSessionModal"
         @start-plan-session="handleStartPlanSession"
@@ -262,7 +282,7 @@ onUnmounted(() => {
         v-else-if="mobileTab === 'chat' && activeKind === 'orchestrator' && orchestratorId"
         :workspace-id="workspaceId"
         :orchestrator-id="orchestratorId"
-        :show-sidebar-toggle="!isDesktop"
+        :show-sidebar-toggle="!isDesktop || !desktopSidebarVisible"
         @toggle-sidebar="handleSidebarToggle"
         @new-session="openNewSessionModal"
       />
