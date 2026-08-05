@@ -797,4 +797,10 @@ onUnmounted((): void => {
   </div>
 </template>
 
-<style scoped></style>
+<style scoped>
+/* md-editor-v3 defaults to word-break: break-all, which splits mid-word on narrow screens. */
+:deep(.md-editor-preview) {
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+</style>
