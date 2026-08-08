@@ -294,8 +294,12 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
       fallbackModelOption(effectiveModelSelection.value)
   );
 
+  // Don't warn while options are still loading — opening a chat restores the
+  // saved model id immediately, but modelOptions stays empty until the agent
+  // options request finishes (can take several seconds for cursor-agent).
   const bSelectedModelMissing = computed(
     () =>
+      !bModelsLoading.value &&
       !!modelSelection.value &&
       modelSelection.value !== 'auto' &&
       !parseConfiguredModelId(modelSelection.value) &&
