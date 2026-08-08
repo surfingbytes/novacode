@@ -19,7 +19,7 @@ import { useToastStore } from '@/stores/toasts';
 import { agentAuthApi, sessionsApi, settingsApi } from '@/classes/api';
 
 // types
-import type { AgentType, Workspace } from '@/@types/index';
+import type { AgentType, ApprovalPolicy, Workspace } from '@/@types/index';
 
 // -------------------------------------------------- Store --------------------------------------------------
 const store = useWorkspacesStore();
@@ -189,6 +189,7 @@ const createSession = async (payload: {
   name: string;
   tags?: string[] | null;
   agentType?: AgentType;
+  approvalPolicy?: ApprovalPolicy;
 }): Promise<void> => {
   const workspace = newSessionWorkspace.value;
   if (!workspace || bSubmittingSession.value) return;

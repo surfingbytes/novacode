@@ -555,16 +555,25 @@ hr {
 }
 
 .list-view {
-  @apply flex flex-col gap-4 bg-card/30 border border-border rounded-md;
+  @apply flex flex-col gap-4 bg-card/30 border border-border rounded-md overflow-hidden;
   .list-view-items {
     @apply flex flex-col;
     .list-item {
-      @apply flex items-center gap-3 py-2 px-2 ps-4 text-sm;
+      @apply flex items-center gap-2 sm:gap-3 py-2 px-2 ps-2 sm:ps-4 text-sm min-w-0;
       &:not(:last-child) {
         @apply border-b border-border;
       }
+
+      .cell {
+        @apply min-w-0;
+      }
+
+      .title {
+        @apply min-w-0;
+      }
+
       .buttons {
-        @apply shrink-0 w-auto flex;
+        @apply shrink-0 w-auto flex min-w-fit;
         > button {
           @apply rounded-none;
           &:first-child {
@@ -574,10 +583,16 @@ hr {
             @apply rounded-r-sm;
           }
         }
+
+        @media (max-width: 639px) {
+          > .button.is-icon {
+            @apply h-7! w-7! px-1.5!;
+          }
+        }
       }
 
       .tag {
-        @apply text-xs  bg-primary/10 text-primary px-2 py-0.5 rounded-full border border-primary/20 font-medium;
+        @apply text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full border border-primary/20 font-medium;
       }
     }
   }

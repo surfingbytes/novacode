@@ -3,7 +3,7 @@
 // node_modules
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mount } from '@vue/test-utils';
-import { defineComponent, h, nextTick } from 'vue';
+import { defineComponent, h, nextTick, ref } from 'vue';
 import { createPinia, setActivePinia } from 'pinia';
 
 // components
@@ -76,5 +76,50 @@ describe('NewSessionModal', () => {
 
     expect(toggle!.getAttribute('aria-expanded')).toBe('true');
     expect(document.body.querySelector('#new-session-tags-panel')).toBeTruthy();
+  });
+
+  it('defaults approval to Ask and emits the selected policy on create', async () => {
+    const created = ref<Record<string, unknown> | null>(null);
+    const Host = defineComponent({
+      components: { NewSessionModal },
+      setup() {
+        return () =>
+          h('div', { id: 'host' }, [
+            h(NewSessionModal, {
+              modelValue: true,
+              cursorAvailable: true,
+              claudeAvailable: true,
+              mistralVibeAvailable: false,
+              openCodeAvailable: false,
+              codexAvailable: false,
+              onCreate: (payload: Record<string, unknown>) => {
+                created.value = payload;
+              }
+            })
+          ]);
+      }
+    });
+    mount(Host, { attachTo: document.getElementById('app')! });
+    await nextTick();
+    await nextTick();
+
+    const group = document.body.querySelector('[aria-label="Approval policy"]');
+    expect(group).toBeTruthy();
+    const buttons = group!.querySelectorAll<HTMLButtonElement>('button');
+    expect(buttons).toHaveLength(2);
+    expect(buttons[0].getAttribute('aria-pressed')).toBe('true');
+    expect(buttons[1].getAttribute('aria-pressed')).toBe('false');
+
+    buttons[1].click();
+    await nextTick();
+    expect(buttons[1].getAttribute('aria-pressed')).toBe('true');
+
+    const form = document.body.querySelector('form');
+    expect(form).toBeTruthy();
+    form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await nextTick();
+
+    expect(created.value).toBeTruthy();
+    expect(created.value!.approvalPolicy).toBe('allow_all');
   });
 });

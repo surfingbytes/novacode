@@ -13,7 +13,7 @@ import ModalHeader from '@/components/ModalHeader.vue';
 import { settingsApi } from '@/classes/api';
 
 // types
-import type { AgentModelOption, AgentType, LinkedPlanContext } from '@/@types/index';
+import type { AgentModelOption, AgentType, ApprovalPolicy, LinkedPlanContext } from '@/@types/index';
 
 // utils
 import { agentSelectedStyle } from '@/utils/agentTypeMeta';
@@ -61,6 +61,7 @@ const emit = defineEmits<{
       agentType: AgentType;
       modelSelection?: string | null;
       linkedPlanContext?: LinkedPlanContext | null;
+      approvalPolicy: ApprovalPolicy;
     }
   ];
 }>();
@@ -74,6 +75,7 @@ const modelSelection = ref('');
 const modelOptions = ref<AgentModelOption[]>([]);
 const bLoadingModels = ref(false);
 const bTagsExpanded = ref(false);
+const approvalPolicy = ref<ApprovalPolicy>('ask');
 
 // -------------------------------------------------- Computed --------------------------------------------------
 const availableAgents = computed(() => {
@@ -141,6 +143,7 @@ const onCreate = (): void => {
     name: finalName,
     ...(tags.length > 0 ? { tags } : {}),
     agentType: agentType.value,
+    approvalPolicy: approvalPolicy.value,
     ...(props.showModelSelection && modelSelection.value ? { modelSelection: modelSelection.value } : {})
   });
 };
@@ -179,6 +182,7 @@ watch(
     if (open) {
       formTags.value = [];
       bTagsExpanded.value = false;
+      approvalPolicy.value = 'ask';
       defaultName.value = props.defaultSessionName || `Session ${new Date().toLocaleString()}`;
       // Prefill only when a suggested name is provided (e.g. plan handoff);
       // otherwise keep the datetime as placeholder so the user can type a fresh name.
@@ -323,6 +327,47 @@ watch(agentType, () => {
                   :disabled="loading || bLoadingModels"
                   variant="modal"
                 />
+              </div>
+
+              <!-- Approval policy — compact segmented control (same row density as agent) -->
+              <div class="nc-field">
+                <div class="flex items-center gap-3">
+                  <span class="nc-field-label shrink-0">Approval</span>
+                  <div
+                    class="grid flex-1 grid-cols-2 rounded-lg border border-fg/[0.12] bg-fg/[0.04] p-0.5 gap-1"
+                    role="group"
+                    aria-label="Approval policy"
+                  >
+                    <button
+                      type="button"
+                      class="text-xs px-2 py-1.5 rounded-md border transition-colors"
+                      :class="
+                        approvalPolicy === 'ask'
+                          ? 'border-fg/20 bg-fg/[0.1] text-text-primary'
+                          : 'border-transparent text-text-muted hover:text-text-primary hover:bg-fg/[0.06]'
+                      "
+                      :aria-pressed="approvalPolicy === 'ask'"
+                      title="Prompt before tool actions"
+                      @click="approvalPolicy = 'ask'"
+                    >
+                      Ask
+                    </button>
+                    <button
+                      type="button"
+                      class="text-xs px-2 py-1.5 rounded-md border transition-colors"
+                      :class="
+                        approvalPolicy === 'allow_all'
+                          ? 'border-warning/40 bg-warning/15 text-warning'
+                          : 'border-transparent text-text-muted hover:text-text-primary hover:bg-fg/[0.06]'
+                      "
+                      :aria-pressed="approvalPolicy === 'allow_all'"
+                      title="Auto-approve tool actions"
+                      @click="approvalPolicy = 'allow_all'"
+                    >
+                      Allow all
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <p v-if="error" class="text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded-lg px-3 py-2">

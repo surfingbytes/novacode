@@ -19,7 +19,7 @@ import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
 import { useWorkspacesStore } from '@/stores/workspaces';
 
 // types
-import type { AgentType, LinkedPlanContext } from '@/@types/index';
+import type { AgentType, ApprovalPolicy, LinkedPlanContext } from '@/@types/index';
 
 const route = useRoute();
 const router = useRouter();
@@ -95,6 +95,7 @@ async function createSession(payload: {
   tags?: string[] | null;
   agentType?: AgentType;
   modelSelection?: string | null;
+  approvalPolicy?: ApprovalPolicy;
 }): Promise<void> {
   if (isSubmittingSession.value) return;
   isSubmittingSession.value = true;

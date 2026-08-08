@@ -227,15 +227,18 @@ const rootClass = computed(() => {
           <path d="M3 9l9 9 9-9" />
         </svg>
         <div class="min-w-0 flex-1">
-          <p class="title flex items-center gap-2 flex-wrap">
-            <span>{{ session.name }}</span>
+          <p class="title flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span class="break-words">{{ session.name }}</span>
             <span
               v-if="session.busy"
-              class="busy-badge text-[11px] px-2 py-0.5 rounded-full inline-flex items-center gap-1"
+              class="busy-badge text-[11px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 shrink-0"
               title="Session is running"
             >
               <span class="busy-spinner"></span>
               Busy
+            </span>
+            <span class="tag shrink-0" :class="AGENT_TYPE_TAG_COLOR[session.agentType]">
+              {{ agentTypeLabel(session.agentType) }}
             </span>
           </p>
           <div v-if="session.tags?.length" class="flex flex-wrap gap-1 mt-1">
@@ -250,16 +253,14 @@ const rootClass = computed(() => {
           </div>
         </div>
       </div>
-      <div class="cell shrink-0">
-        <p class="tag" :class="AGENT_TYPE_TAG_COLOR[session.agentType]">
-          {{ agentTypeLabel(session.agentType) }}
-        </p>
-      </div>
     </template>
 
     <!-- List layout -->
     <template v-else>
-      <div class="cell !flex-none pr-0">
+      <div
+        class="cell shrink-0"
+        :class="{ 'max-sm:hidden': !bSelectionActive && !bSelected }"
+      >
         <button
           type="button"
           class="w-6 h-6 rounded border border-border bg-bg/90 text-primary flex items-center justify-center"
@@ -283,15 +284,18 @@ const rootClass = computed(() => {
         </button>
       </div>
       <div class="cell flex-1 min-w-0">
-        <p class="title flex items-center gap-2">
-          <span>{{ session.name }}</span>
+        <p class="title flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span class="break-words">{{ session.name }}</span>
           <span
             v-if="session.busy"
-            class="busy-badge text-[11px] px-2 py-0.5 rounded-full inline-flex items-center gap-1"
+            class="busy-badge text-[11px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 shrink-0"
             title="Session is running"
           >
             <span class="busy-spinner"></span>
             Busy
+          </span>
+          <span class="tag shrink-0" :class="AGENT_TYPE_TAG_COLOR[session.agentType]">
+            {{ agentTypeLabel(session.agentType) }}
           </span>
         </p>
         <div v-if="session.tags?.length" class="flex flex-wrap gap-1 mt-1">
@@ -304,11 +308,6 @@ const rootClass = computed(() => {
             {{ tag }}
           </span>
         </div>
-      </div>
-      <div class="cell">
-        <p class="tag" :class="AGENT_TYPE_TAG_COLOR[session.agentType]">
-          {{ agentTypeLabel(session.agentType) }}
-        </p>
       </div>
       <div class="cell buttons">
         <button

@@ -2,6 +2,7 @@
 import { db } from './database';
 import type { AgentErrorCode } from './agentError';
 import { MODE_SENTINEL } from './agentModes';
+import { normalizeApprovalPolicy } from './approvalPolicy';
 import {
   LINKED_PLAN_CONTEXT_CONFIG_KEY,
   serializeLinkedPlanContext
@@ -9,7 +10,7 @@ import {
 
 // types
 import type { SessionModel as Session } from '../generated/client/models/Session';
-import type { AgentType } from '../@types/index';
+import type { AgentType, ApprovalPolicy } from '../@types/index';
 import type { LinkedPlanContext } from './linkedPlanContext';
 
 export interface CreateSessionWithAgentParams {
@@ -25,6 +26,8 @@ export interface CreateSessionWithAgentParams {
   linkedPlanContext?: LinkedPlanContext | null;
   /** Optional explicit session mode; plan handoffs default to agent. */
   sessionMode?: string | null;
+  /** Optional tool-approval policy; defaults to ask. */
+  approvalPolicy?: ApprovalPolicy | string | null;
 }
 
 export interface CreateSessionWithAgentResult {
@@ -59,6 +62,7 @@ export async function createSessionWithAgent(
         [LINKED_PLAN_CONTEXT_CONFIG_KEY]: serializeLinkedPlanContext(params.linkedPlanContext),
       })
     : null;
+  const approvalPolicy = normalizeApprovalPolicy(params.approvalPolicy);
 
   const session = await db.createSession({
     name,
@@ -67,6 +71,7 @@ export async function createSessionWithAgent(
     agentType,
     modelSelection,
     sessionMode,
+    approvalPolicy,
     sessionConfigJson,
   });
 

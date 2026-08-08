@@ -214,7 +214,10 @@ const rootClass = computed(() => {
 
     <!-- List layout -->
     <template v-else>
-      <div class="cell !flex-none pr-0">
+      <div
+        class="cell shrink-0"
+        :class="{ 'max-sm:hidden': !bSelectionActive && !bSelected }"
+      >
         <button
           type="button"
           class="w-6 h-6 rounded border border-border bg-bg/90 text-primary flex items-center justify-center"
@@ -238,7 +241,7 @@ const rootClass = computed(() => {
         </button>
       </div>
       <div class="cell flex-1 min-w-0">
-        <p class="title flex items-center gap-2">
+        <p class="title flex flex-wrap items-center gap-x-2 gap-y-1">
           <svg
             viewBox="0 0 24 24"
             fill="none"
@@ -254,20 +257,18 @@ const rootClass = computed(() => {
             <path d="M21 3H15v4h6V3zM9 3H3v4h6V3zM15 17H9v4h6v-4z" />
             <path d="M12 7v4M6 7v6h12V7" />
           </svg>
-          <span>{{ orchestrator.name }}</span>
+          <span class="break-words">{{ orchestrator.name }}</span>
           <span
             v-if="orchestrator.runStatus === 'running'"
-            class="busy-badge text-[11px] px-2 py-0.5 rounded-full inline-flex items-center gap-1"
+            class="busy-badge text-[11px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 shrink-0"
             title="Orchestrator is running"
           >
             <span class="busy-spinner"></span>
             Running
           </span>
-        </p>
-      </div>
-      <div class="cell">
-        <p class="tag" :class="AGENT_TYPE_TAG_COLOR[orchestrator.agentType]">
-          {{ agentTypeLabel(orchestrator.agentType) }}
+          <span class="tag shrink-0" :class="AGENT_TYPE_TAG_COLOR[orchestrator.agentType]">
+            {{ agentTypeLabel(orchestrator.agentType) }}
+          </span>
         </p>
       </div>
       <div class="cell buttons">

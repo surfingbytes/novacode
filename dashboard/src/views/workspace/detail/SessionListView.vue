@@ -29,7 +29,7 @@ import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
 
 // types
 import type { ContextMenuItem } from '@/components/ContextMenu.vue';
-import type { Session, Orchestrator, AgentType, Workspace } from '@/@types/index';
+import type { Session, Orchestrator, AgentType, ApprovalPolicy, Workspace } from '@/@types/index';
 
 // -------------------------------------------------- Props --------------------------------------------------
 const props = defineProps<{
@@ -437,6 +437,7 @@ const createSession = async (payload: {
   name: string;
   tags?: string[] | null;
   agentType?: AgentType;
+  approvalPolicy?: ApprovalPolicy;
 }): Promise<void> => {
   if (!props.workspace || bSubmittingSession.value) return;
   bSubmittingSession.value = true;
@@ -923,7 +924,7 @@ watch(
             :session="item.session"
             :workspace-id="workspaceId"
             :b-selected="selectedIds.has(item.session.id)"
-            :b-selection-active="selectionActive"
+            :b-selection-active="selectionActive || orchestratorSelectionActive"
             @pointerdown="sessionLongPress.onPointerDown($event, item.session.id)"
             @pointerup="sessionLongPress.onPointerUp"
             @pointerleave="sessionLongPress.onPointerUp"
@@ -942,7 +943,7 @@ watch(
               :orchestrator="item.orchestrator"
               :workspace-id="workspaceId"
               :b-selected="orchestratorSelectedIds.has(item.orchestrator.id)"
-              :b-selection-active="orchestratorSelectionActive"
+              :b-selection-active="selectionActive || orchestratorSelectionActive"
               @pointerdown="orchestratorLongPress.onPointerDown($event, item.orchestrator.id)"
               @pointerup="orchestratorLongPress.onPointerUp"
               @pointerleave="orchestratorLongPress.onPointerUp"
@@ -1052,7 +1053,7 @@ watch(
                 :session="session"
                 :workspace-id="workspaceId"
                 :b-selected="selectedIds.has(session.id)"
-                :b-selection-active="selectionActive"
+                :b-selection-active="selectionActive || orchestratorSelectionActive"
                 b-archived
                 :style="{ '--stagger-index': index }"
                 @contextmenu.prevent.stop="onSessionContextMenu($event, session)"
@@ -1080,7 +1081,7 @@ watch(
                     :orchestrator="orch"
                     :workspace-id="workspaceId"
                     :b-selected="orchestratorSelectedIds.has(orch.id)"
-                    :b-selection-active="orchestratorSelectionActive"
+                    :b-selection-active="selectionActive || orchestratorSelectionActive"
                     b-archived
                     @contextmenu.prevent.stop="onOrchestratorContextMenu($event, orch)"
                     @archive="toggleArchiveOrchestrator(orch)"
