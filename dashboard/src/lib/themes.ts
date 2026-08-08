@@ -326,3 +326,18 @@ export function stopAutoThemeWatcher(): void {
   _colorSchemeQuery = null;
   _colorSchemeListener = null;
 }
+
+/** Apply theme from localStorage (manual theme or OS auto). Safe to call before Vue mounts. */
+export function applyActiveTheme(): void {
+  migrateLegacyThemeLocalStorage();
+  const autoThemeSetting = localStorage.getItem('autoTheme');
+  // null = never set on this device → follow OS until settings sync writes an explicit value
+  const autoTheme = autoThemeSetting === null ? true : autoThemeSetting === 'true';
+  if (autoTheme) {
+    applyTheme(resolveAutoTheme());
+    startAutoThemeWatcher();
+  } else {
+    stopAutoThemeWatcher();
+    applyTheme(localStorage.getItem('theme') ?? DEFAULT_THEME_ID);
+  }
+}

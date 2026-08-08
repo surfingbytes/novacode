@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { onMounted, onUnmounted, ref } from 'vue';
+import { settingsApi } from '@/classes/api';
 import {
   applyTheme,
   resolveStoredThemeId,
@@ -16,28 +17,45 @@ withDefaults(
   { compact: false }
 );
 
-const currentMode = ref<'dark' | 'light'>(
-  (document.documentElement.getAttribute('data-theme') as 'dark' | 'light') ?? 'dark'
-);
+function readMode(): 'dark' | 'light' {
+  return (document.documentElement.getAttribute('data-theme') as 'dark' | 'light') ?? 'dark';
+}
 
-function toggleTheme(): void {
+const currentMode = ref<'dark' | 'light'>(readMode());
+
+function syncModeFromDom(): void {
+  currentMode.value = readMode();
+}
+
+async function toggleTheme(): Promise<void> {
   const isDark = currentMode.value === 'dark';
-  if (isDark) {
-    const lightId = resolveStoredThemeId(localStorage.getItem('lightTheme') ?? DEFAULT_LIGHT_THEME_ID);
-    applyTheme(lightId);
-    localStorage.setItem('theme', lightId);
-    localStorage.setItem('autoTheme', 'false');
-    stopAutoThemeWatcher();
-    currentMode.value = 'light';
-  } else {
-    const darkId = resolveStoredThemeId(localStorage.getItem('darkTheme') ?? DEFAULT_DARK_THEME_ID);
-    applyTheme(darkId);
-    localStorage.setItem('theme', darkId);
-    localStorage.setItem('autoTheme', 'false');
-    stopAutoThemeWatcher();
-    currentMode.value = 'dark';
+  const nextThemeId = isDark
+    ? resolveStoredThemeId(localStorage.getItem('lightTheme') ?? DEFAULT_LIGHT_THEME_ID)
+    : resolveStoredThemeId(localStorage.getItem('darkTheme') ?? DEFAULT_DARK_THEME_ID);
+  const nextMode = isDark ? 'light' : 'dark';
+
+  applyTheme(nextThemeId);
+  localStorage.setItem('theme', nextThemeId);
+  localStorage.setItem('autoTheme', 'false');
+  stopAutoThemeWatcher();
+  currentMode.value = nextMode;
+
+  // Persist so a cold start / new device syncs the chosen light/dark mode
+  try {
+    await settingsApi.update({ theme: nextThemeId, autoTheme: false });
+  } catch {
+    // offline / unauthenticated — localStorage still applies for this device
   }
 }
+
+onMounted(() => {
+  syncModeFromDom();
+  window.addEventListener('nc-theme-changed', syncModeFromDom);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('nc-theme-changed', syncModeFromDom);
+});
 </script>
 
 <template>

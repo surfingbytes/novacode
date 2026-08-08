@@ -16,14 +16,7 @@ import { useToastStore } from '@/stores/toasts';
 // classes
 import router from '@/classes/router';
 import { settingsApi, setUnauthorizedHandler } from '@/classes/api';
-import {
-  applyTheme,
-  DEFAULT_THEME_ID,
-  migrateLegacyThemeLocalStorage,
-  resolveAutoTheme,
-  startAutoThemeWatcher,
-  stopAutoThemeWatcher
-} from '@/lib/themes';
+import { applyActiveTheme, stopAutoThemeWatcher } from '@/lib/themes';
 import { isNotificationsEnabled, syncPushSubscription } from '@/lib/notifications';
 
 // -------------------------------------------------- Store --------------------------------------------------
@@ -58,15 +51,11 @@ async function syncSettingsFromDb(): Promise<void> {
     if (data.lightTheme) {
       localStorage.setItem('lightTheme', data.lightTheme);
     }
+    // Authenticated settings are the source of truth — always write autoTheme,
+    // including false. Skipping false left localStorage null, which the client
+    // treats as "follow OS" and forced light mode on most laptops.
     if (typeof data.autoTheme === 'boolean') {
-      // If the user never touched auto-theme, default to following OS/browser.
-      // Respect an explicit localStorage choice when it already exists.
-      const existingAutoTheme = localStorage.getItem('autoTheme');
-      if (existingAutoTheme !== null) {
-        localStorage.setItem('autoTheme', String(data.autoTheme));
-      } else if (data.autoTheme === true) {
-        localStorage.setItem('autoTheme', 'true');
-      }
+      localStorage.setItem('autoTheme', String(data.autoTheme));
     }
     if (data.theme) {
       localStorage.setItem('theme', data.theme);
@@ -74,19 +63,6 @@ async function syncSettingsFromDb(): Promise<void> {
     applyActiveTheme();
   } catch {
     // not authenticated or server unreachable — keep localStorage values
-  }
-}
-
-function applyActiveTheme(): void {
-  migrateLegacyThemeLocalStorage();
-  const autoThemeSetting = localStorage.getItem('autoTheme');
-  const autoTheme = autoThemeSetting === null ? true : autoThemeSetting === 'true';
-  if (autoTheme) {
-    applyTheme(resolveAutoTheme());
-    startAutoThemeWatcher();
-  } else {
-    stopAutoThemeWatcher();
-    applyTheme(localStorage.getItem('theme') ?? DEFAULT_THEME_ID);
   }
 }
 

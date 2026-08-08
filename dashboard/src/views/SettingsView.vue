@@ -361,18 +361,9 @@ const loadSettings = async (): Promise<void> => {
       localStorage.setItem('lightTheme', response.data.lightTheme);
     }
     if (typeof response.data.autoTheme === 'boolean') {
-      const existingAutoTheme = localStorage.getItem('autoTheme');
-      if (existingAutoTheme !== null) {
-        bAutoTheme.value = response.data.autoTheme;
-        localStorage.setItem('autoTheme', String(response.data.autoTheme));
-      } else {
-        // Default behavior: follow OS/browser unless the user has explicitly set
-        // auto-theme in localStorage.
-        bAutoTheme.value = true;
-        if (response.data.autoTheme === true) {
-          localStorage.setItem('autoTheme', 'true');
-        }
-      }
+      // Server settings are authoritative once loaded (including autoTheme: false).
+      bAutoTheme.value = response.data.autoTheme;
+      localStorage.setItem('autoTheme', String(response.data.autoTheme));
     }
     if (response.data.theme) {
       activeThemeId.value = response.data.theme;
