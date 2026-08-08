@@ -176,10 +176,8 @@ async function createSession(payload: {
 onMounted(() => {
   window.addEventListener('resize', onWindowResize);
   ensureAgentCapabilitiesLoaded();
-  workspacesStore.ensureSessionsInitialized();
-  if (workspacesStore.workspaces.length === 0) {
-    workspacesStore.fetchAll();
-  }
+  void workspacesStore.ensureWorkspacesInitialized();
+  void workspacesStore.ensureSessionsInitialized();
 });
 
 onBeforeUnmount(() => {

@@ -24,6 +24,8 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
 
   let sessionSocket: ManagedSocket | null = null;
   let sessionsInitialized = false;
+  let workspacesInitialized = false;
+  let workspacesInitPromise: Promise<void> | null = null;
 
   // -------------------------------------------------- Computed --------------------------------------------------
   const activeSessions = computed<Session[]>(() => {
@@ -70,10 +72,24 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     try {
       const response = await workspaceApi.listAll();
       workspaces.value = response.data;
+      workspacesInitialized = true;
     } finally {
       bIsLoading.value = false;
     }
   };
+
+  /** Load workspaces once (sidebar favorites, home, etc.). Safe to call from multiple mounts. */
+  async function ensureWorkspacesInitialized(): Promise<void> {
+    if (workspacesInitialized) {
+      return;
+    }
+    if (!workspacesInitPromise) {
+      workspacesInitPromise = fetchAll().finally(() => {
+        workspacesInitPromise = null;
+      });
+    }
+    await workspacesInitPromise;
+  }
 
   function upsertSession(next: Session): void {
     const sessionIndex = allSessions.value.findIndex((session) => session.id === next.id);
@@ -233,6 +249,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     bSessionsLoading,
     // methods
     fetchAll,
+    ensureWorkspacesInitialized,
     setActiveWorkspace,
     fetchAllSessions,
     ensureSessionsInitialized,

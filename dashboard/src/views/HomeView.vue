@@ -51,8 +51,8 @@ function workspaceName(workspaceId: string): string {
 }
 
 onMounted(() => {
-  workspacesStore.fetchAll();
-  workspacesStore.ensureSessionsInitialized();
+  void workspacesStore.ensureWorkspacesInitialized();
+  void workspacesStore.ensureSessionsInitialized();
 });
 </script>
 
