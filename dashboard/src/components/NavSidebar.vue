@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import ThemeToggleButton from '@/components/ThemeToggleButton.vue';
+import NewSessionModal from '@/components/NewSessionModal.vue';
+import { sessionsApi } from '@/classes/api';
+import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
 import { PANE_LAYOUT_MIN_WIDTH } from '@/constants/layout';
 import { agentTypeShortLabel } from '@/utils/agentTypeMeta';
 import { sessionStatusDotStyle, workspaceColor } from '@/utils/workspaceColor';
-import type { Workspace } from '@/@types/index';
+import type { AgentType, ApprovalPolicy, Workspace } from '@/@types/index';
 
 const props = withDefaults(
   defineProps<{
@@ -23,12 +26,25 @@ const emit = defineEmits<{
 }>();
 
 const route = useRoute();
+const router = useRouter();
 const workspacesStore = useWorkspacesStore();
+const {
+  claudeAvailable,
+  cursorAvailable,
+  mistralVibeAvailable,
+  openCodeAvailable,
+  codexAvailable,
+  ensureLoaded: ensureAgentCapabilitiesLoaded
+} = useAgentCapabilities();
 
 const windowWidth = ref(window.innerWidth);
 /** Persistent nav rail (foldable / tablet+), vs phone drawer. */
 const bRailMode = computed(() => windowWidth.value >= PANE_LAYOUT_MIN_WIDTH);
 const bIsCollapsed = computed(() => props.collapsed && bRailMode.value);
+
+const bShowNewSessionModal = ref(false);
+const newSessionWorkspace = ref<Workspace | undefined>(undefined);
+const bSubmittingSession = ref(false);
 
 function onWindowResize(): void {
   windowWidth.value = window.innerWidth;
@@ -78,6 +94,8 @@ const navItems = [
   }
 ];
 
+const favoriteWorkspaces = computed(() => workspacesStore.favoriteWorkspaces);
+
 const activeQuickSessions = computed(() => workspacesStore.activeBusySessions);
 const mergedQuickSessions = computed(() => {
   const activeIds = new Set(activeQuickSessions.value.map((s) => s.id));
@@ -85,6 +103,28 @@ const mergedQuickSessions = computed(() => {
     .filter((s) => !s.archived && !activeIds.has(s.id))
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   return [...activeQuickSessions.value, ...recentSessions].slice(0, 10);
+});
+
+const newSessionTags = computed((): string[] => {
+  const workspaceId = newSessionWorkspace.value?.id;
+  if (!workspaceId) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const session of workspacesStore.allSessions) {
+    if (session.workspaceId !== workspaceId) continue;
+    const tags = session.tags;
+    if (!tags?.length) continue;
+    for (const tag of tags) {
+      if (typeof tag !== 'string' || !tag.trim()) continue;
+      const key = tag.trim().toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(tag.trim());
+    }
+  }
+  return out.sort((a, b) => a.localeCompare(b));
 });
 
 function workspaceById(id: string): Workspace | undefined {
@@ -95,8 +135,47 @@ function workspaceNameById(id: string): string {
   return workspaceById(id)?.name ?? 'Workspace';
 }
 
+function favoriteInitial(workspace: Workspace): string {
+  const trimmed = workspace.name.trim();
+  if (!trimmed) {
+    return '?';
+  }
+  return trimmed.charAt(0).toLocaleUpperCase();
+}
+
+function openFavoriteNewSession(workspace: Workspace): void {
+  newSessionWorkspace.value = workspace;
+  bShowNewSessionModal.value = true;
+  handleClose();
+}
+
+async function createSession(payload: {
+  name: string;
+  tags?: string[] | null;
+  agentType?: AgentType;
+  approvalPolicy?: ApprovalPolicy;
+}): Promise<void> {
+  const workspace = newSessionWorkspace.value;
+  if (!workspace || bSubmittingSession.value) return;
+  bSubmittingSession.value = true;
+  try {
+    const { data: newSession } = await sessionsApi.create(workspace.id, payload);
+    bShowNewSessionModal.value = false;
+    newSessionWorkspace.value = undefined;
+    await router.push({
+      name: 'session',
+      params: { id: workspace.id, sessionId: newSession.id }
+    });
+  } catch (error) {
+    console.error('Failed to create session:', error);
+  } finally {
+    bSubmittingSession.value = false;
+  }
+}
+
 onMounted(() => {
   window.addEventListener('resize', onWindowResize);
+  ensureAgentCapabilitiesLoaded();
   workspacesStore.ensureSessionsInitialized();
   if (workspacesStore.workspaces.length === 0) {
     workspacesStore.fetchAll();
@@ -237,6 +316,30 @@ onBeforeUnmount(() => {
       </RouterLink>
     </nav>
 
+    <!-- Favorite workspaces — quick new session -->
+    <div
+      v-if="favoriteWorkspaces.length > 0"
+      class="sidebar__favorites"
+      :class="{ 'sidebar__favorites--collapsed': bIsCollapsed }"
+    >
+      <button
+        v-for="workspace in favoriteWorkspaces"
+        :key="'fav-' + workspace.id"
+        type="button"
+        class="sidebar__fav-btn"
+        :style="{
+          color: workspaceColor(workspace),
+          background: `color-mix(in oklab, ${workspaceColor(workspace)} 18%, transparent)`,
+          borderColor: `color-mix(in oklab, ${workspaceColor(workspace)} 40%, transparent)`
+        }"
+        :title="`New session in ${workspace.name}`"
+        :aria-label="`New session in ${workspace.name}`"
+        @click="openFavoriteNewSession(workspace)"
+      >
+        {{ favoriteInitial(workspace) }}
+      </button>
+    </div>
+
     <!-- Sessions section -->
     <div v-if="!bIsCollapsed" class="sidebar__section-label nc-eyebrow">// sessions</div>
 
@@ -335,6 +438,19 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </aside>
+
+  <NewSessionModal
+    v-model="bShowNewSessionModal"
+    :loading="bSubmittingSession"
+    :default-agent-type="newSessionWorkspace?.defaultAgentType ?? null"
+    :claude-available="claudeAvailable"
+    :cursor-available="cursorAvailable"
+    :mistral-vibe-available="mistralVibeAvailable"
+    :open-code-available="openCodeAvailable"
+    :codex-available="codexAvailable"
+    :existing-tags="newSessionTags"
+    @create="createSession"
+  />
 </template>
 
 <style scoped>
@@ -494,11 +610,63 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
 }
 
+/* Favorites */
+.sidebar__favorites {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px 2px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.sidebar__favorites--collapsed {
+  flex-direction: column;
+  padding: 8px;
+  gap: 6px;
+}
+
+.sidebar__fav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    transform 0.1s;
+}
+
+.sidebar__fav-btn:hover {
+  transform: translateY(-1px);
+  background: color-mix(in oklab, currentColor 28%, transparent) !important;
+  border-color: color-mix(in oklab, currentColor 55%, transparent) !important;
+}
+
+.sidebar__fav-btn:active {
+  transform: translateY(0);
+}
+
 /* Sessions */
 .sidebar__section-label {
   padding: 18px 18px 6px;
   margin-top: 10px;
   flex-shrink: 0;
+}
+
+.sidebar__favorites + .sidebar__section-label {
+  margin-top: 4px;
+  padding-top: 10px;
 }
 
 .sidebar__sessions {

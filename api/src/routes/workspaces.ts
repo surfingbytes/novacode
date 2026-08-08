@@ -8,7 +8,7 @@ import { existsSync } from 'node:fs';
 
 // classes
 import { jwtPreHandler } from '../classes/auth';
-import { db } from '../classes/database';
+import { db, FavoriteLimitError } from '../classes/database';
 import { config } from '../classes/config';
 
 const WorkspaceSchema = Type.Object({
@@ -23,7 +23,9 @@ const WorkspaceSchema = Type.Object({
   sortOrder: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
   defaultAgentType: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   tags: Type.Optional(Type.Union([Type.Array(Type.String()), Type.Null()])),
-  archived: Type.Boolean()
+  archived: Type.Boolean(),
+  isFavorite: Type.Boolean(),
+  favoriteOrder: Type.Optional(Type.Union([Type.Number(), Type.Null()]))
 });
 
 const BrowseEntrySchema = Type.Object({
@@ -267,7 +269,8 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
           gitUserEmail: Type.Optional(Type.Union([Type.String(), Type.Null()])),
           color: Type.Optional(Type.Union([Type.String(), Type.Null()])),
           defaultAgentType: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-          tags: Type.Optional(Type.Union([Type.Array(Type.String()), Type.Null()]))
+          tags: Type.Optional(Type.Union([Type.Array(Type.String()), Type.Null()])),
+          isFavorite: Type.Optional(Type.Boolean())
         }),
         response: {
           200: WorkspaceSchema,
@@ -286,6 +289,7 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
         color?: string | null;
         defaultAgentType?: string | null;
         tags?: string[] | null;
+        isFavorite?: boolean;
       };
       let pathPatch: string | undefined;
       if (body.path !== undefined) {
@@ -295,17 +299,26 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
           return reply.code(400).send({ error: (err as Error).message });
         }
       }
-      const updated = await db.updateWorkspace(request.params.id, {
-        name: body.name,
-        path: pathPatch,
-        group: body.group !== undefined ? body.group?.trim() || null : undefined,
-        gitUserName: body.gitUserName !== undefined ? body.gitUserName?.trim() || null : undefined,
-        gitUserEmail:
-          body.gitUserEmail !== undefined ? body.gitUserEmail?.trim() || null : undefined,
-        color: body.color !== undefined ? body.color?.trim() || null : undefined,
-        defaultAgentType: normalizeDefaultAgentTypeForWrite(body.defaultAgentType),
-        tags: body.tags
-      });
+      let updated;
+      try {
+        updated = await db.updateWorkspace(request.params.id, {
+          name: body.name,
+          path: pathPatch,
+          group: body.group !== undefined ? body.group?.trim() || null : undefined,
+          gitUserName: body.gitUserName !== undefined ? body.gitUserName?.trim() || null : undefined,
+          gitUserEmail:
+            body.gitUserEmail !== undefined ? body.gitUserEmail?.trim() || null : undefined,
+          color: body.color !== undefined ? body.color?.trim() || null : undefined,
+          defaultAgentType: normalizeDefaultAgentTypeForWrite(body.defaultAgentType),
+          tags: body.tags,
+          isFavorite: body.isFavorite
+        });
+      } catch (err) {
+        if (err instanceof FavoriteLimitError) {
+          return reply.code(400).send({ error: err.message });
+        }
+        throw err;
+      }
       if (!updated) return reply.code(404).send({ error: 'Workspace not found' });
       return normalizeWorkspaceResponse(updated);
     }

@@ -16,10 +16,11 @@ import { useWorkspacesStore } from '@/stores/workspaces';
 import { useToastStore } from '@/stores/toasts';
 
 // classes
-import { agentAuthApi, sessionsApi, settingsApi } from '@/classes/api';
+import { agentAuthApi, apiErrorMessage, sessionsApi, settingsApi } from '@/classes/api';
 
 // types
 import type { AgentType, ApprovalPolicy, Workspace } from '@/@types/index';
+import { MAX_FAVORITE_WORKSPACES } from '@/@types/index';
 
 // -------------------------------------------------- Store --------------------------------------------------
 const store = useWorkspacesStore();
@@ -247,6 +248,24 @@ const handleArchiveWorkspace = async (workspace: Workspace, archived: boolean): 
   }
 };
 
+const handleToggleFavorite = async (workspace: Workspace): Promise<void> => {
+  if (workspace.archived) {
+    return;
+  }
+  if (
+    !workspace.isFavorite &&
+    store.favoriteWorkspaces.length >= MAX_FAVORITE_WORKSPACES
+  ) {
+    toastStore.error(`You can favorite at most ${MAX_FAVORITE_WORKSPACES} workspaces`);
+    return;
+  }
+  try {
+    await store.toggleFavorite(workspace.id);
+  } catch (err: unknown) {
+    toastStore.error(apiErrorMessage(err, 'Failed to update favorite'));
+  }
+};
+
 const handleDeleteWorkspace = async (id: string): Promise<void> => {
   deletingId.value = id;
   try {
@@ -425,6 +444,29 @@ onMounted((): void => {
                 </div>
                 <!-- Busy indicator -->
                 <span v-if="workspaceHasBusySession(workspace.id)" class="nc-status-dot busy" />
+                <button
+                  type="button"
+                  class="ws-fav-btn"
+                  :class="{ 'ws-fav-btn--on': workspace.isFavorite }"
+                  :title="workspace.isFavorite ? 'Remove favorite' : 'Add to favorites'"
+                  :aria-label="workspace.isFavorite ? 'Remove favorite' : 'Add to favorites'"
+                  :aria-pressed="workspace.isFavorite"
+                  @click.prevent.stop="handleToggleFavorite(workspace)"
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    :fill="workspace.isFavorite ? 'currentColor' : 'none'"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z" />
+                  </svg>
+                </button>
                 <!-- Secondary actions (hover-only) -->
                 <div class="ws-card__actions">
                   <button class="ws-icon-btn" title="Edit" @click.prevent.stop="openEditWorkspace(workspace)">
@@ -793,6 +835,32 @@ onMounted((): void => {
 .ws-new-session-btn:focus-visible {
   background: var(--bg-hover);
   color: var(--fg);
+}
+
+.ws-fav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--fg-subtle);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.1s, color 0.1s;
+}
+.ws-fav-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg-muted);
+}
+.ws-fav-btn--on {
+  color: var(--accent);
+}
+.ws-fav-btn--on:hover {
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
 }
 
 /* Secondary actions — hidden until card hover */

@@ -42,6 +42,19 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     return allSessions.value.filter((session) => session.workspaceId === workspaceId && session.archived);
   });
 
+  const favoriteWorkspaces = computed<Workspace[]>(() =>
+    workspaces.value
+      .filter((workspace) => workspace.isFavorite && !workspace.archived)
+      .sort((left, right) => {
+        const leftOrder = left.favoriteOrder ?? Number.MAX_SAFE_INTEGER;
+        const rightOrder = right.favoriteOrder ?? Number.MAX_SAFE_INTEGER;
+        if (leftOrder !== rightOrder) {
+          return leftOrder - rightOrder;
+        }
+        return left.name.localeCompare(right.name);
+      })
+  );
+
   const activeBusySessions = computed<Session[]>(() =>
     allSessions.value
       .filter((session) => !session.archived && session.busy)
@@ -179,6 +192,14 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     }
   };
 
+  const toggleFavorite = async (id: string): Promise<void> => {
+    const workspace = workspaces.value.find((item) => item.id === id);
+    if (!workspace || workspace.archived) {
+      return;
+    }
+    await updateWorkspace(id, { isFavorite: !workspace.isFavorite });
+  };
+
   const archiveWorkspace = async (id: string, archived: boolean): Promise<void> => {
     const response = await workspaceApi.archive(id, archived);
     const index = workspaces.value.findIndex((workspace) => workspace.id === id);
@@ -207,6 +228,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     allSessions,
     activeSessions,
     archivedSessions,
+    favoriteWorkspaces,
     activeBusySessions,
     bSessionsLoading,
     // methods
@@ -216,6 +238,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     ensureSessionsInitialized,
     createWorkspace,
     updateWorkspace,
+    toggleFavorite,
     archiveWorkspace,
     deleteWorkspace,
     reorderWorkspaces

@@ -21,6 +21,7 @@ import type { AutomationRunModel as AutomationRun } from '../generated/client/mo
 import type { UserModel } from '../generated/client/models';
 import type { PushSubscriptionModel as PushSubscription } from '../generated/client/models/PushSubscription';
 import type { ChatMessage, ChatQueueItem } from '../@types/index';
+import { MAX_FAVORITE_WORKSPACES } from '@novacode/shared';
 
 /** Session without messageJson */
 export type SessionWithCategory = Omit<Session, 'messageJson'>;
@@ -28,6 +29,13 @@ export type SessionWithCategory = Omit<Session, 'messageJson'>;
 export type SessionWithCategoryAndMessages = Session;
 /** Orchestrator (alias for backward compat) */
 export type OrchestratorWithCategory = Orchestrator;
+
+export class FavoriteLimitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FavoriteLimitError';
+  }
+}
 
 // --------------------------------------------- Setup ---------------------------------------------
 
@@ -201,6 +209,7 @@ export const db = {
       color?: string | null;
       defaultAgentType?: string | null;
       tags?: string[] | null;
+      isFavorite?: boolean;
     }
   ): Promise<Workspace | undefined> {
     const existingWorkspace = await db.getWorkspace(id);
@@ -219,6 +228,34 @@ export const db = {
         : tagsArr === null || tagsArr.length === 0
           ? Prisma.JsonNull
           : tagsArr;
+
+    let favoritePatch: { isFavorite?: boolean; favoriteOrder?: number | null } = {};
+    if (patch.isFavorite !== undefined && patch.isFavorite !== existingWorkspace.isFavorite) {
+      if (patch.isFavorite) {
+        if (existingWorkspace.archived) {
+          throw new FavoriteLimitError('Archived workspaces cannot be favorited');
+        }
+        const favoriteCount = await _prisma.workspace.count({
+          where: { isFavorite: true, archived: false }
+        });
+        if (favoriteCount >= MAX_FAVORITE_WORKSPACES) {
+          throw new FavoriteLimitError(
+            `At most ${MAX_FAVORITE_WORKSPACES} favorite workspaces are allowed`
+          );
+        }
+        const maxOrder = await _prisma.workspace.aggregate({
+          where: { isFavorite: true },
+          _max: { favoriteOrder: true }
+        });
+        favoritePatch = {
+          isFavorite: true,
+          favoriteOrder: (maxOrder._max.favoriteOrder ?? -1) + 1
+        };
+      } else {
+        favoritePatch = { isFavorite: false, favoriteOrder: null };
+      }
+    }
+
     const row = await _prisma.workspace.update({
       where: { id },
       data: {
@@ -229,7 +266,8 @@ export const db = {
         gitUserEmail: patch.gitUserEmail ?? existingWorkspace.gitUserEmail,
         color: patch.color ?? existingWorkspace.color,
         defaultAgentType: patch.defaultAgentType ?? existingWorkspace.defaultAgentType,
-        ...(tagsJson !== undefined && { tags: tagsJson })
+        ...(tagsJson !== undefined && { tags: tagsJson }),
+        ...favoritePatch
       }
     });
     return row;
@@ -248,7 +286,13 @@ export const db = {
     if (!existingWorkspace) {
       return undefined;
     }
-    return _prisma.workspace.update({ where: { id }, data: { archived } });
+    return _prisma.workspace.update({
+      where: { id },
+      data: {
+        archived,
+        ...(archived ? { isFavorite: false, favoriteOrder: null } : {})
+      }
+    });
   },
 
   async deleteWorkspace(id: string): Promise<boolean> {

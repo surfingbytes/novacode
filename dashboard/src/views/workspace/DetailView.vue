@@ -9,17 +9,23 @@ import PageShell from '@/components/layout/PageShell.vue';
 // stores
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { useOrchestratorsStore } from '@/stores/orchestrators';
+import { useToastStore } from '@/stores/toasts';
+
+// classes
+import { apiErrorMessage } from '@/classes/api';
 
 // composables
 import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
 
 // types
 import { APP_NAV_TOGGLE_KEY } from '@/constants/layout';
+import { MAX_FAVORITE_WORKSPACES } from '@/@types/index';
 
 // -------------------------------------------------- Store --------------------------------------------------
 
 const store = useWorkspacesStore();
 const orchestratorsStore = useOrchestratorsStore();
+const toastStore = useToastStore();
 const route = useRoute();
 const toggleAppNav = inject(APP_NAV_TOGGLE_KEY, null);
 
@@ -75,6 +81,22 @@ const ensureData = async (): Promise<void> => {
     return;
   }
   await store.fetchAll();
+};
+
+const handleToggleFavorite = async (): Promise<void> => {
+  const current = workspace.value;
+  if (!current || current.archived) {
+    return;
+  }
+  if (!current.isFavorite && store.favoriteWorkspaces.length >= MAX_FAVORITE_WORKSPACES) {
+    toastStore.error(`You can favorite at most ${MAX_FAVORITE_WORKSPACES} workspaces`);
+    return;
+  }
+  try {
+    await store.toggleFavorite(current.id);
+  } catch (err: unknown) {
+    toastStore.error(apiErrorMessage(err, 'Failed to update favorite'));
+  }
 };
 
 const fetchOrchestrators = async (): Promise<void> => {
@@ -138,6 +160,30 @@ onBeforeUnmount(() => {
           <span class="wd-sep" />
         </template>
         <span>{{ workspace?.name ?? '…' }}</span>
+        <button
+          v-if="workspace && !workspace.archived"
+          type="button"
+          class="wd-fav-btn"
+          :class="{ 'wd-fav-btn--on': workspace.isFavorite }"
+          :title="workspace.isFavorite ? 'Remove favorite' : 'Add to favorites'"
+          :aria-label="workspace.isFavorite ? 'Remove favorite' : 'Add to favorites'"
+          :aria-pressed="workspace.isFavorite"
+          @click="handleToggleFavorite"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            :fill="workspace.isFavorite ? 'currentColor' : 'none'"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z" />
+          </svg>
+        </button>
       </h1>
       <p class="wd-subtitle nc-mono">
         {{ workspace?.path }}
@@ -260,6 +306,33 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+}
+
+.wd-fav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin-left: 2px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-subtle);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.1s, color 0.1s;
+}
+.wd-fav-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg-muted);
+}
+.wd-fav-btn--on {
+  color: var(--accent);
+}
+.wd-fav-btn--on:hover {
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
 }
 
 .wd-group {

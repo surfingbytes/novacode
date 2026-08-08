@@ -218,6 +218,9 @@ export interface ChatWsServerMessage {
 
 // ---------------------------------- Entities ----------------------------------
 
+/** Max workspaces that can be marked favorite (sidebar quick-start row). */
+export const MAX_FAVORITE_WORKSPACES = 5;
+
 export interface Workspace {
   id: string;
   name: string;
@@ -231,6 +234,8 @@ export interface Workspace {
   defaultAgentType?: AgentType | null;
   tags?: string[] | null;
   archived: boolean;
+  isFavorite: boolean;
+  favoriteOrder?: number | null;
 }
 
 export interface PlanDocumentSummary {
@@ -433,4 +438,5 @@ export interface UpdateWorkspacePayload {
   color?: string | null;
   defaultAgentType?: AgentType | null;
   tags?: string[] | null;
+  isFavorite?: boolean;
 }

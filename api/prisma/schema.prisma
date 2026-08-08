@@ -51,6 +51,8 @@ model Workspace {
   defaultAgentType String?    @map("default_agent_type")
   tags           Json?       // string[] stored as JSON
   archived     Boolean       @default(false)
+  isFavorite   Boolean       @default(false) @map("is_favorite")
+  favoriteOrder Int?         @map("favorite_order")
   sessions     Session[]
   orchestrators Orchestrator[]
   automations  Automation[]
