@@ -85,6 +85,36 @@ function resolveExtension(mimeType: string, filename?: string): string | null {
   return null;
 }
 
+/** Keep the original name when possible so agents see a recognizable path. */
+function buildAttachmentFilename(raw: string | undefined, ext: string): string {
+  let stem = basename((raw ?? '').trim()).replace(/[\0\r\n]/g, '');
+  const existingExt = extname(stem);
+  if (existingExt) {
+    stem = stem.slice(0, -existingExt.length);
+  }
+  if (!stem || stem === '.' || stem === '..') {
+    stem = 'attachment';
+  }
+  // Cap length so collision suffixes and the extension still fit comfortably.
+  if (stem.length > 180) {
+    stem = stem.slice(0, 180);
+  }
+  return `${stem}${ext}`;
+}
+
+function allocateUniqueFilename(dir: string, desired: string): string {
+  if (!existsSync(join(dir, desired))) {
+    return desired;
+  }
+  const ext = extname(desired);
+  const stem = desired.slice(0, -ext.length);
+  let n = 1;
+  while (existsSync(join(dir, `${stem}-${n}${ext}`))) {
+    n += 1;
+  }
+  return `${stem}-${n}${ext}`;
+}
+
 // --------------------------------------------- Helpers ---------------------------------------------
 
 export async function deleteSessionImages(sessionId: string): Promise<void> {
@@ -120,7 +150,6 @@ export async function imageRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.status(400).send({ error: 'Unsupported file type' });
       }
 
-      const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`;
       const dir = join(IMAGE_DIR, sessionId);
 
       if (!dir.startsWith(IMAGE_DIR + '/')) {
@@ -129,6 +158,7 @@ export async function imageRoutes(fastify: FastifyInstance): Promise<void> {
 
       await mkdir(dir, { recursive: true });
 
+      const filename = allocateUniqueFilename(dir, buildAttachmentFilename(body.filename, ext));
       const buf = Buffer.from(body.data, 'base64');
       const filePath = join(dir, filename);
       await writeFile(filePath, buf);
