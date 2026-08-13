@@ -12,14 +12,14 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "^0.60.0",
-    "@novacode/shared": "file:../shared",
-    "@agentclientprotocol/sdk": "^1.2.1",
+    "@agentclientprotocol/claude-agent-acp": "^0.66.0",
+    "@agentclientprotocol/sdk": "^1.3.0",
     "@fastify/auth": "^5.0.4",
     "@fastify/cors": "^11.3.0",
     "@fastify/static": "^10.1.0",
     "@fastify/type-provider-typebox": "^6.1.0",
     "@fastify/websocket": "^11.3.0",
+    "@novacode/shared": "file:../shared",
     "@prisma/adapter-pg": "^7.9.0",
     "@prisma/client": "^7.9.0",
     "@sinclair/typebox": "^0.34.52",
