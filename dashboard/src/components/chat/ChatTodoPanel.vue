@@ -82,6 +82,7 @@ function bDone(status: string): boolean {
         <span class="shrink-0 select-none text-text-muted" v-html="checklistSvg" />
         <span class="text-xs font-medium text-text-primary shrink-0">Tasks</span>
         <span class="ml-auto flex items-center gap-1.5 shrink-0">
+          <span class="text-xs text-text-muted">{{ doneCount }}/{{ todoItems.length }}</span>
           <svg
             v-if="bRunning"
             class="animate-spin text-primary select-none"
@@ -98,7 +99,6 @@ function bDone(status: string): boolean {
             <polyline points="23 4 23 10 17 10" />
             <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
           </svg>
-          <span v-else class="text-xs text-text-muted">{{ doneCount }}/{{ todoItems.length }}</span>
           <template v-if="layout === 'strip'">
             <ChevronUp v-if="panelState === 'collapsed'" :size="13" class="text-text-muted" />
             <ChevronDown v-else :size="13" class="text-text-muted" />
