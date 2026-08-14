@@ -69,12 +69,12 @@ const emit = defineEmits<{
 // -------------------------------------------------- Refs --------------------------------------------------
 const name = ref('');
 const formTags = ref<string[]>([]);
-const defaultName = ref('');
 const agentType = ref<AgentType>('cursor-agent');
 const modelSelection = ref('');
 const modelOptions = ref<AgentModelOption[]>([]);
 const bLoadingModels = ref(false);
 const bTagsExpanded = ref(false);
+const bAdvancedExpanded = ref(false);
 const approvalPolicy = ref<ApprovalPolicy>('ask');
 
 // -------------------------------------------------- Computed --------------------------------------------------
@@ -137,7 +137,7 @@ const onCreate = (): void => {
   if (props.loading) {
     return;
   }
-  const finalName = name.value.trim() || defaultName.value;
+  const finalName = name.value.trim() || props.defaultSessionName?.trim() || '';
   const tags = formTags.value;
   emit('create', {
     name: finalName,
@@ -183,10 +183,9 @@ watch(
       formTags.value = [];
       bTagsExpanded.value = false;
       approvalPolicy.value = 'ask';
-      defaultName.value = props.defaultSessionName || `Session ${new Date().toLocaleString()}`;
-      // Prefill only when a suggested name is provided (e.g. plan handoff);
-      // otherwise keep the datetime as placeholder so the user can type a fresh name.
-      name.value = props.defaultSessionName?.trim() ? defaultName.value : '';
+      const suggestedName = props.defaultSessionName?.trim() ?? '';
+      name.value = suggestedName;
+      bAdvancedExpanded.value = suggestedName.length > 0 || props.showModelSelection === true;
       agentType.value = computeInitialAgentType();
       modelSelection.value = props.defaultModelSelection ?? '';
       void loadModelOptions();
@@ -224,55 +223,11 @@ watch(agentType, () => {
             </div>
 
             <div class="px-6 flex flex-col gap-4 pb-5">
-              <!-- Name -->
-              <div class="nc-field">
-                <label class="nc-field-label" for="new-session-name">Name</label>
-                <input
-                  id="new-session-name"
-                  v-model="name"
-                  type="text"
-                  :placeholder="defaultName"
-                  data-modal-autofocus
-                  @keydown.escape="close"
-                />
-              </div>
-
-              <!-- Tags (collapsed by default — rarely used, keeps the dialog short on mobile) -->
-              <div class="nc-field">
-                <button
-                  type="button"
-                  class="tags-toggle"
-                  :aria-expanded="bTagsExpanded"
-                  aria-controls="new-session-tags-panel"
-                  @click="bTagsExpanded = !bTagsExpanded"
-                >
-                  <ChevronRight v-if="!bTagsExpanded" :size="12" aria-hidden="true" />
-                  <ChevronDown v-else :size="12" aria-hidden="true" />
-                  <span class="nc-field-label"
-                    >Tags <span class="normal-case opacity-60">(optional)</span></span
-                  >
-                  <span
-                    v-if="formTags.length > 0 && !bTagsExpanded"
-                    class="rounded-md bg-primary/15 px-1.5 py-px text-[10.5px] leading-4 text-primary"
-                  >
-                    {{ formTags.length }}
-                  </span>
-                </button>
-                <div v-if="bTagsExpanded" id="new-session-tags-panel">
-                  <TagChipsInput
-                    v-model="formTags"
-                    :suggestions="existingTags ?? []"
-                    datalist-id="new-session-tag-suggestions"
-                    hint="Separate tags with a comma, or press Enter/Done. Suggestions from other sessions."
-                  />
-                </div>
-              </div>
-
-              <!-- Agent selection -->
+              <!-- Agent (ACP) selection -->
               <div class="nc-field">
                 <span class="nc-field-label">
                   Agent
-                  <span class="normal-case opacity-60">(required)</span>
+                  <span class="normal-case opacity-60">(ACP)</span>
                 </span>
                 <div
                   class="grid rounded-lg border border-fg/[0.12] bg-fg/[0.04] p-0.5 gap-1"
@@ -311,22 +266,8 @@ watch(agentType, () => {
                   </button>
                 </div>
                 <p v-if="availableAgents.length === 0" class="text-[11px] text-warning">
-                  No agents available. Configure Cursor, Mistral Vibe, or Claude in Settings.
+                  No agents available. Configure an ACP in Settings.
                 </p>
-              </div>
-
-              <!-- Model selection -->
-              <div v-if="showModelSelection" class="nc-field">
-                <span class="nc-field-label">
-                  Model
-                </span>
-                <AgentModelPicker
-                  v-model="modelSelection"
-                  :agent-type="agentType"
-                  :model-options="modelOptions"
-                  :disabled="loading || bLoadingModels"
-                  variant="modal"
-                />
               </div>
 
               <!-- Approval policy — compact segmented control (same row density as agent) -->
@@ -370,6 +311,80 @@ watch(agentType, () => {
                 </div>
               </div>
 
+              <!-- Name, tags, and optional model stay out of the way -->
+              <div class="nc-field">
+                <button
+                  type="button"
+                  class="tags-toggle"
+                  :aria-expanded="bAdvancedExpanded"
+                  aria-controls="new-session-advanced-panel"
+                  @click="bAdvancedExpanded = !bAdvancedExpanded"
+                >
+                  <ChevronRight v-if="!bAdvancedExpanded" :size="12" aria-hidden="true" />
+                  <ChevronDown v-else :size="12" aria-hidden="true" />
+                  <span class="nc-field-label">Advanced</span>
+                  <span
+                    v-if="(name.trim() || formTags.length > 0) && !bAdvancedExpanded"
+                    class="rounded-md bg-primary/15 px-1.5 py-px text-[10.5px] leading-4 text-primary"
+                  >
+                    {{ [name.trim() ? 'name' : null, formTags.length > 0 ? String(formTags.length) : null].filter(Boolean).join(' · ') }}
+                  </span>
+                </button>
+                <div v-if="bAdvancedExpanded" id="new-session-advanced-panel" class="flex flex-col gap-4 pt-3">
+                  <div class="nc-field">
+                    <label class="nc-field-label" for="new-session-name">Name</label>
+                    <input
+                      id="new-session-name"
+                      v-model="name"
+                      type="text"
+                      placeholder="Named from first message"
+                      @keydown.escape="close"
+                    />
+                  </div>
+
+                  <div class="nc-field">
+                    <button
+                      type="button"
+                      class="tags-toggle"
+                      :aria-expanded="bTagsExpanded"
+                      aria-controls="new-session-tags-panel"
+                      @click="bTagsExpanded = !bTagsExpanded"
+                    >
+                      <ChevronRight v-if="!bTagsExpanded" :size="12" aria-hidden="true" />
+                      <ChevronDown v-else :size="12" aria-hidden="true" />
+                      <span class="nc-field-label"
+                        >Tags <span class="normal-case opacity-60">(optional)</span></span
+                      >
+                      <span
+                        v-if="formTags.length > 0 && !bTagsExpanded"
+                        class="rounded-md bg-primary/15 px-1.5 py-px text-[10.5px] leading-4 text-primary"
+                      >
+                        {{ formTags.length }}
+                      </span>
+                    </button>
+                    <div v-if="bTagsExpanded" id="new-session-tags-panel">
+                      <TagChipsInput
+                        v-model="formTags"
+                        :suggestions="existingTags ?? []"
+                        datalist-id="new-session-tag-suggestions"
+                        hint="Separate tags with a comma, or press Enter/Done. Suggestions from other sessions."
+                      />
+                    </div>
+                  </div>
+
+                  <div v-if="showModelSelection" class="nc-field">
+                    <span class="nc-field-label">Model</span>
+                    <AgentModelPicker
+                      v-model="modelSelection"
+                      :agent-type="agentType"
+                      :model-options="modelOptions"
+                      :disabled="loading || bLoadingModels"
+                      variant="modal"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <p v-if="error" class="text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded-lg px-3 py-2">
                 {{ error }}
               </p>
@@ -390,6 +405,7 @@ watch(agentType, () => {
               type="submit"
               class="button is-primary"
               :disabled="loading"
+              data-modal-autofocus
             >
               <div
                 v-if="loading"

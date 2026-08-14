@@ -153,9 +153,35 @@ const bPromptUseCompactMultiline = computed(
 const promptPlaceholder = computed(() => {
   if (props.bIsStreaming) return 'Type your next message…';
   if (props.bMdUp) {
-    return 'Type a message… (Ctrl+Enter to send, Enter for newline)';
+    return 'Type a message… (Enter to send, Ctrl+Enter for newline)';
   }
   return 'Type a message…';
+});
+
+const bHasDraft = computed(
+  () => promptText.value.trim().length > 0 || pendingImages.value.length > 0
+);
+
+const bPrimaryIsStop = computed(() => props.bIsStreaming && !bHasDraft.value);
+
+const bPrimaryDisabled = computed(() => {
+  if (!props.bWsConnected) {
+    return true;
+  }
+  if (props.bIsStreaming) {
+    return false;
+  }
+  return !bHasDraft.value;
+});
+
+const primaryActionLabel = computed(() => {
+  if (bPrimaryIsStop.value) {
+    return 'Stop generating';
+  }
+  if (props.bIsStreaming) {
+    return 'Queue message';
+  }
+  return 'Send message';
 });
 
 // -------------------------------------------------- Methods --------------------------------------------------
@@ -176,12 +202,24 @@ function send(): void {
   nextTick(() => textareaEl.value?.focus());
 }
 
-function onKeydown(e: KeyboardEvent): void {
-  if (e.isComposing) return;
-  if (e.ctrlKey || e.metaKey) {
-    e.preventDefault();
-    send();
+function onPrimaryClick(): void {
+  if (bPrimaryIsStop.value) {
+    emit('cancel');
+    return;
   }
+  send();
+}
+
+function onKeydown(e: KeyboardEvent): void {
+  if (e.isComposing) {
+    return;
+  }
+  // Ctrl/Cmd+Enter and Shift+Enter insert a newline (textarea default).
+  if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) {
+    return;
+  }
+  e.preventDefault();
+  send();
 }
 
 function onPaste(e: ClipboardEvent): void {
@@ -618,14 +656,45 @@ defineExpose({
       />
       <button
         type="button"
-        @click="send"
-        :disabled="(!promptText.trim() && !pendingImages.length) || !bWsConnected"
-        :aria-label="bIsStreaming ? 'Waiting for response' : 'Send message'"
-        :title="bIsStreaming ? 'Waiting for response' : 'Send message'"
-        class="button is-primary is-icon !h-[44px] !w-[44px] !min-w-[44px] shrink-0 !rounded-md !p-0"
+        @click="onPrimaryClick"
+        :disabled="bPrimaryDisabled"
+        :aria-label="primaryActionLabel"
+        :title="primaryActionLabel"
+        class="button is-icon !h-[44px] !w-[44px] !min-w-[44px] shrink-0 !rounded-md !p-0"
+        :class="bPrimaryIsStop ? 'is-transparent !text-destructive hover:!bg-destructive/10' : 'is-primary'"
       >
-        <svg v-if="bIsStreaming" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none send-wait-hourglass" aria-hidden="true"><path d="M5 22h14M5 2h14M17 22v-4.172a2 2 0 00-.586-1.414L12 12M7 22v-4.172a2 2 0 01.586-1.414L12 12M17 2v4.172a2 2 0 01-.586 1.414L12 12M7 2v4.172a2 2 0 00.586 1.414L12 12"/></svg>
-        <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        <svg
+          v-if="bPrimaryIsStop"
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="select-none"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <rect x="9" y="9" width="6" height="6" />
+        </svg>
+        <svg
+          v-else
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="select-none"
+          aria-hidden="true"
+        >
+          <line x1="22" y1="2" x2="11" y2="13" />
+          <polygon points="22 2 15 22 11 13 2 9 22 2" />
+        </svg>
       </button>
     </div>
 
@@ -663,7 +732,7 @@ defineExpose({
         <div ref="approvalMenuRef" class="relative">
           <button
             type="button"
-            class="flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors"
+            class="flex h-5 items-center gap-1 rounded px-0.5 text-[11px] transition-colors"
             :class="
               approvalPolicy === 'allow_all'
                 ? 'text-warning hover:text-warning/80'
@@ -679,12 +748,13 @@ defineExpose({
             "
             :title="
               approvalPolicy === 'allow_all'
-                ? 'Approval: Allow all'
-                : 'Approval: Ask'
+                ? 'Auto-approve tool actions'
+                : 'Prompt before tool actions'
             "
             @click.stop="openApprovalMenu"
           >
             <Shield :size="14" :stroke-width="1.8" aria-hidden="true" />
+            <span>{{ approvalPolicy === 'allow_all' ? 'Allow all' : 'Ask' }}</span>
           </button>
           <div
             v-if="bApprovalMenuOpen"
@@ -785,23 +855,5 @@ defineExpose({
   grid-column: 3;
   grid-row: 2;
   align-self: end;
-}
-
-.send-wait-hourglass {
-  display: inline-block;
-  transform-origin: center;
-  animation: send-hourglass-flip 1.2s ease-in-out infinite;
-}
-
-@keyframes send-hourglass-flip {
-  0% {
-    transform: rotate(0deg);
-  }
-  22% {
-    transform: rotate(180deg);
-  }
-  100% {
-    transform: rotate(180deg);
-  }
 }
 </style>

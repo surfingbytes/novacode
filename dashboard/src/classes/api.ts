@@ -557,7 +557,7 @@ export const sessionsApi = {
   create: (
     workspaceId: string,
     payload: {
-      name: string;
+      name?: string;
       tags?: string[] | null;
       agentType?: AgentType;
       modelSelection?: string | null;

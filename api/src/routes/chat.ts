@@ -1,10 +1,12 @@
 // node_modules
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
+import { sessionNameFromFirstMessage } from '@novacode/shared';
 
 // classes
 import { extractWsToken, verifyToken } from '../classes/auth';
 import { db } from '../classes/database';
+import { broadcastSessionListUpsert } from '../classes/sessionListBroadcast';
 import {
   getActiveSessionIds as _getActiveSessionIds,
   getActiveRun,
@@ -165,6 +167,25 @@ async function loadSessionMessages(sessionId: string): Promise<ChatMessage[]> {
     return JSON.parse(session.messageJson ?? '[]');
   } catch {
     return [];
+  }
+}
+
+async function maybeNameUntitledSession(
+  sessionId: string,
+  text: string,
+  imagePaths: string[]
+): Promise<void> {
+  const current = await db.getSession(sessionId);
+  if (!current || current.name.trim() !== '') {
+    return;
+  }
+  const derived = sessionNameFromFirstMessage(text) || (imagePaths.length > 0 ? 'Image' : '');
+  if (!derived) {
+    return;
+  }
+  const updated = await db.updateSession(sessionId, { name: derived });
+  if (updated) {
+    broadcastSessionListUpsert(updated.workspaceId, updated);
   }
 }
 
@@ -341,6 +362,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
           return;
         }
 
+        await maybeNameUntitledSession(id, text, imagePaths);
         await db.enqueueSessionQueueItem({
           sessionId: id,
           text,

@@ -52,6 +52,26 @@ export interface DisplayItem {
   planRenderedHtml?: string;
 }
 
+/** Raw path from a tool card (locations first, then a summary that looks like a path). */
+export function filePathFromToolItem(item: DisplayItem): string | null {
+  if (item.kind !== 'tool') {
+    return null;
+  }
+  const fromLocation = item.locations?.find((location) => location.path?.trim())?.path?.trim();
+  if (fromLocation) {
+    return fromLocation;
+  }
+  const summary = item.toolSummary?.trim() ?? '';
+  if (!summary || summary.startsWith('"') || summary.includes(' → ') || summary.includes('*')) {
+    return null;
+  }
+  const firstToken = summary.split(/\s+/)[0] ?? '';
+  if (!firstToken.includes('/') && !/\.\w+$/.test(firstToken)) {
+    return null;
+  }
+  return firstToken;
+}
+
 export interface PlanDocument {
   id: string;
   backendPlanId?: string;

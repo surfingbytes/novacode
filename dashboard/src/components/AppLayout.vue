@@ -66,9 +66,21 @@ function handleMobileSearch(): void {
 }
 
 function handleKeyDown(event: KeyboardEvent): void {
-  if ((event.ctrlKey || event.metaKey) && event.key === 'k') {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) {
+    return;
+  }
+  const key = event.key.toLowerCase();
+  if (key === 'k') {
     event.preventDefault();
     openSearchModal();
+    return;
+  }
+  if (bSearchModalOpen.value) {
+    return;
+  }
+  if (key === 'n') {
+    event.preventDefault();
+    window.dispatchEvent(new CustomEvent('novacode:new-session'));
   }
 }
 
@@ -92,10 +104,8 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', handleKeyDown); })
       <NavTopBar
         :hide-on-mobile="hideMobileTopBar"
         :sidebar-open="bSidebarIsOpen"
-        :sidebar-collapsed="bSidebarCollapsed"
         :on-menu-click="toggleSidebar"
         :on-search-click="openSearchModal"
-        @toggle-collapsed="toggleCollapsed"
       />
 
       <main

@@ -24,6 +24,11 @@ const props = withDefaults(
     entityLabel?: string;
     /** Show 'New session' as the first item in the mobile overflow menu */
     showNewSession?: boolean;
+    /** Show export-as-Markdown in the desktop toolbar and mobile overflow menu */
+    showExport?: boolean;
+    /** Workspaces listed in the subtitle switcher */
+    subtitleItems?: Array<{ id: string; name: string }>;
+    currentSubtitleId?: string;
   }>(),
   {
     subtitle: undefined,
@@ -33,7 +38,10 @@ const props = withDefaults(
     bShowSidebarToggle: false,
     showAppMenu: true,
     entityLabel: 'session',
-    showNewSession: false
+    showNewSession: false,
+    showExport: false,
+    subtitleItems: () => [],
+    currentSubtitleId: undefined
   }
 );
 
@@ -44,6 +52,8 @@ const emit = defineEmits<{
   (e: 'archive'): void;
   (e: 'delete'): void;
   (e: 'newSession'): void;
+  (e: 'export'): void;
+  (e: 'selectSubtitle', id: string): void;
 }>();
 
 // -------------------------------------------------- Store --------------------------------------------------
@@ -52,6 +62,8 @@ const toggleAppNav = inject(APP_NAV_TOGGLE_KEY, null);
 // -------------------------------------------------- Refs --------------------------------------------------
 const bMobileMenuOpen = ref(false);
 const mobileMenuRef = ref<HTMLElement | null>(null);
+const bSubtitleMenuOpen = ref(false);
+const subtitleMenuRef = ref<HTMLElement | null>(null);
 
 // -------------------------------------------------- Computed --------------------------------------------------
 const entityLabelTitle = computed(
@@ -68,17 +80,34 @@ function handleDocumentClick(e: MouseEvent): void {
   if (bMobileMenuOpen.value && el && !el.contains(e.target as Node)) {
     closeMobileMenu();
   }
+  const subtitleEl = subtitleMenuRef.value;
+  if (bSubtitleMenuOpen.value && subtitleEl && !subtitleEl.contains(e.target as Node)) {
+    bSubtitleMenuOpen.value = false;
+  }
 }
 
 function handleKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape' && bMobileMenuOpen.value) {
     closeMobileMenu();
   }
+  if (e.key === 'Escape' && bSubtitleMenuOpen.value) {
+    bSubtitleMenuOpen.value = false;
+  }
+}
+
+function onSelectSubtitle(id: string): void {
+  bSubtitleMenuOpen.value = false;
+  emit('selectSubtitle', id);
 }
 
 function onMobileMenuNewSession(): void {
   closeMobileMenu();
   emit('newSession');
+}
+
+function onMobileMenuExport(): void {
+  closeMobileMenu();
+  emit('export');
 }
 
 function onMobileMenuEdit(): void {
@@ -138,7 +167,38 @@ onUnmounted(() => {
             {{ bLoading ? '…' : title }}
           </h1>
           <!-- workspace name -->
-          <p v-if="subtitle" class="text-xs text-text-muted">
+          <div v-if="subtitleItems.length > 0" ref="subtitleMenuRef" class="relative min-w-0">
+            <button
+              type="button"
+              class="flex items-center gap-1 max-w-full text-xs text-text-muted hover:text-text-primary truncate"
+              :aria-expanded="bSubtitleMenuOpen"
+              aria-haspopup="menu"
+              aria-label="Switch workspace"
+              title="Switch workspace"
+              @click.stop="bSubtitleMenuOpen = !bSubtitleMenuOpen"
+            >
+              <span class="truncate">{{ subtitle }}</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <div
+              v-if="bSubtitleMenuOpen"
+              class="absolute left-0 top-full mt-1 z-50 min-w-[12rem] max-h-64 overflow-y-auto rounded-lg border border-border bg-surface py-1 shadow-lg"
+              role="menu"
+            >
+              <button
+                v-for="item in subtitleItems"
+                :key="item.id"
+                type="button"
+                class="w-full px-3 py-2 text-sm text-left truncate hover:bg-fg/[0.06]"
+                :class="item.id === currentSubtitleId ? 'text-text-primary font-medium' : 'text-text-muted'"
+                role="menuitem"
+                @click="onSelectSubtitle(item.id)"
+              >
+                {{ item.name }}
+              </button>
+            </div>
+          </div>
+          <p v-else-if="subtitle" class="text-xs text-text-muted">
             {{ subtitle }}
           </p>
           <span
@@ -168,6 +228,16 @@ onUnmounted(() => {
         @click="emit('edit')"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
+      </button>
+      <button
+        v-if="showExport"
+        type="button"
+        class="button is-transparent is-icon"
+        title="Export as Markdown"
+        aria-label="Export as Markdown"
+        @click="emit('export')"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
       </button>
       <button
         type="button"
@@ -231,6 +301,16 @@ onUnmounted(() => {
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="shrink-0" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
             Edit
+          </button>
+          <button
+            v-if="showExport"
+            type="button"
+            class="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-text-primary hover:bg-fg/[0.06] transition-colors"
+            role="menuitem"
+            @click="onMobileMenuExport"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="shrink-0" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export Markdown
           </button>
           <button
             type="button"

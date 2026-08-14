@@ -4,14 +4,9 @@ import ThemeToggleButton from '@/components/ThemeToggleButton.vue';
 
 defineProps<{
   sidebarOpen: boolean;
-  sidebarCollapsed: boolean;
   onMenuClick: () => void;
   onSearchClick: () => void;
   hideOnMobile?: boolean;
-}>();
-
-defineEmits<{
-  (e: 'toggleCollapsed'): void;
 }>();
 
 const auth = useAuthStore();
@@ -24,30 +19,7 @@ function userInitial(): string {
 
 <template>
   <header class="topbar" :class="{ 'topbar--hide-mobile': hideOnMobile }">
-    <!-- Sidebar toggle -->
-    <button
-      type="button"
-      class="topbar__toggle"
-      :aria-label="sidebarOpen || !sidebarCollapsed ? 'Collapse sidebar' : 'Expand sidebar'"
-      @click="$emit('toggleCollapsed')"
-    >
-      <svg
-        width="15"
-        height="15"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.6"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <rect x="3" y="3" width="18" height="18" rx="2" />
-        <path d="M9 3v18" />
-      </svg>
-    </button>
-
-    <!-- Phone drawer toggle (hidden once the persistent nav rail is active) -->
+    <!-- App-nav collapse lives on the sidebar (rail) or the hamburger (phone). -->
     <button
       type="button"
       class="topbar__mobile-menu pane:hidden!"
@@ -86,7 +58,7 @@ function userInitial(): string {
         <circle cx="11" cy="11" r="7" />
         <path d="M16.5 16.5L21 21" />
       </svg>
-      <span class="topbar__search-placeholder">Search sessions, files, workspaces…</span>
+      <span class="topbar__search-placeholder">Search or jump to…</span>
       <kbd class="topbar__kbd">⌘K</kbd>
     </button>
 
@@ -116,27 +88,6 @@ function userInitial(): string {
   background: var(--bg);
   gap: 10px;
   flex-shrink: 0;
-}
-
-.topbar__toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  color: var(--fg-muted);
-  cursor: pointer;
-  transition:
-    background 0.1s,
-    color 0.1s;
-  flex-shrink: 0;
-}
-.topbar__toggle:hover {
-  background: var(--bg-hover);
-  color: var(--fg);
 }
 
 .topbar__mobile-menu {
@@ -271,10 +222,5 @@ function userInitial(): string {
   }
 }
 
-/* Phone only: collapse control lives in the drawer; show hamburger instead */
-@media (max-width: 37.49rem) {
-  .topbar__toggle {
-    display: none;
-  }
-}
+/* Phone: rail collapse is inside the drawer; hamburger opens it. */
 </style>

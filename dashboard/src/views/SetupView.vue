@@ -44,9 +44,15 @@ const bSavingProfile = ref<boolean>(false);
 
 // Step 2: AI Agents
 const bClaudeAuthenticated = ref<boolean>(false);
+const bCursorAuthenticated = ref<boolean>(false);
 const bVibeConfigured = ref<boolean>(false);
+const bOpenCodeAuthenticated = ref<boolean>(false);
+const bCodexAuthenticated = ref<boolean>(false);
 const bStartingClaudeLogin = ref<boolean>(false);
+const bStartingCursorLogin = ref<boolean>(false);
 const bLoggingOutClaude = ref<boolean>(false);
+const bLoggingOutCursor = ref<boolean>(false);
+const authKind = ref<'claude' | 'cursor' | null>(null);
 const authSessionId = ref<string | null>(null);
 const authCode = ref<string>('');
 const authUrl = ref<string | null>(null);
@@ -58,6 +64,14 @@ const vibeApiKey = ref<string>('');
 const bSavingVibeKey = ref<boolean>(false);
 const bClearingVibeKey = ref<boolean>(false);
 const vibeKeyError = ref<string>('');
+const openCodeApiKey = ref<string>('');
+const bSavingOpenCodeKey = ref<boolean>(false);
+const bClearingOpenCodeKey = ref<boolean>(false);
+const openCodeKeyError = ref<string>('');
+const codexApiKey = ref<string>('');
+const bSavingCodexKey = ref<boolean>(false);
+const bClearingCodexKey = ref<boolean>(false);
+const codexKeyError = ref<string>('');
 
 // Step 3: Git Credentials
 const gitName = ref<string>('');
@@ -83,7 +97,14 @@ const passwordMismatch = computed((): boolean => {
   return passwordConfirm.value.length > 0 && password.value !== passwordConfirm.value;
 });
 
-const canProceedStep2 = computed((): boolean => bClaudeAuthenticated.value || bVibeConfigured.value);
+const canProceedStep2 = computed(
+  (): boolean =>
+    bClaudeAuthenticated.value ||
+    bCursorAuthenticated.value ||
+    bVibeConfigured.value ||
+    bOpenCodeAuthenticated.value ||
+    bCodexAuthenticated.value
+);
 
 const stepStatuses = computed<Record<1 | 2 | 3 | 4, 'complete' | 'active' | 'pending'>>(() => ({
   1: step.value > 1 ? 'complete' : step.value === 1 ? 'active' : 'pending',
@@ -123,6 +144,12 @@ const handleStep1Next = async (): Promise<void> => {
 // --- agent auth ---
 const refreshAuthStatus = async (): Promise<void> => {
   try {
+    const cursorResponse = await agentAuthApi.cursorStatus();
+    bCursorAuthenticated.value = cursorResponse.data.authenticated;
+  } catch {
+    // ignore
+  }
+  try {
     const claudeResponse = await agentAuthApi.claudeStatus();
     bClaudeAuthenticated.value = claudeResponse.data.authenticated;
   } catch {
@@ -134,6 +161,33 @@ const refreshAuthStatus = async (): Promise<void> => {
   } catch {
     // ignore
   }
+  try {
+    const openCodeResponse = await agentAuthApi.openCodeStatus();
+    bOpenCodeAuthenticated.value = openCodeResponse.data.authenticated;
+  } catch {
+    // ignore
+  }
+  try {
+    const codexResponse = await agentAuthApi.codexStatus();
+    bCodexAuthenticated.value = codexResponse.data.authenticated;
+  } catch {
+    // ignore
+  }
+};
+
+const startCursorLogin = async (): Promise<void> => {
+  bStartingCursorLogin.value = true;
+  try {
+    authUrl.value = null;
+    authCode.value = '';
+    authKind.value = 'cursor';
+    const response = await agentAuthApi.cursorLogin();
+    authSessionId.value = response.data.sessionId;
+  } catch {
+    // ignore
+  } finally {
+    bStartingCursorLogin.value = false;
+  }
 };
 
 const startClaudeLogin = async (): Promise<void> => {
@@ -141,12 +195,25 @@ const startClaudeLogin = async (): Promise<void> => {
   try {
     authUrl.value = null;
     authCode.value = '';
+    authKind.value = 'claude';
     const response = await agentAuthApi.claudeLogin();
     authSessionId.value = response.data.sessionId;
   } catch {
     // ignore
   } finally {
     bStartingClaudeLogin.value = false;
+  }
+};
+
+const logoutCursor = async (): Promise<void> => {
+  bLoggingOutCursor.value = true;
+  try {
+    await agentAuthApi.cursorLogout();
+    await refreshAuthStatus();
+  } catch {
+    // ignore
+  } finally {
+    bLoggingOutCursor.value = false;
   }
 };
 
@@ -174,6 +241,9 @@ const submitAuthCode = async (): Promise<void> => {
 };
 
 const onAuthTokenFound = async (token: string): Promise<void> => {
+  if (authKind.value !== 'claude') {
+    return;
+  }
   const trimmedToken = token.trim();
   if (!trimmedToken) {
     return;
@@ -205,9 +275,8 @@ const dismissAuthTerminal = (): void => {
   authSessionId.value = null;
   authUrl.value = null;
   authCode.value = '';
-  agentAuthApi.claudeStatus()
-    .then((r) => { bClaudeAuthenticated.value = r.data.authenticated; })
-    .catch(() => {});
+  authKind.value = null;
+  void refreshAuthStatus();
 };
 
 const onAuthSessionEnded = (): void => {
@@ -240,6 +309,70 @@ const clearVibeApiKey = async (): Promise<void> => {
     // ignore
   } finally {
     bClearingVibeKey.value = false;
+  }
+};
+
+const saveOpenCodeApiKey = async (): Promise<void> => {
+  const key = openCodeApiKey.value.trim();
+  if (!key) return;
+  bSavingOpenCodeKey.value = true;
+  openCodeKeyError.value = '';
+  try {
+    const response = await agentAuthApi.openCodeLogin(key);
+    if (!response.data?.ok) {
+      openCodeKeyError.value = 'Authentication failed. Check your API key and try again.';
+      return;
+    }
+    openCodeApiKey.value = '';
+    await refreshAuthStatus();
+  } catch {
+    openCodeKeyError.value = 'Failed to save API key.';
+  } finally {
+    bSavingOpenCodeKey.value = false;
+  }
+};
+
+const clearOpenCodeApiKey = async (): Promise<void> => {
+  bClearingOpenCodeKey.value = true;
+  try {
+    await agentAuthApi.openCodeLogout();
+    await refreshAuthStatus();
+  } catch {
+    // ignore
+  } finally {
+    bClearingOpenCodeKey.value = false;
+  }
+};
+
+const saveCodexApiKey = async (): Promise<void> => {
+  const key = codexApiKey.value.trim();
+  if (!key) return;
+  bSavingCodexKey.value = true;
+  codexKeyError.value = '';
+  try {
+    const response = await agentAuthApi.codexLogin(key);
+    if (!response.data?.ok) {
+      codexKeyError.value = 'Authentication failed. Check your API key and try again.';
+      return;
+    }
+    codexApiKey.value = '';
+    await refreshAuthStatus();
+  } catch {
+    codexKeyError.value = 'Failed to save API key.';
+  } finally {
+    bSavingCodexKey.value = false;
+  }
+};
+
+const clearCodexApiKey = async (): Promise<void> => {
+  bClearingCodexKey.value = true;
+  try {
+    await agentAuthApi.codexLogout();
+    await refreshAuthStatus();
+  } catch {
+    // ignore
+  } finally {
+    bClearingCodexKey.value = false;
   }
 };
 
@@ -501,11 +634,60 @@ onMounted((): void => {
               Connect AI Agents
             </h1>
             <p class="text-text-muted text-base max-w-md mx-auto">
-              Connect your preferred AI coding assistants. You need at least one to start working.
+              Connect at least one coding agent. Cursor, Claude, Mistral Vibe, OpenCode, and Codex
+              are all supported — you can add more later in Settings.
             </p>
           </div>
 
           <div class="space-y-4 mb-6">
+            <!-- Cursor Card -->
+            <div class="bg-fg/[0.02] border border-fg/[0.07] rounded-xl p-5">
+              <div class="flex items-start justify-between gap-4 mb-4">
+                <div class="min-w-0">
+                  <p class="font-medium text-text-primary text-sm">Cursor</p>
+                  <p class="text-xs text-text-muted mt-1">
+                    Sign in with your Cursor account. A terminal will open for
+                    <code class="text-[11px]">cursor-agent login</code>.
+                  </p>
+                </div>
+                <span
+                  class="inline-flex items-center text-xs px-2.5 py-1 rounded-full border flex-shrink-0 font-medium"
+                  :class="bCursorAuthenticated
+                    ? 'bg-success/10 text-success border-success/20'
+                    : 'bg-warning/10 text-warning border-warning/20'"
+                >
+                  <span class="w-1.5 h-1.5 rounded-full mr-1.5" :class="bCursorAuthenticated ? 'bg-success' : 'bg-warning'"></span>
+                  {{ bCursorAuthenticated ? 'Authenticated' : 'Not authenticated' }}
+                </span>
+              </div>
+              <div class="flex items-center gap-3">
+                <button
+                  v-if="!bCursorAuthenticated"
+                  class="flex items-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all"
+                  :disabled="bStartingCursorLogin"
+                  @click="startCursorLogin"
+                >
+                  <div v-if="bStartingCursorLogin" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  Login to Cursor
+                </button>
+                <button
+                  v-else
+                  class="flex items-center gap-2 bg-fg/[0.05] hover:bg-fg/[0.09] disabled:opacity-50 disabled:cursor-not-allowed border border-fg/[0.1] text-text-primary text-sm font-medium px-4 py-2.5 rounded-lg transition-all"
+                  :disabled="bLoggingOutCursor"
+                  @click="logoutCursor"
+                >
+                  <div v-if="bLoggingOutCursor" class="w-3.5 h-3.5 border-2 border-fg/30 border-t-fg rounded-full animate-spin"></div>
+                  Logout
+                </button>
+                <a
+                  href="https://cursor.com/dashboard"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="text-xs text-primary hover:text-primary-hover transition-colors"
+                >Manage account &rarr;</a>
+              </div>
+            </div>
+
             <!-- Claude Card -->
             <div class="bg-fg/[0.02] border border-fg/[0.07] rounded-xl p-5">
               <div class="flex items-start justify-between gap-4 mb-4">
@@ -616,6 +798,124 @@ onMounted((): void => {
               </div>
 
               <p v-if="vibeKeyError" class="text-xs text-destructive mt-2">{{ vibeKeyError }}</p>
+            </div>
+
+            <!-- OpenCode Card -->
+            <div class="bg-fg/[0.02] border border-fg/[0.07] rounded-xl p-5">
+              <div class="flex items-start justify-between gap-4 mb-4">
+                <div class="min-w-0">
+                  <p class="font-medium text-text-primary text-sm">OpenCode</p>
+                  <p class="text-xs text-text-muted mt-1">
+                    Optional API key for OpenCode. Add Moonshot/Kimi or custom providers later in
+                    Settings.
+                  </p>
+                </div>
+                <span
+                  class="inline-flex items-center text-xs px-2.5 py-1 rounded-full border flex-shrink-0 font-medium"
+                  :class="bOpenCodeAuthenticated
+                    ? 'bg-success/10 text-success border-success/20'
+                    : 'bg-warning/10 text-warning border-warning/20'"
+                >
+                  <span class="w-1.5 h-1.5 rounded-full mr-1.5" :class="bOpenCodeAuthenticated ? 'bg-success' : 'bg-warning'"></span>
+                  {{ bOpenCodeAuthenticated ? 'Configured' : 'Not configured' }}
+                </span>
+              </div>
+
+              <div v-if="!bOpenCodeAuthenticated" class="flex items-center gap-2">
+                <div class="input-wrap flex-1">
+                  <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></span>
+                  <input
+                    v-model="openCodeApiKey"
+                    type="password"
+                    placeholder="OpenCode API key"
+                    autocomplete="off"
+                    @keydown.enter="saveOpenCodeApiKey"
+                  />
+                </div>
+                <button
+                  class="flex items-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all shrink-0"
+                  :disabled="bSavingOpenCodeKey || !openCodeApiKey.trim()"
+                  @click="saveOpenCodeApiKey"
+                >
+                  <div v-if="bSavingOpenCodeKey" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  <span v-else>Save</span>
+                </button>
+              </div>
+
+              <div v-else class="flex items-center gap-3">
+                <button
+                  class="flex items-center gap-2 bg-fg/[0.05] hover:bg-fg/[0.09] disabled:opacity-50 disabled:cursor-not-allowed border border-fg/[0.1] text-text-primary text-sm font-medium px-4 py-2.5 rounded-lg transition-all"
+                  :disabled="bClearingOpenCodeKey"
+                  @click="clearOpenCodeApiKey"
+                >
+                  <div v-if="bClearingOpenCodeKey" class="w-3.5 h-3.5 border-2 border-fg/30 border-t-fg rounded-full animate-spin"></div>
+                  Remove key
+                </button>
+              </div>
+
+              <p v-if="openCodeKeyError" class="text-xs text-destructive mt-2">{{ openCodeKeyError }}</p>
+            </div>
+
+            <!-- Codex Card -->
+            <div class="bg-fg/[0.02] border border-fg/[0.07] rounded-xl p-5">
+              <div class="flex items-start justify-between gap-4 mb-4">
+                <div class="min-w-0">
+                  <p class="font-medium text-text-primary text-sm">OpenAI Codex</p>
+                  <p class="text-xs text-text-muted mt-1">
+                    API key for Codex ACP. Stored in
+                    <code class="text-[11px]">~/.codex/auth.json</code>.
+                  </p>
+                </div>
+                <span
+                  class="inline-flex items-center text-xs px-2.5 py-1 rounded-full border flex-shrink-0 font-medium"
+                  :class="bCodexAuthenticated
+                    ? 'bg-success/10 text-success border-success/20'
+                    : 'bg-warning/10 text-warning border-warning/20'"
+                >
+                  <span class="w-1.5 h-1.5 rounded-full mr-1.5" :class="bCodexAuthenticated ? 'bg-success' : 'bg-warning'"></span>
+                  {{ bCodexAuthenticated ? 'Configured' : 'Not configured' }}
+                </span>
+              </div>
+
+              <div v-if="!bCodexAuthenticated" class="flex items-center gap-2">
+                <div class="input-wrap flex-1">
+                  <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></span>
+                  <input
+                    v-model="codexApiKey"
+                    type="password"
+                    placeholder="OpenAI API key"
+                    autocomplete="off"
+                    @keydown.enter="saveCodexApiKey"
+                  />
+                </div>
+                <button
+                  class="flex items-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all shrink-0"
+                  :disabled="bSavingCodexKey || !codexApiKey.trim()"
+                  @click="saveCodexApiKey"
+                >
+                  <div v-if="bSavingCodexKey" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  <span v-else>Save</span>
+                </button>
+              </div>
+
+              <div v-else class="flex items-center gap-3">
+                <button
+                  class="flex items-center gap-2 bg-fg/[0.05] hover:bg-fg/[0.09] disabled:opacity-50 disabled:cursor-not-allowed border border-fg/[0.1] text-text-primary text-sm font-medium px-4 py-2.5 rounded-lg transition-all"
+                  :disabled="bClearingCodexKey"
+                  @click="clearCodexApiKey"
+                >
+                  <div v-if="bClearingCodexKey" class="w-3.5 h-3.5 border-2 border-fg/30 border-t-fg rounded-full animate-spin"></div>
+                  Remove key
+                </button>
+                <a
+                  href="https://platform.openai.com/api-keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="text-xs text-primary hover:text-primary-hover transition-colors"
+                >Manage API keys &rarr;</a>
+              </div>
+
+              <p v-if="codexKeyError" class="text-xs text-destructive mt-2">{{ codexKeyError }}</p>
             </div>
           </div>
 

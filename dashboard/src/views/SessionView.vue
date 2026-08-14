@@ -105,6 +105,7 @@ async function createSession(payload: {
       ...payload,
       linkedPlanContext: pendingPlanHandoff.value?.linkedPlanContext,
       sessionMode: pendingPlanHandoff.value?.defaultSessionMode,
+      modelSelection: payload.modelSelection ?? pendingPlanHandoff.value?.defaultModelSelection,
     });
     if (pendingPlanHandoff.value?.draftPrompt) {
       localStorage.setItem(
@@ -199,6 +200,7 @@ onMounted(() => {
   ensureWorkspaceLoaded();
   store.setActiveWorkspace(workspaceId.value);
   ensureAgentCapabilitiesLoaded();
+  window.addEventListener('novacode:new-session', openNewSessionModal);
 });
 
 watch(
@@ -226,6 +228,7 @@ onUnmounted(() => {
   if (window.visualViewport) {
     window.visualViewport.removeEventListener('resize', onViewportResize);
   }
+  window.removeEventListener('novacode:new-session', openNewSessionModal);
 });
 </script>
 

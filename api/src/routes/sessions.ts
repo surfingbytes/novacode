@@ -88,7 +88,7 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { workspaceId } = request.params as { workspaceId: string };
       const body = request.body as {
-        name: string;
+        name?: string;
         tags?: string[] | string | null;
         agentType?: AgentType;
         modelSelection?: string | null;
@@ -100,7 +100,7 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       const tagsParsed = parseTagsFromBody(request.body);
       const result = await createSessionWithAgent({
         workspaceId,
-        name: body.name,
+        name: typeof body.name === 'string' ? body.name.trim() : '',
         tags: tagsParsed === undefined ? null : tagsParsed,
         agentType: body.agentType,
         modelSelection: body.modelSelection ?? undefined,

@@ -8,6 +8,7 @@ import {
   notificationPreviewFromStreamingItems,
   mergeStreamingTextChunks,
   prepareDisplayItem,
+  filePathFromToolItem,
   entriesFromPlanMarkdown,
   shouldSkipDuplicateVibeEventLine,
   indexSeenVibeIdsFromEvents,
@@ -688,5 +689,27 @@ describe('notificationPreviewFromStreamingItems', () => {
     expect(notificationPreviewFromStreamingItems([{ kind: 'plan', planEntries: [] }])).toBe(
       'Plan ready'
     );
+  });
+});
+
+describe('filePathFromToolItem', () => {
+  it('prefers locations over the summary', () => {
+    expect(
+      filePathFromToolItem({
+        kind: 'tool',
+        toolSummary: 'other.ts',
+        locations: [{ path: '/data-root/opt/src/novacode/api/src/index.ts' }]
+      })
+    ).toBe('/data-root/opt/src/novacode/api/src/index.ts');
+  });
+
+  it('uses a path-like summary when there are no locations', () => {
+    expect(filePathFromToolItem({ kind: 'tool', toolSummary: 'dashboard/src/App.vue' })).toBe(
+      'dashboard/src/App.vue'
+    );
+  });
+
+  it('ignores grep-style summaries', () => {
+    expect(filePathFromToolItem({ kind: 'tool', toolSummary: '"pattern"  src' })).toBeNull();
   });
 });

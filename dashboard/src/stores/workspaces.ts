@@ -8,6 +8,7 @@ import { createManagedSocket, type ManagedSocket } from '@/lib/wsClient';
 
 // stores
 import { useOrchestratorsStore } from '@/stores/orchestrators';
+import { markSessionFinished } from '@/utils/sessionUnread';
 
 // types
 import type { Workspace, CreateWorkspacePayload, UpdateWorkspacePayload, Session, Orchestrator } from '@/@types/index';
@@ -116,9 +117,13 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
   }
 
   function setSessionBusy(sessionId: string, busy: boolean): void {
+    const previous = allSessions.value.find((session) => session.id === sessionId);
     allSessions.value = allSessions.value.map((session) =>
       session.id === sessionId ? { ...session, busy } : session
     );
+    if (previous?.busy && !busy) {
+      markSessionFinished(sessionId);
+    }
   }
 
   const fetchAllSessions = async (): Promise<void> => {

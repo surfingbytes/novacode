@@ -44,4 +44,41 @@ describe('EntityDetailHeader', () => {
     const items = wrapper.findAll('[role="menuitem"]');
     expect(items.map((item) => item.text())).toEqual(['Edit', 'Archive', 'Delete']);
   });
+
+  it('shows Export Markdown in the mobile menu when showExport is set', async () => {
+    const onExport = vi.fn();
+    const wrapper = mount(EntityDetailHeader, {
+      props: { title: 'My session', showExport: true, onExport },
+      attachTo: document.getElementById('app')!
+    });
+    await wrapper.find('button[aria-label="Session actions"]').trigger('click');
+    const items = wrapper.findAll('[role="menuitem"]');
+    expect(items.map((item) => item.text())).toContain('Export Markdown');
+    const exportItem = items.filter((item) => item.text().includes('Export Markdown'))[0];
+    expect(exportItem).toBeTruthy();
+    await exportItem.trigger('click');
+    expect(onExport).toHaveBeenCalledTimes(1);
+  });
+
+  it('emits selectSubtitle from the workspace switcher', async () => {
+    const onSelectSubtitle = vi.fn();
+    const wrapper = mount(EntityDetailHeader, {
+      props: {
+        title: 'My session',
+        subtitle: 'novacode',
+        currentSubtitleId: 'ws-1',
+        subtitleItems: [
+          { id: 'ws-1', name: 'novacode' },
+          { id: 'ws-2', name: 'home' }
+        ],
+        onSelectSubtitle
+      },
+      attachTo: document.getElementById('app')!
+    });
+    await wrapper.find('button[aria-label="Switch workspace"]').trigger('click');
+    const items = wrapper.findAll('[role="menuitem"]');
+    expect(items.map((item) => item.text())).toEqual(['novacode', 'home']);
+    await items[1].trigger('click');
+    expect(onSelectSubtitle).toHaveBeenCalledWith('ws-2');
+  });
 });

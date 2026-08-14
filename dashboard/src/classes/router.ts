@@ -23,14 +23,17 @@ const router = createRouter({
     },
     {
       path: '/',
-      name: 'home',
-      component: (): Promise<typeof import('@/views/HomeView.vue')> => import('@/views/HomeView.vue')
-    },
-    {
-      path: '/workspaces',
       name: 'workspaces',
       component: (): Promise<typeof import('@/views/workspace/ListView.vue')> =>
         import('@/views/workspace/ListView.vue')
+    },
+    {
+      path: '/workspaces',
+      redirect: '/'
+    },
+    {
+      path: '/home',
+      redirect: '/'
     },
     {
       path: '/workspace/:id',
@@ -99,6 +102,12 @@ const router = createRouter({
       name: 'account',
       component: (): Promise<typeof import('@/views/AccountView.vue')> =>
         import('@/views/AccountView.vue')
+    },
+    {
+      path: '/:pathMatch(.*)*',
+      name: 'not-found',
+      component: (): Promise<typeof import('@/views/NotFoundView.vue')> =>
+        import('@/views/NotFoundView.vue')
     }
   ]
 });

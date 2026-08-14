@@ -9,7 +9,8 @@ import { createPinia, setActivePinia } from 'pinia';
 // components
 import NewSessionModal from '@/components/NewSessionModal.vue';
 
-function mountModal() {
+function mountModal(attrs: Record<string, unknown> = {}) {
+  const created = ref<Record<string, unknown> | null>(null);
   const Host = defineComponent({
     components: { NewSessionModal },
     setup() {
@@ -21,12 +22,17 @@ function mountModal() {
             claudeAvailable: true,
             mistralVibeAvailable: false,
             openCodeAvailable: false,
-            codexAvailable: false
+            codexAvailable: false,
+            onCreate: (payload: Record<string, unknown>) => {
+              created.value = payload;
+            },
+            ...attrs
           })
         ]);
     }
   });
-  return mount(Host, { attachTo: document.getElementById('app')! });
+  const wrapper = mount(Host, { attachTo: document.getElementById('app')! });
+  return { wrapper, created };
 }
 
 /**
@@ -46,60 +52,65 @@ describe('NewSessionModal', () => {
     await nextTick();
     await nextTick();
 
-    const nameInput = document.body.querySelector('#new-session-name');
-    expect(nameInput).toBeTruthy();
+    const agentGroup = document.body.querySelector('[aria-label="Approval policy"]');
+    expect(agentGroup).toBeTruthy();
 
-    // the fixed overlay lives at body level and contains the form
     const overlay = document.body.querySelector('.fixed.inset-0');
     expect(overlay).toBeTruthy();
-    expect(overlay!.contains(nameInput!)).toBe(true);
+    expect(overlay!.contains(agentGroup!)).toBe(true);
 
-    // nothing of the dialog renders inline in the host
-    expect(document.getElementById('host')!.contains(nameInput!)).toBe(false);
+    expect(document.getElementById('host')!.contains(agentGroup!)).toBe(false);
     expect(document.getElementById('host')!.querySelector('basemodal')).toBeNull();
   });
 
-  it('keeps tags collapsed by default and expands them via the toggle', async () => {
+  it('keeps name and tags under Advanced, collapsed by default', async () => {
     mountModal();
     await nextTick();
     await nextTick();
 
+    expect(document.body.querySelector('#new-session-name')).toBeNull();
+    expect(document.body.querySelector('#new-session-tags-panel')).toBeNull();
+
     const toggle = document.body.querySelector<HTMLButtonElement>(
-      'button[aria-controls="new-session-tags-panel"]'
+      'button[aria-controls="new-session-advanced-panel"]'
     );
     expect(toggle).toBeTruthy();
     expect(toggle!.getAttribute('aria-expanded')).toBe('false');
-    expect(document.body.querySelector('#new-session-tags-panel')).toBeNull();
 
     toggle!.click();
     await nextTick();
 
     expect(toggle!.getAttribute('aria-expanded')).toBe('true');
+    expect(document.body.querySelector('#new-session-name')).toBeTruthy();
+    expect(document.body.querySelector('#new-session-tags-panel')).toBeNull();
+
+    const tagsToggle = document.body.querySelector<HTMLButtonElement>(
+      'button[aria-controls="new-session-tags-panel"]'
+    );
+    expect(tagsToggle).toBeTruthy();
+    tagsToggle!.click();
+    await nextTick();
     expect(document.body.querySelector('#new-session-tags-panel')).toBeTruthy();
   });
 
+  it('emits an empty name when Advanced is left blank', async () => {
+    const { created } = mountModal();
+    await nextTick();
+    await nextTick();
+
+    const form = document.body.querySelector('form');
+    expect(form).toBeTruthy();
+    form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await nextTick();
+
+    expect(created.value).toBeTruthy();
+    expect(created.value!.name).toBe('');
+    expect(created.value!.agentType).toBe('cursor-agent');
+    expect(created.value!.approvalPolicy).toBe('ask');
+  });
+
   it('defaults approval to Ask and emits the selected policy on create', async () => {
-    const created = ref<Record<string, unknown> | null>(null);
-    const Host = defineComponent({
-      components: { NewSessionModal },
-      setup() {
-        return () =>
-          h('div', { id: 'host' }, [
-            h(NewSessionModal, {
-              modelValue: true,
-              cursorAvailable: true,
-              claudeAvailable: true,
-              mistralVibeAvailable: false,
-              openCodeAvailable: false,
-              codexAvailable: false,
-              onCreate: (payload: Record<string, unknown>) => {
-                created.value = payload;
-              }
-            })
-          ]);
-      }
-    });
-    mount(Host, { attachTo: document.getElementById('app')! });
+    const { created } = mountModal();
     await nextTick();
     await nextTick();
 

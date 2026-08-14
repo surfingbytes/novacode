@@ -51,9 +51,28 @@ describe('ChatMessageList loading states', () => {
     expect(wrapper.text()).toContain('Start the conversation below.');
   });
 
-  it('stops the skeleton when the socket failed (error shown instead)', () => {
-    const wrapper = mountList({ bHistoryLoaded: false, chatError: 'Connection closed (auth)' });
-    expect(wrapper.text()).not.toContain('Start the conversation below.');
-    expect(wrapper.text()).toContain('Connection closed (auth)');
+  it('opens find and counts matching messages', async () => {
+    const wrapper = mountList({
+      displayMessages: [
+        {
+          msg: { role: 'user', content: 'hello world', createdAt: '1' },
+          key: '1-0',
+          items: [],
+          fallbackHtml: ''
+        },
+        {
+          msg: { role: 'assistant', content: '', createdAt: '2' },
+          key: '2-1',
+          items: [{ kind: 'text', text: 'goodbye' }],
+          fallbackHtml: ''
+        }
+      ]
+    });
+    wrapper.vm.openFind();
+    await wrapper.vm.$nextTick();
+    const input = wrapper.get('input[aria-label="Find in conversation"]');
+    await input.setValue('hello');
+    await wrapper.vm.$nextTick();
+    expect(wrapper.text()).toContain('1/1');
   });
 });

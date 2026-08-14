@@ -31,6 +31,13 @@ describe('sessionStatusDotStyle', () => {
     });
   });
 
+  it('unread idle dot uses the full color with a tighter ring', () => {
+    expect(sessionStatusDotStyle({ color: '#ff8800' }, false, true)).toEqual({
+      background: '#ff8800',
+      boxShadow: '0 0 0 2px color-mix(in oklab, #ff8800 45%, transparent)'
+    });
+  });
+
   it('falls back to the accent token for colorless workspaces', () => {
     expect(sessionStatusDotStyle(null, true).background).toBe('var(--accent)');
   });

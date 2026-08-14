@@ -21,13 +21,20 @@ export function workspaceColor(workspace: WorkspaceColorSource): string {
  */
 export function sessionStatusDotStyle(
   workspace: WorkspaceColorSource,
-  busy: boolean | undefined
+  busy: boolean | undefined,
+  unread?: boolean
 ): Record<string, string> {
   const color = workspaceColor(workspace);
   if (busy) {
     return {
       background: color,
       boxShadow: `0 0 0 3px color-mix(in oklab, ${color} 20%, transparent)`
+    };
+  }
+  if (unread) {
+    return {
+      background: color,
+      boxShadow: `0 0 0 2px color-mix(in oklab, ${color} 45%, transparent)`
     };
   }
   return { background: `color-mix(in oklab, ${color} 35%, transparent)` };

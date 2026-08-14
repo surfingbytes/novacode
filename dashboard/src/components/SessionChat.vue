@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // node_modules
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { ChevronDown } from 'lucide-vue-next';
 
 // components
@@ -18,9 +18,10 @@ import EntityDetailHeader from '@/components/ui/EntityDetailHeader.vue';
 import BottomTabBar from '@/components/ui/BottomTabBar.vue';
 
 // classes
-import { sessionsApi, settingsApi, buildSessionTerminalWsUrl } from '@/classes/api';
+import { sessionsApi, settingsApi, workspaceRulesApi, buildSessionTerminalWsUrl } from '@/classes/api';
 import { renderMermaidDiagrams } from '@/lib/mermaid';
 import { readSessionCache, writeSessionCache } from '@/lib/sessionCache';
+import { sessionChatToMarkdown, sessionExportFilename } from '@/utils/sessionChatMarkdown';
 import {
   getToolIconSvg,
   isPlanEntryCompleted,
@@ -29,6 +30,8 @@ import {
   prepareDisplayItem,
   renderMdCached
 } from '@/utils/chatDisplayItems';
+import { toWorkspaceRelativePath } from '@/utils/workspaceFilePath';
+import { setViewingSession } from '@/utils/sessionUnread';
 
 // composables
 import { useAgentOptions } from '@/composables/useAgentOptions';
@@ -72,6 +75,7 @@ const emit = defineEmits<{
 
 // -------------------------------------------------- Store --------------------------------------------------
 const router = useRouter();
+const route = useRoute();
 const workspacesStore = useWorkspacesStore();
 const toastStore = useToastStore();
 const auth = useAuthStore();
@@ -169,6 +173,8 @@ function toggleToolOutput(callId: string): void {
 
 type SessionTab = 'chat' | 'terminal' | 'files' | 'git' | 'plan';
 const activeTab = ref<SessionTab>('chat');
+const filesOpenPath = ref<string | null>(null);
+const rulesCount = ref(0);
 
 let mermaidRenderTimer: ReturnType<typeof setTimeout> | null = null;
 let fetchSessionSeq = 0;
@@ -327,6 +333,19 @@ watch(session, () => {
   scheduleSessionCachePersist();
 });
 
+watch(
+  () => workspacesStore.allSessions.find((storeSession) => storeSession.id === props.sessionId)?.name,
+  (storeName) => {
+    if (!session.value || storeName === undefined) {
+      return;
+    }
+    if (session.value.name === storeName) {
+      return;
+    }
+    session.value = { ...session.value, name: storeName };
+  }
+);
+
 // -------------------------------------------------- Display items --------------------------------------------------
 interface DisplayChatMessage {
   msg: ChatMessage;
@@ -457,6 +476,85 @@ function onComposerSend(payload: { text: string; imagePaths: string[] }): void {
 const workspaceName = computed(
   () => workspacesStore.workspaces.find((w) => w.id === props.workspaceId)?.name ?? 'Workspace'
 );
+const workspacePath = computed(
+  () => workspacesStore.workspaces.find((w) => w.id === props.workspaceId)?.path ?? ''
+);
+const subtitleWorkspaces = computed(() =>
+  workspacesStore.workspaces
+    .filter((workspace) => !workspace.archived)
+    .map((workspace) => ({ id: workspace.id, name: workspace.name }))
+    .sort((left, right) => left.name.localeCompare(right.name))
+);
+
+function tabFromQuery(raw: unknown): SessionTab | null {
+  if (raw === 'chat' || raw === 'terminal' || raw === 'files' || raw === 'git' || raw === 'plan') {
+    return raw;
+  }
+  return null;
+}
+
+function applySessionQueryFromRoute(): void {
+  const tab = tabFromQuery(route.query.tab);
+  if (tab && tab !== activeTab.value) {
+    activeTab.value = tab;
+  }
+  const file = route.query.file;
+  if (typeof file === 'string' && file.trim()) {
+    filesOpenPath.value = file;
+    if (!tab) {
+      activeTab.value = 'files';
+    }
+  }
+}
+
+function syncSessionQuery(): void {
+  const nextQuery: Record<string, string> = {};
+  if (activeTab.value !== 'chat') {
+    nextQuery.tab = activeTab.value;
+  }
+  if (activeTab.value === 'files' && filesOpenPath.value) {
+    nextQuery.file = filesOpenPath.value;
+  }
+  const currentTab = typeof route.query.tab === 'string' ? route.query.tab : '';
+  const currentFile = typeof route.query.file === 'string' ? route.query.file : '';
+  if ((nextQuery.tab ?? '') === currentTab && (nextQuery.file ?? '') === currentFile) {
+    return;
+  }
+  void router.replace({ query: nextQuery });
+}
+
+function openWorkspaceFile(rawPath: string): void {
+  const relative =
+    toWorkspaceRelativePath(rawPath, workspacePath.value) ??
+    rawPath.replace(/\\/g, '/').replace(/^\/+/, '');
+  if (!relative || relative.includes('*')) {
+    return;
+  }
+  filesOpenPath.value = relative;
+  activeTab.value = 'files';
+  syncSessionQuery();
+}
+
+function onFilesOpenPath(path: string | null): void {
+  filesOpenPath.value = path;
+  syncSessionQuery();
+}
+
+function onSelectWorkspace(workspaceId: string): void {
+  if (workspaceId === props.workspaceId) {
+    return;
+  }
+  void router.push({ name: 'workspace-sessions', params: { id: workspaceId } });
+}
+
+async function loadRulesCount(): Promise<void> {
+  try {
+    const { data } = await workspaceRulesApi.list(props.workspaceId);
+    rulesCount.value = Array.isArray(data) ? data.length : 0;
+  } catch {
+    rulesCount.value = 0;
+  }
+}
 const sessionTerminalWsUrl = computed(() =>
   buildSessionTerminalWsUrl(props.workspaceId, props.sessionId)
 );
@@ -526,6 +624,28 @@ function handleKeydownMobileMenu(e: KeyboardEvent): void {
 // ── Session edit/delete/archive ──────────────────────────────────────────────
 function openEditModal(): void {
   bShowEditModal.value = true;
+}
+
+function exportSessionMarkdown(): void {
+  const title = session.value?.name?.trim() || 'Untitled session';
+  const markdown = sessionChatToMarkdown(messages.value, {
+    title,
+    workspaceName: workspaceName.value
+  });
+  if (!markdown.includes('\n## ')) {
+    toastStore.info('Nothing to export yet');
+    return;
+  }
+  const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = sessionExportFilename(title);
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  toastStore.success('Exported Markdown');
 }
 
 async function saveSessionEdit(payload: { name: string; tags?: string[] | null }): Promise<void> {
@@ -634,6 +754,7 @@ function handleAutoContinueUpdated(enabled: boolean): void {
 
 // -------------------------------------------------- Watchers --------------------------------------------------
 watch(activeTab, (tab) => {
+  syncSessionQuery();
   if (tab === 'chat') {
     chatSocket.ensureConnected();
     nextTick(() => {
@@ -646,6 +767,29 @@ watch(activeTab, (tab) => {
     scheduleMermaidRender();
   }
 });
+
+watch(
+  () => [route.query.tab, route.query.file],
+  () => {
+    applySessionQueryFromRoute();
+  }
+);
+
+watch(
+  () => props.sessionId,
+  (sessionId) => {
+    setViewingSession(sessionId);
+  },
+  { immediate: true }
+);
+
+watch(
+  () => props.workspaceId,
+  () => {
+    void loadRulesCount();
+  },
+  { immediate: true }
+);
 
 watch(promptText, (val) => {
   const key = promptStorageKey.value;
@@ -680,7 +824,9 @@ watch(
     chatSocket.resetChatState();
     chatSocket.disconnect();
     expandedToolOutputIds.value = new Set();
-    activeTab.value = 'chat';
+    filesOpenPath.value = null;
+    const queryTab = tabFromQuery(route.query.tab);
+    activeTab.value = queryTab ?? 'chat';
     const cached = readSessionCache(props.workspaceId, newId);
     session.value = cached?.session ?? null;
     bCachedHistoryOnScreen = !!cached;
@@ -741,6 +887,7 @@ onMounted(async () => {
   document.addEventListener('click', handleDocumentClickMobileMenu);
   document.addEventListener('keydown', handleKeydownMobileMenu);
   scheduleMermaidRender();
+  applySessionQueryFromRoute();
 });
 
 onUnmounted(() => {
@@ -762,6 +909,7 @@ onUnmounted(() => {
   chatSocket.disconnect();
   document.removeEventListener('click', handleDocumentClickMobileMenu);
   document.removeEventListener('keydown', handleKeydownMobileMenu);
+  setViewingSession(null);
 });
 </script>
 
@@ -769,19 +917,36 @@ onUnmounted(() => {
   <div ref="sessionChatRootRef" class="flex-1 flex flex-col overflow-hidden">
     <!-- Header -->
     <EntityDetailHeader
-      :title="session?.name || 'Session'"
+      :title="session?.name?.trim() || 'Untitled session'"
       :subtitle="workspaceName"
+      :subtitle-items="subtitleWorkspaces"
+      :current-subtitle-id="workspaceId"
       :tags="session?.tags ?? []"
       :b-loading="bLoading"
       :archived="session?.archived ?? false"
       :b-show-sidebar-toggle="props.showSidebarToggle"
       :show-new-session="true"
+      :show-export="true"
       @toggle-sidebar="emit('toggle-sidebar')"
       @new-session="emit('new-session')"
       @edit="openEditModal"
+      @export="exportSessionMarkdown"
+      @select-subtitle="onSelectWorkspace"
       @archive="toggleArchive"
       @delete="bShowDeleteModal = true"
     />
+
+    <div
+      v-if="rulesCount > 0 && activeTab === 'chat'"
+      class="px-4 md:px-6 py-1.5 border-b border-fg/10 shrink-0"
+    >
+      <RouterLink
+        :to="{ name: 'workspace-rules', params: { id: workspaceId } }"
+        class="text-[11px] text-text-muted hover:text-text-primary"
+      >
+        Using {{ rulesCount }} workspace rule{{ rulesCount === 1 ? '' : 's' }}
+      </RouterLink>
+    </div>
 
     <div
       v-if="error"
@@ -822,6 +987,7 @@ onUnmounted(() => {
             @load-older="chatSocket.loadOlderMessages"
             @toggle-tool-output="toggleToolOutput"
             @open-plan="planDocs.openPlan"
+            @open-file="openWorkspaceFile"
             @lightbox="(src) => (lightboxSrc = src)"
             @chat-error-action="handleChatErrorAction"
             @cancel="chatSocket.cancelPrompt"
@@ -1159,6 +1325,8 @@ onUnmounted(() => {
         class="flex-1 min-h-0"
         :workspace-id="workspaceId"
         :active="activeTab === 'files'"
+        :open-path="filesOpenPath"
+        @update:open-path="onFilesOpenPath"
       />
 
       <!-- Git -->

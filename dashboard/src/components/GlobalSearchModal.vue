@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // node_modules
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 
 // stores
 import { useAuthStore } from '@/stores/auth';
@@ -10,7 +10,7 @@ import { useAuthStore } from '@/stores/auth';
 interface SearchResult {
   id: string;
   name: string;
-  type: 'workspace' | 'session' | 'role-template' | 'automation' | 'settings';
+  type: 'workspace' | 'session' | 'role-template' | 'automation' | 'settings' | 'command';
   workspaceId?: string;
   workspaceName?: string;
 }
@@ -79,9 +79,28 @@ const SETTINGS_SEARCH_TERMS: string[] = [
   'connectivity'
 ];
 
+interface PaletteCommand {
+  id: string;
+  name: string;
+  keywords: string[];
+}
+
+function commandMatches(command: PaletteCommand, query: string): boolean {
+  if (!query) {
+    return true;
+  }
+  const haystack = `${command.name} ${command.keywords.join(' ')}`.toLowerCase();
+  return query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((token) => token.length > 0)
+    .every((token) => haystack.includes(token));
+}
+
 // -------------------------------------------------- Store --------------------------------------------------
 const auth = useAuthStore();
 const router = useRouter();
+const route = useRoute();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const searchQuery = ref('');
@@ -99,8 +118,86 @@ const searchInputRef = ref<HTMLInputElement | null>(null);
 const activeResultIndex = ref<number>(-1);
 
 // -------------------------------------------------- Computed --------------------------------------------------
+const currentWorkspaceId = computed((): string => {
+  const id = route.params.id;
+  return typeof id === 'string' ? id : '';
+});
+
+const paletteCommands = computed<PaletteCommand[]>(() => {
+  const commands: PaletteCommand[] = [
+    {
+      id: 'workspaces',
+      name: 'Go to Workspaces',
+      keywords: ['home', 'workspaces', 'projects', 'list']
+    },
+    {
+      id: 'automations',
+      name: 'Go to Automations',
+      keywords: ['automation', 'workflow', 'schedule']
+    },
+    {
+      id: 'settings',
+      name: 'Go to Settings',
+      keywords: ['settings', 'preferences', 'config']
+    },
+    {
+      id: 'account',
+      name: 'Go to Account',
+      keywords: ['account', 'profile', 'user']
+    },
+    {
+      id: 'integrations',
+      name: 'Settings → Integrations',
+      keywords: ['integrations', 'auth', 'cursor', 'claude', 'api key', 'token']
+    }
+  ];
+  const workspaceId = currentWorkspaceId.value;
+  if (workspaceId) {
+    commands.push(
+      {
+        id: 'ws-files',
+        name: 'Open Files',
+        keywords: ['files', 'editor', 'monaco']
+      },
+      {
+        id: 'ws-git',
+        name: 'Open Git',
+        keywords: ['git', 'diff', 'commit']
+      },
+      {
+        id: 'ws-rules',
+        name: 'Open Rules',
+        keywords: ['rules', 'cursor rules']
+      },
+      {
+        id: 'ws-new-session',
+        name: 'New session',
+        keywords: ['new', 'session', 'chat', 'create']
+      }
+    );
+  }
+  if (route.name === 'session') {
+    commands.push({
+      id: 'find-in-chat',
+      name: 'Find in conversation',
+      keywords: ['find', 'search', 'chat', 'thread']
+    });
+  }
+  return commands;
+});
+
+const commandResults = computed<SearchResult[]>(() => {
+  const query = searchQuery.value.trim();
+  return paletteCommands.value.filter((command) => commandMatches(command, query)).map((command) => ({
+    id: `cmd:${command.id}`,
+    name: command.name,
+    type: 'command' as const
+  }));
+});
+
 const hasResults = computed(() => {
   return (
+    commandResults.value.length > 0 ||
     searchResults.value.workspaces.length > 0 ||
     searchResults.value.sessions.length > 0 ||
     searchResults.value.roleTemplates.length > 0 ||
@@ -111,6 +208,7 @@ const hasResults = computed(() => {
 
 const totalResults = computed(() => {
   return (
+    commandResults.value.length +
     searchResults.value.workspaces.length +
     searchResults.value.sessions.length +
     searchResults.value.roleTemplates.length +
@@ -121,10 +219,11 @@ const totalResults = computed(() => {
 
 /**
  * Flat result list in the exact render order of the template groups
- * (workspaces → sessions → automations → roleTemplates → settings) so
+ * (commands → workspaces → sessions → automations → roleTemplates → settings) so
  * ArrowUp/Down and Enter map 1:1 onto what the user sees.
  */
 const flatResults = computed<SearchResult[]>(() => [
+  ...commandResults.value,
   ...searchResults.value.workspaces,
   ...searchResults.value.sessions,
   ...searchResults.value.automations,
@@ -268,11 +367,74 @@ function onSearchInputKeydown(event: KeyboardEvent): void {
   }
 }
 
+function runPaletteCommand(commandId: string): void {
+  const workspaceId = currentWorkspaceId.value;
+  switch (commandId) {
+    case 'workspaces':
+      void router.push({ name: 'workspaces' });
+      break;
+    case 'automations':
+      void router.push('/automations');
+      break;
+    case 'settings':
+      void router.push('/settings');
+      break;
+    case 'account':
+      void router.push('/account');
+      break;
+    case 'integrations':
+      void router.push({ name: 'settings', query: { tab: 'integrations' } });
+      break;
+    case 'ws-files':
+      if (route.name === 'session' && workspaceId && typeof route.params.sessionId === 'string') {
+        void router.push({
+          name: 'session',
+          params: { id: workspaceId, sessionId: route.params.sessionId },
+          query: { tab: 'files' }
+        });
+      } else if (workspaceId) {
+        void router.push({ name: 'workspace-files', params: { id: workspaceId } });
+      }
+      break;
+    case 'ws-git':
+      if (workspaceId) {
+        void router.push({ name: 'workspace-git', params: { id: workspaceId } });
+      }
+      break;
+    case 'ws-rules':
+      if (workspaceId) {
+        void router.push({ name: 'workspace-rules', params: { id: workspaceId } });
+      }
+      break;
+    case 'ws-new-session':
+      if (route.name === 'session' || route.name === 'workspace-sessions') {
+        window.dispatchEvent(new CustomEvent('novacode:new-session'));
+      } else if (workspaceId) {
+        void router.push({
+          name: 'workspace-sessions',
+          params: { id: workspaceId },
+          query: { newSession: '1' }
+        });
+      }
+      break;
+    case 'find-in-chat':
+      window.dispatchEvent(new CustomEvent('novacode:find-in-chat'));
+      break;
+    default:
+      break;
+  }
+}
+
 function navigateToResult(result: SearchResult): void {
   props.onClose();
   emit('navigate');
 
   switch (result.type) {
+    case 'command': {
+      const commandId = result.id.startsWith('cmd:') ? result.id.slice(4) : result.id;
+      runPaletteCommand(commandId);
+      break;
+    }
     case 'workspace':
       router.push({ name: 'workspace-sessions', params: { id: result.id } });
       break;
@@ -388,7 +550,7 @@ onBeforeUnmount(() => {
               ref="searchInputRef"
               v-model="searchQuery"
               type="text"
-              placeholder="Search sessions, files, workspaces…"
+              placeholder="Search or jump to…"
               class="search-input"
               autocomplete="off"
               role="combobox"
@@ -454,13 +616,43 @@ onBeforeUnmount(() => {
               No results for "{{ searchQuery }}"
             </div>
 
-            <!-- Empty -->
-            <div v-else-if="!searchQuery" class="search-state">
-              Type to search sessions, workspaces, automations, and more
-            </div>
-
-            <!-- Results -->
-            <template v-else>
+            <!-- Results (commands when empty; commands + matches when typing) -->
+            <template v-else-if="hasResults">
+              <div v-if="commandResults.length > 0" class="search-group">
+                <div class="search-group-label nc-eyebrow">Commands</div>
+                <button
+                  v-for="result in commandResults"
+                  :id="`search-result-${resultIndexByKey.get(resultKey(result))}`"
+                  :key="result.id"
+                  class="search-result-row nc-row-hover"
+                  :class="{
+                    'is-active': resultIndexByKey.get(resultKey(result)) === activeResultIndex
+                  }"
+                  :data-flat-index="resultIndexByKey.get(resultKey(result))"
+                  role="option"
+                  :aria-selected="resultIndexByKey.get(resultKey(result)) === activeResultIndex"
+                  @click="navigateToResult(result)"
+                  @mouseenter="activeResultIndex = resultIndexByKey.get(resultKey(result)) ?? -1"
+                >
+                  <svg
+                    class="search-result-icon"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M4 17l6-6-6-6 M12 19h8" />
+                  </svg>
+                  <div class="search-result-text">
+                    <div class="search-result-name">{{ result.name }}</div>
+                  </div>
+                </button>
+              </div>
               <template
                 v-for="group in [
                   {
@@ -559,8 +751,12 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- Footer -->
-          <div v-if="searchQuery && totalResults > 0" class="search-footer nc-mono">
-            {{ totalResults }} result{{ totalResults !== 1 ? 's' : '' }}
+          <div v-if="hasResults" class="search-footer nc-mono">
+            {{
+              searchQuery
+                ? `${totalResults} result${totalResults !== 1 ? 's' : ''}`
+                : '⌘K search · ⌘N new session · ⌘F find · ⌘S save'
+            }}
           </div>
         </div>
       </div>

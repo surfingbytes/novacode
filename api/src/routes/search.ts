@@ -75,18 +75,24 @@ export async function searchRoutes(fastify: FastifyInstance): Promise<void> {
 
         for (const workspace of allWorkspaces) {
           const sessions = await db.listSessionsByWorkspace(workspace.id, { archived: false });
-          const filteredSessions = sessions.filter((session) =>
-            session.name.toLowerCase().includes(searchTerm),
-          );
+          const filteredSessions = sessions.filter((session) => {
+            const name = session.name?.trim() ?? '';
+            const preview = session.lastPreviewText?.trim() ?? '';
+            return `${name} ${preview}`.toLowerCase().includes(searchTerm);
+          });
 
           sessionResults.push(
-            ...filteredSessions.map((session) => ({
-              id: session.id,
-              name: session.name,
-              type: 'session' as const,
-              workspaceId: session.workspaceId,
-              workspaceName: workspace.name,
-            })),
+            ...filteredSessions.map((session) => {
+              const name = session.name?.trim() ?? '';
+              const preview = session.lastPreviewText?.trim() ?? '';
+              return {
+                id: session.id,
+                name: name || preview || 'Untitled session',
+                type: 'session' as const,
+                workspaceId: session.workspaceId,
+                workspaceName: workspace.name,
+              };
+            }),
           );
         }
 

@@ -8,6 +8,7 @@ import PageShell from '@/components/layout/PageShell.vue';
 import NewSessionModal from '@/components/NewSessionModal.vue';
 import WorkspaceDeleteModal from '@/components/workspace/DeleteModal.vue';
 import WorkspaceEditModal from '@/components/workspace/EditModal.vue';
+import RecentlyActiveSessions from '@/components/workspace/RecentlyActiveSessions.vue';
 import ContextMenu from '@/components/ContextMenu.vue';
 import type { ContextMenuItem } from '@/components/ContextMenu.vue';
 
@@ -52,6 +53,7 @@ const deletingWorkspace = ref<Workspace | undefined>(undefined);
 const bShowNewSessionModal = ref<boolean>(false);
 const newSessionWorkspace = ref<Workspace | undefined>(undefined);
 const bSubmittingSession = ref<boolean>(false);
+const createSessionError = ref<string | null>(null);
 
 const bCtxMenuOpen = ref<boolean>(false);
 const ctxMenuX = ref(0);
@@ -183,6 +185,7 @@ const openEditWorkspace = (workspace: Workspace): void => {
 
 const openNewSession = (workspace: Workspace): void => {
   newSessionWorkspace.value = workspace;
+  createSessionError.value = null;
   bShowNewSessionModal.value = true;
 };
 
@@ -195,6 +198,7 @@ const createSession = async (payload: {
   const workspace = newSessionWorkspace.value;
   if (!workspace || bSubmittingSession.value) return;
   bSubmittingSession.value = true;
+  createSessionError.value = null;
   try {
     const { data: newSession } = await sessionsApi.create(workspace.id, payload);
     bShowNewSessionModal.value = false;
@@ -204,7 +208,8 @@ const createSession = async (payload: {
       params: { id: workspace.id, sessionId: newSession.id }
     });
   } catch (error) {
-    console.error('Failed to create session:', error);
+    createSessionError.value = apiErrorMessage(error, 'Failed to create session');
+    toastStore.error(createSessionError.value);
   } finally {
     bSubmittingSession.value = false;
   }
@@ -382,7 +387,7 @@ onMounted((): void => {
         <div class="nc-eyebrow ws-eyebrow">// workspaces</div>
         <h1 class="ws-title">Workspaces</h1>
         <p class="ws-subtitle">
-          Select a workspace to browse files and manage git. Paths are under
+          Pick a project to start a session, browse files, or manage git. Paths are under
           <code class="ws-path-pill nc-mono">/data-root</code>.
         </p>
       </div>
@@ -395,6 +400,8 @@ onMounted((): void => {
         Add workspace
       </button>
     </div>
+
+    <RecentlyActiveSessions />
 
     <!-- Loading -->
     <Transition name="fade" mode="out-in">
@@ -579,6 +586,7 @@ onMounted((): void => {
   <NewSessionModal
     v-model="bShowNewSessionModal"
     :loading="bSubmittingSession"
+    :error="createSessionError"
     :default-agent-type="newSessionWorkspace?.defaultAgentType ?? null"
     :claude-available="claudeAvailable"
     :cursor-available="cursorAvailable"

@@ -2,13 +2,15 @@
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useWorkspacesStore } from '@/stores/workspaces';
+import { useToastStore } from '@/stores/toasts';
 import ThemeToggleButton from '@/components/ThemeToggleButton.vue';
 import NewSessionModal from '@/components/NewSessionModal.vue';
-import { sessionsApi } from '@/classes/api';
+import { apiErrorMessage, sessionsApi } from '@/classes/api';
 import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
 import { PANE_LAYOUT_MIN_WIDTH } from '@/constants/layout';
 import { agentTypeShortLabel } from '@/utils/agentTypeMeta';
 import { sessionStatusDotStyle, workspaceColor } from '@/utils/workspaceColor';
+import { isSessionUnread } from '@/utils/sessionUnread';
 import type { AgentType, ApprovalPolicy, Workspace } from '@/@types/index';
 
 const props = withDefaults(
@@ -28,6 +30,7 @@ const emit = defineEmits<{
 const route = useRoute();
 const router = useRouter();
 const workspacesStore = useWorkspacesStore();
+const toastStore = useToastStore();
 const {
   claudeAvailable,
   cursorAvailable,
@@ -45,6 +48,7 @@ const bIsCollapsed = computed(() => props.collapsed && bRailMode.value);
 const bShowNewSessionModal = ref(false);
 const newSessionWorkspace = ref<Workspace | undefined>(undefined);
 const bSubmittingSession = ref(false);
+const createSessionError = ref<string | null>(null);
 
 function onWindowResize(): void {
   windowWidth.value = window.innerWidth;
@@ -55,7 +59,7 @@ function handleClose(): void {
 }
 
 function handleBrandClick(event: MouseEvent): void {
-  // Collapsed rail: logo expands the sidebar (Home is the nav item below).
+  // Collapsed rail: logo expands the sidebar (Workspaces is the nav item below).
   if (bIsCollapsed.value) {
     event.preventDefault();
     emit('toggle-collapsed');
@@ -74,12 +78,6 @@ function handleBrandClick(event: MouseEvent): void {
 }
 
 const navItems = [
-  {
-    id: 'home',
-    label: 'Home',
-    to: { name: 'home' },
-    svgPath: 'M3 10.5L12 3l9 7.5V20a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z'
-  },
   {
     id: 'workspaces',
     label: 'Workspaces',
@@ -145,6 +143,7 @@ function favoriteInitial(workspace: Workspace): string {
 
 function openFavoriteNewSession(workspace: Workspace): void {
   newSessionWorkspace.value = workspace;
+  createSessionError.value = null;
   bShowNewSessionModal.value = true;
   handleClose();
 }
@@ -158,6 +157,7 @@ async function createSession(payload: {
   const workspace = newSessionWorkspace.value;
   if (!workspace || bSubmittingSession.value) return;
   bSubmittingSession.value = true;
+  createSessionError.value = null;
   try {
     const { data: newSession } = await sessionsApi.create(workspace.id, payload);
     bShowNewSessionModal.value = false;
@@ -167,7 +167,8 @@ async function createSession(payload: {
       params: { id: workspace.id, sessionId: newSession.id }
     });
   } catch (error) {
-    console.error('Failed to create session:', error);
+    createSessionError.value = apiErrorMessage(error, 'Failed to create session');
+    toastStore.error(createSessionError.value);
   } finally {
     bSubmittingSession.value = false;
   }
@@ -208,7 +209,7 @@ onBeforeUnmount(() => {
         to="/"
         class="sidebar__logo-link"
         :title="bIsCollapsed ? 'Expand sidebar' : undefined"
-        :aria-label="bIsCollapsed ? 'Expand sidebar' : 'Nova Code home'"
+        :aria-label="bIsCollapsed ? 'Expand sidebar' : 'Nova Code workspaces'"
         @click="handleBrandClick"
       >
         <svg
@@ -351,22 +352,41 @@ onBeforeUnmount(() => {
         :key="'nav-' + session.id"
         :to="{ name: 'session', params: { id: session.workspaceId, sessionId: session.id } }"
         class="sidebar__session-item nc-row-hover"
+        :class="{ 'sidebar__session-item--unread': isSessionUnread(session.id) }"
         active-class="sidebar__session-item--active"
-        :title="bIsCollapsed ? session.name : undefined"
+        :title="
+          isSessionUnread(session.id)
+            ? `${session.name || 'Untitled'} — finished, unread`
+            : bIsCollapsed
+              ? session.name
+              : undefined
+        "
         @click="handleClose"
       >
         <span
           class="nc-status-dot"
-          :style="sessionStatusDotStyle(workspaceById(session.workspaceId), session.busy)"
+          :style="
+            sessionStatusDotStyle(
+              workspaceById(session.workspaceId),
+              session.busy,
+              isSessionUnread(session.id)
+            )
+          "
         />
         <template v-if="!bIsCollapsed">
           <div class="sidebar__session-info">
-            <div class="sidebar__session-name">{{ session.name || 'Untitled' }}</div>
+            <div
+              class="sidebar__session-name"
+              :class="{ 'sidebar__session-name--unread': isSessionUnread(session.id) }"
+            >
+              {{ session.name || 'Untitled' }}
+            </div>
             <div class="sidebar__session-path nc-mono">
               <span :style="{ color: workspaceColor(workspaceById(session.workspaceId)) }">{{
                 workspaceNameById(session.workspaceId)
               }}</span>
               <template v-if="session.agentType"> · {{ agentTypeShortLabel(session.agentType) }}</template>
+              <template v-if="isSessionUnread(session.id)"> · done</template>
             </div>
           </div>
         </template>
@@ -440,6 +460,7 @@ onBeforeUnmount(() => {
   <NewSessionModal
     v-model="bShowNewSessionModal"
     :loading="bSubmittingSession"
+    :error="createSessionError"
     :default-agent-type="newSessionWorkspace?.defaultAgentType ?? null"
     :claude-available="claudeAvailable"
     :cursor-available="cursorAvailable"
@@ -728,6 +749,9 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.sidebar__session-name--unread {
+  font-weight: 600;
 }
 
 .sidebar__session-path {

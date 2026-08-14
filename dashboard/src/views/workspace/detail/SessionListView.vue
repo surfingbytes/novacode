@@ -723,13 +723,16 @@ onMounted(() => {
   ensureData();
   ensureAgentCapabilitiesLoaded();
   fetchOrchestrators();
+  consumeNewSessionQuery();
 
   // Keep the fixed bar aligned with the list when layout changes.
   window.addEventListener('resize', updateMultiselectBarPosition);
+  window.addEventListener('novacode:new-session', openNewSessionFromShortcut);
   scheduleUpdateMultiselectBarPosition();
 });
 onBeforeUnmount(() => {
   window.removeEventListener('resize', updateMultiselectBarPosition);
+  window.removeEventListener('novacode:new-session', openNewSessionFromShortcut);
 });
 watch(workspaceId, (id) => {
   if (!id) return;
@@ -737,6 +740,27 @@ watch(workspaceId, (id) => {
   ensureData();
   fetchOrchestrators();
 });
+
+function consumeNewSessionQuery(): void {
+  if (route.query.newSession !== '1') {
+    return;
+  }
+  bShowNewSessionModal.value = true;
+  const nextQuery = { ...route.query };
+  delete nextQuery.newSession;
+  void router.replace({ name: route.name as string, params: route.params, query: nextQuery });
+}
+
+function openNewSessionFromShortcut(): void {
+  bShowNewSessionModal.value = true;
+}
+
+watch(
+  () => route.query.newSession,
+  () => {
+    consumeNewSessionQuery();
+  }
+);
 watch(bShowArchived, () => {
   clearSelection();
   scheduleUpdateMultiselectBarPosition();

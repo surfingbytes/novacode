@@ -22,6 +22,7 @@ import type { ContextMenuItem } from '@/components/ContextMenu.vue';
 import { subtasksFromStoredJson } from '@/utils/orchestratorPayload';
 import { relativeTimeShort } from '@/utils/relativeTime';
 import { formatSessionSidebarPreview, previewFromMessageJson } from '@/utils/sessionListPreview';
+import { isSessionUnread } from '@/utils/sessionUnread';
 import { tagColorClass as categoryColorClass } from '@/utils/tagColors';
 
 // classes
@@ -513,6 +514,13 @@ watch(
                   class="w-3 h-3 border-2 border-primary/40 border-t-primary rounded-full animate-spin"
                 />
                 Busy
+              </span>
+              <span
+                v-else-if="isSessionUnread(item.session.id)"
+                class="text-[11px] text-primary font-medium shrink-0 self-center"
+                title="Finished — unread"
+              >
+                Done
               </span>
             </button>
           </template>

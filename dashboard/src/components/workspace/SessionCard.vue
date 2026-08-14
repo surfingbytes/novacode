@@ -7,6 +7,7 @@ import { RouterLink } from 'vue-router';
 import { agentTypeLabel } from '@/utils/agentTypeMeta';
 import { tagColorClass } from '@/utils/tagColors';
 import { AGENT_TYPE_TAG_COLOR } from '@/components/workspace/agentTypeTagColor';
+import { isSessionUnread } from '@/utils/sessionUnread';
 
 // types
 import type { Session } from '@/@types/index';
@@ -54,6 +55,8 @@ const linkTo = computed(() => ({
   params: { id: props.workspaceId, sessionId: props.session.id }
 }));
 
+const bUnread = computed(() => isSessionUnread(props.session.id));
+
 const rootClass = computed(() => {
   const classes = [props.bGrid ? 'grid-item' : 'list-item'];
   if (props.bNested) {
@@ -95,6 +98,13 @@ const rootClass = computed(() => {
           >
             <span class="busy-spinner"></span>
             Busy
+          </span>
+          <span
+            v-else-if="bUnread"
+            class="text-[11px] px-2 py-0.5 rounded-full inline-flex items-center shrink-0 border border-primary/30 text-primary"
+            title="Finished — unread"
+          >
+            Done
           </span>
         </p>
         <p class="tag" :class="AGENT_TYPE_TAG_COLOR[session.agentType]">
@@ -237,6 +247,13 @@ const rootClass = computed(() => {
               <span class="busy-spinner"></span>
               Busy
             </span>
+            <span
+              v-else-if="bUnread"
+              class="text-[11px] px-2 py-0.5 rounded-full inline-flex items-center shrink-0 border border-primary/30 text-primary"
+              title="Finished — unread"
+            >
+              Done
+            </span>
             <span class="tag shrink-0" :class="AGENT_TYPE_TAG_COLOR[session.agentType]">
               {{ agentTypeLabel(session.agentType) }}
             </span>
@@ -293,6 +310,13 @@ const rootClass = computed(() => {
           >
             <span class="busy-spinner"></span>
             Busy
+          </span>
+          <span
+            v-else-if="bUnread"
+            class="text-[11px] px-2 py-0.5 rounded-full inline-flex items-center shrink-0 border border-primary/30 text-primary"
+            title="Finished — unread"
+          >
+            Done
           </span>
           <span class="tag shrink-0" :class="AGENT_TYPE_TAG_COLOR[session.agentType]">
             {{ agentTypeLabel(session.agentType) }}

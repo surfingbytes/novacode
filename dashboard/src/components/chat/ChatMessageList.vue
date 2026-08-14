@@ -8,7 +8,7 @@
  */
 
 // node_modules
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 
 // components
 import ChatDisplayItems from '@/components/chat/ChatDisplayItems.vue';
@@ -74,6 +74,7 @@ const emit = defineEmits<{
   (e: 'loadOlder'): void;
   (e: 'toggleToolOutput', callId: string): void;
   (e: 'openPlan', planId: string | undefined): void;
+  (e: 'openFile', path: string): void;
   (e: 'lightbox', src: string): void;
   (e: 'chatErrorAction'): void;
   (e: 'cancel'): void;
@@ -353,11 +354,191 @@ function skipQuestion(request: ChatQuestionRequest): void {
   emit('questionResponse', request.id, { skipped: true });
 }
 
-defineExpose({ scrollToBottom, notifyHistoryPage, forceInitialScrollToBottom });
+const FIND_EVENT = 'novacode:find-in-chat';
+const bFindOpen = ref(false);
+const findQuery = ref('');
+const findMatchIndex = ref(0);
+const findInputRef = ref<HTMLInputElement | null>(null);
+
+function displayMessageSearchText(entry: DisplayChatMessage): string {
+  const parts = [entry.msg.content ?? ''];
+  for (const item of entry.items) {
+    if (item.text) {
+      parts.push(item.text);
+    }
+    if (item.toolName) {
+      parts.push(item.toolName);
+    }
+    if (item.toolSummary) {
+      parts.push(item.toolSummary);
+    }
+  }
+  return parts.join('\n').toLowerCase();
+}
+
+const findMatchKeys = computed((): string[] => {
+  const query = findQuery.value.trim().toLowerCase();
+  if (!query) {
+    return [];
+  }
+  return props.displayMessages
+    .filter((entry) => displayMessageSearchText(entry).includes(query))
+    .map((entry) => entry.key);
+});
+
+watch(findMatchKeys, (keys) => {
+  if (keys.length === 0) {
+    findMatchIndex.value = 0;
+    return;
+  }
+  if (findMatchIndex.value >= keys.length) {
+    findMatchIndex.value = 0;
+  }
+  scrollFindMatchIntoView();
+});
+
+function cssEscape(value: string): string {
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+    return CSS.escape(value);
+  }
+  return value.replace(/"/g, '\\"');
+}
+
+function scrollFindMatchIntoView(): void {
+  const key = findMatchKeys.value[findMatchIndex.value];
+  if (!key) {
+    return;
+  }
+  void nextTick(() => {
+    const el = messagesEl.value?.querySelector(`[data-find-key="${cssEscape(key)}"]`);
+    if (el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ block: 'center' });
+    }
+  });
+}
+
+function stepFindMatch(delta: number): void {
+  const count = findMatchKeys.value.length;
+  if (count === 0) {
+    return;
+  }
+  findMatchIndex.value = (findMatchIndex.value + delta + count) % count;
+  scrollFindMatchIntoView();
+}
+
+async function openFind(): Promise<void> {
+  if (bFindOpen.value && findQuery.value.trim()) {
+    stepFindMatch(1);
+    return;
+  }
+  bFindOpen.value = true;
+  await nextTick();
+  findInputRef.value?.focus();
+  findInputRef.value?.select();
+}
+
+function closeFind(): void {
+  bFindOpen.value = false;
+  findQuery.value = '';
+  findMatchIndex.value = 0;
+}
+
+function onFindKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    stepFindMatch(event.shiftKey ? -1 : 1);
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeFind();
+  }
+}
+
+function onWindowFindKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && bFindOpen.value) {
+    event.preventDefault();
+    closeFind();
+    return;
+  }
+  if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'f') {
+    return;
+  }
+  event.preventDefault();
+  void openFind();
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onWindowFindKeydown);
+  window.addEventListener(FIND_EVENT, openFind as EventListener);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onWindowFindKeydown);
+  window.removeEventListener(FIND_EVENT, openFind as EventListener);
+});
+
+defineExpose({
+  scrollToBottom,
+  notifyHistoryPage,
+  forceInitialScrollToBottom,
+  openFind
+});
 </script>
 
 <template>
   <div class="flex-1 overflow-hidden flex flex-col min-h-0">
+    <div
+      v-if="bFindOpen"
+      class="flex items-center gap-2 px-4 md:px-6 py-2 border-b border-fg/10 shrink-0"
+    >
+      <input
+        ref="findInputRef"
+        v-model="findQuery"
+        type="search"
+        placeholder="Find in conversation"
+        class="flex-1 min-w-0 bg-transparent text-sm text-text-primary outline-none"
+        aria-label="Find in conversation"
+        @keydown="onFindKeydown"
+      />
+      <span class="text-[11px] text-text-muted tabular-nums shrink-0 nc-mono">
+        {{
+          findQuery.trim()
+            ? findMatchKeys.length
+              ? `${findMatchIndex + 1}/${findMatchKeys.length}`
+              : '0/0'
+            : ''
+        }}
+      </span>
+      <button
+        type="button"
+        class="button is-transparent is-icon"
+        title="Previous"
+        aria-label="Previous match"
+        :disabled="findMatchKeys.length === 0"
+        @click="stepFindMatch(-1)"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 15 12 9 6 15"/></svg>
+      </button>
+      <button
+        type="button"
+        class="button is-transparent is-icon"
+        title="Next"
+        aria-label="Next match"
+        :disabled="findMatchKeys.length === 0"
+        @click="stepFindMatch(1)"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <button
+        type="button"
+        class="button is-transparent is-icon"
+        title="Close"
+        aria-label="Close find"
+        @click="closeFind"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18 M6 6l12 12"/></svg>
+      </button>
+    </div>
     <!-- Messages -->
     <div
       ref="messagesEl"
@@ -405,7 +586,11 @@ defineExpose({ scrollToBottom, notifyHistoryPage, forceInitialScrollToBottom });
 
         <!-- History messages -->
         <template v-for="{ msg, key, items, fallbackHtml } in displayMessages" :key="key">
-          <div class="chat-msg-row">
+          <div
+            class="chat-msg-row"
+            :class="{ 'chat-msg-row--find': findMatchKeys[findMatchIndex] === key }"
+            :data-find-key="key"
+          >
             <!-- Avatar -->
             <div
               class="chat-avatar nc-mono"
@@ -460,6 +645,7 @@ defineExpose({ scrollToBottom, notifyHistoryPage, forceInitialScrollToBottom });
                   :expanded-tool-output-ids="expandedToolOutputIds"
                   @toggle-tool-output="(callId) => emit('toggleToolOutput', callId)"
                   @open-plan="(planId) => emit('openPlan', planId)"
+                  @open-file="(path) => emit('openFile', path)"
                   @markdown-click="onChatMarkdownClick"
                 />
                 <div
@@ -493,6 +679,7 @@ defineExpose({ scrollToBottom, notifyHistoryPage, forceInitialScrollToBottom });
               :expanded-tool-output-ids="expandedToolOutputIds"
               @toggle-tool-output="(callId) => emit('toggleToolOutput', callId)"
               @open-plan="(planId) => emit('openPlan', planId)"
+              @open-file="(path) => emit('openFile', path)"
               @markdown-click="onChatMarkdownClick"
             />
 
@@ -734,18 +921,6 @@ defineExpose({ scrollToBottom, notifyHistoryPage, forceInitialScrollToBottom });
         </div>
       </div>
     </Transition>
-
-    <!-- Floating stop button (when already at bottom) -->
-    <div v-if="bIsStreaming && !bShowScrollToBottom" class="flex justify-center py-2 shrink-0">
-      <button
-        @click="emit('cancel')"
-        class="button is-transparent is-icon chat-fixed-action !text-destructive hover:!bg-destructive/10"
-        title="Stop"
-        aria-label="Stop generating"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none" aria-hidden="true"><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6"/></svg>
-      </button>
-    </div>
   </div>
 </template>
 
@@ -755,6 +930,12 @@ defineExpose({ scrollToBottom, notifyHistoryPage, forceInitialScrollToBottom });
   display: flex;
   gap: 10px;
   align-items: flex-start;
+  border-radius: 8px;
+}
+.chat-msg-row--find {
+  outline: 1px solid color-mix(in oklab, var(--accent) 55%, transparent);
+  outline-offset: 4px;
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
 }
 .chat-avatar {
   width: 26px;

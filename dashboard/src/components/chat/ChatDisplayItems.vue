@@ -7,7 +7,7 @@
  */
 
 // components
-import { getToolIconSvg, type DisplayItem } from '@/utils/chatDisplayItems';
+import { getToolIconSvg, filePathFromToolItem, type DisplayItem } from '@/utils/chatDisplayItems';
 
 // -------------------------------------------------- Props --------------------------------------------------
 
@@ -25,6 +25,7 @@ withDefaults(
 const emit = defineEmits<{
   (e: 'toggleToolOutput', callId: string): void;
   (e: 'openPlan', planId: string | undefined): void;
+  (e: 'openFile', path: string): void;
   (e: 'markdownClick', event: MouseEvent): void;
 }>();
 </script>
@@ -179,7 +180,16 @@ const emit = defineEmits<{
         >
           <span class="shrink-0" v-html="getToolIconSvg(item.toolIcon ?? '')" />
           <span class="font-sans font-medium text-text-primary shrink-0">{{ item.toolName }}</span>
-          <span class="truncate">{{ item.toolSummary }}</span>
+          <button
+            v-if="filePathFromToolItem(item)"
+            type="button"
+            class="truncate text-left hover:text-text-primary hover:underline decoration-fg/30 underline-offset-2"
+            :title="`Open ${filePathFromToolItem(item)}`"
+            @click="emit('openFile', filePathFromToolItem(item)!)"
+          >
+            {{ item.toolSummary }}
+          </button>
+          <span v-else class="truncate">{{ item.toolSummary }}</span>
           <span class="shrink-0 ml-auto pl-2">
             <svg
               v-if="bLive && item.status === 'running'"
@@ -233,12 +243,16 @@ const emit = defineEmits<{
         </div>
         <!-- Locations -->
         <div v-if="item.locations?.length" class="flex flex-wrap gap-x-2 px-1">
-          <span
+          <button
             v-for="loc in item.locations"
-            :key="loc.path"
-            class="text-[11px] text-text-muted/60 font-mono"
-            >{{ loc.path.split('/').at(-1) }}{{ loc.line ? `:${loc.line}` : '' }}</span
+            :key="`${loc.path}:${loc.line ?? ''}`"
+            type="button"
+            class="text-[11px] text-text-muted/80 font-mono hover:text-text-primary hover:underline decoration-fg/30 underline-offset-2"
+            :title="`Open ${loc.path}`"
+            @click="emit('openFile', loc.path)"
           >
+            {{ loc.path.split('/').at(-1) }}{{ loc.line ? `:${loc.line}` : '' }}
+          </button>
         </div>
         <!-- Tool output toggle -->
         <div v-if="item.toolOutput && item.callId" class="px-1">

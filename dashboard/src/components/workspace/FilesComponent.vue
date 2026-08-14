@@ -14,6 +14,7 @@ import { usePaneLayout } from '@/composables/usePaneLayout';
 
 // types
 import type { FileEntry } from '@/classes/api';
+import { ancestorDirectoryPaths } from '@/utils/workspaceFilePath';
 
 const monacoModule = shallowRef<typeof Monaco | null>(null);
 async function getMonaco(): Promise<typeof Monaco> {
@@ -27,6 +28,11 @@ async function getMonaco(): Promise<typeof Monaco> {
 const props = defineProps<{
   workspaceId: string;
   active: boolean;
+  openPath?: string | null;
+}>();
+
+const emit = defineEmits<{
+  (e: 'update:openPath', path: string | null): void;
 }>();
 
 const {
@@ -242,8 +248,11 @@ const toggleExpand = (entry: FileEntry): void => {
   loadList(entry.path);
 };
 
-const readFilePath = async (path: string): Promise<void> => {
+const readFilePath = async (path: string, bEmit = true): Promise<void> => {
   selectedPath.value = path;
+  if (bEmit) {
+    emit('update:openPath', path);
+  }
   readError.value = null;
   bReadLoading.value = true;
   fileContent.value = '';
@@ -282,6 +291,19 @@ const selectFile = async (entry: FileEntry): Promise<void> => {
   await readFilePath(entry.path);
 };
 
+async function revealAndOpen(path: string): Promise<void> {
+  const normalized = path.replace(/^\/+/, '').replace(/\/+/g, '/');
+  if (!normalized) {
+    return;
+  }
+  const ancestors = ancestorDirectoryPaths(normalized);
+  expandedPaths.value = new Set([...expandedPaths.value, ...ancestors]);
+  for (const directoryPath of ancestors) {
+    await loadList(directoryPath);
+  }
+  await readFilePath(normalized, false);
+}
+
 const isExpanded = (path: string): boolean => expandedPaths.value.has(path);
 
 async function initEditor(): Promise<void> {
@@ -302,6 +324,9 @@ async function initEditor(): Promise<void> {
     fontSize: 13,
     scrollBeyondLastLine: false,
     theme: bIsDarkTheme.value ? 'vs-dark' : 'vs-light'
+  });
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+    void saveFile();
   });
 }
 
@@ -348,6 +373,17 @@ const saveFile = async (): Promise<void> => {
     bSaving.value = false;
   }
 };
+
+function onWindowKeydown(event: KeyboardEvent): void {
+  if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') {
+    return;
+  }
+  if (!props.active || !selectedPath.value || !bIsEditorFile.value || bSaving.value) {
+    return;
+  }
+  event.preventDefault();
+  void saveFile();
+}
 
 function parentPath(path: string): string {
   const slashIndex = path.lastIndexOf('/');
@@ -487,22 +523,40 @@ watch([fileContent, fileEncoding, selectedPath, bHtmlPreview], () => {
 });
 
 watch(
+  () => props.openPath,
+  (path) => {
+    if (!path || path === selectedPath.value) {
+      return;
+    }
+    void revealAndOpen(path);
+  }
+);
+
+watch(
   () => props.workspaceId,
-  () => {
+  async () => {
     entriesByPath.value = {};
     expandedPaths.value = new Set();
     selectedPath.value = null;
     fileContent.value = '';
-    loadList('');
+    await loadList('');
+    if (props.openPath) {
+      await revealAndOpen(props.openPath);
+    }
   }
 );
 
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 onMounted(async (): Promise<void> => {
+  window.addEventListener('keydown', onWindowKeydown);
   await loadList('');
+  if (props.openPath) {
+    await revealAndOpen(props.openPath);
+  }
 });
 
 onUnmounted((): void => {
+  window.removeEventListener('keydown', onWindowKeydown);
   disposeEditor();
   if (imageObjectUrl.value) {
     URL.revokeObjectURL(imageObjectUrl.value);
@@ -717,6 +771,8 @@ onUnmounted((): void => {
             type="button"
             class="button is-primary is-transparent h-8!"
             :disabled="bSaving"
+            title="Save (Ctrl+S)"
+            aria-label="Save (Ctrl+S)"
             @click="saveFile"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
