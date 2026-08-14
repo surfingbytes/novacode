@@ -352,10 +352,10 @@ onBeforeUnmount(() => {
         :key="'nav-' + session.id"
         :to="{ name: 'session', params: { id: session.workspaceId, sessionId: session.id } }"
         class="sidebar__session-item nc-row-hover"
-        :class="{ 'sidebar__session-item--unread': isSessionUnread(session.id) }"
+        :class="{ 'sidebar__session-item--unread': isSessionUnread(session.id) && !session.busy }"
         active-class="sidebar__session-item--active"
         :title="
-          isSessionUnread(session.id)
+          isSessionUnread(session.id) && !session.busy
             ? `${session.name || 'Untitled'} — finished, unread`
             : bIsCollapsed
               ? session.name
@@ -363,30 +363,45 @@ onBeforeUnmount(() => {
         "
         @click="handleClose"
       >
+        <svg
+          v-if="bIsCollapsed && isSessionUnread(session.id) && !session.busy"
+          class="sidebar__session-done-icon"
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.4"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M5 12l5 5L20 7" />
+        </svg>
         <span
+          v-else
           class="nc-status-dot"
-          :style="
-            sessionStatusDotStyle(
-              workspaceById(session.workspaceId),
-              session.busy,
-              isSessionUnread(session.id)
-            )
-          "
+          :style="sessionStatusDotStyle(workspaceById(session.workspaceId), session.busy)"
         />
         <template v-if="!bIsCollapsed">
           <div class="sidebar__session-info">
-            <div
-              class="sidebar__session-name"
-              :class="{ 'sidebar__session-name--unread': isSessionUnread(session.id) }"
-            >
-              {{ session.name || 'Untitled' }}
+            <div class="sidebar__session-name-row">
+              <div class="sidebar__session-name">
+                {{ session.name || 'Untitled' }}
+              </div>
+              <span
+                v-if="isSessionUnread(session.id) && !session.busy"
+                class="sidebar__session-done"
+                title="Finished — unread"
+              >
+                Done
+              </span>
             </div>
             <div class="sidebar__session-path nc-mono">
               <span :style="{ color: workspaceColor(workspaceById(session.workspaceId)) }">{{
                 workspaceNameById(session.workspaceId)
               }}</span>
               <template v-if="session.agentType"> · {{ agentTypeShortLabel(session.agentType) }}</template>
-              <template v-if="isSessionUnread(session.id)"> · done</template>
             </div>
           </div>
         </template>
@@ -742,6 +757,13 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
+.sidebar__session-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .sidebar__session-name {
   font-size: 13px;
   color: var(--fg);
@@ -749,9 +771,27 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex: 1;
 }
-.sidebar__session-name--unread {
+
+.sidebar__session-done {
+  flex-shrink: 0;
+  font-size: 10px;
   font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent);
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  border-radius: 999px;
+  padding: 1px 6px;
+  line-height: 1.35;
+}
+
+.sidebar__session-done-icon {
+  color: var(--accent);
+  flex-shrink: 0;
 }
 
 .sidebar__session-path {

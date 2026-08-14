@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { agentTypeShortLabel } from '@/utils/agentTypeMeta';
 import { sessionStatusDotStyle, workspaceColor } from '@/utils/workspaceColor';
+import { isSessionUnread } from '@/utils/sessionUnread';
 import { relativeTimeLong } from '@/utils/relativeTime';
 import type { Session, Workspace } from '@/@types/index';
 
@@ -50,7 +51,16 @@ function workspaceName(workspaceId: string): string {
           :style="sessionStatusDotStyle(workspaceById(session.workspaceId), session.busy)"
         />
         <span class="session-row__text">
-          <span class="session-row__name">{{ session.name?.trim() || 'Untitled session' }}</span>
+          <span class="session-row__name-row">
+            <span class="session-row__name">{{ session.name?.trim() || 'Untitled session' }}</span>
+            <span
+              v-if="isSessionUnread(session.id) && !session.busy"
+              class="session-row__done"
+              title="Finished — unread"
+            >
+              Done
+            </span>
+          </span>
           <span class="session-row__meta nc-mono">
             <span
               class="session-row__ws-name"
@@ -105,6 +115,13 @@ function workspaceName(workspaceId: string): string {
   gap: 1px;
 }
 
+.session-row__name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .session-row__name {
   font-size: 13.5px;
   font-weight: 450;
@@ -112,6 +129,22 @@ function workspaceName(workspaceId: string): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.session-row__done {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent);
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  border-radius: 999px;
+  padding: 1px 6px;
+  line-height: 1.35;
 }
 
 .session-row__meta {

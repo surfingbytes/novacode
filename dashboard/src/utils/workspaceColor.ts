@@ -16,25 +16,19 @@ export function workspaceColor(workspace: WorkspaceColorSource): string {
 
 /**
  * Session status dot tinted with the workspace color: busy = full color with
- * glow, idle = dimmed. Inline style because the color is dynamic per workspace
- * (mirrors the .nc-status-dot busy glow in main.css).
+ * glow, idle = dimmed. Finished/unread is a separate badge — never a glow,
+ * which reads as still running. Inline style because the color is dynamic
+ * per workspace (mirrors the .nc-status-dot busy glow in main.css).
  */
 export function sessionStatusDotStyle(
   workspace: WorkspaceColorSource,
-  busy: boolean | undefined,
-  unread?: boolean
+  busy: boolean | undefined
 ): Record<string, string> {
   const color = workspaceColor(workspace);
   if (busy) {
     return {
       background: color,
       boxShadow: `0 0 0 3px color-mix(in oklab, ${color} 20%, transparent)`
-    };
-  }
-  if (unread) {
-    return {
-      background: color,
-      boxShadow: `0 0 0 2px color-mix(in oklab, ${color} 45%, transparent)`
     };
   }
   return { background: `color-mix(in oklab, ${color} 35%, transparent)` };
