@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseGitLog } from './git';
+import { parseGitLog } from './gitLog';
 
 describe('parseGitLog', () => {
   it('parses unit-separated git log lines', () => {
