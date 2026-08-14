@@ -88,7 +88,6 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.get('/api/ws/session/:id', { websocket: true }, async (socket: WebSocket, request) => {
     wsClients.add(socket);
-    // Validate JWT (bearer subprotocol preferred, ?token= query still accepted)
     const token = extractWsToken(request);
     if (!token) {
       socket.close(4001, 'Missing token');

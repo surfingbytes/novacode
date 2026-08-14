@@ -97,11 +97,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     const previousSession = sessionIndex === -1 ? null : allSessions.value[sessionIndex];
     const merged: Session = {
       ...(previousSession ?? {}),
-      ...next,
-      messageJson:
-        typeof next.messageJson === 'string' && next.messageJson.length > 0
-          ? next.messageJson
-          : (previousSession?.messageJson ?? '[]'),
+      ...next
     };
     if (sessionIndex === -1) {
       allSessions.value = [merged, ...allSessions.value];

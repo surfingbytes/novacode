@@ -65,7 +65,7 @@ Nova Code was originally created by [Jonah Fintz](https://github.com/JonahFintzD
 | **Role templates** | Reusable instruction snippets for bootstrapping new rule files. |
 | **REST API** | JSON API under `/api` with JWT bearer auth only (no separate API-token or API-key table today; see root `feature-ideas.md` for possible future programmatic keys). |
 | **Web Push** | Browser notifications when sessions finish; the body previews the last assistant text or tool result (title still names workspace/session). Notifications include a **Reply** action that opens the PWA directly to that session. VAPID keys are created automatically in the config volume. |
-| **Health endpoint** | `GET /api/health` — unauthenticated, ready for Docker `HEALTHCHECK` and uptime monitors. |
+| **Health endpoint** | `GET /api/health` — unauthenticated, ready for Docker `HEALTHCHECK` and uptime monitors. Compose and the image probe this path; Postgres is not published to the host. |
 | **MCP connectivity check** | In **Settings → MCP**, **Test connectivity** dry-runs each registered MCP server (stdio spawn, HTTP GET) on the host before agents use them. |
 
 ---
@@ -140,7 +140,7 @@ Copy `.env.example` to `.env` and edit the values below.
 | Variable | Description |
 |----------|-------------|
 | `POSTGRES_PASSWORD` | Password for the PostgreSQL user |
-| `JWT_SECRET` | Long random string for signing JWTs — `openssl rand -hex 32` (keep stable across restarts/upgrades; changing it invalidates existing browser tokens) |
+| `JWT_SECRET` | Long random string for signing JWTs — `openssl rand -hex 32` (required at startup; the example placeholder is rejected. Keep stable across restarts/upgrades; changing it invalidates existing browser tokens) |
 
 ### PostgreSQL
 
@@ -165,6 +165,7 @@ Copy `.env.example` to `.env` and edit the values below.
 |----------|-------------|
 | `AGENT_ENV_*` | Any env var prefixed with `AGENT_ENV_` is forwarded to spawned agents with the prefix stripped |
 | `VIBE_COMMAND` | *(optional)* Executable for Mistral Vibe (default: `vibe` on `PATH`) |
+| `TRUST_PROXY` | Set to `true` when behind a reverse proxy so login rate limits use `X-Forwarded-For` |
 
 ---
 

@@ -11,6 +11,19 @@ function optional(name: string, fallback = ''): string {
   return process.env[name] ?? fallback;
 }
 
+const EXAMPLE_JWT_SECRET = 'change_this_to_a_long_random_string';
+
+/** Fail process startup when JWT_SECRET is missing or still the example placeholder. */
+export function assertJwtSecret(): void {
+  const secret = (process.env['JWT_SECRET'] ?? '').trim();
+  if (!secret) {
+    throw new Error('JWT_SECRET environment variable is required');
+  }
+  if (secret === EXAMPLE_JWT_SECRET) {
+    throw new Error('JWT_SECRET must be a unique secret, not the example placeholder');
+  }
+}
+
 export const config = {
   // auth: credentials stored in DB, first-use setup creates the initial user
   jwtSecret: optional('JWT_SECRET'),

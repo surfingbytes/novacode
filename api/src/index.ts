@@ -1,6 +1,8 @@
 // node_modules
 import Fastify from 'fastify';
 import fastifyCors from '@fastify/cors';
+import fastifyHelmet from '@fastify/helmet';
+import fastifyRateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import { join } from 'node:path';
@@ -8,7 +10,7 @@ import { existsSync } from 'node:fs';
 
 // classes
 import { registerAuth } from './classes/auth';
-import { config, writeGlobalGitConfig } from './classes/config';
+import { assertJwtSecret, config, writeGlobalGitConfig } from './classes/config';
 import { db } from './classes/database';
 import { sessionManager } from './classes/sessionManager';
 import { workspaceTerminalManager } from './classes/workspaceTerminalManager';
@@ -51,16 +53,32 @@ const BODY_LIMIT_BYTES = 25 * 1024 * 1024;
 // --------------------------------------------- Methods ---------------------------------------------
 
 async function main(): Promise<void> {
+  assertJwtSecret();
   ensureVapidKeys();
   ensureSshKey(config.configDir);
 
-  const fastify = Fastify({ bodyLimit: BODY_LIMIT_BYTES });
+  const trustProxy =
+    process.env['TRUST_PROXY'] === '1' || process.env['TRUST_PROXY'] === 'true';
+  const fastify = Fastify({ bodyLimit: BODY_LIMIT_BYTES, trustProxy });
 
   // plugins
+  await fastify.register(fastifyHelmet, {
+    // SPA + WebSockets + Monaco workers: a strict CSP is a separate project.
+    // HSTS is off because many self-hosted installs are plain HTTP on a LAN.
+    contentSecurityPolicy: false,
+    hsts: false,
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: false
+  });
+
   await fastify.register(fastifyCors, {
     origin: true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
+  });
+
+  await fastify.register(fastifyRateLimit, {
+    global: false
   });
 
   await fastify.register(fastifyWebsocket, {
@@ -116,7 +134,7 @@ async function main(): Promise<void> {
   fastify.get('/api/health', async (_request, reply) => {
     let dbOk = false;
     try {
-      await db.listWorkspaces();
+      await db.pingDatabase();
       dbOk = true;
     } catch {
       // db not ok

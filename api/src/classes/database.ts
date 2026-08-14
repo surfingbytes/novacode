@@ -8,6 +8,11 @@ import { ensureDatabaseUrl } from '../env';
 import { PrismaClient, Prisma } from '../generated/client/client';
 import { config } from './config';
 import { computeLastListPreview } from './chatPreview';
+import {
+  chatMessageToRowData,
+  escapeIlikeContains,
+  sessionMessageRowToChat
+} from './sessionMessages';
 
 ensureDatabaseUrl();
 
@@ -23,8 +28,8 @@ import type { PushSubscriptionModel as PushSubscription } from '../generated/cli
 import type { ChatMessage, ChatQueueItem } from '../@types/index';
 import { MAX_FAVORITE_WORKSPACES } from '@novacode/shared';
 
-/** Session without messageJson */
-export type SessionWithCategory = Omit<Session, 'messageJson'>;
+/** Session list/detail row (chat history lives in `session_messages`). */
+export type SessionWithCategory = Session;
 /** Session with all fields */
 export type SessionWithCategoryAndMessages = Session;
 /** Orchestrator (alias for backward compat) */
@@ -93,7 +98,27 @@ function toChatQueueItem(row: {
   };
 }
 
+export const SEARCH_LIMIT = 30;
+
+export type SearchHit = {
+  id: string;
+  name: string;
+  type: 'workspace' | 'session' | 'orchestrator' | 'role-template' | 'automation';
+  workspaceId?: string;
+  workspaceName?: string;
+};
+
+function ilikeContains(term: string): { contains: string; mode: 'insensitive' } {
+  return { contains: escapeIlikeContains(term), mode: 'insensitive' };
+}
+
 export const db = {
+  // -------------------------------------------------- Health --------------------------------------------------
+
+  async pingDatabase(): Promise<void> {
+    await _prisma.$queryRaw`SELECT 1`;
+  },
+
   // -------------------------------------------------- Auth --------------------------------------------------
 
   async hasAnyUser(): Promise<boolean> {
@@ -315,21 +340,19 @@ export const db = {
         workspaceId,
         ...(opts?.archived !== undefined ? { archived: opts.archived } : {})
       },
-      omit: { messageJson: true },
       orderBy: { updatedAt: 'desc' }
     }) as Promise<SessionWithCategory[]>;
   },
 
   async listSessions(): Promise<SessionWithCategory[]> {
     return _prisma.session.findMany({
-      omit: { messageJson: true },
       orderBy: { updatedAt: 'desc' }
     }) as Promise<SessionWithCategory[]>;
   },
 
   /**
-   * List payloads omit `messageJson`. If `last_preview_*` was never set (older rows),
-   * derive from `message_json` and persist so future lists are cheap.
+   * List payloads do not include chat rows. If `last_preview_*` was never set
+   * (older rows), derive from `session_messages` and persist so future lists are cheap.
    */
   async enrichSessionListPreviews<
     T extends { id: string; lastPreviewText?: string | null; lastPreviewRole?: string | null }
@@ -341,24 +364,20 @@ export const db = {
       return;
     }
 
-    const rows = await _prisma.session.findMany({
-      where: { id: { in: missing.map((m) => m.id) } },
-      select: { id: true, messageJson: true }
+    const rows = await _prisma.sessionMessage.findMany({
+      where: { sessionId: { in: missing.map((m) => m.id) } },
+      orderBy: [{ sessionId: 'asc' }, { position: 'asc' }]
     });
-    const byId = new Map(rows.map((r) => [r.id, r.messageJson]));
+    const byId = new Map<string, ChatMessage[]>();
+    for (const row of rows) {
+      const list = byId.get(row.sessionId) ?? [];
+      list.push(sessionMessageRowToChat(row));
+      byId.set(row.sessionId, list);
+    }
 
     for (const s of missing) {
-      const mj = byId.get(s.id);
-      if (!mj || mj === '[]') {
-        continue;
-      }
-      let messages: ChatMessage[];
-      try {
-        messages = JSON.parse(mj) as ChatMessage[];
-      } catch {
-        continue;
-      }
-      if (!Array.isArray(messages) || messages.length === 0) {
+      const messages = byId.get(s.id);
+      if (!messages || messages.length === 0) {
         continue;
       }
       const p = computeLastListPreview(messages);
@@ -413,7 +432,6 @@ export const db = {
         sessionMode: data.sessionMode ?? 'default',
         approvalPolicy: data.approvalPolicy ?? 'ask',
         sessionConfigJson: data.sessionConfigJson ?? null,
-        messageJson: '[]',
         workspaceId: data.workspaceId,
         createdAt
       }
@@ -437,12 +455,12 @@ export const db = {
       sessionMode?: string;
       approvalPolicy?: string;
       sessionConfigJson?: string | null;
-      messageJson?: string;
       lastPreviewText?: string | null;
       lastPreviewRole?: string | null;
       name?: string;
       tags?: string[] | null;
       archived?: boolean;
+      claudeLimitResetAt?: string | null;
     }
   ): Promise<Session | undefined> {
     const existingSession = await _prisma.session.findUnique({ where: { id } });
@@ -468,17 +486,89 @@ export const db = {
         sessionMode: patch.sessionMode ?? existingSession.sessionMode,
         approvalPolicy: patch.approvalPolicy ?? existingSession.approvalPolicy,
         ...(patch.sessionConfigJson !== undefined && { sessionConfigJson: patch.sessionConfigJson }),
-        messageJson: patch.messageJson ?? existingSession.messageJson,
         ...(patch.lastPreviewText !== undefined && { lastPreviewText: patch.lastPreviewText }),
         ...(patch.lastPreviewRole !== undefined && { lastPreviewRole: patch.lastPreviewRole }),
         name: patch.name ?? existingSession.name,
         ...(tagsJson !== undefined && { tags: tagsJson }),
         archived: patch.archived ?? existingSession.archived,
+        ...(patch.claudeLimitResetAt !== undefined && { claudeLimitResetAt: patch.claudeLimitResetAt }),
         updatedAt: new Date().toISOString()
       }
     });
 
     return row;
+  },
+
+  async listSessionMessages(sessionId: string): Promise<ChatMessage[]> {
+    const rows = await _prisma.sessionMessage.findMany({
+      where: { sessionId },
+      orderBy: { position: 'asc' }
+    });
+    return rows.map(sessionMessageRowToChat);
+  },
+
+  async listSessionMessagesPage(
+    sessionId: string,
+    offset: number,
+    limit: number
+  ): Promise<{ messages: ChatMessage[]; hasMore: boolean }> {
+    const total = await _prisma.sessionMessage.count({ where: { sessionId } });
+    const endIdx = Math.max(0, total - offset);
+    const startIdx = Math.max(0, endIdx - limit);
+    if (endIdx <= startIdx) {
+      return { messages: [], hasMore: startIdx > 0 };
+    }
+    const rows = await _prisma.sessionMessage.findMany({
+      where: { sessionId },
+      orderBy: { position: 'asc' },
+      skip: startIdx,
+      take: endIdx - startIdx
+    });
+    return {
+      messages: rows.map(sessionMessageRowToChat),
+      hasMore: startIdx > 0
+    };
+  },
+
+  async persistSessionMessages(
+    sessionId: string,
+    messages: ChatMessage[],
+    patch?: {
+      sessionId?: string | null;
+      lastPreviewText?: string | null;
+      lastPreviewRole?: string | null;
+    }
+  ): Promise<Session | undefined> {
+    const existing = await _prisma.session.findUnique({ where: { id: sessionId } });
+    if (!existing) {
+      return undefined;
+    }
+
+    const rows = messages.map((message, position) =>
+      chatMessageToRowData(sessionId, position, message, randomUUID())
+    );
+    const MESSAGE_INSERT_BATCH = 100;
+
+    await _prisma.$transaction(async (tx) => {
+      await tx.sessionMessage.deleteMany({ where: { sessionId } });
+      for (let index = 0; index < rows.length; index += MESSAGE_INSERT_BATCH) {
+        await tx.sessionMessage.createMany({
+          data: rows.slice(index, index + MESSAGE_INSERT_BATCH)
+        });
+      }
+      await tx.session.update({
+        where: { id: sessionId },
+        data: {
+          ...(patch?.sessionId !== undefined && { sessionId: patch.sessionId }),
+          ...(patch?.lastPreviewText !== undefined && { lastPreviewText: patch.lastPreviewText }),
+          ...(patch?.lastPreviewRole !== undefined && { lastPreviewRole: patch.lastPreviewRole }),
+          updatedAt: new Date().toISOString()
+        }
+      });
+    });
+
+    const row = await _prisma.session.findUnique({ where: { id: sessionId } });
+    return row ?? undefined;
   },
 
   async listSessionQueue(sessionId: string): Promise<ChatQueueItem[]> {
@@ -972,5 +1062,115 @@ export const db = {
         error: 'error' in patch ? patch.error : existing.error
       }
     });
+  },
+
+  // -------------------------------------------------- Search --------------------------------------------------
+
+  async searchCatalog(query: string): Promise<{
+    workspaces: SearchHit[];
+    sessions: SearchHit[];
+    orchestrators: SearchHit[];
+    roleTemplates: SearchHit[];
+    automations: SearchHit[];
+  }> {
+    const contains = ilikeContains(query.trim());
+
+    const [workspaces, sessions, orchestrators, roleTemplates, automations] = await Promise.all([
+      _prisma.workspace.findMany({
+        where: { archived: false, name: contains },
+        select: { id: true, name: true },
+        take: SEARCH_LIMIT,
+        orderBy: { name: 'asc' }
+      }),
+      _prisma.session.findMany({
+        where: {
+          archived: false,
+          OR: [
+            { name: contains },
+            { lastPreviewText: contains },
+            { messages: { some: { content: contains } } }
+          ]
+        },
+        select: {
+          id: true,
+          name: true,
+          lastPreviewText: true,
+          workspaceId: true,
+          workspace: { select: { name: true } }
+        },
+        take: SEARCH_LIMIT,
+        orderBy: { updatedAt: 'desc' }
+      }),
+      _prisma.orchestrator.findMany({
+        where: {
+          archived: false,
+          OR: [{ name: contains }, { messageJson: contains }, { tags: contains }]
+        },
+        select: {
+          id: true,
+          name: true,
+          workspaceId: true,
+          workspace: { select: { name: true } }
+        },
+        take: SEARCH_LIMIT,
+        orderBy: { updatedAt: 'desc' }
+      }),
+      _prisma.roleTemplate.findMany({
+        where: { OR: [{ name: contains }, { content: contains }] },
+        select: { id: true, name: true },
+        take: SEARCH_LIMIT,
+        orderBy: { name: 'asc' }
+      }),
+      _prisma.automation.findMany({
+        where: { OR: [{ name: contains }, { prompt: contains }] },
+        select: {
+          id: true,
+          name: true,
+          workspaceId: true,
+          workspace: { select: { name: true } }
+        },
+        take: SEARCH_LIMIT,
+        orderBy: { name: 'asc' }
+      })
+    ]);
+
+    return {
+      workspaces: workspaces.map((workspace) => ({
+        id: workspace.id,
+        name: workspace.name,
+        type: 'workspace' as const,
+        workspaceId: workspace.id
+      })),
+      sessions: sessions.map((session) => {
+        const name = session.name?.trim() ?? '';
+        const preview = session.lastPreviewText?.trim() ?? '';
+        return {
+          id: session.id,
+          name: name || preview || 'Untitled session',
+          type: 'session' as const,
+          workspaceId: session.workspaceId,
+          workspaceName: session.workspace.name
+        };
+      }),
+      orchestrators: orchestrators.map((orchestrator) => ({
+        id: orchestrator.id,
+        name: orchestrator.name?.trim() || 'Untitled orchestrator',
+        type: 'orchestrator' as const,
+        workspaceId: orchestrator.workspaceId,
+        workspaceName: orchestrator.workspace.name
+      })),
+      roleTemplates: roleTemplates.map((roleTemplate) => ({
+        id: roleTemplate.id,
+        name: roleTemplate.name,
+        type: 'role-template' as const
+      })),
+      automations: automations.map((automation) => ({
+        id: automation.id,
+        name: automation.name,
+        type: 'automation' as const,
+        workspaceId: automation.workspaceId,
+        workspaceName: automation.workspace.name
+      }))
+    };
   }
 };

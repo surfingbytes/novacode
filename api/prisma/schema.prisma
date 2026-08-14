@@ -70,12 +70,12 @@ model Session {
   sessionMode    String  @default("default") @map("session_mode")
   approvalPolicy String  @default("ask") @map("approval_policy")
   sessionConfigJson String? @map("session_config_json")
-  messageJson String    @map("message_json")
   /** Denormalized snippet for session lists (sidebar); updated when chat is saved */
   lastPreviewText String? @map("last_preview_text")
   lastPreviewRole String? @map("last_preview_role")
   workspaceId String
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  messages    SessionMessage[]
   promptQueue SessionPromptQueue[]
   createdAt   String    @map("created_at")
   updatedAt   String    @default(dbgenerated("CURRENT_TIMESTAMP")) @map("updated_at")
@@ -83,6 +83,22 @@ model Session {
   claudeLimitResetAt String? @map("claude_limit_reset_at")
 
   @@map("sessions")
+}
+
+model SessionMessage {
+  id             String  @id
+  sessionId      String  @map("session_id")
+  session        Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  position       Int
+  role           String
+  content        String  @default("")
+  eventsJson     String? @map("events_json")
+  imagePathsJson String? @map("image_paths_json")
+  createdAt      String  @map("created_at")
+
+  @@unique([sessionId, position], map: "session_messages_session_id_position_key")
+  @@index([sessionId], map: "idx_session_messages_session_id")
+  @@map("session_messages")
 }
 
 model SessionPromptQueue {

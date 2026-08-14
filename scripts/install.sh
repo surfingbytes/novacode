@@ -159,9 +159,6 @@ ensure_env_paths() {
   if ! grep -q '^COMPOSE_PROJECT_NAME=' "$f" 2>/dev/null; then
     echo "COMPOSE_PROJECT_NAME=novacode" >>"$f"
   fi
-  if ! grep -q '^POSTGRES_PUBLISH_PORT=' "$f" 2>/dev/null; then
-    echo "POSTGRES_PUBLISH_PORT=5432" >>"$f"
-  fi
 }
 
 write_env_file() {
@@ -184,7 +181,6 @@ POSTGRES_PASSWORD=${pg_pass}
 POSTGRES_DB=novacode
 POSTGRES_HOST=postgres
 POSTGRES_PORT=5432
-POSTGRES_PUBLISH_PORT=5432
 
 JWT_SECRET=${jwt}
 

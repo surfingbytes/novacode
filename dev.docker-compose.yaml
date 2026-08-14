@@ -24,6 +24,15 @@ services:
       - ./config:/config
       - ~:/data-root
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:21000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
   dashboard:
     build:
       context: .
@@ -49,6 +58,11 @@ services:
     volumes:
       - ai-postgres-data:/var/lib/postgresql/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d novacode"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   ai-postgres-data:

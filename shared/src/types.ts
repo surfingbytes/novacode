@@ -256,7 +256,7 @@ export interface Session {
   /** Nova chat approval policy: ask before tools, or auto-allow. */
   approvalPolicy: ApprovalPolicy;
   sessionConfigJson?: Record<string, string> | null;
-  /** Omitted on list endpoints and the session detail GET (chat history streams over the chat WebSocket) */
+  /** Legacy field; chat history is no longer returned on session payloads (it streams over the chat WebSocket). */
   messageJson?: string;
   /** Real Cursor plan documents from .cursor/plans, present on session detail when available */
   planDocuments?: PlanDocumentSummary[];

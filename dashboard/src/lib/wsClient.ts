@@ -5,7 +5,7 @@
  *
  * Features:
  *  - Auth via `bearer.<jwt>` Sec-WebSocket-Protocol (token stays out of URLs
- *    and server access logs); `?token=` remains as server-side fallback.
+ *    and server access logs).
  *  - Exponential reconnect backoff (1s → 30s) with jitter.
  *  - Reconnect on window `online` and tab `visibilitychange`.
  *  - App-level ping every 30s to keep the connection warm through proxies.

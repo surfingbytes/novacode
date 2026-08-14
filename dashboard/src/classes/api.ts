@@ -507,32 +507,26 @@ function wsBase(): string {
   return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${base}${pathPrefix}`;
 }
 
-function wsAuthQuery(): string {
-  const token = localStorage.getItem('token') ?? '';
-  return token ? `?token=${encodeURIComponent(token)}` : '';
-}
-
-// Primary WS auth is bearer.<jwt> Sec-WebSocket-Protocol (see lib/wsClient).
-// Keep the query token as a compatibility fallback for proxies that strip or
-// mishandle Sec-WebSocket-Protocol during upgrades.
+// Auth is bearer.<jwt> Sec-WebSocket-Protocol (see lib/wsClient) — never put
+// the token in the URL.
 export const buildWsUrl = (sessionId: string): string => {
-  return `${wsBase()}/ws/session/${sessionId}${wsAuthQuery()}`;
+  return `${wsBase()}/ws/session/${sessionId}`;
 };
 
 export const buildChatWsUrl = (sessionId: string): string => {
-  return `${wsBase()}/ws/chat/${sessionId}${wsAuthQuery()}`;
+  return `${wsBase()}/ws/chat/${sessionId}`;
 };
 
 export const buildSessionTerminalWsUrl = (workspaceId: string, sessionId: string): string => {
-  return `${wsBase()}/ws/workspaces/${workspaceId}/sessions/${sessionId}/terminal${wsAuthQuery()}`;
+  return `${wsBase()}/ws/workspaces/${workspaceId}/sessions/${sessionId}/terminal`;
 };
 
 export const buildWorkspaceSessionsWsUrl = (workspaceId: string): string => {
-  return `${wsBase()}/ws/workspaces/${workspaceId}/sessions${wsAuthQuery()}`;
+  return `${wsBase()}/ws/workspaces/${workspaceId}/sessions`;
 };
 
 export const buildSessionsWsUrl = (): string => {
-  return `${wsBase()}/ws/sessions${wsAuthQuery()}`;
+  return `${wsBase()}/ws/sessions`;
 };
 
 // ---------------------------------- Sessions ----------------------------------

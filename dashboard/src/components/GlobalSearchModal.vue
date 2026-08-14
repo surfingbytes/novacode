@@ -10,7 +10,7 @@ import { useAuthStore } from '@/stores/auth';
 interface SearchResult {
   id: string;
   name: string;
-  type: 'workspace' | 'session' | 'role-template' | 'automation' | 'settings' | 'command';
+  type: 'workspace' | 'session' | 'orchestrator' | 'role-template' | 'automation' | 'settings' | 'command';
   workspaceId?: string;
   workspaceName?: string;
 }
@@ -18,6 +18,7 @@ interface SearchResult {
 interface SearchResultsGrouped {
   workspaces: SearchResult[];
   sessions: SearchResult[];
+  orchestrators: SearchResult[];
   roleTemplates: SearchResult[];
   automations: SearchResult[];
   settings: SearchResult[];
@@ -107,6 +108,7 @@ const searchQuery = ref('');
 const searchResults = ref<SearchResultsGrouped>({
   workspaces: [],
   sessions: [],
+  orchestrators: [],
   roleTemplates: [],
   automations: [],
   settings: []
@@ -200,6 +202,7 @@ const hasResults = computed(() => {
     commandResults.value.length > 0 ||
     searchResults.value.workspaces.length > 0 ||
     searchResults.value.sessions.length > 0 ||
+    searchResults.value.orchestrators.length > 0 ||
     searchResults.value.roleTemplates.length > 0 ||
     searchResults.value.automations.length > 0 ||
     searchResults.value.settings.length > 0
@@ -211,6 +214,7 @@ const totalResults = computed(() => {
     commandResults.value.length +
     searchResults.value.workspaces.length +
     searchResults.value.sessions.length +
+    searchResults.value.orchestrators.length +
     searchResults.value.roleTemplates.length +
     searchResults.value.automations.length +
     searchResults.value.settings.length
@@ -219,13 +223,14 @@ const totalResults = computed(() => {
 
 /**
  * Flat result list in the exact render order of the template groups
- * (commands → workspaces → sessions → automations → roleTemplates → settings) so
+ * (commands → workspaces → sessions → orchestrators → automations → roleTemplates → settings) so
  * ArrowUp/Down and Enter map 1:1 onto what the user sees.
  */
 const flatResults = computed<SearchResult[]>(() => [
   ...commandResults.value,
   ...searchResults.value.workspaces,
   ...searchResults.value.sessions,
+  ...searchResults.value.orchestrators,
   ...searchResults.value.automations,
   ...searchResults.value.roleTemplates,
   ...searchResults.value.settings
@@ -245,6 +250,7 @@ async function performSearch(): Promise<void> {
     searchResults.value = {
       workspaces: [],
       sessions: [],
+      orchestrators: [],
       roleTemplates: [],
       automations: [],
       settings: []
@@ -310,6 +316,7 @@ async function performSearch(): Promise<void> {
     searchResults.value = {
       workspaces: Array.isArray(data.workspaces) ? data.workspaces : [],
       sessions: Array.isArray(data.sessions) ? data.sessions : [],
+      orchestrators: Array.isArray(data.orchestrators) ? data.orchestrators : [],
       roleTemplates: Array.isArray(data.roleTemplates) ? data.roleTemplates : [],
       automations: mergedAutomations,
       settings: settingsResults
@@ -443,6 +450,14 @@ function navigateToResult(result: SearchResult): void {
         router.push({
           name: 'session',
           params: { id: result.workspaceId, sessionId: result.id }
+        });
+      }
+      break;
+    case 'orchestrator':
+      if (result.workspaceId) {
+        router.push({
+          name: 'orchestrator',
+          params: { id: result.workspaceId, orchestratorId: result.id }
         });
       }
       break;
@@ -668,6 +683,12 @@ onBeforeUnmount(() => {
                     icon: 'terminal'
                   },
                   {
+                    key: 'orchestrators',
+                    label: 'Orchestrators',
+                    items: searchResults.orchestrators,
+                    icon: 'layers'
+                  },
+                  {
                     key: 'automations',
                     label: 'Automations',
                     items: searchResults.automations,
@@ -725,6 +746,10 @@ onBeforeUnmount(() => {
                         d="M3 7a2 2 0 012-2h3.5l2 2H19a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"
                       />
                       <path v-else-if="group.icon === 'terminal'" d="M4 7l4 5-4 5 M12 19h8" />
+                      <path
+                        v-else-if="group.icon === 'layers'"
+                        d="M12 2l9 5-9 5-9-5 9-5z M3 12l9 5 9-5 M3 17l9 5 9-5"
+                      />
                       <path
                         v-else-if="group.icon === 'clock'"
                         d="M12 7v5l3 2 M12 21a9 9 0 100-18 9 9 0 000 18z"

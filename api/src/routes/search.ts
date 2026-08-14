@@ -13,6 +13,7 @@ const SearchResultSchema = Type.Object({
   type: Type.Union([
     Type.Literal('workspace'),
     Type.Literal('session'),
+    Type.Literal('orchestrator'),
     Type.Literal('role-template'),
     Type.Literal('automation')
   ]),
@@ -23,8 +24,9 @@ const SearchResultSchema = Type.Object({
 const SearchResponseSchema = Type.Object({
   workspaces: Type.Array(SearchResultSchema),
   sessions: Type.Array(SearchResultSchema),
+  orchestrators: Type.Array(SearchResultSchema),
   roleTemplates: Type.Array(SearchResultSchema),
-  automations: Type.Array(SearchResultSchema),
+  automations: Type.Array(SearchResultSchema)
 });
 
 export async function searchRoutes(fastify: FastifyInstance): Promise<void> {
@@ -39,14 +41,14 @@ export async function searchRoutes(fastify: FastifyInstance): Promise<void> {
       preHandler: jwtPreHandler,
       schema: {
         querystring: Type.Object({
-          query: Type.String({ minLength: 1 }),
+          query: Type.String({ minLength: 1 })
         }),
         response: {
           200: SearchResponseSchema,
           400: Type.Object({ error: Type.String() }),
-          500: Type.Object({ error: Type.String() }),
-        },
-      },
+          500: Type.Object({ error: Type.String() })
+        }
+      }
     },
     async (request, reply) => {
       const { query } = request.query as { query: string };
@@ -55,80 +57,13 @@ export async function searchRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: 'Query parameter is required' });
       }
 
-      const searchTerm = query.trim().toLowerCase();
-
       try {
-        // ---------------------------------- Workspaces ----------------------------------
-        const workspaces = await db.listWorkspaces({ includeArchived: false });
-        const workspaceResults = workspaces
-          .filter((workspace) => workspace.name.toLowerCase().includes(searchTerm))
-          .map((workspace) => ({
-            id: workspace.id,
-            name: workspace.name,
-            type: 'workspace' as const,
-            workspaceId: workspace.id,
-          }));
-
-        // ---------------------------------- Sessions ----------------------------------
-        const allWorkspaces = await db.listWorkspaces({ includeArchived: true });
-        const sessionResults = [];
-
-        for (const workspace of allWorkspaces) {
-          const sessions = await db.listSessionsByWorkspace(workspace.id, { archived: false });
-          const filteredSessions = sessions.filter((session) => {
-            const name = session.name?.trim() ?? '';
-            const preview = session.lastPreviewText?.trim() ?? '';
-            return `${name} ${preview}`.toLowerCase().includes(searchTerm);
-          });
-
-          sessionResults.push(
-            ...filteredSessions.map((session) => {
-              const name = session.name?.trim() ?? '';
-              const preview = session.lastPreviewText?.trim() ?? '';
-              return {
-                id: session.id,
-                name: name || preview || 'Untitled session',
-                type: 'session' as const,
-                workspaceId: session.workspaceId,
-                workspaceName: workspace.name,
-              };
-            }),
-          );
-        }
-
-        // ---------------------------------- Role Templates ----------------------------------
-        const roleTemplates = await db.listRoleTemplates();
-        const roleTemplateResults = roleTemplates
-          .filter((roleTemplate) => roleTemplate.name.toLowerCase().includes(searchTerm))
-          .map((roleTemplate) => ({
-            id: roleTemplate.id,
-            name: roleTemplate.name,
-            type: 'role-template' as const,
-          }));
-
-        // ---------------------------------- Automations ----------------------------------
-        const automations = await db.listAutomations();
-        const automationResults = automations
-          .filter((automation) => automation.name.toLowerCase().includes(searchTerm))
-          .map((automation) => ({
-            id: automation.id,
-            name: automation.name,
-            type: 'automation' as const,
-          }));
-
-        // ---------------------------------- Response ----------------------------------
-        const response = {
-          workspaces: workspaceResults,
-          sessions: sessionResults,
-          roleTemplates: roleTemplateResults,
-          automations: automationResults,
-        };
-
-        return reply.send(response);
+        const results = await db.searchCatalog(query);
+        return reply.send(results);
       } catch (error) {
-        console.error('Search failed:', error);
+        request.log.error({ err: error }, 'Search failed');
         return reply.status(500).send({ error: 'Failed to perform search' });
       }
-    },
+    }
   );
 }

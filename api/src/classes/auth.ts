@@ -36,31 +36,7 @@ export async function verifyToken(token: string): Promise<JwtPayload> {
   return jwt.verify(token, secret) as JwtPayload;
 }
 
-/**
- * Extract the JWT from a WebSocket upgrade request. Preferred transport is
- * the `bearer.<token>` Sec-WebSocket-Protocol (keeps tokens out of URLs and
- * access logs); the legacy `?token=` query param is still accepted.
- */
-export function extractWsToken(request: {
-  query?: unknown;
-  headers?: Record<string, unknown>;
-}): string | null {
-  const protocol = request.headers?.['sec-websocket-protocol'];
-  if (typeof protocol === 'string') {
-    for (const candidate of protocol.split(',')) {
-      const trimmed = candidate.trim();
-      if (!trimmed.startsWith('bearer.')) {
-        continue;
-      }
-      const token = trimmed.slice('bearer.'.length);
-      if (token) {
-        return token;
-      }
-    }
-  }
-  const query = (request.query ?? {}) as Record<string, string>;
-  return query['token'] ?? null;
-}
+export { extractWsToken } from './wsToken';
 
 // constant-time string comparison to prevent timing attacks
 function safeEqual(a: string, b: string): boolean {

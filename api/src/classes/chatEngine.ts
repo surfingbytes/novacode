@@ -640,7 +640,7 @@ export async function dispatchPrompt(
 
   let currentMessages: ChatMessage[] = [];
   try {
-    currentMessages = JSON.parse(session.messageJson ?? '[]');
+    currentMessages = await db.listSessionMessages(sessionId);
   } catch {
     currentMessages = [];
   }
@@ -655,8 +655,7 @@ export async function dispatchPrompt(
 
   const previewAfterUser = computeLastListPreview(currentMessages);
   try {
-    await db.updateSession(sessionId, {
-      messageJson: JSON.stringify(currentMessages),
+    const fresh = await db.persistSessionMessages(sessionId, currentMessages, {
       ...(previewAfterUser
         ? {
             lastPreviewText: previewAfterUser.lastPreviewText,
@@ -664,7 +663,6 @@ export async function dispatchPrompt(
           }
         : {}),
     });
-    const fresh = await db.getSession(sessionId);
     if (fresh) broadcastSessionListUpsert(fresh.workspaceId, fresh);
   } catch (err) {
     currentMessages.pop();
@@ -882,7 +880,7 @@ export async function dispatchPrompt(
       const resetAtReadable = parsedClaudeLimit?.resetAtReadable;
       if (parsedClaudeLimit) {
         try {
-          await db.updateSession(sessionId, { claudeLimitResetAt: resetAtIso } as any);
+          await db.updateSession(sessionId, { claudeLimitResetAt: resetAtIso });
           const fresh = await db.getSession(sessionId);
           if (fresh) broadcastSessionListUpsert(fresh.workspaceId, fresh);
         } catch (err) {
@@ -912,9 +910,8 @@ export async function dispatchPrompt(
       eventCount: assistantEvents.length,
     });
 
-    // Track ACP session ID changes (new session on first turn, or if Claude rotates it).
-    // Folded into the same awaited DB write below to avoid a race where the fire-and-forget
-    // save races the messageJson write — the messageJson write would win and clobber the sessionId.
+    // Persist ACP session ID together with chat rows so a separate session
+    // update cannot race the message write.
     const newAcpSessionId =
       result.acpSessionId && result.acpSessionId !== session.sessionId
         ? result.acpSessionId
@@ -932,8 +929,7 @@ export async function dispatchPrompt(
 
     const previewDone = computeLastListPreview(currentMessages);
     try {
-      await db.updateSession(sessionId, {
-        messageJson: JSON.stringify(currentMessages),
+      const fresh = await db.persistSessionMessages(sessionId, currentMessages, {
         ...(newAcpSessionId ? { sessionId: newAcpSessionId } : {}),
         ...(previewDone
           ? { lastPreviewText: previewDone.lastPreviewText, lastPreviewRole: previewDone.lastPreviewRole }
@@ -942,7 +938,6 @@ export async function dispatchPrompt(
       if (newAcpSessionId) {
         console.log('[chatEngine] ACP session ID saved:', newAcpSessionId);
       }
-      const fresh = await db.getSession(sessionId);
       if (fresh) broadcastSessionListUpsert(fresh.workspaceId, fresh);
     } catch (err) {
       console.error('[chatEngine] Failed to save messages:', err);
@@ -1057,7 +1052,7 @@ export async function checkClaudeAutoContinue(): Promise<void> {
           subscriber: mockSubscriber,
         });
 
-        await db.updateSession(session.id, { claudeLimitResetAt: null } as any);
+        await db.updateSession(session.id, { claudeLimitResetAt: null });
       }
     }
   } catch (err) {

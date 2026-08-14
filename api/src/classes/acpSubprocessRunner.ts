@@ -158,7 +158,7 @@ const PROMPT_IDLE_TIMEOUT_MS = Number.isFinite(promptIdleTimeoutEnv)
 const CONTEXT_RESET_NOTICE_TEXT =
   'Previous conversation context could not be resumed — the agent started a fresh conversation and cannot see earlier messages.';
 
-/** Serialized stream event for the reset notice (persisted in messageJson, rendered by the dashboard). */
+/** Serialized stream event for the reset notice (persisted in session messages, rendered by the dashboard). */
 export function sessionResetNoticeEventLine(): string {
   return JSON.stringify({ type: 'session_reset_notice', text: CONTEXT_RESET_NOTICE_TEXT });
 }

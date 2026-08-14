@@ -166,15 +166,7 @@ async function loadSessionMessages(sessionId: string): Promise<ChatMessage[]> {
   if (run) {
     return run.messages;
   }
-  const session = await db.getSession(sessionId);
-  if (!session) {
-    return [];
-  }
-  try {
-    return JSON.parse(session.messageJson ?? '[]');
-  } catch {
-    return [];
-  }
+  return db.listSessionMessages(sessionId);
 }
 
 const namingInFlight = new Set<string>();
@@ -327,13 +319,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
       }
     } else {
       registerChatSocket(id, socket);
-      let allMessages: ChatMessage[] = [];
-      try {
-        allMessages = JSON.parse(session.messageJson ?? '[]');
-      } catch {
-        allMessages = [];
-      }
-      const { messages: page, hasMore } = paginateMessages(allMessages, 0);
+      const { messages: page, hasMore } = await db.listSessionMessagesPage(id, 0, HISTORY_PAGE_SIZE);
       send(socket, { type: 'history', messages: page, hasMore, queue });
     }
 
@@ -373,8 +359,17 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
 
         if (clientMessage.type === 'load-more') {
           const offset = clientMessage.offset ?? 0;
-          const allMessages = await loadSessionMessages(id);
-          const { messages: page, hasMore } = paginateMessages(allMessages, offset);
+          if (getActiveRun(id)) {
+            const allMessages = await loadSessionMessages(id);
+            const { messages: page, hasMore } = paginateMessages(allMessages, offset);
+            send(socket, { type: 'history-page', messages: page, hasMore });
+            return;
+          }
+          const { messages: page, hasMore } = await db.listSessionMessagesPage(
+            id,
+            offset,
+            HISTORY_PAGE_SIZE
+          );
           send(socket, { type: 'history-page', messages: page, hasMore });
           return;
         }

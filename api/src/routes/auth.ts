@@ -38,6 +38,9 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
   fastifyInstance.post(
     '/api/auth/setup',
     {
+      config: {
+        rateLimit: { max: 5, timeWindow: '1 minute' }
+      },
       schema: {
         body: Type.Object({
           username: Type.String({ minLength: 1, maxLength: 128 }),
@@ -65,6 +68,9 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
   fastifyInstance.post(
     '/api/auth/login',
     {
+      config: {
+        rateLimit: { max: 10, timeWindow: '1 minute' }
+      },
       schema: {
         body: Type.Object({
           username: Type.String({ minLength: 1 }),
