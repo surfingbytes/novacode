@@ -307,6 +307,35 @@ Diff:
 ${diff}`;
 }
 
+export interface GitLogCommit {
+  hash: string;
+  shortHash: string;
+  author: string;
+  date: string;
+  subject: string;
+}
+
+export function parseGitLog(stdout: string): GitLogCommit[] {
+  const commits: GitLogCommit[] = [];
+  for (const line of stdout.split('\n')) {
+    if (!line.trim()) {
+      continue;
+    }
+    const [hash, shortHash, author, date, subject] = line.split('\x1f');
+    if (!hash) {
+      continue;
+    }
+    commits.push({
+      hash,
+      shortHash: shortHash || hash.slice(0, 7),
+      author: author || '',
+      date: date || '',
+      subject: subject || ''
+    });
+  }
+  return commits;
+}
+
 export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
   const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
 
@@ -916,6 +945,99 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
           timeout: 30_000
         });
         return { output: (stdout + '\n' + stderr).trim() };
+      } catch (err) {
+        return reply.code(400).send({ error: gitErrorMessage(err) });
+      }
+    }
+  );
+
+  const GitLogCommitSchema = Type.Object({
+    hash: Type.String(),
+    shortHash: Type.String(),
+    author: Type.String(),
+    date: Type.String(),
+    subject: Type.String()
+  });
+
+  // GET /api/git/workspace/:workspaceId/log — recent commits
+  fastifyInstance.get(
+    '/api/git/workspace/:workspaceId/log',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        params: Type.Object({ workspaceId: Type.String() }),
+        querystring: Type.Object({
+          repo: Type.Optional(Type.String()),
+          limit: Type.Optional(Type.String())
+        }),
+        response: {
+          200: Type.Object({ commits: Type.Array(GitLogCommitSchema) }),
+          404: Type.Object({ error: Type.String() }),
+          400: Type.Object({ error: Type.String() })
+        }
+      }
+    },
+    async (request, reply) => {
+      try {
+        const context = await resolveWorkspaceGitContext(
+          request.params.workspaceId,
+          request.query.repo ?? ''
+        );
+        if (!context) return reply.code(404).send({ error: 'Workspace not found' });
+        const parsedLimit = parseInt(request.query.limit ?? '80', 10);
+        const limit = Number.isFinite(parsedLimit) ? Math.min(200, Math.max(1, parsedLimit)) : 80;
+        const { stdout } = await execFileAsync(
+          'git',
+          ['log', `-n${limit}`, '--date=iso-strict', '--format=%H%x1f%h%x1f%an%x1f%ad%x1f%s'],
+          { cwd: context.cwd, env: gitEnv(context.workspace), timeout: 15_000 }
+        );
+        return { commits: parseGitLog(stdout) };
+      } catch (err) {
+        return reply.code(400).send({ error: gitErrorMessage(err) });
+      }
+    }
+  );
+
+  // GET /api/git/workspace/:workspaceId/show — commit patch
+  fastifyInstance.get(
+    '/api/git/workspace/:workspaceId/show',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        params: Type.Object({ workspaceId: Type.String() }),
+        querystring: Type.Object({
+          hash: Type.String({ minLength: 7 }),
+          repo: Type.Optional(Type.String())
+        }),
+        response: {
+          200: Type.Object({ hash: Type.String(), patch: Type.String() }),
+          404: Type.Object({ error: Type.String() }),
+          400: Type.Object({ error: Type.String() })
+        }
+      }
+    },
+    async (request, reply) => {
+      try {
+        const context = await resolveWorkspaceGitContext(
+          request.params.workspaceId,
+          request.query.repo ?? ''
+        );
+        if (!context) return reply.code(404).send({ error: 'Workspace not found' });
+        const hash = request.query.hash.trim();
+        if (!/^[0-9a-fA-F]{7,40}$/.test(hash)) {
+          return reply.code(400).send({ error: 'Invalid commit hash' });
+        }
+        const { stdout } = await execFileAsync(
+          'git',
+          ['show', '--stat', '-p', '--format=commit %H%nAuthor: %an <%ae>%nDate: %ad%n%n%s%n%n%b', hash],
+          {
+            cwd: context.cwd,
+            env: gitEnv(context.workspace),
+            timeout: 15_000,
+            maxBuffer: 2 * 1024 * 1024
+          }
+        );
+        return { hash, patch: stdout };
       } catch (err) {
         return reply.code(400).send({ error: gitErrorMessage(err) });
       }

@@ -976,6 +976,8 @@ export const db = {
       enabled?: boolean;
       nextRunAt?: string | null;
       lastRunAt?: string | null;
+      lastRunStatus?: string | null;
+      lastRunError?: string | null;
     }
   ): Promise<Automation | undefined> {
     const existing = await _prisma.automation.findUnique({ where: { id } });
@@ -992,6 +994,8 @@ export const db = {
         enabled: patch.enabled !== undefined ? patch.enabled : existing.enabled,
         nextRunAt: 'nextRunAt' in patch ? patch.nextRunAt : existing.nextRunAt,
         lastRunAt: 'lastRunAt' in patch ? patch.lastRunAt : existing.lastRunAt,
+        lastRunStatus: 'lastRunStatus' in patch ? patch.lastRunStatus : existing.lastRunStatus,
+        lastRunError: 'lastRunError' in patch ? patch.lastRunError : existing.lastRunError,
         updatedAt: new Date().toISOString()
       }
     });
@@ -1009,8 +1013,25 @@ export const db = {
   async listEnabledAutomationsDue(): Promise<Automation[]> {
     const now = new Date().toISOString();
     return _prisma.automation.findMany({
-      where: { enabled: true, nextRunAt: { lte: now } }
+      where: {
+        enabled: true,
+        nextRunAt: { lte: now },
+        OR: [{ lastRunStatus: null }, { lastRunStatus: { not: 'running' } }]
+      }
     });
+  },
+
+  async failStaleAutomationRuns(error = 'Interrupted by server restart'): Promise<number> {
+    const finishedAt = new Date().toISOString();
+    const stale = await _prisma.automationRun.updateMany({
+      where: { status: 'running' },
+      data: { status: 'failed', error, finishedAt }
+    });
+    await _prisma.automation.updateMany({
+      where: { lastRunStatus: 'running' },
+      data: { lastRunStatus: 'failed', lastRunError: error }
+    });
+    return stale.count;
   },
 
   // -------------------------------------------------- Automation Runs --------------------------------------------------
@@ -1044,6 +1065,7 @@ export const db = {
       agentResponse?: string | null;
       changedFiles?: string | null;
       error?: string | null;
+      sessionId?: string | null;
     }
   ): Promise<AutomationRun | undefined> {
     const existing = await _prisma.automationRun.findUnique({ where: { id } });
@@ -1059,8 +1081,24 @@ export const db = {
           'agentResponse' in patch ? patch.agentResponse : existing.agentResponse,
         changedFiles:
           'changedFiles' in patch ? patch.changedFiles : existing.changedFiles,
-        error: 'error' in patch ? patch.error : existing.error
+        error: 'error' in patch ? patch.error : existing.error,
+        sessionId: 'sessionId' in patch ? patch.sessionId : existing.sessionId
       }
+    });
+  },
+
+  async pruneAutomationRuns(automationId: string, keep = 50): Promise<void> {
+    const extra = await _prisma.automationRun.findMany({
+      where: { automationId },
+      orderBy: { startedAt: 'desc' },
+      skip: keep,
+      select: { id: true }
+    });
+    if (extra.length === 0) {
+      return;
+    }
+    await _prisma.automationRun.deleteMany({
+      where: { id: { in: extra.map((row) => row.id) } }
     });
   },
 

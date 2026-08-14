@@ -141,14 +141,15 @@ export async function sendPushToAll(payload: PushPayload): Promise<void> {
 export async function sendTaskDonePush(
   sessionName: string,
   workspaceName: string,
-  agentLastMessage: string
+  agentLastMessage: string,
+  opts?: { url?: string; tag?: string }
 ): Promise<void> {
   const context = [workspaceName, sessionName || 'Session'].filter(Boolean).join(' • ');
   await sendPushToAll({
     title: `Task finished: ${context}`,
     body: compactText(agentLastMessage || context || 'Task finished'),
-    tag: 'task-done',
-    url: '/'
+    tag: opts?.tag ?? 'task-done',
+    url: opts?.url ?? '/'
   });
 }
 

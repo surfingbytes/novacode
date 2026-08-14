@@ -8,6 +8,7 @@ import {
   CloudDownload,
   CloudUpload,
   GitBranch as GitBranchIcon,
+  History,
   Minus,
   MoreHorizontal,
   Plus,
@@ -17,7 +18,7 @@ import {
 } from 'lucide-vue-next';
 
 // classes
-import { gitApi, type GitBranch, type GitFile, type GitRepoStatus } from '@/classes/api';
+import { gitApi, type GitBranch, type GitCommit, type GitFile, type GitRepoStatus } from '@/classes/api';
 
 // composables
 import { usePaneLayout } from '@/composables/usePaneLayout';
@@ -99,6 +100,13 @@ const bGitActionsMenuOpen = ref<boolean>(false);
 const gitActionsMenuX = ref<number>(0);
 const gitActionsMenuY = ref<number>(0);
 const gitActionsButtonRef = ref<HTMLElement | null>(null);
+const listPane = ref<'changes' | 'history'>('changes');
+const commits = ref<GitCommit[]>([]);
+const bHistoryLoading = ref<boolean>(false);
+const selectedCommit = ref<GitCommit | null>(null);
+const commitPatch = ref<string>('');
+const bCommitPatchLoading = ref<boolean>(false);
+const commitPatchError = ref<string | null>(null);
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let commitResultTimer: ReturnType<typeof setTimeout> | null = null;
@@ -107,8 +115,13 @@ let gitActionResultTimer: ReturnType<typeof setTimeout> | null = null;
 
 // -------------------------------------------------- Computed --------------------------------------------------
 const diffLines = computed((): string[] => diffContent.value.split('\n'));
-const bShowList = computed((): boolean => listVisible(selectedFile.value !== null));
-const bShowDetail = computed((): boolean => detailVisible(selectedFile.value !== null));
+const commitPatchLines = computed((): string[] => commitPatch.value.split('\n'));
+const bShowList = computed((): boolean =>
+  listVisible(selectedFile.value !== null || selectedCommit.value !== null)
+);
+const bShowDetail = computed((): boolean =>
+  detailVisible(selectedFile.value !== null || selectedCommit.value !== null)
+);
 const allSelected = computed((): boolean => {
   const list = filesInSelectedRepo.value;
   return (
@@ -392,6 +405,9 @@ const refresh = async (): Promise<void> => {
 
     const repo = activeRepo.value?.repo ?? selectedGitRepo.value;
     if (repo !== undefined && repos.value.length > 0) await loadBranches(repo);
+    if (listPane.value === 'history') {
+      await loadHistory();
+    }
   } catch (e: unknown) {
     error.value = gitErrorMessage(e, 'Failed to get git status');
   } finally {
@@ -401,6 +417,8 @@ const refresh = async (): Promise<void> => {
 };
 
 const openFile = async (file: GitFile): Promise<void> => {
+  selectedCommit.value = null;
+  commitPatch.value = '';
   selectedFile.value = file;
   emit('update:selectedFilePath', file.file);
   diffContent.value = '';
@@ -418,8 +436,72 @@ const openFile = async (file: GitFile): Promise<void> => {
 
 const clearSelectedFile = (): void => {
   selectedFile.value = null;
+  selectedCommit.value = null;
+  commitPatch.value = '';
   emit('update:selectedFilePath', null);
 };
+
+function formatCommitDate(iso: string): string {
+  if (!iso) {
+    return '';
+  }
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) {
+    return iso;
+  }
+  return parsed.toLocaleString();
+}
+
+async function loadHistory(): Promise<void> {
+  const repo = activeRepo.value?.repo ?? selectedGitRepo.value;
+  bHistoryLoading.value = true;
+  try {
+    const response = await gitApi.log(props.workspaceId, repo, 80);
+    commits.value = response.data.commits;
+    if (
+      selectedCommit.value &&
+      !commits.value.some((commit) => commit.hash === selectedCommit.value?.hash)
+    ) {
+      selectedCommit.value = null;
+      commitPatch.value = '';
+    }
+  } catch (e: unknown) {
+    commits.value = [];
+    setGitActionResult('error', gitErrorMessage(e, 'Failed to load history'), repo);
+  } finally {
+    bHistoryLoading.value = false;
+  }
+}
+
+async function openCommit(commit: GitCommit): Promise<void> {
+  selectedFile.value = null;
+  emit('update:selectedFilePath', null);
+  selectedCommit.value = commit;
+  commitPatch.value = '';
+  commitPatchError.value = null;
+  bCommitPatchLoading.value = true;
+  try {
+    const repo = activeRepo.value?.repo ?? selectedGitRepo.value;
+    const response = await gitApi.show(props.workspaceId, commit.hash, repo);
+    commitPatch.value = response.data.patch;
+  } catch (e: unknown) {
+    commitPatchError.value = gitErrorMessage(e, 'Failed to load commit');
+  } finally {
+    bCommitPatchLoading.value = false;
+  }
+}
+
+function setListPane(pane: 'changes' | 'history'): void {
+  listPane.value = pane;
+  if (pane === 'history') {
+    selectedFile.value = null;
+    emit('update:selectedFilePath', null);
+    void loadHistory();
+    return;
+  }
+  selectedCommit.value = null;
+  commitPatch.value = '';
+}
 
 const toggleFile = (file: GitFile): void => {
   const key = fileKey(file);
@@ -797,6 +879,9 @@ watch(
 watch(selectedGitRepo, (repo) => {
   if (!props.active || (!repo && repos.value.length === 0)) return;
   loadBranches(repo);
+  if (listPane.value === 'history') {
+    void loadHistory();
+  }
 });
 
 watch(
@@ -908,37 +993,31 @@ onUnmounted((): void => {
         </div>
         <div class="flex items-center justify-between gap-2">
           <div class="flex items-center gap-2 min-w-0">
-            <button
-              v-if="filesInSelectedRepo.length"
-              class="flex items-center justify-center w-4 h-4 rounded border transition-colors flex-shrink-0"
-              :class="
-                allSelected
-                  ? 'bg-primary border-primary'
-                  : someSelected
-                    ? 'bg-primary/40 border-primary'
-                    : 'border-fg/20 hover:border-fg/40'
-              "
-              title="Select all / none"
-              @click.stop="toggleAll"
-            >
-              <Check v-if="allSelected" :size="10" :stroke-width="1.6" class="select-none text-white" aria-hidden="true" />
-              <Minus v-else-if="someSelected" :size="10" :stroke-width="1.6" class="select-none text-white" aria-hidden="true" />
-            </button>
-            <span class="text-xs font-medium text-text-muted truncate">
-              Changed files
-              <span
-                v-if="repos.length > 1 ? filesInSelectedRepo.length : files.length"
-                class="ml-1 text-text-muted/60"
-                >({{ repos.length > 1 ? filesInSelectedRepo.length : files.length }})</span
+            <div class="button-select-small h-7! p-0.5!">
+              <button
+                type="button"
+                class="button is-icon px-2! h-6! text-[11px]"
+                :class="{ 'is-active': listPane === 'changes' }"
+                @click="setListPane('changes')"
               >
-            </span>
+                Changes
+              </button>
+              <button
+                type="button"
+                class="button is-icon px-2! h-6! text-[11px]"
+                :class="{ 'is-active': listPane === 'history' }"
+                @click="setListPane('history')"
+              >
+                History
+              </button>
+            </div>
           </div>
           <div class="flex items-center gap-1 flex-shrink-0">
             <button
               class="text-text-muted hover:text-text-primary transition-colors px-1"
-              :class="{ 'animate-spin': bIsLoading }"
+              :class="{ 'animate-spin': listPane === 'changes' ? bIsLoading : bHistoryLoading }"
               title="Refresh"
-              @click="refresh"
+              @click="listPane === 'history' ? loadHistory() : refresh()"
             >
               <RefreshCw :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
             </button>
@@ -954,6 +1033,33 @@ onUnmounted((): void => {
             </button>
           </div>
         </div>
+        <div v-if="listPane === 'changes'" class="flex items-center gap-2 min-w-0">
+          <button
+            v-if="filesInSelectedRepo.length"
+            class="flex items-center justify-center w-4 h-4 rounded border transition-colors flex-shrink-0"
+            :class="
+              allSelected
+                ? 'bg-primary border-primary'
+                : someSelected
+                  ? 'bg-primary/40 border-primary'
+                  : 'border-fg/20 hover:border-fg/40'
+            "
+            title="Select all / none"
+            @click.stop="toggleAll"
+          >
+            <Check v-if="allSelected" :size="10" :stroke-width="1.6" class="select-none text-white" aria-hidden="true" />
+            <Minus v-else-if="someSelected" :size="10" :stroke-width="1.6" class="select-none text-white" aria-hidden="true" />
+          </button>
+          <span class="text-xs font-medium text-text-muted truncate">
+            Changed files
+            <span
+              v-if="repos.length > 1 ? filesInSelectedRepo.length : files.length"
+              class="ml-1 text-text-muted/60"
+              >({{ repos.length > 1 ? filesInSelectedRepo.length : files.length }})</span
+            >
+          </span>
+        </div>
+        <div v-else class="text-xs font-medium text-text-muted truncate">Recent commits</div>
       </div>
 
       <div
@@ -970,7 +1076,7 @@ onUnmounted((): void => {
       </div>
 
       <!-- Git file list skeleton -->
-      <div v-else-if="bIsLoading && !bHasLoadedStatus" class="flex-1 overflow-hidden flex flex-col">
+      <div v-else-if="listPane === 'changes' && bIsLoading && !bHasLoadedStatus" class="flex-1 overflow-hidden flex flex-col">
         <div
           v-for="i in 5"
           :key="'git-skel-' + i"
@@ -983,7 +1089,7 @@ onUnmounted((): void => {
       </div>
 
       <div
-        v-else-if="!files.length && repos.length === 1"
+        v-else-if="listPane === 'changes' && !files.length && repos.length === 1"
         class="flex flex-col items-center justify-center flex-1 gap-1"
       >
         <p class="text-text-muted text-sm">No changes</p>
@@ -991,7 +1097,7 @@ onUnmounted((): void => {
       </div>
 
       <div
-        v-else-if="!files.length && repos.length > 1"
+        v-else-if="listPane === 'changes' && !files.length && repos.length > 1"
         class="flex flex-col items-center justify-center flex-1 gap-1 px-6 text-center"
       >
         <p class="text-text-muted text-sm">No changes</p>
@@ -999,11 +1105,40 @@ onUnmounted((): void => {
       </div>
 
       <div
-        v-else-if="repos.length > 1 && files.length && !filesInSelectedRepo.length"
+        v-else-if="listPane === 'changes' && repos.length > 1 && files.length && !filesInSelectedRepo.length"
         class="flex flex-col items-center justify-center flex-1 gap-1 px-6 text-center"
       >
         <p class="text-text-muted text-sm">No changes in this repository</p>
         <p class="text-text-muted/50 text-xs">Switch repository above to see other files</p>
+      </div>
+
+      <div v-else-if="listPane === 'history'" class="flex-1 overflow-y-auto min-h-0">
+        <div
+          v-if="bHistoryLoading && commits.length === 0"
+          class="px-3 py-2 text-xs text-text-muted"
+        >
+          Loading history…
+        </div>
+        <div
+          v-else-if="commits.length === 0"
+          class="flex flex-col items-center justify-center h-full gap-1 px-6 text-center"
+        >
+          <History :size="20" :stroke-width="1.5" class="opacity-40" aria-hidden="true" />
+          <p class="text-text-muted text-sm">No commits yet</p>
+        </div>
+        <button
+          v-for="commit in commits"
+          :key="commit.hash"
+          type="button"
+          class="w-full text-left px-3 py-2 border-b border-fg/[0.03] hover:bg-fg/[0.04] transition-colors"
+          :class="selectedCommit?.hash === commit.hash ? 'bg-primary/15' : ''"
+          @click="openCommit(commit)"
+        >
+          <p class="text-xs text-text-primary truncate">{{ commit.subject }}</p>
+          <p class="text-[11px] text-text-muted mt-0.5 truncate font-mono">
+            {{ commit.shortHash }} · {{ commit.author }} · {{ formatCommitDate(commit.date) }}
+          </p>
+        </button>
       </div>
 
       <div v-else class="flex-1 overflow-y-auto min-h-0">
@@ -1062,7 +1197,7 @@ onUnmounted((): void => {
 
       <!-- Commit & Push actions -->
       <div
-        v-if="!error && repos.length"
+        v-if="!error && repos.length && listPane === 'changes'"
         class="flex-shrink-0 border-t border-fg/[0.08] px-3 py-3 flex flex-col gap-2"
       >
         <!-- Single Git root: one bar -->
@@ -1344,14 +1479,18 @@ onUnmounted((): void => {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M11 9l3 3-3 3"/></svg>
         </button>
         <button
-          v-if="!bWidePane && selectedFile"
+          v-if="!bWidePane && (selectedFile || selectedCommit)"
           class="flex-shrink-0 text-xs text-primary hover:text-primary-hover transition-colors"
           @click="clearSelectedFile"
         >
           <ArrowLeft :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
           Back
         </button>
-        <template v-if="selectedFile">
+        <template v-if="selectedCommit">
+          <span class="text-[10px] font-mono text-text-muted shrink-0">{{ selectedCommit.shortHash }}</span>
+          <span class="text-xs text-text-primary truncate">{{ selectedCommit.subject }}</span>
+        </template>
+        <template v-else-if="selectedFile">
           <span
             class="flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded font-mono"
             :class="statusBadgeClass(selectedFile.status)"
@@ -1366,11 +1505,41 @@ onUnmounted((): void => {
             Discard
           </button>
         </template>
-        <span v-else class="text-xs text-text-muted truncate">Select a file to view diff</span>
+        <span v-else class="text-xs text-text-muted truncate">Select a file or commit</span>
       </div>
 
       <div
-        v-if="!selectedFile"
+        v-if="selectedCommit"
+        class="flex-1 min-h-0 flex flex-col"
+      >
+        <div
+          v-if="bCommitPatchLoading"
+          class="flex-1 overflow-auto px-3 py-2 space-y-1"
+        >
+          <div class="h-3 rounded bg-fg/10 animate-pulse w-full max-w-[280px]" />
+          <div class="h-3 rounded bg-fg/10 animate-pulse w-full" />
+          <div class="h-3 rounded bg-fg/10 animate-pulse w-4/5" />
+        </div>
+        <div
+          v-else-if="commitPatchError"
+          class="flex flex-col items-center justify-center flex-1 gap-2 px-6 text-center"
+        >
+          <p class="text-text-muted text-sm">{{ commitPatchError }}</p>
+        </div>
+        <div v-else class="flex-1 overflow-auto">
+          <div
+            v-for="(line, i) in commitPatchLines"
+            :key="'commit-' + i"
+            class="px-3 py-0 leading-5 whitespace-pre-wrap break-all text-xs font-mono"
+            :class="diffRowClass(line)"
+          >
+            {{ line }}
+          </div>
+        </div>
+      </div>
+
+      <div
+        v-else-if="!selectedFile"
         class="flex flex-1 flex-col items-center justify-center gap-1 px-6 text-center"
       >
         <p class="text-text-muted text-sm">Select a changed file</p>

@@ -160,6 +160,8 @@ model Automation {
   updatedAt       String          @default(dbgenerated("CURRENT_TIMESTAMP")) @map("updated_at")
   nextRunAt       String?         @map("next_run_at")
   lastRunAt       String?         @map("last_run_at")
+  lastRunStatus   String?         @map("last_run_status")
+  lastRunError    String?         @map("last_run_error")
   runs            AutomationRun[]
 
   @@map("automations")
@@ -175,6 +177,7 @@ model AutomationRun {
   agentResponse String?   @map("agent_response")
   changedFiles  String?   @map("changed_files") // json array of { status, file }
   error        String?
+  sessionId    String?    @map("session_id")
 
   @@map("automation_runs")
 }

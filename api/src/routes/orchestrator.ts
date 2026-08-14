@@ -20,6 +20,7 @@ import {
 } from '../classes/orchestratorPayload';
 import { deleteSessionImages } from './images';
 import { broadcastOrchestratorUpsert, broadcastWorkspaceSessionsRefresh } from './ws';
+import { sendPushToAll } from '../classes/push';
 
 // types
 import type { ChatMessage, OrchestratorSubtasksPayload, SubTask } from '../@types/index';
@@ -622,6 +623,19 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         runTotalSteps: total,
         subtasksJson: serializeSubtasksPayload(payload)
       });
+      const finished = await db.getOrchestrator(orchestratorId);
+      void sendPushToAll({
+        title: anyFailed
+          ? `Plan failed: ${finished?.name || 'task plan'}`
+          : `Plan completed: ${finished?.name || 'task plan'}`,
+        body: anyFailed
+          ? `${subtasks.filter((task) => task.runResult === 'failed').length} step(s) failed`
+          : `${total} step${total === 1 ? '' : 's'} completed`,
+        tag: `orchestrator-${orchestratorId}`,
+        url: `/workspace/${workspaceId}/orchestrator/${orchestratorId}`
+      }).catch((err) => {
+        console.error('[orchestrator] Failed to send push:', err);
+      });
     } catch (error) {
       console.error('error while running orchestrator', error);
       const current = await db.getOrchestrator(orchestratorId);
@@ -632,6 +646,12 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         runTotalSteps: total,
         subtasksJson: serializeSubtasksPayload(payload)
       });
+      void sendPushToAll({
+        title: `Plan failed: ${current?.name || 'task plan'}`,
+        body: 'The run stopped because of an unexpected error',
+        tag: `orchestrator-${orchestratorId}`,
+        url: `/workspace/${workspaceId}/orchestrator/${orchestratorId}`
+      }).catch(() => {});
     }
   }
 

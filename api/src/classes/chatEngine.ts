@@ -945,7 +945,10 @@ export async function dispatchPrompt(
 
     try {
       const lastAssistantMessage = extractStreamNotificationPreview(assistantEvents);
-      await sendTaskDonePush(session.name, workspace.name, lastAssistantMessage);
+      await sendTaskDonePush(session.name, workspace.name, lastAssistantMessage, {
+        url: `/workspace/${session.workspaceId}/session/${session.id}`,
+        tag: `session-${session.id}`
+      });
     } catch (err) {
       console.error('[chatEngine] Failed to send task completion push:', err);
     }

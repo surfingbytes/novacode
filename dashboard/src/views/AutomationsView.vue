@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // node_modules
 import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { useRouter } from 'vue-router';
 
 // components
 import ConfirmModal from '@/components/ConfirmModal.vue';
@@ -35,6 +36,7 @@ interface AutomationFormPayload {
 // -------------------------------------------------- Stores --------------------------------------------------
 
 const toastStore = useToastStore();
+const router = useRouter();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 
@@ -720,6 +722,23 @@ onUnmounted(() => {
             </div>
 
             <!-- Agent response -->
+            <div v-if="selectedRun.sessionId" class="mb-3">
+              <button
+                type="button"
+                class="text-xs text-primary hover:text-primary-hover"
+                @click="
+                  router.push({
+                    name: 'session',
+                    params: {
+                      id: selectedAutomation?.workspaceId,
+                      sessionId: selectedRun.sessionId
+                    }
+                  })
+                "
+              >
+                Open session
+              </button>
+            </div>
             <div v-if="selectedRun.agentResponse">
               <p class="text-xs font-medium text-text-muted mb-2 flex items-center gap-1">
                 <svg

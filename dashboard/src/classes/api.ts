@@ -339,6 +339,14 @@ export interface GitFile {
   repo: string;
 }
 
+export interface GitCommit {
+  hash: string;
+  shortHash: string;
+  author: string;
+  date: string;
+  subject: string;
+}
+
 export interface GitRepoStatus {
   repo: string;
   currentBranch: string;
@@ -459,7 +467,25 @@ export const gitApi = {
     files: string[],
     repo?: string
   ): ReturnType<typeof http.post<{ discarded: string[] }>> =>
-    http.post<{ discarded: string[] }>(`/git/workspace/${workspaceId}/discard`, { files, repo })
+    http.post<{ discarded: string[] }>(`/git/workspace/${workspaceId}/discard`, { files, repo }),
+
+  log: (
+    workspaceId: string,
+    repo?: string,
+    limit?: number
+  ): ReturnType<typeof http.get<{ commits: GitCommit[] }>> =>
+    http.get<{ commits: GitCommit[] }>(`/git/workspace/${workspaceId}/log`, {
+      params: { repo, limit }
+    }),
+
+  show: (
+    workspaceId: string,
+    hash: string,
+    repo?: string
+  ): ReturnType<typeof http.get<{ hash: string; patch: string }>> =>
+    http.get<{ hash: string; patch: string }>(`/git/workspace/${workspaceId}/show`, {
+      params: { hash, repo }
+    })
 };
 
 // ---------------------------------- Files (workspace-scoped) ----------------------------------

@@ -85,6 +85,19 @@ const metaLine = computed(() => {
         <p class="title truncate">{{ automation.name }}</p>
         <p class="nc-mono text-[11px] text-text-muted mt-1 truncate">{{ metaLine }}</p>
         <p class="text-xs text-text-muted mt-1 truncate opacity-70">{{ automation.prompt }}</p>
+        <p
+          v-if="automation.lastRunStatus === 'failed' && automation.lastRunError"
+          class="text-xs text-destructive mt-1 truncate"
+          :title="automation.lastRunError"
+        >
+          Last run: {{ automation.lastRunError }}
+        </p>
+        <p
+          v-else-if="automation.lastRunStatus === 'running'"
+          class="text-xs text-primary mt-1"
+        >
+          Running now…
+        </p>
         <div class="flex items-center gap-2 mt-2">
           <span
             class="text-[10px] px-1.5 py-0.5 rounded font-medium"
@@ -242,6 +255,19 @@ const metaLine = computed(() => {
         </div>
         <p class="nc-mono text-[11px] text-text-muted mt-1 truncate">{{ metaLine }}</p>
         <p class="text-xs text-text-muted mt-1 truncate opacity-70">{{ automation.prompt }}</p>
+        <p
+          v-if="automation.lastRunStatus === 'failed' && automation.lastRunError"
+          class="text-xs text-destructive mt-1 truncate"
+          :title="automation.lastRunError"
+        >
+          Last run: {{ automation.lastRunError }}
+        </p>
+        <p
+          v-else-if="automation.lastRunStatus === 'running'"
+          class="text-xs text-primary mt-1"
+        >
+          Running now…
+        </p>
       </div>
       <!-- Actions -->
       <div class="flex items-center gap-1 shrink-0" @click.stop>

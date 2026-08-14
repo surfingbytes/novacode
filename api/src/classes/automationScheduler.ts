@@ -1,12 +1,14 @@
 // node_modules
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { readdir } from 'node:fs/promises';
 
 // classes
-import { db } from './database';
+import { db, normalizeTagStringList } from './database';
 import { config } from './config';
 import { createSessionWithAgent } from './sessionService';
 import { dispatchPromptAndWait } from './chatEngine';
+import { sendPushToAll } from './push';
 
 // types
 import type { AgentType, ChatMessage } from '../@types/index';
@@ -53,35 +55,107 @@ function extractAssistantText(messages: ChatMessage[] | undefined): string {
 async function getGitStatus(
   workspacePath: string
 ): Promise<Array<{ status: string; file: string }>> {
+  const rel = workspacePath.replace(/^\//, '');
+  const baseCwd = config.workspaceBrowseRoot + '/' + (rel || '.');
+  const skipDirs = new Set(['.git', 'node_modules', '.next', 'dist', 'build', '.cache']);
+  const files: Array<{ status: string; file: string }> = [];
+
+  const readPorcelain = async (cwd: string, prefix: string): Promise<void> => {
+    try {
+      const { stdout } = await execFileAsync('git', ['status', '--porcelain', '-u'], {
+        cwd,
+        env: { ...process.env, HOME: config.configDir } as Record<string, string>
+      });
+      for (const line of stdout.split('\n')) {
+        if (!line.trim()) {
+          continue;
+        }
+        const statusCode = line.slice(0, 2).trim();
+        const file = line.slice(3).trim();
+        if (file) {
+          files.push({ status: statusCode, file: prefix ? `${prefix}/${file}` : file });
+        }
+      }
+    } catch {
+      // not a git repo or git unavailable
+    }
+  };
+
+  await readPorcelain(baseCwd, '');
+
+  let entries: Array<{ name: string; isDirectory: () => boolean }>;
   try {
-    const rel = workspacePath.replace(/^\//, '');
-    const cwd = config.workspaceBrowseRoot + '/' + (rel || '.');
-    const { stdout } = await execFileAsync('git', ['status', '--porcelain', '-u'], {
-      cwd,
-      env: { ...process.env, HOME: config.configDir } as Record<string, string>
-    });
-    const files: Array<{ status: string; file: string }> = [];
-    for (const line of stdout.split('\n')) {
-      if (!line.trim()) {
+    entries = (await readdir(baseCwd, { withFileTypes: true })) as Array<{
+      name: string;
+      isDirectory: () => boolean;
+    }>;
+  } catch {
+    return files;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || skipDirs.has(entry.name)) {
+      continue;
+    }
+    const child = `${baseCwd}/${entry.name}`;
+    try {
+      const childEntries = await readdir(child, { withFileTypes: true });
+      if (!childEntries.some((item) => item.name === '.git')) {
         continue;
       }
-      const statusCode = line.slice(0, 2).trim();
-      const file = line.slice(3).trim();
-      if (file) {
-        files.push({ status: statusCode, file });
-      }
+    } catch {
+      continue;
     }
-    return files;
-  } catch {
-    return [];
+    await readPorcelain(child, entry.name);
   }
+
+  return files;
 }
 
 // --------------------------------------------- Scheduler ---------------------------------------------
 
+const runningAutomationIds = new Set<string>();
+
+function compactPushBody(input: string, maxLen = 280): string {
+  const normalized = input.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxLen) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLen - 1)}…`;
+}
+
+async function notifyAutomationFinished(opts: {
+  automationName: string;
+  workspaceId: string;
+  sessionId?: string | null;
+  bFailed: boolean;
+  body: string;
+}): Promise<void> {
+  try {
+    await sendPushToAll({
+      title: opts.bFailed
+        ? `Automation failed: ${opts.automationName}`
+        : `Automation finished: ${opts.automationName}`,
+      body: compactPushBody(opts.body || (opts.bFailed ? 'Run failed' : 'Run completed')),
+      tag: `automation-${opts.workspaceId}`,
+      url: opts.sessionId
+        ? `/workspace/${opts.workspaceId}/session/${opts.sessionId}`
+        : '/automations'
+    });
+  } catch (err) {
+    console.error('[automations] Failed to send push:', err);
+  }
+}
+
 async function runAutomation(automationId: string): Promise<void> {
+  if (runningAutomationIds.has(automationId)) {
+    return;
+  }
+  runningAutomationIds.add(automationId);
+
   const automation = await db.getAutomation(automationId);
   if (!automation) {
+    runningAutomationIds.delete(automationId);
     return;
   }
 
@@ -90,33 +164,51 @@ async function runAutomation(automationId: string): Promise<void> {
     console.error(
       `[automations] workspace ${automation.workspaceId} not found for automation ${automationId}`
     );
+    runningAutomationIds.delete(automationId);
     return;
   }
 
   const run = await db.createAutomationRun(automationId);
 
-  // update nextRunAt and lastRunAt immediately so the scheduler doesn't re-trigger
   const nextRunAt = new Date(Date.now() + automation.intervalMinutes * 60_000).toISOString();
   const lastRunAt = new Date().toISOString();
-  await db.updateAutomation(automationId, { nextRunAt, lastRunAt });
+  await db.updateAutomation(automationId, {
+    nextRunAt,
+    lastRunAt,
+    lastRunStatus: 'running',
+    lastRunError: null
+  });
 
+  let sessionId: string | null = null;
   try {
     const beforeFiles = await getGitStatus(workspace.path);
 
     const sessionResult = await createSessionWithAgent({
       workspaceId: automation.workspaceId,
       name: `Automation: ${automation.name}`,
-      agentType: automation.agentType as AgentType
+      agentType: automation.agentType as AgentType,
+      tags: normalizeTagStringList(['automation'])
     });
 
     if (sessionResult.error || !sessionResult.session) {
+      const error = sessionResult.error ?? 'Failed to create session';
       await db.updateAutomationRun(run.id, {
         status: 'failed',
         finishedAt: new Date().toISOString(),
-        error: sessionResult.error ?? 'Failed to create session'
+        error
+      });
+      await db.updateAutomation(automationId, { lastRunStatus: 'failed', lastRunError: error });
+      await notifyAutomationFinished({
+        automationName: automation.name,
+        workspaceId: automation.workspaceId,
+        bFailed: true,
+        body: error
       });
       return;
     }
+
+    sessionId = sessionResult.session.id;
+    await db.updateAutomationRun(run.id, { sessionId });
 
     const result = await dispatchPromptAndWait({
       sessionId: sessionResult.session.id,
@@ -126,19 +218,16 @@ async function runAutomation(automationId: string): Promise<void> {
 
     const afterFiles = await getGitStatus(workspace.path);
 
-    // diff: files that changed between before and after
     const beforeSet = new Set(beforeFiles.map((f) => f.file));
     const changedFiles = afterFiles.filter((f) => {
       const prev = beforeFiles.find((b) => b.file === f.file);
       return !prev || prev.status !== f.status;
     });
-    // also include new files not in before
     for (const f of afterFiles) {
       if (!beforeSet.has(f.file)) {
         changedFiles.push(f);
       }
     }
-    // deduplicate
     const seen = new Set<string>();
     const uniqueChanged = changedFiles.filter((f) => {
       if (seen.has(f.file)) {
@@ -149,34 +238,46 @@ async function runAutomation(automationId: string): Promise<void> {
     });
 
     const agentResponse = extractAssistantText(result.messages);
-
-    if (result.error) {
-      await db.updateAutomationRun(run.id, {
-        status: 'failed',
-        finishedAt: new Date().toISOString(),
-        agentResponse,
-        changedFiles: JSON.stringify(uniqueChanged),
-        error: result.error
-      });
-    } else {
-      await db.updateAutomationRun(run.id, {
-        status: 'completed',
-        finishedAt: new Date().toISOString(),
-        agentResponse,
-        changedFiles: JSON.stringify(uniqueChanged)
-      });
-    }
-
-    // clean up temp session
-    await db.deleteSession(sessionResult.session.id);
+    const bFailed = Boolean(result.error);
+    await db.updateAutomationRun(run.id, {
+      status: bFailed ? 'failed' : 'completed',
+      finishedAt: new Date().toISOString(),
+      agentResponse,
+      changedFiles: JSON.stringify(uniqueChanged),
+      error: result.error ?? null,
+      sessionId
+    });
+    await db.updateAutomation(automationId, {
+      lastRunStatus: bFailed ? 'failed' : 'completed',
+      lastRunError: result.error ?? null
+    });
+    await notifyAutomationFinished({
+      automationName: automation.name,
+      workspaceId: automation.workspaceId,
+      sessionId,
+      bFailed,
+      body: result.error || agentResponse || (bFailed ? 'Run failed' : 'Run completed')
+    });
+    await db.pruneAutomationRuns(automationId, 50);
   } catch (err) {
     const error = err instanceof Error ? err.message : 'Unknown error';
     console.error(`[automations] run ${run.id} failed:`, error);
     await db.updateAutomationRun(run.id, {
       status: 'failed',
       finishedAt: new Date().toISOString(),
-      error
+      error,
+      sessionId
     });
+    await db.updateAutomation(automationId, { lastRunStatus: 'failed', lastRunError: error });
+    await notifyAutomationFinished({
+      automationName: automation.name,
+      workspaceId: automation.workspaceId,
+      sessionId,
+      bFailed: true,
+      body: error
+    });
+  } finally {
+    runningAutomationIds.delete(automationId);
   }
 }
 
@@ -188,6 +289,10 @@ export function startAutomationScheduler(): void {
   if (intervalHandle) {
     return;
   }
+
+  void db.failStaleAutomationRuns().catch((err) => {
+    console.error('[automations] failed to clear stale runs:', err);
+  });
 
   const tick = async (): Promise<void> => {
     try {

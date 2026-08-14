@@ -89,7 +89,8 @@ Optional features include **scheduled automations**, **role templates**, and **b
 
 - **Repository discovery** under the workspace (nested repos, depth limits, skip directories like `node_modules`).
 - **Status**: Per-repo file status, ahead counts, etc.
-- **Diffs** and other Git operations exposed via HTTP (see `git` routes) for use in the **Git** workspace view.
+- **Diffs**, **commit**, **push/pull/fetch**, **branch checkout/create**, and **discard**.
+- **Commit history**: `GET .../log` lists recent commits; `GET .../show` returns a patch. The Git pane has a Changes / History toggle.
 
 ---
 
@@ -114,8 +115,9 @@ Optional features include **scheduled automations**, **role templates**, and **b
 ## 10. Automations
 
 - **Automations** are tied to a workspace: **name**, **agent type**, **prompt**, **interval** (minutes), **enabled**, **next run** / **last run**.
-- A **scheduler** runs due automations; each run records **AutomationRun** (status, agent response, changed files, errors).
-- Global and per-workspace listing and CRUD via `/api/automations` and nested routes.
+- A **scheduler** runs due automations; overlapping ticks for the same automation are skipped. Stale `running` rows are marked failed on API startup.
+- Each run creates a tagged **session** (kept after the run, not deleted) and records **AutomationRun** (status, agent response, changed files, errors, `sessionId`). Git change detection includes nested repos one level down. Old runs are pruned to the last 50.
+- Global and per-workspace listing and CRUD via `/api/automations` and nested routes. Manual **trigger** is `POST /api/automations/:id/trigger`.
 
 ---
 
@@ -149,6 +151,7 @@ Optional features include **scheduled automations**, **role templates**, and **b
 
 - **Web Push** (VAPID): Keys are generated on first run and stored under the config directory (`vapid-keys.json`); clients can subscribe; subscriptions are stored per user.
 - **Public key** endpoint for the dashboard to register the service worker subscription.
+- Completion notifications deep-link to the **session**, **orchestrator**, or **automations** page. Orchestrator and automation finishes also send a push.
 
 ---
 

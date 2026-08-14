@@ -295,6 +295,8 @@ export interface Automation {
   updatedAt: string;
   nextRunAt: string | null;
   lastRunAt: string | null;
+  lastRunStatus?: 'running' | 'completed' | 'failed' | null;
+  lastRunError?: string | null;
 }
 
 export interface AutomationRun {
@@ -306,6 +308,7 @@ export interface AutomationRun {
   agentResponse: string | null;
   changedFiles: string | null; // json array of { status, file }
   error: string | null;
+  sessionId?: string | null;
 }
 
 // ---------------------------------- API DTOs ----------------------------------

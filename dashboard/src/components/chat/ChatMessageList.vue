@@ -77,7 +77,6 @@ const emit = defineEmits<{
   (e: 'openFile', path: string): void;
   (e: 'lightbox', src: string): void;
   (e: 'chatErrorAction'): void;
-  (e: 'cancel'): void;
   (e: 'approvalResponse', approvalRequestId: string, approvalOptionId: string): void;
   (
     e: 'questionResponse',
@@ -540,9 +539,10 @@ defineExpose({
       </button>
     </div>
     <!-- Messages -->
+    <div class="relative flex-1 min-h-0">
     <div
       ref="messagesEl"
-      class="flex-1 overflow-y-auto px-4 md:px-6 py-4 space-y-4 min-h-0"
+      class="h-full overflow-y-auto px-4 md:px-6 py-4 space-y-4"
       @scroll="onMessagesScroll"
     >
       <!-- Chat skeleton -->
@@ -890,7 +890,6 @@ defineExpose({
       </template>
     </div>
 
-    <!-- Scroll-to-bottom + stop actions -->
     <Transition
       enter-active-class="transition duration-200 ease-out"
       enter-from-class="opacity-0 translate-y-2"
@@ -899,28 +898,18 @@ defineExpose({
       leave-from-class="opacity-100 translate-y-0"
       leave-to-class="opacity-0 translate-y-2"
     >
-      <div v-if="bShowScrollToBottom" class="flex justify-center py-2 shrink-0">
-        <div class="chat-fixed-actions">
-          <button
-            v-if="bIsStreaming"
-            @click="emit('cancel')"
-            class="button is-transparent is-icon chat-fixed-action !text-destructive hover:!bg-destructive/10"
-            title="Stop"
-            aria-label="Stop generating"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none" aria-hidden="true"><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6"/></svg>
-          </button>
-          <button
-            @click="scrollToBottom(true)"
-            class="button is-transparent is-icon chat-fixed-action"
-            title="Scroll to bottom"
-            aria-label="Scroll to bottom"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
-          </button>
-        </div>
-      </div>
+      <button
+        v-if="bShowScrollToBottom"
+        type="button"
+        class="absolute bottom-3 right-4 md:right-6 z-10 button is-transparent is-icon h-9! w-9! min-w-9! rounded-full! border border-fg/15 bg-surface/90 shadow-md backdrop-blur-sm hover:bg-surface"
+        title="Scroll to bottom"
+        aria-label="Scroll to bottom"
+        @click="scrollToBottom(true)"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+      </button>
     </Transition>
+    </div>
   </div>
 </template>
 
@@ -996,21 +985,5 @@ defineExpose({
 .chat-card {
   background: var(--bg-elev-2);
   border: 1px solid var(--line);
-}
-
-.chat-fixed-actions {
-  display: inline-flex;
-  border: 1px solid rgb(255 255 255 / 0.12);
-  border-radius: 0.375rem;
-  overflow: hidden;
-  background: rgb(255 255 255 / 0.04);
-}
-
-.chat-fixed-action {
-  border: 0 !important;
-  border-radius: 0 !important;
-  width: 2rem !important;
-  min-width: 2rem !important;
-  height: 2rem !important;
 }
 </style>

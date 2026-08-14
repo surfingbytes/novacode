@@ -990,7 +990,6 @@ onUnmounted(() => {
             @open-file="openWorkspaceFile"
             @lightbox="(src) => (lightboxSrc = src)"
             @chat-error-action="handleChatErrorAction"
-            @cancel="chatSocket.cancelPrompt"
             @approval-response="chatSocket.sendApprovalResponse"
             @question-response="chatSocket.sendQuestionResponse"
           />
