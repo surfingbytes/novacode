@@ -9,7 +9,6 @@ Shipped work has been removed from this list. Items below are still open.
 - **Suggested follow-ups** — short prompt chips after an assistant reply.
 - **Orchestrator templates** — seed plans such as “Feature + tests”.
 - **Recent files** — quick access to files opened in a workspace.
-- **Pin sessions / orchestrators / file paths** — workspace favorites already exist; this is the per-item equivalent.
 - **Webhooks** — outbound events when a session or orchestrator finishes.
 - **Chat bots** — optional Slack / Discord / Teams entry points.
 - **In-app notification center** — bell for events while the tab is open (web push already exists).
@@ -18,12 +17,9 @@ Shipped work has been removed from this list. Items below are still open.
 
 ## UI
 
-- Breadcrumbs on workspace / session / orchestrator views.
-- Skeleton loaders instead of generic spinners on list pages.
 - Pagination or virtualized lists for workspaces with hundreds of sessions.
-- Keyboard shortcuts beyond Ctrl+K (new session, new orchestrator, refresh).
-- Inline form validation (workspace path, etc.) instead of errors only on submit.
-- Accessibility: modal focus trap, remaining `aria-label`s, `prefers-reduced-motion`.
+- Keyboard shortcuts for new orchestrator and refresh (Ctrl+K search and Ctrl/Cmd+N new session already exist).
+- Accessibility: remaining `aria-label`s, `prefers-reduced-motion` (modal focus trap is already in BaseModal).
 - Custom theme colors.
 - Global toast on 403/5xx (401 logout is already handled).
 

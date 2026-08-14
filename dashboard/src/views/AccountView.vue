@@ -13,6 +13,8 @@ import ConfirmModal from '@/components/ConfirmModal.vue';
 // classes
 import { apiErrorMessage, authApi } from '@/classes/api';
 import { relativeTimeShort } from '@/utils/relativeTime';
+import { passwordLengthError, requiredTrimmed } from '@/utils/formValidation';
+import { useInlineFieldErrors } from '@/composables/useInlineFieldErrors';
 
 // types
 import type { ApiToken, CreatedApiToken } from '@/@types/index';
@@ -38,24 +40,56 @@ const bRevokingApiToken = ref<boolean>(false);
 const tokenToRevoke = ref<ApiToken | null>(null);
 const toastStore = useToastStore();
 
+const { errors: usernameFieldErrors, touch: touchUsername, onInput: onUsernameInput, validateAll: validateUsername, reset: resetUsername } =
+  useInlineFieldErrors({
+    username: () => {
+      const next = accountNewUsername.value.trim();
+      if (!next) {
+        return requiredTrimmed(accountNewUsername.value, 'Username');
+      }
+      if (next === authStore.username) {
+        return 'New username is the same as current.';
+      }
+      return undefined;
+    }
+  });
+
+const {
+  errors: passwordFieldErrors,
+  touch: touchPassword,
+  onInput: onPasswordInput,
+  validateAll: validatePassword,
+  reset: resetPassword
+} = useInlineFieldErrors({
+  current: () => requiredTrimmed(accountCurrentPassword.value, 'Current password'),
+  next: () =>
+    requiredTrimmed(accountNewPassword.value, 'New password') ??
+    passwordLengthError(accountNewPassword.value),
+  confirm: () => {
+    if (!accountConfirmPassword.value) {
+      return 'Confirm your new password';
+    }
+    if (accountConfirmPassword.value !== accountNewPassword.value) {
+      return 'New password and confirmation do not match.';
+    }
+    return undefined;
+  }
+});
+
 // -------------------------------------------------- Methods --------------------------------------------------
 const changeUsername = async (): Promise<void> => {
   accountUsernameError.value = '';
   bAccountUsernameSuccess.value = false;
+  if (!validateUsername()) {
+    return;
+  }
   const newUsername = accountNewUsername.value.trim();
-  if (!newUsername) {
-    accountUsernameError.value = 'Enter a new username and your current password.';
-    return;
-  }
-  if (newUsername === authStore.username) {
-    accountUsernameError.value = 'New username is the same as current.';
-    return;
-  }
   bChangingUsername.value = true;
   try {
     const response = await authApi.changeUsername(newUsername);
     authStore.setToken(response.data.token, newUsername);
     accountNewUsername.value = '';
+    resetUsername();
     bAccountUsernameSuccess.value = true;
     setTimeout(() => {
       bAccountUsernameSuccess.value = false;
@@ -74,27 +108,18 @@ const changeUsername = async (): Promise<void> => {
 const changePassword = async (): Promise<void> => {
   accountPasswordError.value = '';
   bAccountPasswordSuccess.value = false;
+  if (!validatePassword()) {
+    return;
+  }
   const current = accountCurrentPassword.value;
   const newP = accountNewPassword.value;
-  const confirm = accountConfirmPassword.value;
-  if (!current || !newP || !confirm) {
-    accountPasswordError.value = 'Fill in all password fields.';
-    return;
-  }
-  if (newP.length < 8) {
-    accountPasswordError.value = 'New password must be at least 8 characters.';
-    return;
-  }
-  if (newP !== confirm) {
-    accountPasswordError.value = 'New password and confirmation do not match.';
-    return;
-  }
   bChangingPassword.value = true;
   try {
     await authApi.changePassword(current, newP);
     accountCurrentPassword.value = '';
     accountNewPassword.value = '';
     accountConfirmPassword.value = '';
+    resetPassword();
     bAccountPasswordSuccess.value = true;
     setTimeout(() => {
       bAccountPasswordSuccess.value = false;
@@ -202,10 +227,18 @@ onMounted(() => {
               type="text"
               placeholder="New username"
               :disabled="bChangingUsername"
+              :aria-invalid="Boolean(usernameFieldErrors.username)"
+              aria-describedby="account-username-error"
+              @blur="touchUsername('username')"
+              @input="onUsernameInput('username')"
             />
           </div>
-          <p v-if="accountUsernameError" class="hint is-error">
-            {{ accountUsernameError }}
+          <p
+            v-if="usernameFieldErrors.username || accountUsernameError"
+            id="account-username-error"
+            class="hint is-error"
+          >
+            {{ usernameFieldErrors.username || accountUsernameError }}
           </p>
         </div>
         <div class="flex justify-end mt-4">
@@ -236,8 +269,19 @@ onMounted(() => {
               type="password"
               placeholder="Current password"
               :disabled="bChangingPassword"
+              :aria-invalid="Boolean(passwordFieldErrors.current)"
+              aria-describedby="account-password-current-error"
+              @blur="touchPassword('current')"
+              @input="onPasswordInput('current')"
             />
           </div>
+          <p
+            v-if="passwordFieldErrors.current"
+            id="account-password-current-error"
+            class="hint is-error"
+          >
+            {{ passwordFieldErrors.current }}
+          </p>
         </div>
         <div class="field mt-2">
           <div class="label">New password</div>
@@ -250,8 +294,15 @@ onMounted(() => {
               type="password"
               placeholder="At least 8 characters"
               :disabled="bChangingPassword"
+              :aria-invalid="Boolean(passwordFieldErrors.next)"
+              aria-describedby="account-password-next-error"
+              @blur="touchPassword('next')"
+              @input="onPasswordInput('next')"
             />
           </div>
+          <p v-if="passwordFieldErrors.next" id="account-password-next-error" class="hint is-error">
+            {{ passwordFieldErrors.next }}
+          </p>
         </div>
         <div class="field mt-2">
           <div class="label">New password</div>
@@ -264,10 +315,18 @@ onMounted(() => {
               type="password"
               placeholder="Confirm new password"
               :disabled="bChangingPassword"
+              :aria-invalid="Boolean(passwordFieldErrors.confirm)"
+              aria-describedby="account-password-confirm-error"
+              @blur="touchPassword('confirm')"
+              @input="onPasswordInput('confirm')"
             />
           </div>
-          <p v-if="!accountConfirmPassword" class="hint is-error">
-            {{ accountPasswordError }}
+          <p
+            v-if="passwordFieldErrors.confirm || accountPasswordError"
+            id="account-password-confirm-error"
+            class="hint is-error"
+          >
+            {{ passwordFieldErrors.confirm || accountPasswordError }}
           </p>
         </div>
 

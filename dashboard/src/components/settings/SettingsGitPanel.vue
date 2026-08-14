@@ -5,6 +5,12 @@ import { ref, onMounted } from 'vue';
 // classes
 import { settingsApi } from '@/classes/api';
 
+// composables
+import { useInlineFieldErrors } from '@/composables/useInlineFieldErrors';
+
+// utils
+import { optionalEmailError } from '@/utils/formValidation';
+
 // -------------------------------------------------- Refs --------------------------------------------------
 const gitForm = ref<{ name: string; email: string }>({ name: '', email: '' });
 const bSavingGit = ref<boolean>(false);
@@ -13,6 +19,10 @@ const sshPublicKey = ref<string>('');
 const sshPrivateKey = ref<string>('');
 const bCopiedSshPublic = ref<boolean>(false);
 const bCopiedSshPrivate = ref<boolean>(false);
+
+const { errors, touch, onInput, validateAll } = useInlineFieldErrors({
+  email: () => optionalEmailError(gitForm.value.email)
+});
 
 // -------------------------------------------------- Methods --------------------------------------------------
 const loadSettings = async (): Promise<void> => {
@@ -58,6 +68,9 @@ const copySshPrivate = async (): Promise<void> => {
 };
 
 const saveGitSettings = async (): Promise<void> => {
+  if (!validateAll()) {
+    return;
+  }
   bSavingGit.value = true;
   bGitSaved.value = false;
   try {
@@ -107,12 +120,19 @@ onMounted((): void => {
                 type="email"
                 placeholder="you@example.com"
                 class="w-full bg-fg/[0.05] border border-fg/[0.1] rounded-lg px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
+                :aria-invalid="Boolean(errors.email)"
+                aria-describedby="settings-git-email-error"
+                @blur="touch('email')"
+                @input="onInput('email')"
               />
+              <p v-if="errors.email" id="settings-git-email-error" class="text-xs text-destructive mt-1.5">
+                {{ errors.email }}
+              </p>
             </div>
             <div class="flex items-center gap-3 pt-1">
               <button
                 class="flex items-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all"
-                :disabled="bSavingGit"
+                :disabled="bSavingGit || Boolean(errors.email)"
                 @click="saveGitSettings"
               >
                 <div

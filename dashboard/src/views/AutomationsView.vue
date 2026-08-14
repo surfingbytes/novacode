@@ -9,6 +9,7 @@ import AutomationCard from '@/components/automations/AutomationCard.vue';
 import AutomationFormModal from '@/components/automations/AutomationFormModal.vue';
 import PageShell from '@/components/layout/PageShell.vue';
 import PageHeader from '@/components/layout/PageHeader.vue';
+import ListPageSkeleton from '@/components/ui/ListPageSkeleton.vue';
 
 // api
 import { automationsApi, workspaceApi } from '@/classes/api';
@@ -382,10 +383,12 @@ onUnmounted(() => {
     </div>
 
     <!-- Loading -->
-    <div v-if="bLoading" class="flex items-center gap-2 py-8 text-text-muted text-sm">
-      <div class="w-5 h-5 border-2 border-surface border-t-primary rounded-full animate-spin" />
-      Loading automations…
-    </div>
+    <ListPageSkeleton
+      v-if="bLoading"
+      :variant="viewMode === 'grid' ? 'cards' : 'rows'"
+      :count="5"
+      label="Loading automations"
+    />
 
     <!-- Empty -->
     <div
@@ -472,14 +475,8 @@ onUnmounted(() => {
           </div>
 
           <!-- runs loading -->
-          <div
-            v-if="bRunsLoading"
-            class="flex items-center gap-2 px-4 py-6 text-text-muted text-sm"
-          >
-            <div
-              class="w-4 h-4 border-2 border-surface border-t-primary rounded-full animate-spin"
-            />
-            Loading runs…
+          <div v-if="bRunsLoading" class="px-4 py-3">
+            <ListPageSkeleton variant="lines" :count="4" label="Loading runs" />
           </div>
 
           <!-- no runs -->

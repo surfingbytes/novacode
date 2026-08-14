@@ -10,6 +10,7 @@ import WorkspaceDeleteModal from '@/components/workspace/DeleteModal.vue';
 import WorkspaceEditModal from '@/components/workspace/EditModal.vue';
 import RecentlyActiveSessions from '@/components/workspace/RecentlyActiveSessions.vue';
 import ContextMenu from '@/components/ContextMenu.vue';
+import ListPageSkeleton from '@/components/ui/ListPageSkeleton.vue';
 import type { ContextMenuItem } from '@/components/ContextMenu.vue';
 
 // stores
@@ -403,9 +404,8 @@ onMounted((): void => {
 
     <!-- Loading -->
     <Transition name="fade" mode="out-in">
-      <div v-if="store.bIsLoading" key="loading" class="ws-state">
-        <div class="ws-spinner" />
-        <p class="ws-state-text">Loading workspaces…</p>
+      <div v-if="store.bIsLoading" key="loading">
+        <ListPageSkeleton variant="workspaces" :count="6" label="Loading workspaces" />
       </div>
 
       <!-- Empty state -->
@@ -681,15 +681,6 @@ onMounted((): void => {
   padding: 72px 24px;
   gap: 10px;
   text-align: center;
-}
-
-.ws-spinner {
-  width: 22px;
-  height: 22px;
-  border: 2px solid var(--line-strong);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: ws-spin 0.7s linear infinite;
 }
 
 @keyframes ws-spin {

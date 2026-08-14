@@ -4,6 +4,7 @@ import { ref, computed, onMounted } from 'vue';
 
 // components
 import ConfirmModal from '@/components/ConfirmModal.vue';
+import ListPageSkeleton from '@/components/ui/ListPageSkeleton.vue';
 
 // classes
 import { workspaceRulesApi, roleTemplatesApi } from '@/classes/api';
@@ -459,10 +460,7 @@ onMounted(async () => {
   </div>
 
   <!-- Loading -->
-  <div v-if="bListLoading" class="flex items-center gap-2 py-8 text-text-muted text-sm">
-    <div class="w-5 h-5 border-2 border-surface border-t-primary rounded-full animate-spin" />
-    Loading workspace rules…
-  </div>
+  <ListPageSkeleton v-if="bListLoading" variant="rows" :count="5" label="Loading workspace rules" />
 
   <!-- Empty / missing rules dir -->
   <div

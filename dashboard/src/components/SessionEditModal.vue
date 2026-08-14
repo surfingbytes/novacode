@@ -10,6 +10,12 @@ import TagChipsInput from '@/components/input/TagChipsInput.vue';
 // types
 import type { Session } from '@/@types/index';
 
+// composables
+import { useInlineFieldErrors } from '@/composables/useInlineFieldErrors';
+
+// utils
+import { requiredTrimmed } from '@/utils/formValidation';
+
 const props = defineProps<{
   modelValue: boolean;
   session: Session | null;
@@ -25,6 +31,10 @@ const emit = defineEmits<{
 
 const name = ref('');
 const formTags = ref<string[]>([]);
+
+const { errors, touch, onInput, validateAll, reset } = useInlineFieldErrors({
+  name: () => requiredTrimmed(name.value, 'Name')
+});
 
 function tagsFromSession(s: Session | null): string[] {
   const raw = s?.tags;
@@ -49,6 +59,7 @@ watch(
     if (s) {
       name.value = s.name;
       formTags.value = tagsFromSession(s);
+      reset();
     }
   },
   { immediate: true }
@@ -60,8 +71,8 @@ const close = (): void => {
 
 const onSave = (): void => {
   if (props.loading) return;
+  if (!validateAll()) return;
   const trimmedName = name.value.trim();
-  if (!trimmedName) return;
   const tagsClean = formTags.value;
   emit('save', {
     name: trimmedName,
@@ -96,7 +107,14 @@ const onSave = (): void => {
                 type="text"
                 placeholder="Session name"
                 data-modal-autofocus
+                :aria-invalid="Boolean(errors.name)"
+                aria-describedby="session-edit-name-error"
+                @blur="touch('name')"
+                @input="onInput('name')"
               />
+              <p v-if="errors.name" id="session-edit-name-error" class="nc-field-hint is-error">
+                {{ errors.name }}
+              </p>
             </div>
 
             <!-- Tags -->

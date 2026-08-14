@@ -9,6 +9,7 @@ import ContextMenu from '@/components/ContextMenu.vue';
 import SessionEditModal from '@/components/SessionEditModal.vue';
 import NewSessionModal from '@/components/NewSessionModal.vue';
 import NewOrchestratorModal from '@/components/NewOrchestratorModal.vue';
+import ListPageSkeleton from '@/components/ui/ListPageSkeleton.vue';
 import SessionListToolbar from './session-list/SessionListToolbar.vue';
 import SessionListGrid from './session-list/SessionListGrid.vue';
 import SessionListRows from './session-list/SessionListRows.vue';
@@ -816,13 +817,12 @@ watch(
     @new-orchestrator="bShowNewOrchestratorModal = true"
   />
 
-  <div
+  <ListPageSkeleton
     v-if="sessionsLoading || !bOrchestratorsInitialFetched"
-    class="flex flex-col items-center justify-center py-14 gap-4"
-  >
-    <div class="w-8 h-8 border-2 border-surface border-t-primary rounded-full animate-spin"></div>
-    <p class="text-sm text-text-muted">Loading sessions…</p>
-  </div>
+    :variant="viewMode === 'grid' ? 'cards' : 'rows'"
+    :count="6"
+    label="Loading sessions"
+  />
   <template v-else>
     <SessionListGrid
       v-if="viewMode === 'grid'"

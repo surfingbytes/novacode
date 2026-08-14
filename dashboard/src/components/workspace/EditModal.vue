@@ -11,6 +11,12 @@ import DirPickerModal from '@/components/DirPickerModal.vue';
 // types
 import type { AgentType, Workspace } from '@/@types/index';
 
+// composables
+import { useInlineFieldErrors } from '@/composables/useInlineFieldErrors';
+
+// utils
+import { optionalEmailError, requiredTrimmed, workspacePathError } from '@/utils/formValidation';
+
 // -------------------------------------------------- Props --------------------------------------------------
 const props = defineProps<{
   modelValue: boolean;
@@ -97,13 +103,19 @@ const form = ref<FormState>({
   defaultAgentType: '',
   tags: []
 });
-const errors = ref<{ name?: string; path?: string; defaultAgentType?: string }>({});
 const bSaving = ref<boolean>(false);
 const bShowDirPicker = ref<boolean>(false);
 const bNewGroupAddActive = ref<boolean>(false);
 const groupNameInput = ref<string>('');
 const newGroupError = ref<string | null>(null);
 const tagInput = ref<string>('');
+
+const { errors, touch, onInput, validateAll, reset } = useInlineFieldErrors({
+  name: () => requiredTrimmed(form.value.name, 'Name'),
+  path: () => workspacePathError(form.value.path),
+  defaultAgentType: () => requiredTrimmed(form.value.defaultAgentType, 'Default agent'),
+  gitUserEmail: () => optionalEmailError(form.value.gitUserEmail)
+});
 
 // -------------------------------------------------- Computed --------------------------------------------------
 /** Tag suggestions from other workspaces, filtered by current input, excluding already-added tags. */
@@ -134,13 +146,7 @@ function normalizeTags(raw: string[]): string[] {
 }
 
 // --- validation ---
-const validate = (): boolean => {
-  errors.value = {};
-  if (!form.value.name.trim()) errors.value.name = 'Name is required';
-  if (!form.value.path.trim()) errors.value.path = 'Path is required';
-  if (!form.value.defaultAgentType) errors.value.defaultAgentType = 'Default agent is required';
-  return Object.keys(errors.value).length === 0;
-};
+const validate = (): boolean => validateAll();
 
 // --- submit / close ---
 const submit = async (): Promise<void> => {
@@ -180,6 +186,10 @@ const onDirPicked = (path: string): void => {
   bShowDirPicker.value = false;
   if (!form.value.name.trim()) {
     form.value.name = path.split('/').pop() ?? '';
+  }
+  onInput('path');
+  if (form.value.name.trim()) {
+    onInput('name');
   }
 };
 
@@ -265,7 +275,8 @@ watch(
         tags
       };
       tagInput.value = '';
-      errors.value = {};
+      newGroupError.value = null;
+      reset();
     }
   }
 );
@@ -299,9 +310,17 @@ watch(AGENT_OPTIONS, (options) => {
             <div class="field" :class="{ 'has-error': errors.name }">
               <div class="label">Workspace Name</div>
               <div class="input-wrap">
-                <input v-model="form.name" type="text" placeholder="e.g. My Projects" />
+                <input
+                  v-model="form.name"
+                  type="text"
+                  placeholder="e.g. My Projects"
+                  :aria-invalid="Boolean(errors.name)"
+                  aria-describedby="workspace-name-error"
+                  @blur="touch('name')"
+                  @input="onInput('name')"
+                />
               </div>
-              <p v-if="errors.name" class="hint is-error">{{ errors.name }}</p>
+              <p v-if="errors.name" id="workspace-name-error" class="hint is-error">{{ errors.name }}</p>
             </div>
 
             <!-- Group (optional) -->
@@ -324,7 +343,13 @@ watch(AGENT_OPTIONS, (options) => {
                 >
                   <option v-for="g in existingGroups || []" :key="g" :value="g">{{ g }}</option>
                 </select>
-                <input v-else v-model="groupNameInput" type="text" placeholder="New group name" />
+                <input
+                  v-else
+                  v-model="groupNameInput"
+                  type="text"
+                  placeholder="New group name"
+                  @input="newGroupError = groupNameInput.trim() ? null : newGroupError"
+                />
                 <button class="button is-primary" @click="createNewGroup" v-if="bNewGroupAddActive">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
                   Create
@@ -394,13 +419,21 @@ watch(AGENT_OPTIONS, (options) => {
             <div class="field" :class="{ 'has-error': errors.path }">
               <div class="label">Project Path</div>
               <div class="input-wrap">
-                <input v-model="form.path" type="text" placeholder="/my-project" />
+                <input
+                  v-model="form.path"
+                  type="text"
+                  placeholder="/my-project"
+                  :aria-invalid="Boolean(errors.path)"
+                  aria-describedby="workspace-path-error"
+                  @blur="touch('path')"
+                  @input="onInput('path')"
+                />
                 <div class="icon is-small">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
                 </div>
                 <button class="button" @click="bShowDirPicker = true">Browse...</button>
               </div>
-              <p v-if="errors.path" class="hint is-error">{{ errors.path }}</p>
+              <p v-if="errors.path" id="workspace-path-error" class="hint is-error">{{ errors.path }}</p>
               <p v-else class="hint">
                 Path to the workspace directory. Use Browse to pick a folder from the server.
               </p>
@@ -416,18 +449,21 @@ watch(AGENT_OPTIONS, (options) => {
             <!-- Default Agent -->
             <div class="field" :class="{ 'has-error': errors.defaultAgentType }">
               <div class="label">Default Agent</div>
-              <div class="button-select">
+              <div class="button-select" aria-describedby="workspace-agent-error">
                 <button
                   type="button"
                   class="button is-transparent"
                   v-for="opt in AGENT_OPTIONS"
                   :key="opt.value"
                   :class="form.defaultAgentType === opt.value ? 'is-active' : ''"
-                  @click="form.defaultAgentType = opt.value"
+                  @click="
+                    form.defaultAgentType = opt.value;
+                    onInput('defaultAgentType');
+                  "
                   v-text="opt.label"
                 ></button>
               </div>
-              <p v-if="errors.defaultAgentType" class="hint is-error">
+              <p v-if="errors.defaultAgentType" id="workspace-agent-error" class="hint is-error">
                 {{ errors.defaultAgentType }}
               </p>
             </div>
@@ -446,12 +482,23 @@ watch(AGENT_OPTIONS, (options) => {
                   </div>
                   <p class="hint">Leave blank to use global setting</p>
                 </div>
-                <div class="field">
+                <div class="field" :class="{ 'has-error': errors.gitUserEmail }">
                   <div class="label">Email</div>
                   <div class="input-wrap">
-                    <input v-model="form.gitUserEmail" type="email" placeholder="your@email.com" />
+                    <input
+                      v-model="form.gitUserEmail"
+                      type="email"
+                      placeholder="your@email.com"
+                      :aria-invalid="Boolean(errors.gitUserEmail)"
+                      aria-describedby="workspace-git-email-error"
+                      @blur="touch('gitUserEmail')"
+                      @input="onInput('gitUserEmail')"
+                    />
                   </div>
-                  <p class="hint">Leave blank to use global setting</p>
+                  <p v-if="errors.gitUserEmail" id="workspace-git-email-error" class="hint is-error">
+                    {{ errors.gitUserEmail }}
+                  </p>
+                  <p v-else class="hint">Leave blank to use global setting</p>
                 </div>
               </div>
             </div>

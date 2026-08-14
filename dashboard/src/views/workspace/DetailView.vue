@@ -5,6 +5,7 @@ import { useRoute, RouterLink } from 'vue-router';
 
 // components
 import PageShell from '@/components/layout/PageShell.vue';
+import ListPageSkeleton from '@/components/ui/ListPageSkeleton.vue';
 
 // stores
 import { useWorkspacesStore } from '@/stores/workspaces';
@@ -262,10 +263,9 @@ onBeforeUnmount(() => {
     <div
       v-if="store.bIsLoading && !workspace"
       key="loading"
-      class="wd-state"
+      class="flex-1 min-h-0"
     >
-      <div class="wd-spinner" />
-      <p class="wd-state-text">Loading workspace…</p>
+      <ListPageSkeleton variant="rows" :count="6" label="Loading workspace" />
     </div>
     <RouterView
       v-else-if="workspace"
@@ -391,19 +391,6 @@ onBeforeUnmount(() => {
   padding: 72px 24px;
   gap: 10px;
   text-align: center;
-}
-
-.wd-spinner {
-  width: 22px;
-  height: 22px;
-  border: 2px solid var(--line-strong);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: ws-spin 0.7s linear infinite;
-}
-
-@keyframes ws-spin {
-  to { transform: rotate(360deg); }
 }
 
 .wd-state-title {

@@ -9,8 +9,12 @@ import ModalHeader from '@/components/ModalHeader.vue';
 // types
 import type { AgentType, Automation, Workspace } from '@/@types/index';
 
+// composables
+import { useInlineFieldErrors } from '@/composables/useInlineFieldErrors';
+
 // utils
 import { agentSelectedStyle, agentTypeLabel } from '@/utils/agentTypeMeta';
+import { requiredTrimmed } from '@/utils/formValidation';
 
 // -------------------------------------------------- Constants --------------------------------------------------
 
@@ -78,7 +82,13 @@ const agentType = ref<AgentType>('cursor-agent');
 const intervalMinutes = ref(60);
 const prompt = ref('');
 const bEnabled = ref(true);
-const validationError = ref<string | null>(null);
+
+const { errors, touch, onInput, validateAll, reset } = useInlineFieldErrors({
+  name: () => requiredTrimmed(name.value, 'Name'),
+  workspaceId: () =>
+    props.automation != null ? undefined : requiredTrimmed(workspaceId.value, 'Workspace'),
+  prompt: () => requiredTrimmed(prompt.value, 'Prompt')
+});
 
 // -------------------------------------------------- Computed --------------------------------------------------
 
@@ -99,7 +109,7 @@ const availableAgents = computed(() => {
 
 const gridColsClass = computed(() => `grid-cols-${Math.min(availableAgents.value.length, 3)}`);
 
-const displayedError = computed(() => validationError.value || props.serverError);
+const displayedError = computed(() => props.serverError);
 
 const bSubmitDisabled = computed(
   () =>
@@ -158,21 +168,7 @@ const onSave = (): void => {
   if (props.bSaving) {
     return;
   }
-  validationError.value = null;
-  if (!name.value.trim()) {
-    validationError.value = 'Name is required';
-    return;
-  }
-  if (!bIsEdit.value && !workspaceId.value) {
-    validationError.value = 'Workspace is required';
-    return;
-  }
-  if (!prompt.value.trim()) {
-    validationError.value = 'Prompt is required';
-    return;
-  }
-  if (intervalMinutes.value < 1) {
-    validationError.value = 'Interval must be at least 1 minute';
+  if (!validateAll()) {
     return;
   }
   emit('save', {
@@ -193,7 +189,7 @@ watch(
     if (!bOpen) {
       return;
     }
-    validationError.value = null;
+    reset();
     const automation = props.automation;
     if (automation) {
       name.value = automation.name;
@@ -241,15 +237,37 @@ watch(
             placeholder="e.g. Daily security audit"
             data-modal-autofocus
             :disabled="bSaving"
+            :aria-invalid="Boolean(errors.name)"
+            aria-describedby="automation-form-name-error"
+            @blur="touch('name')"
+            @input="onInput('name')"
           />
+          <p v-if="errors.name" id="automation-form-name-error" class="nc-field-hint is-error">
+            {{ errors.name }}
+          </p>
         </div>
 
         <!-- Workspace (create only — not editable afterwards) -->
         <div v-if="!bIsEdit" class="nc-field">
           <label class="nc-field-label" for="automation-form-workspace">Workspace</label>
-          <select id="automation-form-workspace" v-model="workspaceId" :disabled="bSaving">
+          <select
+            id="automation-form-workspace"
+            v-model="workspaceId"
+            :disabled="bSaving"
+            :aria-invalid="Boolean(errors.workspaceId)"
+            aria-describedby="automation-form-workspace-error"
+            @blur="touch('workspaceId')"
+            @change="onInput('workspaceId')"
+          >
             <option v-for="w in workspaces" :key="w.id" :value="w.id">{{ w.name }}</option>
           </select>
+          <p
+            v-if="errors.workspaceId"
+            id="automation-form-workspace-error"
+            class="nc-field-hint is-error"
+          >
+            {{ errors.workspaceId }}
+          </p>
         </div>
 
         <!-- Agent selection -->
@@ -295,7 +313,14 @@ watch(
             rows="4"
             placeholder="Describe what the agent should do each time it runs…"
             :disabled="bSaving"
+            :aria-invalid="Boolean(errors.prompt)"
+            aria-describedby="automation-form-prompt-error"
+            @blur="touch('prompt')"
+            @input="onInput('prompt')"
           />
+          <p v-if="errors.prompt" id="automation-form-prompt-error" class="nc-field-hint is-error">
+            {{ errors.prompt }}
+          </p>
         </div>
 
         <p

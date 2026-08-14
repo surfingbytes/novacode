@@ -4,6 +4,7 @@ import { ref, computed, onMounted } from 'vue';
 
 // components
 import ConfirmModal from '@/components/ConfirmModal.vue';
+import ListPageSkeleton from '@/components/ui/ListPageSkeleton.vue';
 
 // classes
 import { roleTemplatesApi } from '@/classes/api';
@@ -297,10 +298,12 @@ onMounted(() => {
     </div>
 
     <!-- Loading -->
-    <div v-if="bLoading" class="flex items-center gap-2 py-8 text-text-muted text-sm">
-      <div class="w-5 h-5 border-2 border-surface border-t-primary rounded-full animate-spin" />
-      Loading rule templates…
-    </div>
+    <ListPageSkeleton
+      v-if="bLoading"
+      :variant="viewMode === 'grid' ? 'cards' : 'rows'"
+      :count="4"
+      label="Loading rule templates"
+    />
 
     <!-- Empty -->
     <div
