@@ -174,6 +174,24 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
+  // GET /api/workspaces/:workspaceId/sessions/:sessionId/usage
+  fastify.get(
+    '/api/workspaces/:workspaceId/sessions/:sessionId/usage',
+    { preHandler: jwtPreHandler },
+    async (request, reply) => {
+      const { workspaceId, sessionId } = request.params as {
+        workspaceId: string;
+        sessionId: string;
+      };
+      const session = await db.getSession(sessionId);
+      if (!session || session.workspaceId !== workspaceId) {
+        return reply.status(404).send({ error: 'Session not found' });
+      }
+      const turns = await db.listSessionUsage(sessionId);
+      return reply.send({ turns });
+    }
+  );
+
   // PATCH /api/workspaces/:workspaceId/sessions/:sessionId
   fastify.patch(
     '/api/workspaces/:workspaceId/sessions/:sessionId',

@@ -1,15 +1,21 @@
 <script setup lang="ts">
 // node_modules
-import { ref } from 'vue';
+import { onMounted, ref } from 'vue';
 
 // stores
 import { useAuthStore } from '@/stores/auth';
+import { useToastStore } from '@/stores/toasts';
 
 // components
 import PageShell from '@/components/layout/PageShell.vue';
+import ConfirmModal from '@/components/ConfirmModal.vue';
 
 // classes
-import { authApi } from '@/classes/api';
+import { apiErrorMessage, authApi } from '@/classes/api';
+import { relativeTimeShort } from '@/utils/relativeTime';
+
+// types
+import type { ApiToken, CreatedApiToken } from '@/@types/index';
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const authStore = useAuthStore();
@@ -23,6 +29,14 @@ const accountUsernameError = ref<string>('');
 const accountPasswordError = ref<string>('');
 const bAccountUsernameSuccess = ref<boolean>(false);
 const bAccountPasswordSuccess = ref<boolean>(false);
+const apiTokens = ref<ApiToken[]>([]);
+const newApiTokenName = ref<string>('');
+const createdApiToken = ref<CreatedApiToken | null>(null);
+const bLoadingApiTokens = ref<boolean>(false);
+const bCreatingApiToken = ref<boolean>(false);
+const bRevokingApiToken = ref<boolean>(false);
+const tokenToRevoke = ref<ApiToken | null>(null);
+const toastStore = useToastStore();
 
 // -------------------------------------------------- Methods --------------------------------------------------
 const changeUsername = async (): Promise<void> => {
@@ -95,6 +109,71 @@ const changePassword = async (): Promise<void> => {
     bChangingPassword.value = false;
   }
 };
+
+async function loadApiTokens(): Promise<void> {
+  bLoadingApiTokens.value = true;
+  try {
+    const response = await authApi.listApiTokens();
+    apiTokens.value = response.data;
+  } catch (err: unknown) {
+    toastStore.error(apiErrorMessage(err, 'Failed to load API keys'));
+  } finally {
+    bLoadingApiTokens.value = false;
+  }
+}
+
+async function createApiToken(): Promise<void> {
+  const name = newApiTokenName.value.trim();
+  if (!name) {
+    return;
+  }
+  bCreatingApiToken.value = true;
+  try {
+    const response = await authApi.createApiToken(name);
+    createdApiToken.value = response.data;
+    newApiTokenName.value = '';
+    apiTokens.value = [response.data, ...apiTokens.value];
+  } catch (err: unknown) {
+    toastStore.error(apiErrorMessage(err, 'Failed to create API key'));
+  } finally {
+    bCreatingApiToken.value = false;
+  }
+}
+
+async function copyCreatedToken(): Promise<void> {
+  const token = createdApiToken.value?.token;
+  if (!token) {
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(token);
+    toastStore.success('API key copied');
+  } catch {
+    toastStore.error('Could not copy API key');
+  }
+}
+
+async function confirmRevokeApiToken(): Promise<void> {
+  const target = tokenToRevoke.value;
+  if (!target) {
+    return;
+  }
+  bRevokingApiToken.value = true;
+  try {
+    await authApi.deleteApiToken(target.id);
+    apiTokens.value = apiTokens.value.filter((token) => token.id !== target.id);
+    tokenToRevoke.value = null;
+    toastStore.success('API key revoked');
+  } catch (err: unknown) {
+    toastStore.error(apiErrorMessage(err, 'Failed to revoke API key'));
+  } finally {
+    bRevokingApiToken.value = false;
+  }
+}
+
+onMounted(() => {
+  void loadApiTokens();
+});
 </script>
 
 <template>
@@ -102,7 +181,7 @@ const changePassword = async (): Promise<void> => {
     <div class="mb-6">
       <h1 class="text-xl font-semibold text-text-primary">Account</h1>
       <p class="text-sm text-text-muted mt-1">
-        Change your username or password. You will stay signed in after changing username.
+        Change your username, password, or API keys. You will stay signed in after changing username.
       </p>
     </div>
 
@@ -210,7 +289,80 @@ const changePassword = async (): Promise<void> => {
           </button>
         </div>
       </div>
+
+      <!-- API keys -->
+      <div class="box bg-surface!">
+        <h2 class="text-md font-semibold text-text-primary mb-3">API keys</h2>
+        <hr />
+        <p class="text-sm text-text-muted mb-3">
+          Use a key as <span class="font-mono text-xs">Authorization: Bearer nck_…</span> for scripts.
+          The secret is shown only once.
+        </p>
+        <div v-if="createdApiToken" class="message is-info mb-3">
+          <div class="font-medium mb-1">Copy this key now — it will not be shown again.</div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <code class="text-xs break-all">{{ createdApiToken.token }}</code>
+            <button type="button" class="button is-primary" @click="copyCreatedToken">Copy</button>
+          </div>
+        </div>
+        <div class="field">
+          <div class="label">Name</div>
+          <div class="input-wrap">
+            <input
+              v-model="newApiTokenName"
+              type="text"
+              maxlength="64"
+              placeholder="e.g. home-assistant"
+              :disabled="bCreatingApiToken"
+              @keyup.enter="createApiToken"
+            />
+          </div>
+        </div>
+        <div class="flex justify-end mt-4">
+          <button
+            class="button is-primary"
+            :disabled="bCreatingApiToken || !newApiTokenName.trim()"
+            @click="createApiToken"
+          >
+            <div v-if="bCreatingApiToken" class="loading-spinner"></div>
+            Create API key
+          </button>
+        </div>
+        <ul v-if="apiTokens.length > 0" class="mt-4 space-y-2">
+          <li
+            v-for="token in apiTokens"
+            :key="token.id"
+            class="flex items-center justify-between gap-3 text-sm border border-fg/10 rounded-md px-3 py-2"
+          >
+            <div class="min-w-0">
+              <div class="font-medium text-text-primary truncate">{{ token.name }}</div>
+              <div class="text-xs text-text-muted font-mono">
+                {{ token.tokenPrefix }}
+                <span class="text-text-muted/70">
+                  · created {{ relativeTimeShort(token.createdAt) }}
+                  <template v-if="token.lastUsedAt"> · used {{ relativeTimeShort(token.lastUsedAt) }}</template>
+                  <template v-else> · never used</template>
+                </span>
+              </div>
+            </div>
+            <button type="button" class="button is-destructive" @click="tokenToRevoke = token">
+              Revoke
+            </button>
+          </li>
+        </ul>
+        <p v-else-if="!bLoadingApiTokens" class="text-sm text-text-muted mt-3">No API keys yet.</p>
+      </div>
     </div>
+
+    <ConfirmModal
+      :model-value="tokenToRevoke !== null"
+      title="Revoke API key?"
+      :description="tokenToRevoke ? `Revoke “${tokenToRevoke.name}”? Scripts using this key will fail immediately.` : ''"
+      confirm-label="Revoke"
+      :loading="bRevokingApiToken"
+      @update:model-value="(open) => { if (!open && !bRevokingApiToken) tokenToRevoke = null }"
+      @confirm="confirmRevokeApiToken"
+    />
   </PageShell>
 </template>
 

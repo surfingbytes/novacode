@@ -15,6 +15,7 @@
     "build": "npm run build -w @novacode/shared && npm run build -w novacode-api && npm run build -w novacode-dashboard",
     "typecheck": "npm run build -w @novacode/shared && npm run typecheck -w novacode-api && npm run type-check -w novacode-dashboard",
     "test": "npm run test -w @novacode/shared && npm run test -w novacode-api && npm run test -w novacode-dashboard",
-    "lint": "npm run lint -w novacode-dashboard"
+    "lint": "npm run lint -w novacode-dashboard",
+    "lint:check": "npm run lint:check -w novacode-dashboard"
   }
 }

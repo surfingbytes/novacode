@@ -13,6 +13,9 @@ import {
   escapeIlikeContains,
   sessionMessageRowToChat
 } from './sessionMessages';
+import { hashApiToken, MAX_API_TOKENS_PER_USER } from './apiTokens';
+import { serializeSessionUsage } from './sessionUsage';
+import { logger } from './logger';
 
 ensureDatabaseUrl();
 
@@ -25,7 +28,7 @@ import type { AutomationModel as Automation } from '../generated/client/models/A
 import type { AutomationRunModel as AutomationRun } from '../generated/client/models/AutomationRun';
 import type { UserModel } from '../generated/client/models';
 import type { PushSubscriptionModel as PushSubscription } from '../generated/client/models/PushSubscription';
-import type { ChatMessage, ChatQueueItem } from '../@types/index';
+import type { ChatMessage, ChatQueueItem, SessionUsageSnapshot, SessionUsageTurn, WorkspaceUsageSummary } from '../@types/index';
 import { MAX_FAVORITE_WORKSPACES } from '@novacode/shared';
 
 /** Session list/detail row (chat history lives in `session_messages`). */
@@ -99,6 +102,8 @@ function toChatQueueItem(row: {
 }
 
 export const SEARCH_LIMIT = 30;
+const API_TOKEN_TOUCH_INTERVAL_MS = 60_000;
+const apiTokenTouchedAt = new Map<string, number>();
 
 export type SearchHit = {
   id: string;
@@ -168,6 +173,69 @@ export const db = {
       return undefined;
     }
     return _prisma.user.update({ where: { id }, data: patch });
+  },
+
+  async getUserByApiToken(token: string): Promise<UserModel | null> {
+    const tokenHash = hashApiToken(token);
+    const row = await _prisma.apiToken.findUnique({
+      where: { tokenHash },
+      include: { user: true }
+    });
+    if (!row) {
+      return null;
+    }
+    const now = Date.now();
+    const previous = apiTokenTouchedAt.get(row.id) ?? 0;
+    if (now - previous >= API_TOKEN_TOUCH_INTERVAL_MS) {
+      apiTokenTouchedAt.set(row.id, now);
+      void _prisma.apiToken
+        .update({ where: { id: row.id }, data: { lastUsedAt: new Date().toISOString() } })
+        .catch((err) => logger.warn({ err, tokenId: row.id }, 'Failed to update API token lastUsedAt'));
+    }
+    return row.user;
+  },
+
+  async listApiTokens(userId: string): Promise<
+    Array<{ id: string; name: string; tokenPrefix: string; createdAt: string; lastUsedAt: string | null }>
+  > {
+    return _prisma.apiToken.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, name: true, tokenPrefix: true, createdAt: true, lastUsedAt: true }
+    });
+  },
+
+  async countApiTokens(userId: string): Promise<number> {
+    return _prisma.apiToken.count({ where: { userId } });
+  },
+
+  async createApiToken(data: {
+    userId: string;
+    name: string;
+    tokenHash: string;
+    tokenPrefix: string;
+  }): Promise<{ id: string; name: string; tokenPrefix: string; createdAt: string; lastUsedAt: string | null }> {
+    const count = await _prisma.apiToken.count({ where: { userId: data.userId } });
+    if (count >= MAX_API_TOKENS_PER_USER) {
+      throw new Error(`At most ${MAX_API_TOKENS_PER_USER} API keys are allowed`);
+    }
+    const createdAt = new Date().toISOString();
+    return _prisma.apiToken.create({
+      data: {
+        id: randomUUID(),
+        userId: data.userId,
+        name: data.name,
+        tokenHash: data.tokenHash,
+        tokenPrefix: data.tokenPrefix,
+        createdAt
+      },
+      select: { id: true, name: true, tokenPrefix: true, createdAt: true, lastUsedAt: true }
+    });
+  },
+
+  async deleteApiToken(userId: string, tokenId: string): Promise<boolean> {
+    const result = await _prisma.apiToken.deleteMany({ where: { id: tokenId, userId } });
+    return result.count > 0;
   },
 
   // -------------------------------------------------- Workspaces --------------------------------------------------
@@ -394,7 +462,7 @@ export const db = {
             lastPreviewRole: p.lastPreviewRole
           }
         })
-        .catch((err) => console.error('[db] enrichSessionListPreviews persist failed', s.id, err));
+        .catch((err) => logger.error({ err, sessionId: s.id }, 'enrichSessionListPreviews persist failed'));
     }
   },
 
@@ -457,6 +525,7 @@ export const db = {
       sessionConfigJson?: string | null;
       lastPreviewText?: string | null;
       lastPreviewRole?: string | null;
+      lastUsageJson?: string | null;
       name?: string;
       tags?: string[] | null;
       archived?: boolean;
@@ -488,6 +557,7 @@ export const db = {
         ...(patch.sessionConfigJson !== undefined && { sessionConfigJson: patch.sessionConfigJson }),
         ...(patch.lastPreviewText !== undefined && { lastPreviewText: patch.lastPreviewText }),
         ...(patch.lastPreviewRole !== undefined && { lastPreviewRole: patch.lastPreviewRole }),
+        ...(patch.lastUsageJson !== undefined && { lastUsageJson: patch.lastUsageJson }),
         name: patch.name ?? existingSession.name,
         ...(tagsJson !== undefined && { tags: tagsJson }),
         archived: patch.archived ?? existingSession.archived,
@@ -537,6 +607,7 @@ export const db = {
       sessionId?: string | null;
       lastPreviewText?: string | null;
       lastPreviewRole?: string | null;
+      lastUsageJson?: string | null;
     }
   ): Promise<Session | undefined> {
     const existing = await _prisma.session.findUnique({ where: { id: sessionId } });
@@ -562,6 +633,7 @@ export const db = {
           ...(patch?.sessionId !== undefined && { sessionId: patch.sessionId }),
           ...(patch?.lastPreviewText !== undefined && { lastPreviewText: patch.lastPreviewText }),
           ...(patch?.lastPreviewRole !== undefined && { lastPreviewRole: patch.lastPreviewRole }),
+          ...(patch?.lastUsageJson !== undefined && { lastUsageJson: patch.lastUsageJson }),
           updatedAt: new Date().toISOString()
         }
       });
@@ -569,6 +641,74 @@ export const db = {
 
     const row = await _prisma.session.findUnique({ where: { id: sessionId } });
     return row ?? undefined;
+  },
+
+  async recordSessionUsage(
+    sessionId: string,
+    workspaceId: string,
+    usage: SessionUsageSnapshot
+  ): Promise<void> {
+    const createdAt = usage.at ?? new Date().toISOString();
+    await _prisma.$transaction([
+      _prisma.sessionUsage.create({
+        data: {
+          id: randomUUID(),
+          sessionId,
+          workspaceId,
+          used: Math.round(usage.used),
+          size: Math.round(usage.size),
+          costAmount: usage.cost?.amount ?? null,
+          costCurrency: usage.cost?.currency ?? null,
+          createdAt
+        }
+      }),
+      _prisma.session.update({
+        where: { id: sessionId },
+        data: {
+          lastUsageJson: serializeSessionUsage({ ...usage, at: createdAt }),
+          updatedAt: new Date().toISOString()
+        }
+      })
+    ]);
+  },
+
+  async listSessionUsage(sessionId: string, limit = 50): Promise<SessionUsageTurn[]> {
+    const rows = await _prisma.sessionUsage.findMany({
+      where: { sessionId },
+      orderBy: { createdAt: 'desc' },
+      take: limit
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      sessionId: row.sessionId,
+      used: row.used,
+      size: row.size,
+      ...(row.costAmount != null
+        ? { cost: { amount: row.costAmount, currency: row.costCurrency ?? 'USD' } }
+        : {}),
+      at: row.createdAt,
+      createdAt: row.createdAt
+    }));
+  },
+
+  async summarizeWorkspaceUsage(workspaceId: string): Promise<WorkspaceUsageSummary> {
+    const aggregate = await _prisma.sessionUsage.aggregate({
+      where: { workspaceId },
+      _count: { id: true },
+      _sum: { used: true, size: true, costAmount: true }
+    });
+    const withCurrency = await _prisma.sessionUsage.findFirst({
+      where: { workspaceId, costCurrency: { not: null } },
+      orderBy: { createdAt: 'desc' },
+      select: { costCurrency: true }
+    });
+    return {
+      turnCount: aggregate._count.id,
+      used: aggregate._sum.used ?? 0,
+      size: aggregate._sum.size ?? 0,
+      costAmount: aggregate._sum.costAmount ?? null,
+      costCurrency: withCurrency?.costCurrency ?? null
+    };
   },
 
   async listSessionQueue(sessionId: string): Promise<ChatQueueItem[]> {

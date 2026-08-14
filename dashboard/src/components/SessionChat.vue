@@ -46,7 +46,7 @@ import { useToastStore } from '@/stores/toasts';
 import { useAuthStore } from '@/stores/auth';
 
 // types
-import type { ApprovalPolicy, ChatMessage, LinkedPlanContext, Session } from '@/@types/index';
+import type { ApprovalPolicy, ChatMessage, LinkedPlanContext, Session, SessionUsageTurn } from '@/@types/index';
 
 // -------------------------------------------------- Props --------------------------------------------------
 const props = defineProps<{
@@ -86,6 +86,7 @@ const auth = useAuthStore();
 // stare at a skeleton for data the app already had.
 const initialCache = readSessionCache(props.workspaceId, props.sessionId);
 const session = ref<Session | null>(initialCache?.session ?? null);
+const usageTurns = ref<SessionUsageTurn[]>([]);
 const bLoading = ref(!initialCache);
 const error = ref<string | null>(null);
 const bShowEditModal = ref(false);
@@ -268,6 +269,7 @@ const chatSocket = useChatSocket({
   onDone: () => {
     planDocs.schedulePlanDocumentsRefresh(250, { selectLatest: activeTab.value === 'plan' });
     planDocs.schedulePlanDocumentsRefresh(1500, { selectLatest: activeTab.value === 'plan' });
+    void fetchUsageTurns();
   },
   onMessagesChanged: () => {
     // Server-confirmed message state — emptiness here is authoritative.
@@ -298,6 +300,16 @@ const {
   bWsConnected,
   bWsReconnecting
 } = chatSocket;
+
+watch(
+  () => session.value?.lastUsage,
+  (usage) => {
+    if (usage && !bIsStreaming.value && streamingUsage.value == null) {
+      streamingUsage.value = usage;
+    }
+  },
+  { immediate: true }
+);
 
 // -------------------------------------------------- Session snapshot cache --------------------------------------------------
 let persistCacheTimer: ReturnType<typeof setTimeout> | null = null;
@@ -723,6 +735,7 @@ async function fetchSession(): Promise<boolean> {
     agentOptions.applyFetchedSession(response.data);
     approvalPolicy.value = normalizeApprovalPolicy(response.data.approvalPolicy);
     void loadAgentOptions();
+    void fetchUsageTurns();
     return true;
   } catch (e) {
     if (
@@ -749,7 +762,20 @@ async function fetchSession(): Promise<boolean> {
 }
 
 function handleAutoContinueUpdated(enabled: boolean): void {
-  console.log('Auto-continue preference updated:', enabled);
+  bClaudeAutoContinueEnabled.value = enabled;
+}
+
+async function fetchUsageTurns(): Promise<void> {
+  try {
+    const response = await sessionsApi.listUsage(props.workspaceId, props.sessionId);
+    usageTurns.value = response.data.turns;
+    const latest = usageTurns.value[0];
+    if (latest && !bIsStreaming.value && streamingUsage.value == null) {
+      streamingUsage.value = latest;
+    }
+  } catch {
+    // Usage is optional; agents that never emit usage_update leave this empty.
+  }
 }
 
 // -------------------------------------------------- Watchers --------------------------------------------------
@@ -974,6 +1000,7 @@ onUnmounted(() => {
             :pending-questions="pendingQuestions"
             :streaming-thinking-text="streamingThinkingText"
             :streaming-usage="streamingUsage"
+            :usage-turns="usageTurns"
             :b-is-streaming="bIsStreaming"
             :b-has-more="bHasMore"
             :b-loading-more="bLoadingMore"

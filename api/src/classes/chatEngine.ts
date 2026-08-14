@@ -34,6 +34,8 @@ import {
   buildLinkedPlanContextPrefix,
   extractLinkedPlanContextFromConfig,
 } from './linkedPlanContext';
+import { logger, truncateLogText } from './logger';
+import { parseUsageUpdateLine } from './sessionUsage';
 
 // types
 import type { ChatMessage, AgentType, ApprovalPolicy } from '../@types/index';
@@ -43,6 +45,7 @@ import type {
   ChatApprovalRequest,
   ChatQuestionAnswer,
   ChatQuestionRequest,
+  SessionUsageSnapshot,
 } from '../@types/index';
 
 export interface ActiveRun {
@@ -55,6 +58,7 @@ export interface ActiveRun {
   pendingApprovals: Map<string, PendingApproval>;
   pendingQuestions: Map<string, PendingQuestion>;
   approvalPolicy: ApprovalPolicy;
+  lastUsage: SessionUsageSnapshot | null;
 }
 
 export interface ChatSubscriber {
@@ -131,12 +135,12 @@ export function cancelRun(sessionId: string): void {
   const run = activeRuns.get(sessionId);
   if (!run) return;
   try {
-    console.log('[chatEngine] cancelling active run for session', sessionId);
+    logger.info({ sessionId }, 'cancelling active run');
     cancelPendingApprovals(run);
     cancelPendingQuestions(run);
     run.cancel();
   } catch (err) {
-    console.error('[chatEngine] Failed to cancel run:', err);
+    logger.error({ err, sessionId }, 'Failed to cancel run');
   }
 }
 
@@ -666,7 +670,7 @@ export async function dispatchPrompt(
     if (fresh) broadcastSessionListUpsert(fresh.workspaceId, fresh);
   } catch (err) {
     currentMessages.pop();
-    console.error('[chatEngine] Failed to persist user message / preview:', err);
+    logger.error({ err, sessionId }, 'Failed to persist user message / preview');
     return { error: 'Failed to save message' };
   }
 
@@ -722,6 +726,7 @@ export async function dispatchPrompt(
     pendingApprovals: new Map(),
     pendingQuestions: new Map(),
     approvalPolicy: normalizeApprovalPolicy(session.approvalPolicy),
+    lastUsage: null,
   };
   activeRuns.set(sessionId, run);
   emitBusy(sessionId, session.workspaceId, true);
@@ -731,7 +736,10 @@ export async function dispatchPrompt(
   };
 
   const onEvent = (line: string) => {
-    console.log('[chatEngine] onStream', line);
+    const usage = parseUsageUpdateLine(line);
+    if (usage) {
+      run.lastUsage = usage;
+    }
     assistantEvents.push(line);
     run.bufferedLines.push(line);
     broadcast((sub) => sub.onStream(line));
@@ -764,7 +772,7 @@ export async function dispatchPrompt(
         const fresh = await db.getSession(sessionId);
         if (fresh) broadcastSessionListUpsert(fresh.workspaceId, fresh);
       } catch (err) {
-        console.warn('[chatEngine] Failed to persist ACP config sync:', err);
+        logger.warn({ err, sessionId }, 'Failed to persist ACP config sync');
       }
     })();
   };
@@ -779,12 +787,7 @@ export async function dispatchPrompt(
 
   // Run agent via ACP in background (non-blocking)
   void (async () => {
-    console.log('[chatEngine] dispatching to agent via ACP', {
-      agentType,
-      sessionId,
-      acpSessionId: currentAcpSessionId,
-      cwd: workspacePath,
-    });
+    logger.info({ agentType, sessionId, acpSessionId: currentAcpSessionId }, 'dispatching to agent via ACP');
 
     let result: { acpSessionId: string; stopReason?: string; error?: string };
 
@@ -870,7 +873,7 @@ export async function dispatchPrompt(
     }
 
     if (result.error && !cancelled) {
-      console.error('[chatEngine] ACP error:', result.error);
+      logger.error({ sessionId, agentType, error: truncateLogText(result.error) }, 'ACP error');
       const parsedClaudeLimit = agentType === 'claude' ? parseClaudeRateLimitError(result.error) : null;
       const classifiedError = classifyAgentError(result.error, {
         agentLabel: agentType === 'cursor-agent' ? 'Cursor' : 'Agent',
@@ -884,7 +887,7 @@ export async function dispatchPrompt(
           const fresh = await db.getSession(sessionId);
           if (fresh) broadcastSessionListUpsert(fresh.workspaceId, fresh);
         } catch (err) {
-          console.error('[chatEngine] Failed to persist Claude limit reset time:', err);
+          logger.error({ err, sessionId }, 'Failed to persist Claude limit reset time');
         }
       }
       const stderrEvent = JSON.stringify({ type: 'stderr', text: result.error });
@@ -904,11 +907,7 @@ export async function dispatchPrompt(
       broadcast((sub) => sub.onError(classifiedError.message, classifiedError.code));
     }
 
-    console.log('[chatEngine] agent ACP finished', {
-      agentType,
-      stopReason: result.stopReason,
-      eventCount: assistantEvents.length,
-    });
+    logger.info({ agentType, sessionId, stopReason: result.stopReason, eventCount: assistantEvents.length }, 'agent ACP finished');
 
     // Persist ACP session ID together with chat rows so a separate session
     // update cannot race the message write.
@@ -936,11 +935,21 @@ export async function dispatchPrompt(
           : { lastPreviewText: null, lastPreviewRole: null }),
       });
       if (newAcpSessionId) {
-        console.log('[chatEngine] ACP session ID saved:', newAcpSessionId);
+        logger.debug({ sessionId, acpSessionId: newAcpSessionId }, 'ACP session ID saved');
       }
       if (fresh) broadcastSessionListUpsert(fresh.workspaceId, fresh);
     } catch (err) {
-      console.error('[chatEngine] Failed to save messages:', err);
+      logger.error({ err, sessionId }, 'Failed to save messages');
+    }
+
+    if (run.lastUsage) {
+      try {
+        await db.recordSessionUsage(sessionId, session.workspaceId, run.lastUsage);
+        const withUsage = await db.getSession(sessionId);
+        if (withUsage) broadcastSessionListUpsert(withUsage.workspaceId, withUsage);
+      } catch (err) {
+        logger.error({ err, sessionId }, 'Failed to persist session usage');
+      }
     }
 
     try {
@@ -950,7 +959,7 @@ export async function dispatchPrompt(
         tag: `session-${session.id}`
       });
     } catch (err) {
-      console.error('[chatEngine] Failed to send task completion push:', err);
+      logger.error({ err, sessionId }, 'Failed to send task completion push');
     }
 
     cancelPendingApprovals(run);
@@ -1015,14 +1024,13 @@ export function dispatchPromptAndWait(opts: {
 // ------------------------------------------ Claude Auto-Continue Scheduler ------------------------------------------
 
 export async function checkClaudeAutoContinue(): Promise<void> {
-  console.log('[chatEngine] Checking for Claude sessions to auto-continue...');
+  logger.debug('Checking for Claude sessions to auto-continue');
 
   try {
     const users = await db.listUsers();
     const autoContinueUsers = users.filter((user) => user.claudeAutoContinue);
 
     if (autoContinueUsers.length === 0) {
-      console.log('[chatEngine] No users with auto-continue enabled');
       return;
     }
 
@@ -1037,13 +1045,12 @@ export async function checkClaudeAutoContinue(): Promise<void> {
       continueTime.setMinutes(continueTime.getMinutes() + 1);
 
       if (now >= continueTime) {
-        console.log('[chatEngine] Auto-continuing session after Claude limit reset:', session.id);
+        logger.info({ sessionId: session.id }, 'Auto-continuing session after Claude limit reset');
 
         const mockSubscriber: ChatSubscriber = {
-          onStream: (line) => console.log('[chatEngine] Auto-continue stream:', line),
-          onDone: () => console.log('[chatEngine] Auto-continue completed for session:', session.id),
-          onError: (message) =>
-            console.error('[chatEngine] Auto-continue failed for session', session.id, ':', message),
+          onStream: () => {},
+          onDone: () => logger.info({ sessionId: session.id }, 'Auto-continue completed'),
+          onError: (message) => logger.error({ sessionId: session.id, message }, 'Auto-continue failed'),
           onHistory: () => {},
         };
 
@@ -1059,10 +1066,10 @@ export async function checkClaudeAutoContinue(): Promise<void> {
       }
     }
   } catch (err) {
-    console.error('[chatEngine] Error in auto-continue checker:', err);
+    logger.error({ err }, 'Error in auto-continue checker');
   }
 }
 
 const AUTO_CONTINUE_INTERVAL_MS = 60 * 1000;
 setInterval(checkClaudeAutoContinue, AUTO_CONTINUE_INTERVAL_MS);
-checkClaudeAutoContinue().catch(console.error);
+checkClaudeAutoContinue().catch((err) => logger.error({ err }, 'Auto-continue checker failed to start'));

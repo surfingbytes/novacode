@@ -267,11 +267,49 @@ export interface Session {
   /** Denormalized last chat line for sidebars (from API list / WebSocket) */
   lastPreviewText?: string | null;
   lastPreviewRole?: 'user' | 'assistant' | null;
+  /** Latest token/cost snapshot from an ACP `usage_update` (omitted when the agent never reported usage). */
+  lastUsage?: SessionUsageSnapshot | null;
   workspaceId: string;
   createdAt: string;
   updatedAt: string;
   archived: boolean;
   busy?: boolean;
+}
+
+/** Token/cost snapshot reported by an agent (ACP `usage_update`). */
+export interface SessionUsageSnapshot {
+  used: number;
+  size: number;
+  cost?: { amount: number; currency: string };
+  at?: string;
+}
+
+/** One persisted usage sample (typically one per completed agent turn). */
+export interface SessionUsageTurn extends SessionUsageSnapshot {
+  id: string;
+  sessionId: string;
+  createdAt: string;
+}
+
+export interface WorkspaceUsageSummary {
+  turnCount: number;
+  used: number;
+  size: number;
+  costAmount: number | null;
+  costCurrency: string | null;
+}
+
+/** Stored API key metadata. The plaintext token is only returned once, on create. */
+export interface ApiToken {
+  id: string;
+  name: string;
+  tokenPrefix: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+export interface CreatedApiToken extends ApiToken {
+  token: string;
 }
 
 export interface RoleTemplate {

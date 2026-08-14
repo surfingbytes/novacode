@@ -1024,12 +1024,12 @@ onUnmounted((): void => {
             <button
               v-if="bSidePanelToggleVisible"
               type="button"
-              class="text-text-muted hover:text-text-primary transition-colors px-1"
+              class="inline-flex items-center justify-center w-9 h-9 rounded-lg text-text-muted hover:text-text-primary hover:bg-fg/[0.06] transition-colors"
               title="Hide file list"
               aria-label="Hide file list"
               @click="setSidePanelOpen(false)"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M14 9l-3 3 3 3"/></svg>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M14 9l-3 3 3 3"/></svg>
             </button>
           </div>
         </div>
@@ -1471,12 +1471,12 @@ onUnmounted((): void => {
         <button
           v-if="bSidePanelToggleVisible && !bSidePanelOpen"
           type="button"
-          class="flex-shrink-0 h-8 px-2 rounded-lg border border-fg/10 text-text-muted hover:text-text-primary hover:bg-fg/[0.04] transition-colors"
+          class="flex-shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-lg text-text-muted hover:text-text-primary hover:bg-fg/[0.06] transition-colors"
           title="Show file list"
           aria-label="Show file list"
           @click="setSidePanelOpen(true)"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M11 9l3 3-3 3"/></svg>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M11 9l3 3-3 3"/></svg>
         </button>
         <button
           v-if="!bWidePane && (selectedFile || selectedCommit)"

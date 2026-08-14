@@ -11,6 +11,7 @@ import {
   Bug,
   ChevronDown,
   Infinity as InfinityIcon,
+  Lightbulb,
   ListChecks,
   ListTodo,
   MessageSquare,
@@ -778,30 +779,25 @@ defineExpose({
         </div>
         <button
           type="button"
-          class="flex h-5 w-5 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:text-text-primary sm:hidden"
-          :class="!hideThinkingOutput ? 'text-yellow-400 hover:text-yellow-300' : 'text-text-muted'"
+          class="flex h-5 items-center gap-1 rounded px-0.5 text-[11px] transition-colors"
+          :class="
+            !hideThinkingOutput
+              ? 'text-warning hover:text-warning/80'
+              : 'text-text-muted hover:text-text-primary'
+          "
           :aria-pressed="!hideThinkingOutput"
           :aria-label="hideThinkingOutput ? 'Show thinking process' : 'Hide thinking process'"
           :title="hideThinkingOutput ? 'Show thinking process' : 'Hide thinking process'"
           @click="emit('hideThinkingToggle', !hideThinkingOutput)"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M9 18h6" />
-            <path d="M10 22h4" />
-            <path d="M8.5 14.5A6 6 0 1 1 15.5 14.5c-.8.7-1.3 1.6-1.5 2.5h-4c-.2-.9-.7-1.8-1.5-2.5Z" />
-          </svg>
-        </button>
-        <label
-          class="hidden cursor-pointer items-center gap-1.5 text-text-muted hover:text-text-primary sm:flex"
-        >
-          <input
-            type="checkbox"
-            class="h-3 w-3 shrink-0 rounded border-fg/[0.2] text-primary focus:ring-primary/40"
-            :checked="!hideThinkingOutput"
-            @change="emit('hideThinkingToggle', !($event.target as HTMLInputElement).checked)"
+          <Lightbulb
+            :size="14"
+            :stroke-width="1.8"
+            :fill="!hideThinkingOutput ? 'currentColor' : 'none'"
+            aria-hidden="true"
           />
-          <span>Show thinking process</span>
-        </label>
+          <span>Thinking</span>
+        </button>
       </div>
       <span v-if="bSelectedModelMissing" class="w-full text-[10px] text-warning">
         Saved model not found: {{ modelSelection }}

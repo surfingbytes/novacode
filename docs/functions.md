@@ -2,8 +2,8 @@
 
 This document describes what the application **does today** (backend API, dashboard, and supporting services). It reflects the codebase as of the last review, not a roadmap.
 
-**Canonical detail:** prefer the repository root [`functionality.md`](../../functionality.md) for route names, WebSocket paths, and known limitations; update this file when you need a shorter in-tree summary.
-**Refactor convention:** when touching API/Vue code, follow `/data-root/personal/CODING_CONVENTIONS.md` (import groups, no truncated names, `b` prefix for local boolean refs in the dashboard, explicit control-flow braces, and standard Vue script section headers). Examples: `AutomationsView.vue`, `ContextMenu.vue`, and context-menu parents (`bCtxMenuOpen`).
+**Canonical detail:** this file is the in-tree inventory of routes, WebSockets, and known limitations.
+**Refactor convention:** when touching API/Vue code, follow the in-repo style (import groups, no truncated names, `b` prefix for local boolean refs in the dashboard, explicit control-flow braces, and standard Vue script section headers). Examples: `AutomationsView.vue`, `ContextMenu.vue`, and context-menu parents (`bCtxMenuOpen`).
 
 ---
 
@@ -19,8 +19,8 @@ Optional features include **scheduled automations**, **role templates**, and **b
 
 - **First-run setup**: If no user exists, the app exposes a setup flow (`/api/auth/setup`) to create the initial account (username + password).
 - **Login**: Password-based login returns a **JWT** used for API and WebSocket connections.
-- **Account**: Password change, username change, and related account endpoints (see `auth` routes).
-- **REST auth**: Programmatic access uses the same **JWT** as the dashboard (`Authorization: Bearer`). There is **no** separate API-token table in the current schema (removed in migration `20260329120000_remove_api_tokens`).
+- **Account**: Password change, username change, and **API keys** (`GET`/`POST`/`DELETE /api/auth/api-tokens`). Keys are stored as SHA-256 hashes; the plaintext `nck_…` token is returned only on create. Send it as `Authorization: Bearer` (or the WebSocket `bearer.<token>` subprotocol).
+- **REST auth**: JWT **or** an API key. There is no separate unscoped “service account”.
 - **Claude token setup**: `POST /api/agent-auth/claude/login` spawns a `claude setup-token` PTY session; the terminal overlay auto-detects the token and saves it via `POST /api/agent-auth/claude/token`. `GET /api/agent-auth/claude/status` and `DELETE /api/agent-auth/claude/logout` complete the flow.
 - **Mistral Vibe key setup**: Stored via `PUT /api/settings/vibe-api-key`; status checked with `GET /api/settings/vibe-api-key`; cleared with `DELETE /api/settings/vibe-api-key`.
 
@@ -53,6 +53,7 @@ Optional features include **scheduled automations**, **role templates**, and **b
 | Cursor / OpenCode / Codex | ACP `session/new` id from the subprocess runner, reused with `session/load` |
 - **List / get / patch / delete**: Sessions support **rename**, **tags**, **archive**, and can be listed globally or per workspace (including archived where applicable).
 - **Chat history**: Messages are stored in the **`session_messages`** table (not a JSON blob on the session) and stream to the dashboard over the chat WebSocket. Session **list** and **detail** responses omit full history for size; denormalized **`lastPreviewText`** / **`lastPreviewRole`** (`user` \| `assistant`) are updated when chat is persisted so sidebars can show a last-message snippet without loading full history. On **list** and **global WebSocket snapshot**, sessions missing those fields are **backfilled once** from stored messages (then persisted) so older threads still show a preview.
+- **Usage**: ACP `usage_update` events are parsed during a turn and persisted as `session_usage` rows plus denormalized **`lastUsage`** on the session. `GET .../sessions/:id/usage` lists turns; `GET .../workspaces/:id/usage` returns workspace totals.
 - **Real-time**: WebSocket endpoints for **session** streams and **chat**; separate channels for workspace-level session list updates (create/update/delete, “busy” state for active chat runs).
 - **Images**: Upload **base64 images** to a session for multimodal-style prompts (stored under `/config`, with cleanup on session delete).
 
@@ -184,4 +185,5 @@ Optional features include **scheduled automations**, **role templates**, and **b
 
 ## 18. Related documents
 
-- `FEATURES.md` in the repo root lists **ideas and future improvements**; it is **not** a guarantee of current behavior.
+- [`docs/improvement-plan.md`](improvement-plan.md) lists remaining ideas; it is not a guarantee of current behavior.
+- [`api/README.md`](../api/README.md) covers role templates, API keys, and usage endpoints.

@@ -208,6 +208,35 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
+  // GET /api/workspaces/:workspaceId/usage — token/cost totals for the workspace
+  fastifyInstance.get(
+    '/api/workspaces/:workspaceId/usage',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        params: Type.Object({ workspaceId: Type.String() }),
+        response: {
+          200: Type.Object({
+            turnCount: Type.Number(),
+            used: Type.Number(),
+            size: Type.Number(),
+            costAmount: Type.Union([Type.Number(), Type.Null()]),
+            costCurrency: Type.Union([Type.String(), Type.Null()])
+          }),
+          404: Type.Object({ error: Type.String() })
+        }
+      }
+    },
+    async (request, reply) => {
+      const { workspaceId } = request.params;
+      const workspace = await db.getWorkspace(workspaceId);
+      if (!workspace) {
+        return reply.code(404).send({ error: 'Workspace not found' });
+      }
+      return db.summarizeWorkspaceUsage(workspaceId);
+    }
+  );
+
   // POST /api/workspaces — create workspace
   fastifyInstance.post(
     '/api/workspaces',

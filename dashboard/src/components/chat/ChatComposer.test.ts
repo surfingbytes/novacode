@@ -125,4 +125,23 @@ describe('ChatComposer send controls', () => {
       'Allow all'
     );
   });
+
+  it('toggles thinking visibility from the lightbulb control', async () => {
+    const onHideThinkingToggle = vi.fn();
+    const wrapper = mountComposer({
+      hideThinkingOutput: true,
+      onHideThinkingToggle
+    });
+    await nextTick();
+    const button = wrapper.get('button[aria-label="Show thinking process"]');
+    expect(button.text()).toContain('Thinking');
+    expect(button.attributes('aria-pressed')).toBe('false');
+    await button.trigger('click');
+    expect(onHideThinkingToggle).toHaveBeenCalledWith(false);
+
+    await wrapper.setProps({ hideThinkingOutput: false });
+    await nextTick();
+    const onButton = wrapper.get('button[aria-label="Hide thinking process"]');
+    expect(onButton.attributes('aria-pressed')).toBe('true');
+  });
 });

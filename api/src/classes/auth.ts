@@ -6,9 +6,13 @@ import { timingSafeEqual, scryptSync, randomBytes } from 'node:crypto';
 // classes
 import { config } from './config';
 import { db } from './database';
+import { extractWsToken } from './wsToken';
+import { isApiKeyToken } from './apiTokens';
 
 // types
 import type { UserModel } from '../generated/client/models';
+
+export { extractWsToken };
 
 interface JwtPayload {
   username: string;
@@ -36,7 +40,48 @@ export async function verifyToken(token: string): Promise<JwtPayload> {
   return jwt.verify(token, secret) as JwtPayload;
 }
 
-export { extractWsToken } from './wsToken';
+export async function authenticateToken(
+  token: string
+): Promise<{ id: string; username: string } | null> {
+  if (!token) {
+    return null;
+  }
+  if (isApiKeyToken(token)) {
+    const user = await db.getUserByApiToken(token);
+    return user ? { id: user.id, username: user.username } : null;
+  }
+  try {
+    const payload = await verifyToken(token);
+    let user = await db.getUserById(payload.id);
+    if (!user) {
+      user = await db.getUserByUsername(payload.username);
+    }
+    if (!user) {
+      return null;
+    }
+    return { id: user.id, username: user.username };
+  } catch {
+    return null;
+  }
+}
+
+/** Close a WebSocket with 4001 when the bearer subprotocol is missing or invalid. */
+export async function rejectUnauthorizedWebSocket(
+  socket: { close: (code?: number, reason?: string) => void },
+  request: { headers?: Record<string, unknown> }
+): Promise<boolean> {
+  const token = extractWsToken(request);
+  if (!token) {
+    socket.close(4001, 'Missing token');
+    return true;
+  }
+  const user = await authenticateToken(token);
+  if (!user) {
+    socket.close(4001, 'Invalid token');
+    return true;
+  }
+  return false;
+}
 
 // constant-time string comparison to prevent timing attacks
 function safeEqual(a: string, b: string): boolean {
@@ -135,30 +180,19 @@ export function extractBearerToken(request: FastifyRequest): string | null {
   return header.slice(7);
 }
 
-// validates JWT and attaches user info to the request
+// validates JWT or API key and attaches user info to the request
 export async function jwtPreHandler(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const token = extractBearerToken(request);
   if (!token) {
     await reply.code(401).send({ error: 'Missing authorization token' });
     return;
   }
-  try {
-    const payload = await verifyToken(token);
-    // Ensure token still maps to a real user (handles restored DB / migrated users).
-    let user = await db.getUserById(payload.id);
-    if (!user) {
-      user = await db.getUserByUsername(payload.username);
-    }
-    if (!user) {
-      await reply.code(401).send({ error: 'Invalid or expired token' });
-      return;
-    }
-    request.jwtUser = { id: user.id, username: user.username };
-    return;
-  } catch {
+  const user = await authenticateToken(token);
+  if (!user) {
     await reply.code(401).send({ error: 'Invalid or expired token' });
     return;
   }
+  request.jwtUser = { id: user.id, username: user.username };
 }
 
 export function registerAuth(fastify: FastifyInstance): void {

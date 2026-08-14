@@ -509,7 +509,7 @@ function toggleShowHidden(): void {
   void reloadVisibleLists();
 }
 
-function entryContextItems(entry: FileEntry): ContextMenuItem[] {
+function entryContextItems(): ContextMenuItem[] {
   return [
     { key: 'rename', label: 'Rename…' },
     { key: 'delete', label: 'Delete…', danger: true }
@@ -518,7 +518,7 @@ function entryContextItems(entry: FileEntry): ContextMenuItem[] {
 
 function openEntryContextMenu(event: MouseEvent, entry: FileEntry): void {
   ctxTarget.value = entry;
-  ctxMenuItems.value = entryContextItems(entry);
+  ctxMenuItems.value = entryContextItems();
   ctxMenuX.value = event.clientX;
   ctxMenuY.value = event.clientY;
   bCtxMenuOpen.value = true;
@@ -526,7 +526,7 @@ function openEntryContextMenu(event: MouseEvent, entry: FileEntry): void {
 
 const longPress = useLongPress<FileEntry>((entry) => {
   ctxTarget.value = entry;
-  ctxMenuItems.value = entryContextItems(entry);
+  ctxMenuItems.value = entryContextItems();
   ctxMenuX.value = 16;
   ctxMenuY.value = 80;
   bCtxMenuOpen.value = true;
@@ -801,12 +801,12 @@ onUnmounted((): void => {
           <button
             v-if="bSidePanelToggleVisible"
             type="button"
-            class="button is-icon is-transparent h-8!"
+            class="button is-icon is-transparent h-9! w-9!"
             aria-label="Hide file list"
             title="Hide file list"
             @click="setSidePanelOpen(false)"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M14 9l-3 3 3 3"/></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M14 9l-3 3 3 3"/></svg>
           </button>
         </div>
       </div>
@@ -901,12 +901,12 @@ onUnmounted((): void => {
           <button
             v-if="bSidePanelToggleVisible && !bSidePanelOpen"
             type="button"
-            class="button is-icon is-transparent h-8! w-8!"
+            class="button is-icon is-transparent h-9! w-9!"
             aria-label="Show file list"
             title="Show file list"
             @click="setSidePanelOpen(true)"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M11 9l3 3-3 3"/></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M11 9l3 3-3 3"/></svg>
           </button>
           <!-- Back to file list on narrow viewports -->
           <button

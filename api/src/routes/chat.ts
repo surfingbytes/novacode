@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 
 // classes
-import { extractWsToken, verifyToken } from '../classes/auth';
+import { rejectUnauthorizedWebSocket } from '../classes/auth';
 import { db } from '../classes/database';
 import { config } from '../classes/config';
 import { broadcastSessionListUpsert } from '../classes/sessionListBroadcast';
@@ -271,15 +271,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
   }
 
   fastify.get('/api/ws/chat/:id', { websocket: true }, async (socket: WebSocket, request) => {
-    const token = extractWsToken(request);
-    if (!token) {
-      socket.close(4001, 'Missing token');
-      return;
-    }
-    try {
-      await verifyToken(token);
-    } catch {
-      socket.close(4001, 'Invalid token');
+    if (await rejectUnauthorizedWebSocket(socket, request)) {
       return;
     }
 

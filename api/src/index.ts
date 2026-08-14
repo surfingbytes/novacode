@@ -35,15 +35,16 @@ import { pushRoutes } from './routes/push';
 import { searchRoutes } from './routes/search';
 import { ensureVapidKeys } from './classes/push';
 import { ensureSshKey } from './classes/sshKey';
+import { logger } from './classes/logger';
 
 const startTime = Date.now();
 
 process.on('unhandledRejection', (reason) => {
-  console.error('[process] unhandled rejection:', reason);
+  logger.error({ err: reason }, 'unhandled rejection');
 });
 
 process.on('uncaughtException', (err) => {
-  console.error('[process] uncaught exception:', err);
+  logger.error({ err }, 'uncaught exception');
 });
 
 /** Max JSON/raw body size for most routes. Default Fastify limit is 1MiB and returns 413.
@@ -59,7 +60,7 @@ async function main(): Promise<void> {
 
   const trustProxy =
     process.env['TRUST_PROXY'] === '1' || process.env['TRUST_PROXY'] === 'true';
-  const fastify = Fastify({ bodyLimit: BODY_LIMIT_BYTES, trustProxy });
+  const fastify = Fastify({ bodyLimit: BODY_LIMIT_BYTES, trustProxy, logger: { level: logger.level } });
 
   // plugins
   await fastify.register(fastifyHelmet, {
@@ -150,7 +151,7 @@ async function main(): Promise<void> {
   // serve dashboard SPA in production
   const dashboardDist = join(__dirname, '..', '..', 'dashboard-dist');
   if (existsSync(dashboardDist)) {
-    console.log('Dashboard dist found — serving dashboard');
+    logger.info('Dashboard dist found — serving dashboard');
     await fastify.register(fastifyStatic, {
       root: dashboardDist,
       prefix: '/'
@@ -194,6 +195,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error(err);
+  logger.error({ err }, 'Failed to start API');
   process.exit(1);
 });

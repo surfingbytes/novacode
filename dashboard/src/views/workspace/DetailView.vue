@@ -12,14 +12,14 @@ import { useOrchestratorsStore } from '@/stores/orchestrators';
 import { useToastStore } from '@/stores/toasts';
 
 // classes
-import { apiErrorMessage } from '@/classes/api';
+import { apiErrorMessage, workspaceApi } from '@/classes/api';
 
 // composables
 import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
 
 // types
 import { APP_NAV_TOGGLE_KEY } from '@/constants/layout';
-import { MAX_FAVORITE_WORKSPACES } from '@/@types/index';
+import { MAX_FAVORITE_WORKSPACES, type WorkspaceUsageSummary } from '@/@types/index';
 
 // -------------------------------------------------- Store --------------------------------------------------
 
@@ -32,6 +32,7 @@ const toggleAppNav = inject(APP_NAV_TOGGLE_KEY, null);
 // -------------------------------------------------- Refs --------------------------------------------------
 
 const bOrchestratorsLoading = ref(false);
+const workspaceUsage = ref<WorkspaceUsageSummary | null>(null);
 const viewMode = ref<'list' | 'grid'>(
   (localStorage.getItem('sessionsViewMode') as 'list' | 'grid') ?? 'list'
 );
@@ -65,6 +66,7 @@ watch(workspaceId, (id) => {
   ensureData();
   store.setActiveWorkspace(id);
   fetchOrchestrators();
+  void fetchWorkspaceUsage();
 });
 watch(bShowArchived, () => {
   clearSelection();
@@ -111,6 +113,18 @@ const fetchOrchestrators = async (): Promise<void> => {
   }
 };
 
+async function fetchWorkspaceUsage(): Promise<void> {
+  if (!workspaceId.value) {
+    return;
+  }
+  try {
+    const response = await workspaceApi.usage(workspaceId.value);
+    workspaceUsage.value = response.data;
+  } catch {
+    workspaceUsage.value = null;
+  }
+}
+
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 
 onMounted(() => {
@@ -118,6 +132,7 @@ onMounted(() => {
   ensureAgentCapabilitiesLoaded();
   store.setActiveWorkspace(workspaceId.value);
   fetchOrchestrators();
+  void fetchWorkspaceUsage();
 });
 
 onBeforeUnmount(() => {
@@ -187,6 +202,16 @@ onBeforeUnmount(() => {
       </h1>
       <p class="wd-subtitle nc-mono">
         {{ workspace?.path }}
+        <span
+          v-if="workspaceUsage && workspaceUsage.turnCount > 0"
+          class="wd-usage"
+        >
+          · {{ workspaceUsage.used.toLocaleString() }} tokens
+          <template v-if="workspaceUsage.costAmount != null">
+            · ${{ workspaceUsage.costAmount.toFixed(4) }}
+          </template>
+          across {{ workspaceUsage.turnCount }} turn{{ workspaceUsage.turnCount === 1 ? '' : 's' }}
+        </span>
       </p>
     </div>
 
@@ -352,6 +377,10 @@ onBeforeUnmount(() => {
   font-size: 13px;
   color: var(--fg-subtle);
   line-height: 1.5;
+}
+
+.wd-usage {
+  color: var(--fg-muted);
 }
 
 .wd-state {

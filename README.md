@@ -37,14 +37,9 @@ Nova Code was originally created by [Jonah Fintz](https://github.com/JonahFintzD
 
 ## Documentation
 
-- **[Coding conventions](../docs/coding-conventions.md)** — dashboard/API style (imports, Vue script sections, boolean `b` prefix, naming, braces).
-- **[Current functionality](../functionality.md)** — canonical inventory of what is implemented today (API routes, WebSockets, UI, and known limitations). Prefer this over marketing copy when in doubt.
-- **[Feature ideas](../feature-ideas.md)** — consolidated backlog of possible improvements (not a commitment); merges themes from `app/FEATURES.md` and `app/docs/improvement-plan.md`.
-- **[Security audit checklist (2026-03-30)](../docs/security/security-audit-checklist-2026-03-30.md)** — scoped audit map covering auth, authorization, input/output handling, command execution, secrets, dependencies, CI/CD, and monitoring review paths.
-- **[Security findings: auth/session/authz (2026-03-30)](../docs/security/security-findings-authz-2026-03-30.md)** — focused findings for authentication, session handling, authorization, and data access controls.
-- **[Security findings: appsec surfaces (2026-03-30)](../docs/security/security-findings-appsec-2026-03-30.md)** — findings for input/injection, XSS/CORS/header hardening, secrets/config, dependency risk, and deployment supply-chain posture.
-- **[Security audit report (2026-03-30)](../docs/security/security-audit-report-2026-03-30.md)** — consolidated final audit report with executive summary, prioritized findings, risk themes, and phased remediation roadmap.
-- **Repository root** [`README.md`](../README.md) — monorepo layout (`app/` + `web/`) and short status summary.
+- **[Current functionality](docs/functions.md)** — inventory of what is implemented (API routes, WebSockets, UI, known limitations).
+- **[Remaining improvements](docs/improvement-plan.md)** — open backlog (not a commitment).
+- **[API notes](api/README.md)** — role templates, API keys, and usage endpoints.
 
 ---
 
@@ -63,7 +58,8 @@ Nova Code was originally created by [Jonah Fintz](https://github.com/JonahFintzD
 | **File browser** | Browse, create, rename, and delete files and folders inside a workspace. Dotfiles are hidden by default; use the eye toggle to show them. |
 | **Workspace rules** | Markdown rule files injected into every agent prompt for that workspace. |
 | **Role templates** | Reusable instruction snippets for bootstrapping new rule files. |
-| **REST API** | JSON API under `/api` with JWT bearer auth only (no separate API-token or API-key table today; see root `feature-ideas.md` for possible future programmatic keys). |
+| **REST API** | JSON API under `/api`. The dashboard uses a JWT; scripts can use a hashed **API key** from **Account → API keys** (`Authorization: Bearer nck_…`). |
+| **Usage** | Token/cost snapshots from ACP `usage_update` events are stored per turn and shown in chat plus a workspace total. |
 | **Web Push** | Browser notifications when sessions finish; the body previews the last assistant text or tool result (title still names workspace/session). Notifications include a **Reply** action that opens the PWA directly to that session. VAPID keys are created automatically in the config volume. |
 | **Health endpoint** | `GET /api/health` — unauthenticated, ready for Docker `HEALTHCHECK` and uptime monitors. Compose and the image probe this path; Postgres is not published to the host. |
 | **MCP connectivity check** | In **Settings → MCP**, **Test connectivity** dry-runs each registered MCP server (stdio spawn, HTTP GET) on the host before agents use them. |
@@ -276,7 +272,8 @@ VITE_API_URL=http://localhost:3000/api npm run dev:dashboard
 stream-parsing logic used by **both** the API and the dashboard (previously two
 hand-synced copies). It builds to `shared/dist` (dual CJS/ESM) via the root
 `postinstall`; rebuild after editing with `npm run build -w @novacode/shared`.
-Useful root scripts: `npm run build`, `npm run typecheck`, `npm run test`.
+Useful root scripts: `npm run build`, `npm run typecheck`, `npm run test`, `npm run lint:check`.
+GitHub Actions runs test, typecheck, and lint before building the image.
 
 ### Docker (split services)
 
@@ -357,7 +354,7 @@ Pull requests are welcome. For larger changes, please open an issue first to dis
 
 ### Coding conventions
 
-Refactors and new code should follow the shared conventions in `/data-root/personal/CODING_CONVENTIONS.md` (import grouping, Vue section layout, boolean naming, and explicit control-flow braces).
+Refactors and new code should follow the shared conventions used in this repo (import grouping, Vue section layout, boolean naming with a `b` prefix, and explicit control-flow braces).
 Recent UI refactors standardize modal and menu scripts to the section-header layout (`Props`, `Emits`, `Store`, `Constants`, `Refs`, `Computed`, `Watchers`, `Methods`, `Lifecycle` as applicable), use the `b` prefix on local boolean refs in views such as **Automations** (`bLoading`, `bShowCreateForm`, …) and context-menu visibility (`bCtxMenuOpen`), merge duplicate `@/classes/api` imports where obvious, and replace inline control-flow one-liners with explicit `{}` blocks in script logic.
 The stream-preview and orchestrator-payload logic now lives in `shared/` (`@novacode/shared`) as the single source of truth for both API and dashboard; the old per-app files are thin re-export shims. New shared behavior should be added there (with tests in `shared/src/*.test.ts`), not in per-app copies.
 The dashboard chat surface is decomposed: stream→display parsing is pure logic in `dashboard/src/utils/chatDisplayItems.ts` (regression tests alongside), connection/state in `src/composables/`, and presentation in `src/components/chat/`. Reusable UI primitives live in `src/components/ui/` — use them for new UI instead of hand-rolling buttons/toggles/modals (`BaseModal` + `ModalHeader` for dialogs).

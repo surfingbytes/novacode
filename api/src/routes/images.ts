@@ -5,7 +5,7 @@ import { join, extname, basename } from 'node:path';
 import { existsSync } from 'node:fs';
 
 // classes
-import { jwtPreHandler, verifyToken } from '../classes/auth';
+import { jwtPreHandler, authenticateToken } from '../classes/auth';
 import { db } from '../classes/database';
 import { config } from '../classes/config';
 
@@ -174,9 +174,8 @@ export async function imageRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const query = request.query as Record<string, string>;
       const token = query['token'] ?? (request.headers['authorization'] ?? '').replace(/^Bearer /, '');
-      try {
-        await verifyToken(token);
-      } catch {
+      const user = await authenticateToken(token);
+      if (!user) {
         return reply.status(401).send({ error: 'Unauthorized' });
       }
       const { sessionId, filename } = request.params as {

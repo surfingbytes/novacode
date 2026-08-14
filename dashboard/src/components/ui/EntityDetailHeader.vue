@@ -155,12 +155,12 @@ onUnmounted(() => {
         <button
           v-if="bShowSidebarToggle"
           type="button"
-          class="button is-transparent is-icon mr-2 shrink-0"
-          title="Sessions list"
-          aria-label="Sessions list"
+          class="mr-2 inline-flex shrink-0 items-center justify-center w-9 h-9 rounded-lg text-text-muted hover:text-text-primary hover:bg-fg/[0.06] transition-colors"
+          title="Show session list"
+          aria-label="Show session list"
           @click="emit('toggleSidebar')"
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M11 9l3 3-3 3"/></svg>
         </button>
         <div class="flex flex-col min-w-0">
           <h1 class="text-base font-semibold text-text-primary truncate">

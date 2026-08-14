@@ -26,6 +26,7 @@ import type {
 import { config } from './config';
 import { applySessionMode, applySessionModel, applySessionConfig, findConfigOptionByCategory } from './acpSessionHelpers';
 import type { AcpSessionResponse } from './acpSessionHelpers';
+import { logger, truncateLogText } from './logger';
 
 export type AcpEventHandler = (line: string) => void;
 export type AcpPermissionHandler = (
@@ -754,10 +755,7 @@ function createPhaseLogger(logTag: string, novaSessionId: string) {
   let last = Date.now();
   return (phase: string): void => {
     const now = Date.now();
-    console.log(`[${logTag}] ${phase}`, {
-      novaSessionId,
-      elapsedMs: now - last,
-    });
+    logger.debug({ logTag, novaSessionId, phase, elapsedMs: now - last }, 'ACP phase');
     last = now;
   };
 }
@@ -783,7 +781,9 @@ export async function runAcpSubprocessPrompt(
 
   proc.stderr?.on('data', (chunk: Buffer) => {
     const text = chunk.toString().trim();
-    if (text) console.error(`[${logTag}] stderr:`, text);
+    if (text) {
+      logger.debug({ logTag, novaSessionId, stderr: truncateLogText(text) }, 'ACP subprocess stderr');
+    }
   });
 
   let ctxRef: ClientContext | null = null;
@@ -809,10 +809,7 @@ export async function runAcpSubprocessPrompt(
     clearPromptIdleTimer();
     promptIdleTimer = setTimeout(() => {
       bPromptIdleTimedOut = true;
-      console.warn(`[${logTag}] prompt idle timeout`, {
-        novaSessionId,
-        timeoutMs: PROMPT_IDLE_TIMEOUT_MS,
-      });
+      logger.warn({ logTag, novaSessionId, timeoutMs: PROMPT_IDLE_TIMEOUT_MS }, 'prompt idle timeout');
       killProc();
     }, PROMPT_IDLE_TIMEOUT_MS);
   };
@@ -915,7 +912,7 @@ export async function runAcpSubprocessPrompt(
           resolvedSessionId = acpSessionId;
           phase('session:load:done');
         } catch (err) {
-          console.warn(`[${logTag}] loadSession failed, starting fresh session:`, err);
+          logger.warn({ logTag, novaSessionId, err }, 'loadSession failed, starting fresh session');
           // Surface the silent context reset to the user (persisted via onEvent).
           handleEvent(sessionResetNoticeEventLine());
           activeHandlers.delete(acpSessionId);
@@ -946,18 +943,18 @@ export async function runAcpSubprocessPrompt(
         resolvedModelId = modelOption.currentValue;
       }
 
-      console.log(`[${logTag}] session config discovered`, {
-        requestedMode: params.mode,
-        requestedModel: params.model,
-        currentModeId: sessionResponse.modes?.currentModeId,
-        availableModes: sessionResponse.modes?.availableModes?.map((m) => m.id),
-        configOptions: (sessionResponse.configOptions ?? []).map((o) => ({
-          id: o.id,
-          category: o.category,
-          type: o.type,
-          currentValue: 'currentValue' in o ? o.currentValue : undefined,
-        })),
-      });
+      logger.debug(
+        {
+          logTag,
+          novaSessionId,
+          requestedMode: params.mode,
+          requestedModel: params.model,
+          currentModeId: sessionResponse.modes?.currentModeId,
+          availableModeCount: sessionResponse.modes?.availableModes?.length ?? 0,
+          configOptionCount: sessionResponse.configOptions?.length ?? 0
+        },
+        'session config discovered'
+      );
 
       phase('session:config:start');
       await applySessionMode(agent, resolvedSessionId, params.mode, sessionResponse);
@@ -1083,17 +1080,17 @@ export async function closeAcpSubprocessSession(params: CloseAcpSessionParams): 
       try {
         await agent.closeSession({ sessionId: acpSessionId });
       } catch (err) {
-        console.warn(`[${logTag}] closeSession failed, trying deleteSession:`, err);
+        logger.debug({ logTag, err }, 'closeSession failed, trying deleteSession');
         try {
           await agent.deleteSession({ sessionId: acpSessionId });
         } catch (deleteErr) {
-          console.warn(`[${logTag}] deleteSession failed:`, deleteErr);
+          logger.debug({ logTag, err: deleteErr }, 'deleteSession failed');
         }
       }
       killProc();
     });
   } catch (err) {
-    console.warn(`[${logTag}] closeAcpSubprocessSession failed:`, err);
+    logger.warn({ logTag, err }, 'closeAcpSubprocessSession failed');
   } finally {
     killProc();
   }

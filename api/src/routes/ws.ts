@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 
 // classes
-import { extractWsToken, verifyToken } from '../classes/auth';
+import { rejectUnauthorizedWebSocket } from '../classes/auth';
 import { sessionManager } from '../classes/sessionManager';
 import { db } from '../classes/database';
 import { normalizeSessionForApi } from '../classes/sessionNormalize';
@@ -88,15 +88,7 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.get('/api/ws/session/:id', { websocket: true }, async (socket: WebSocket, request) => {
     wsClients.add(socket);
-    const token = extractWsToken(request);
-    if (!token) {
-      socket.close(4001, 'Missing token');
-      return;
-    }
-    try {
-      await verifyToken(token);
-    } catch {
-      socket.close(4001, 'Invalid token');
+    if (await rejectUnauthorizedWebSocket(socket, request)) {
       return;
     }
 
@@ -161,15 +153,7 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
     { websocket: true },
     async (socket: WebSocket, request) => {
       wsClients.add(socket);
-      const token = extractWsToken(request);
-      if (!token) {
-        socket.close(4001, 'Missing token');
-        return;
-      }
-      try {
-        await verifyToken(token);
-      } catch {
-        socket.close(4001, 'Invalid token');
+      if (await rejectUnauthorizedWebSocket(socket, request)) {
         return;
       }
 
@@ -243,15 +227,7 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
     async (socket: WebSocket, request) => {
       wsClients.add(socket);
       globalSessionClients.add(socket);
-      const token = extractWsToken(request);
-      if (!token) {
-        socket.close(4001, 'Missing token');
-        return;
-      }
-      try {
-        await verifyToken(token);
-      } catch {
-        socket.close(4001, 'Invalid token');
+      if (await rejectUnauthorizedWebSocket(socket, request)) {
         return;
       }
 
@@ -283,15 +259,7 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
     { websocket: true },
     async (socket: WebSocket, request) => {
       wsClients.add(socket);
-      const token = extractWsToken(request);
-      if (!token) {
-        socket.close(4001, 'Missing token');
-        return;
-      }
-      try {
-        await verifyToken(token);
-      } catch {
-        socket.close(4001, 'Invalid token');
+      if (await rejectUnauthorizedWebSocket(socket, request)) {
         return;
       }
 

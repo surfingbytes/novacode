@@ -6,6 +6,8 @@ import type {
   SessionConfigSelectOption,
 } from '@agentclientprotocol/sdk';
 
+import { logger } from './logger';
+
 export type AcpSessionResponse = NewSessionResponse | LoadSessionResponse;
 
 /** Minimal client surface for applying session mode/model config. */
@@ -88,7 +90,7 @@ export async function applySessionMode(
       );
       return;
     } catch (err) {
-      console.warn('[acpSessionHelpers] setSessionMode failed (non-fatal):', err);
+      logger.warn({ err, sessionId, mode: trimmed }, 'setSessionMode failed (non-fatal)');
     }
   }
 
@@ -108,7 +110,7 @@ export async function applySessionMode(
       })
     );
   } catch (err) {
-    console.warn('[acpSessionHelpers] setSessionConfigOption(mode) failed (non-fatal):', err);
+    logger.warn({ err, sessionId, mode: trimmed }, 'setSessionConfigOption(mode) failed (non-fatal)');
   }
 }
 
@@ -128,9 +130,7 @@ export async function applySessionModel(
 
   const modelOption = findConfigOptionByCategory(sessionResponse.configOptions, 'model');
   if (!modelOption || !conn.setSessionConfigOption) {
-    console.warn('[acpSessionHelpers] no model config option available; cannot apply model', {
-      requested: trimmed,
-    });
+    logger.debug({ requested: trimmed }, 'no model config option available; cannot apply model');
     return;
   }
 
@@ -145,10 +145,7 @@ export async function applySessionModel(
   }
   if (!target && values.length === 0) target = trimmed;
   if (!target) {
-    console.warn('[acpSessionHelpers] requested model not offered by agent; leaving default', {
-      requested: trimmed,
-      available: values,
-    });
+    logger.debug({ requested: trimmed, availableCount: values.length }, 'requested model not offered by agent; leaving default');
     return;
   }
 
@@ -167,9 +164,9 @@ export async function applySessionModel(
         value: target,
       })
     );
-    console.log('[acpSessionHelpers] applied model', { configId: modelOption.id, value: target });
+    logger.debug({ configId: modelOption.id, value: target }, 'applied model');
   } catch (err) {
-    console.warn('[acpSessionHelpers] setSessionConfigOption(model) failed (non-fatal):', err);
+    logger.warn({ err, sessionId, configId: modelOption.id, value: target }, 'setSessionConfigOption(model) failed (non-fatal)');
   }
 }
 
@@ -199,7 +196,7 @@ export async function applySessionConfig(
         conn.setSessionConfigOption({ sessionId, configId, value: trimmed })
       );
     } catch (err) {
-      console.warn(`[acpSessionHelpers] setSessionConfigOption(${configId}) failed (non-fatal):`, err);
+      logger.warn({ err, sessionId, configId }, 'setSessionConfigOption failed (non-fatal)');
     }
   }
 }

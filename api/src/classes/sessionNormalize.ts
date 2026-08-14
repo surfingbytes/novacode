@@ -1,7 +1,16 @@
+import { parseSessionUsageJson } from './sessionUsage';
+import type { SessionUsageSnapshot } from '../@types/index';
+
 /** API/WebSocket: session.tags stored as JSON array; expose as string[] | null. */
-export function normalizeSessionForApi<T extends { tags?: unknown; sessionConfigJson?: string | null }>(
+export function normalizeSessionForApi<
+  T extends { tags?: unknown; sessionConfigJson?: string | null; lastUsageJson?: string | null }
+>(
   s: T
-): Omit<T, 'tags' | 'sessionConfigJson'> & { tags: string[] | null; sessionConfigJson: Record<string, string> | null } {
+): Omit<T, 'tags' | 'sessionConfigJson' | 'lastUsageJson'> & {
+  tags: string[] | null;
+  sessionConfigJson: Record<string, string> | null;
+  lastUsage: SessionUsageSnapshot | null;
+} {
   const raw = s.tags;
   let tags: string[] | null = null;
   if (Array.isArray(raw)) {
@@ -36,9 +45,14 @@ export function normalizeSessionForApi<T extends { tags?: unknown; sessionConfig
     }
   }
 
-  const { sessionConfigJson: _omit, ...rest } = s;
-  return { ...rest, tags, sessionConfigJson } as Omit<T, 'tags' | 'sessionConfigJson'> & {
+  const lastUsage = parseSessionUsageJson(s.lastUsageJson);
+  const { sessionConfigJson: _omitConfig, lastUsageJson: _omitUsage, ...rest } = s;
+  return { ...rest, tags, sessionConfigJson, lastUsage } as Omit<
+    T,
+    'tags' | 'sessionConfigJson' | 'lastUsageJson'
+  > & {
     tags: string[] | null;
     sessionConfigJson: Record<string, string> | null;
+    lastUsage: SessionUsageSnapshot | null;
   };
 }

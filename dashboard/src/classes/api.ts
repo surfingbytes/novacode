@@ -28,7 +28,11 @@ import type {
   AgentConfigOption,
   LinkedPlanContext,
   OpenCodeProvider,
-  SaveOpenCodeProviderPayload
+  SaveOpenCodeProviderPayload,
+  ApiToken,
+  CreatedApiToken,
+  SessionUsageTurn,
+  WorkspaceUsageSummary
 } from '@/@types/index';
 
 // ---------------------------------- HTTP ----------------------------------
@@ -118,7 +122,14 @@ export const authApi = {
     }),
 
   changeUsername: (newUsername: string): ReturnType<typeof http.put<{ token: string }>> =>
-    http.put<{ token: string }>('/auth/change-username', { newUsername })
+    http.put<{ token: string }>('/auth/change-username', { newUsername }),
+
+  listApiTokens: (): ReturnType<typeof http.get<ApiToken[]>> => http.get<ApiToken[]>('/auth/api-tokens'),
+
+  createApiToken: (name: string): ReturnType<typeof http.post<CreatedApiToken>> =>
+    http.post<CreatedApiToken>('/auth/api-tokens', { name }),
+
+  deleteApiToken: (id: string): ReturnType<typeof http.delete> => http.delete(`/auth/api-tokens/${id}`)
 };
 
 // ---------------------------------- Workspaces ----------------------------------
@@ -159,6 +170,9 @@ export const workspaceApi = {
 
   listAll: (): ReturnType<typeof http.get<Workspace[]>> =>
     http.get<Workspace[]>('/workspaces', { params: { includeArchived: 'true' } }),
+
+  usage: (id: string): ReturnType<typeof http.get<WorkspaceUsageSummary>> =>
+    http.get<WorkspaceUsageSummary>(`/workspaces/${id}/usage`),
 
   remove: (id: string): ReturnType<typeof http.delete> => http.delete(`/workspaces/${id}`)
 };
@@ -590,6 +604,14 @@ export const sessionsApi = {
       // instead of leaving the view silently fetching forever.
       timeout: 20000
     }),
+
+  listUsage: (
+    workspaceId: string,
+    sessionId: string
+  ): ReturnType<typeof http.get<{ turns: SessionUsageTurn[] }>> =>
+    http.get<{ turns: SessionUsageTurn[] }>(
+      `/workspaces/${workspaceId}/sessions/${sessionId}/usage`
+    ),
 
   create: (
     workspaceId: string,

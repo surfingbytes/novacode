@@ -16,6 +16,7 @@ import {
 } from '../classes/auth';
 import { db } from '../classes/database';
 import { clearVibeApiKey, config } from '../classes/config';
+import { generateApiToken, MAX_API_TOKENS_PER_USER } from '../classes/apiTokens';
 
 export async function authRoutes(fastify: FastifyInstance): Promise<void> {
   const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
@@ -171,6 +172,98 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       }
       const token = await signToken(user.username, user.id);
       return { token };
+    }
+  );
+
+  const ApiTokenSchema = Type.Object({
+    id: Type.String(),
+    name: Type.String(),
+    tokenPrefix: Type.String(),
+    createdAt: Type.String(),
+    lastUsedAt: Type.Union([Type.String(), Type.Null()])
+  });
+
+  // GET /api/auth/api-tokens — list hashed API keys (secret never returned)
+  fastifyInstance.get(
+    '/api/auth/api-tokens',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        response: {
+          200: Type.Array(ApiTokenSchema)
+        }
+      }
+    },
+    async (request) => {
+      return db.listApiTokens(request.jwtUser!.id);
+    }
+  );
+
+  // POST /api/auth/api-tokens — create a key; plaintext token is returned once
+  fastifyInstance.post(
+    '/api/auth/api-tokens',
+    {
+      preHandler: jwtPreHandler,
+      config: {
+        rateLimit: { max: 10, timeWindow: '1 minute' }
+      },
+      schema: {
+        body: Type.Object({
+          name: Type.String({ minLength: 1, maxLength: 64 })
+        }),
+        response: {
+          201: Type.Intersect([ApiTokenSchema, Type.Object({ token: Type.String() })]),
+          400: Type.Object({ error: Type.String() })
+        }
+      }
+    },
+    async (request, reply) => {
+      const name = request.body.name.trim();
+      if (!name) {
+        return reply.code(400).send({ error: 'Name is required' });
+      }
+      const count = await db.countApiTokens(request.jwtUser!.id);
+      if (count >= MAX_API_TOKENS_PER_USER) {
+        return reply.code(400).send({
+          error: `At most ${MAX_API_TOKENS_PER_USER} API keys are allowed`
+        });
+      }
+      const generated = generateApiToken();
+      try {
+        const created = await db.createApiToken({
+          userId: request.jwtUser!.id,
+          name,
+          tokenHash: generated.tokenHash,
+          tokenPrefix: generated.tokenPrefix
+        });
+        return reply.code(201).send({ ...created, token: generated.token });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to create API key';
+        return reply.code(400).send({ error: message });
+      }
+    }
+  );
+
+  // DELETE /api/auth/api-tokens/:id — revoke
+  fastifyInstance.delete(
+    '/api/auth/api-tokens/:id',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        params: Type.Object({ id: Type.String() }),
+        response: {
+          204: Type.Null(),
+          404: Type.Object({ error: Type.String() })
+        }
+      }
+    },
+    async (request, reply) => {
+      const { id } = request.params;
+      const deleted = await db.deleteApiToken(request.jwtUser!.id, id);
+      if (!deleted) {
+        return reply.code(404).send({ error: 'API key not found' });
+      }
+      return reply.code(204).send(null);
     }
   );
 }

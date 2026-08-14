@@ -1,46 +1,32 @@
 # API service
 
-## Role template endpoints
+JSON under `/api`. Dashboard sessions use a JWT (`Authorization: Bearer`). Scripts can use a hashed **API key** from **Account → API keys** the same way.
 
-The API exposes a small set of endpoints for managing reusable role templates that can be applied when creating new Cursor projects/sessions:
+## Role templates
 
-- `GET /api/role-templates` – List all global role templates.
-- `POST /api/role-templates` – Create a new role template.
-- `GET /api/role-templates/:templateId` – Fetch a single template by id.
-- `PUT /api/role-templates/:templateId` – Update an existing template.
-- `DELETE /api/role-templates/:templateId` – Delete a template.
+Reusable Markdown snippets for new workspace rule files.
 
-Each role template has:
+- `GET /api/role-templates` — list
+- `POST /api/role-templates` — create `{ name, description?, content }`
+- `GET /api/role-templates/:templateId` — fetch one
+- `PUT /api/role-templates/:templateId` — update
+- `DELETE /api/role-templates/:templateId` — delete
 
-- `id` – Server-assigned identifier.
-- `name` – Short label for the template.
-- `description` – Optional longer description.
-- `rolePrompt` – System/role instructions text to send to Cursor.
-- `defaultCursorRules` – Optional default rule content (text or JSON-encoded array of rule strings) that can be applied when creating a new project.
-- `category` – Optional free-form category label.
-- `tags` – Optional list of tags for search and filtering.
-- `createdAt` / `updatedAt` – ISO timestamps.
+Each template has `id`, `name`, optional `description`, Markdown `content`, and ISO `createdAt` / `updatedAt`.
 
-## Using templates when creating a project/session
+In the **Rules** UI, pick a template when creating a new workspace rule file so shared boilerplate is not retyped. Templates are **not** copied onto sessions.
 
-When creating a new project view/session under a workspace, the API accepts an optional `roleTemplateId`:
+## API keys
 
-- `POST /api/workspaces/:workspaceId/sessions`
+- `GET /api/auth/api-tokens` — list metadata (prefix, last used). The secret is never returned again.
+- `POST /api/auth/api-tokens` — `{ name }` → metadata plus the plaintext `token` **once**.
+- `DELETE /api/auth/api-tokens/:id` — revoke
 
-Request body:
+Send `Authorization: Bearer nck_…` on REST calls (and as the WebSocket `bearer.<token>` subprotocol). Keys are stored as SHA-256 hashes.
 
-```json
-{
-  "name": "My new project",
-  "categoryId": "optional-category-id",
-  "category": "optional-category-name",
-  "roleTemplateId": "optional-role-template-id"
-}
-```
+## Usage
 
-If `roleTemplateId` is provided:
+Agents that emit ACP `usage_update` events persist a snapshot per turn.
 
-- The server looks up the template.
-- The template’s `rolePrompt` and `defaultCursorRules` are copied into the new session as a snapshot.
-- Existing sessions are **not** affected by later changes to the template.
-
+- `GET /api/workspaces/:workspaceId/sessions/:sessionId/usage` — `{ turns: SessionUsageTurn[] }`
+- `GET /api/workspaces/:workspaceId/usage` — workspace totals

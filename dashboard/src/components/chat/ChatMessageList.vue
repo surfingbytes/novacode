@@ -27,7 +27,8 @@ import type {
   ChatApprovalRequest,
   ChatMessage,
   ChatQuestionAnswer,
-  ChatQuestionRequest
+  ChatQuestionRequest,
+  SessionUsageTurn
 } from '@/@types/index';
 
 // -------------------------------------------------- Props --------------------------------------------------
@@ -50,6 +51,7 @@ const props = withDefaults(
     pendingQuestions: ChatQuestionRequest[];
     streamingThinkingText: string;
     streamingUsage: StreamUsage | null;
+    usageTurns?: SessionUsageTurn[];
     bIsStreaming: boolean;
     bHasMore: boolean;
     bLoadingMore: boolean;
@@ -64,7 +66,8 @@ const props = withDefaults(
   {
     agentType: null,
     userName: null,
-    viewportHeight: null
+    viewportHeight: null,
+    usageTurns: () => []
   }
 );
 
@@ -88,10 +91,16 @@ const emit = defineEmits<{
 // -------------------------------------------------- Refs --------------------------------------------------
 
 const messagesEl = ref<HTMLElement | null>(null);
+const messagesContentEl = ref<HTMLElement | null>(null);
 const messagesScrollAnchor = ref<HTMLElement | null>(null);
 const bShowScrollToBottom = ref(false);
 /** True while the user is parked at the bottom (updated from real scroll events). */
 const bPinnedToBottom = ref(true);
+/** Ignore layout/programmatic scroll events so growing content cannot unpin follow. */
+let bIgnoreScrollEvents = false;
+let ignoreScrollUntil = 0;
+let contentResizeObserver: ResizeObserver | null = null;
+let bRestoringHistoryScroll = false;
 
 // -------------------------------------------------- Computed --------------------------------------------------
 
@@ -176,6 +185,21 @@ function isScrolledToBottom(): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
 }
 
+function beginIgnoreScrollEvents(): void {
+  bIgnoreScrollEvents = true;
+  ignoreScrollUntil = performance.now() + 150;
+}
+
+function endIgnoreScrollEvents(): void {
+  requestAnimationFrame(() => {
+    bIgnoreScrollEvents = false;
+  });
+}
+
+function shouldIgnoreScrollEvent(): boolean {
+  return bIgnoreScrollEvents || performance.now() < ignoreScrollUntil;
+}
+
 /** Wait for layout/paint so scrollHeight and the thinking block height are final. */
 async function waitForLayout(): Promise<void> {
   await nextTick();
@@ -187,29 +211,47 @@ async function waitForLayout(): Promise<void> {
 function applyScrollToBottom(smooth = false): void {
   const el = messagesEl.value;
   if (!el) return;
+  beginIgnoreScrollEvents();
   bShowScrollToBottom.value = false;
   const anchor = messagesScrollAnchor.value;
   if (anchor) {
     anchor.scrollIntoView({ block: 'end', behavior: smooth ? 'smooth' : 'auto' });
+  } else {
+    el.scrollTop = el.scrollHeight;
+  }
+  endIgnoreScrollEvents();
+}
+
+function followPinnedToBottom(): void {
+  if (!bPinnedToBottom.value || bRestoringHistoryScroll) {
     return;
   }
-  el.scrollTop = el.scrollHeight;
+  applyScrollToBottom();
 }
 
 async function scrollToBottom(smooth = false): Promise<void> {
+  beginIgnoreScrollEvents();
   await waitForLayout();
   applyScrollToBottom(smooth);
 }
 
 async function scrollToBottomIfPinned(): Promise<void> {
   if (!bPinnedToBottom.value) return;
+  // Hold pin through the layout wait: adding the 240px thinking box (or a tool
+  // card) fires a scroll event that looks like the user moved away, because the
+  // near-bottom threshold is 80px.
+  beginIgnoreScrollEvents();
   await waitForLayout();
-  // The user may have scrolled away while we waited for layout — don't yank them back.
-  if (!bPinnedToBottom.value) return;
+  if (!bPinnedToBottom.value) {
+    return;
+  }
   applyScrollToBottom();
 }
 
 function onMessagesScroll(): void {
+  if (shouldIgnoreScrollEvent()) {
+    return;
+  }
   bPinnedToBottom.value = isScrolledToBottom();
   bShowScrollToBottom.value = !bPinnedToBottom.value;
   if (!props.bHasMore || props.bLoadingMore) return;
@@ -222,10 +264,16 @@ function onMessagesScroll(): void {
 async function notifyHistoryPage(): Promise<void> {
   const container = messagesEl.value;
   const oldScrollHeight = container?.scrollHeight ?? 0;
+  bRestoringHistoryScroll = true;
+  beginIgnoreScrollEvents();
   await nextTick();
   if (container) {
     container.scrollTop += container.scrollHeight - oldScrollHeight;
   }
+  requestAnimationFrame(() => {
+    bRestoringHistoryScroll = false;
+    endIgnoreScrollEvents();
+  });
 }
 
 function forceInitialScrollToBottom(): void {
@@ -238,20 +286,23 @@ function forceInitialScrollToBottom(): void {
 
 // -------------------------------------------------- Watchers --------------------------------------------------
 
-// Follow new content while pinned to the bottom. The thinking box has a fixed
-// height, so its text streaming by can't move the chat — only the box
-// appearing/disappearing can, so watch its visibility rather than text length.
+// Follow new content while pinned. Length-only is not enough: a tool card can
+// grow in place (status/output) without a new item. ResizeObserver covers the
+// rest (thinking box 240px mount/unmount, images, mermaid).
 watch(
   () => [
     props.displayMessages.length,
     props.streamingDisplayItems.length,
+    props.streamingDisplayItems.map((item) => item.status ?? item.kind).join(','),
     props.pendingApprovals.length,
     props.pendingQuestions.length,
-    props.streamingThinkingText.trim().length > 0 && !props.hideThinkingOutput
+    props.streamingThinkingText.trim().length > 0 && !props.hideThinkingOutput,
+    Boolean(props.chatError)
   ],
   () => {
     void scrollToBottomIfPinned();
-  }
+  },
+  { flush: 'post' }
 );
 
 // First history load → jump to the latest message.
@@ -469,11 +520,19 @@ function onWindowFindKeydown(event: KeyboardEvent): void {
 onMounted(() => {
   window.addEventListener('keydown', onWindowFindKeydown);
   window.addEventListener(FIND_EVENT, openFind as EventListener);
+  if (typeof ResizeObserver !== 'undefined' && messagesContentEl.value) {
+    contentResizeObserver = new ResizeObserver(() => {
+      followPinnedToBottom();
+    });
+    contentResizeObserver.observe(messagesContentEl.value);
+  }
 });
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onWindowFindKeydown);
   window.removeEventListener(FIND_EVENT, openFind as EventListener);
+  contentResizeObserver?.disconnect();
+  contentResizeObserver = null;
 });
 
 defineExpose({
@@ -542,9 +601,10 @@ defineExpose({
     <div class="relative flex-1 min-h-0">
     <div
       ref="messagesEl"
-      class="h-full overflow-y-auto px-4 md:px-6 py-4 space-y-4"
+      class="h-full overflow-y-auto px-4 md:px-6 py-4 [overflow-anchor:none]"
       @scroll="onMessagesScroll"
     >
+      <div ref="messagesContentEl" class="min-h-full space-y-4">
       <!-- Chat skeleton -->
       <template v-if="bLoading || (!bHistoryLoaded && !chatError)">
         <div class="space-y-4">
@@ -823,15 +883,28 @@ defineExpose({
             </div>
 
             <!-- Token usage meter -->
-            <div v-if="streamingUsage" class="flex justify-start">
-              <div class="flex items-center gap-1.5 px-2 py-1 text-[11px] text-text-muted/50 font-mono">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none shrink-0" aria-hidden="true"><path d="M21 12a9 9 0 11-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5M12 12l-3-3"/></svg>
-                {{ streamingUsage.used.toLocaleString() }} /
-                {{ streamingUsage.size.toLocaleString() }}
-                <template v-if="streamingUsage.cost">
-                  <span class="text-text-muted/30">·</span>
-                  ${{ streamingUsage.cost.amount.toFixed(4) }}
-                </template>
+            <div v-if="streamingUsage || usageTurns.length > 0" class="flex justify-start">
+              <div class="flex flex-col gap-1 px-2 py-1 text-[11px] text-text-muted/50 font-mono">
+                <div v-if="streamingUsage" class="flex items-center gap-1.5">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none shrink-0" aria-hidden="true"><path d="M21 12a9 9 0 11-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5M12 12l-3-3"/></svg>
+                  {{ streamingUsage.used.toLocaleString() }} /
+                  {{ streamingUsage.size.toLocaleString() }}
+                  <template v-if="streamingUsage.cost">
+                    <span class="text-text-muted/30">·</span>
+                    ${{ streamingUsage.cost.amount.toFixed(4) }}
+                    <span v-if="streamingUsage.cost.currency && streamingUsage.cost.currency !== 'USD'" class="text-text-muted/30">{{ streamingUsage.cost.currency }}</span>
+                  </template>
+                </div>
+                <details v-if="usageTurns.length > 1" class="text-text-muted/40">
+                  <summary class="cursor-pointer select-none">{{ usageTurns.length }} turns</summary>
+                  <ul class="mt-1 space-y-0.5 pl-4">
+                    <li v-for="turn in usageTurns" :key="turn.id">
+                      {{ turn.used.toLocaleString() }} / {{ turn.size.toLocaleString() }}
+                      <template v-if="turn.cost"> · ${{ turn.cost.amount.toFixed(4) }}</template>
+                      <span class="text-text-muted/30"> · {{ relativeTimeShort(turn.createdAt) }}</span>
+                    </li>
+                  </ul>
+                </details>
               </div>
             </div>
 
@@ -888,6 +961,7 @@ defineExpose({
         <!-- Pinned-to-bottom anchor -->
         <div ref="messagesScrollAnchor" class="h-px w-full shrink-0" aria-hidden="true" />
       </template>
+      </div>
     </div>
 
     <Transition
