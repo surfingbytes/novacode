@@ -401,8 +401,6 @@ onMounted((): void => {
       </button>
     </div>
 
-    <RecentlyActiveSessions />
-
     <!-- Loading -->
     <Transition name="fade" mode="out-in">
       <div v-if="store.bIsLoading" key="loading" class="ws-state">
@@ -561,6 +559,8 @@ onMounted((): void => {
         </div>
       </div>
     </Transition>
+
+    <RecentlyActiveSessions />
   </PageShell>
 
   <WorkspaceEditModal

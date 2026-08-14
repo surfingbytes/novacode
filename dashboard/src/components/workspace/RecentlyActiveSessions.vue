@@ -68,7 +68,7 @@ function workspaceName(workspaceId: string): string {
 
 <style scoped>
 .recently-active {
-  margin: 28px 0 8px;
+  margin: 32px 0 8px;
 }
 
 .recently-active__header {
