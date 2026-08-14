@@ -162,19 +162,33 @@ function onRepoCommitMessageInput(event: Event): void {
         </div>
         <div class="flex items-center justify-between gap-2">
           <div class="flex items-center gap-2 min-w-0">
-            <div class="button-select-small h-7! p-0.5!">
+            <div
+              class="inline-flex shrink-0 items-center rounded-md border border-border bg-input p-0.5 gap-0.5 h-7"
+              role="group"
+              aria-label="Git list"
+            >
               <button
                 type="button"
-                class="button is-icon px-2! h-6! text-[11px]"
-                :class="{ 'is-active': listPane === 'changes' }"
+                class="h-6 px-2.5 rounded text-[11px] font-medium transition-colors"
+                :class="
+                  listPane === 'changes'
+                    ? 'bg-surface text-primary'
+                    : 'text-text-muted hover:text-text-primary'
+                "
+                :aria-pressed="listPane === 'changes'"
                 @click="setListPane('changes')"
               >
                 Changes
               </button>
               <button
                 type="button"
-                class="button is-icon px-2! h-6! text-[11px]"
-                :class="{ 'is-active': listPane === 'history' }"
+                class="h-6 px-2.5 rounded text-[11px] font-medium transition-colors"
+                :class="
+                  listPane === 'history'
+                    ? 'bg-surface text-primary'
+                    : 'text-text-muted hover:text-text-primary'
+                "
+                :aria-pressed="listPane === 'history'"
                 @click="setListPane('history')"
               >
                 History
