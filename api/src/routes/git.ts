@@ -6,18 +6,13 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
 
 // classes
 import { jwtPreHandler } from '../classes/auth';
 import { db } from '../classes/database';
 import { config } from '../classes/config';
 import { sshEnvForGit } from '../classes/sshKey';
-import { runClaudeAcp } from '../classes/claudeAcp';
-import { runCodexAcp } from '../classes/codexAcp';
-import { runCursorAcp } from '../classes/cursorAcp';
-import { runOpenCodeAcp } from '../classes/openCodeAcp';
-import { runVibeAcp } from '../classes/vibeAcp';
+import { ONE_SHOT_AGENT_TYPES, runOneShotAgentText } from '../classes/oneShotAgentText';
 
 // types
 import type { AgentType } from '../@types';
@@ -25,7 +20,6 @@ import type { AgentType } from '../@types';
 const execFileAsync = promisify(execFile);
 const COMMIT_MESSAGE_DIFF_MAX_CHARS = 60_000;
 const COMMIT_MESSAGE_FILE_DIFF_MAX_CHARS = 12_000;
-const COMMIT_MESSAGE_AGENT_TYPES: AgentType[] = ['cursor-agent', 'claude', 'mistral-vibe', 'open-code', 'codex'];
 
 interface RepoStatusFile {
   status: string;
@@ -299,103 +293,6 @@ async function listBranches(cwd: string): Promise<{
   };
 }
 
-function appendAssistantText(line: string, chunks: string[]): void {
-  let event: Record<string, unknown>;
-  try {
-    event = JSON.parse(line) as Record<string, unknown>;
-  } catch {
-    return;
-  }
-
-  if (typeof event.sessionId === 'string' && event.update && typeof event.update === 'object') {
-    const update = event.update as Record<string, unknown>;
-    const content = update.content as { type?: string; text?: string } | undefined;
-    if (update.sessionUpdate === 'agent_message_chunk' && content?.type === 'text' && content.text) {
-      chunks.push(content.text);
-    }
-    return;
-  }
-
-  if (event.type === 'stream' && typeof event.data === 'string') {
-    appendAssistantText(event.data, chunks);
-    return;
-  }
-
-  if (event.type === 'assistant' && Array.isArray((event.message as Record<string, unknown>)?.content)) {
-    const content = (event.message as Record<string, unknown>).content as Array<{
-      type?: string;
-      text?: string;
-    }>;
-    for (const block of content) {
-      if (block.type === 'text' && block.text) chunks.push(block.text);
-    }
-    return;
-  }
-
-  if ((event.role === 'assistant' || event.type === 'assistant') && typeof event.content === 'string') {
-    chunks.push(event.content);
-  }
-}
-
-function cleanGeneratedCommitMessage(raw: string): string {
-  return raw
-    .trim()
-    .replace(/^```(?:text)?/i, '')
-    .replace(/```$/i, '')
-    .trim()
-    .replace(/^["'`]+|["'`]+$/g, '')
-    .trim();
-}
-
-async function runCommitMessageAgent(params: {
-  agentType: AgentType;
-  cwd: string;
-  promptText: string;
-  model: string;
-  claudeToken?: string | null;
-}): Promise<string> {
-  const chunks: string[] = [];
-  const onEvent = (line: string): void => appendAssistantText(line, chunks);
-  const runId = `git-commit-message-${randomUUID()}`;
-  let result: { error?: string };
-
-  if (params.agentType === 'open-code') {
-    result = await runOpenCodeAcp(
-      { acpSessionId: null, cwd: params.cwd, promptText: params.promptText, model: params.model },
-      onEvent,
-      runId
-    );
-  } else if (params.agentType === 'codex') {
-    result = await runCodexAcp(
-      { acpSessionId: null, cwd: params.cwd, promptText: params.promptText, model: params.model },
-      onEvent,
-      runId
-    );
-  } else if (params.agentType === 'mistral-vibe') {
-    result = await runVibeAcp(
-      { acpSessionId: null, cwd: params.cwd, promptText: params.promptText },
-      onEvent,
-      runId
-    );
-  } else if (params.agentType === 'claude') {
-    result = await runClaudeAcp(
-      { acpSessionId: null, cwd: params.cwd, promptText: params.promptText, claudeToken: params.claudeToken },
-      onEvent
-    );
-  } else {
-    result = await runCursorAcp(
-      { acpSessionId: null, cwd: params.cwd, promptText: params.promptText },
-      onEvent,
-      runId
-    );
-  }
-
-  if (result.error) throw new Error(result.error);
-  const message = cleanGeneratedCommitMessage(chunks.join(''));
-  if (!message) throw new Error('AI did not return a commit message');
-  return message;
-}
-
 function buildCommitMessagePrompt(diff: string): string {
   return `Generate a concise git commit message for the following changes.
 
@@ -628,15 +525,16 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
 
         const user = await db.getFirstUser();
         const configuredAgentType = context.workspace.defaultAgentType as AgentType | null | undefined;
-        const agentType = configuredAgentType && COMMIT_MESSAGE_AGENT_TYPES.includes(configuredAgentType)
+        const agentType = configuredAgentType && ONE_SHOT_AGENT_TYPES.includes(configuredAgentType)
           ? configuredAgentType
           : 'cursor-agent';
-        const message = await runCommitMessageAgent({
+        const message = await runOneShotAgentText({
           agentType,
           cwd: context.cwd,
           promptText: buildCommitMessagePrompt(diff),
           model: user?.modelSelection ?? 'auto',
-          claudeToken: user?.claudeToken ?? null
+          claudeToken: user?.claudeToken ?? null,
+          runIdPrefix: 'git-commit-message'
         });
 
         return { message };

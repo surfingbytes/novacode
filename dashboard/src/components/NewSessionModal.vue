@@ -337,7 +337,7 @@ watch(agentType, () => {
                       id="new-session-name"
                       v-model="name"
                       type="text"
-                      placeholder="Named from first message"
+                      placeholder="AI-generated after first prompt"
                       @keydown.escape="close"
                     />
                   </div>

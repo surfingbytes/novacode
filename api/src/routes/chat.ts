@@ -1,12 +1,18 @@
 // node_modules
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
-import { sessionNameFromFirstMessage } from '@novacode/shared';
 
 // classes
 import { extractWsToken, verifyToken } from '../classes/auth';
 import { db } from '../classes/database';
+import { config } from '../classes/config';
 import { broadcastSessionListUpsert } from '../classes/sessionListBroadcast';
+import {
+  buildSessionTitlePrompt,
+  cleanSessionTitle,
+  ONE_SHOT_AGENT_TYPES,
+  runOneShotAgentText
+} from '../classes/oneShotAgentText';
 import {
   getActiveSessionIds as _getActiveSessionIds,
   getActiveRun,
@@ -20,6 +26,7 @@ import {
 
 // types
 import type {
+  AgentType,
   ChatMessage,
   ChatApprovalRequest,
   ChatQuestionRequest,
@@ -170,6 +177,8 @@ async function loadSessionMessages(sessionId: string): Promise<ChatMessage[]> {
   }
 }
 
+const namingInFlight = new Set<string>();
+
 async function maybeNameUntitledSession(
   sessionId: string,
   text: string,
@@ -179,13 +188,61 @@ async function maybeNameUntitledSession(
   if (!current || current.name.trim() !== '') {
     return;
   }
-  const derived = sessionNameFromFirstMessage(text) || (imagePaths.length > 0 ? 'Image' : '');
-  if (!derived) {
+  if (!text.trim() && imagePaths.length > 0) {
+    const updated = await db.updateSession(sessionId, { name: 'Image' });
+    if (updated) {
+      broadcastSessionListUpsert(updated.workspaceId, updated);
+    }
     return;
   }
-  const updated = await db.updateSession(sessionId, { name: derived });
-  if (updated) {
-    broadcastSessionListUpsert(updated.workspaceId, updated);
+  if (!text.trim()) {
+    return;
+  }
+  if (namingInFlight.has(sessionId)) {
+    return;
+  }
+  namingInFlight.add(sessionId);
+  try {
+    const workspace = await db.getWorkspace(current.workspaceId);
+    if (!workspace) {
+      return;
+    }
+    const user = await db.getFirstUser();
+    const sessionAgent = current.agentType as AgentType | null | undefined;
+    const workspaceAgent = workspace.defaultAgentType as AgentType | null | undefined;
+    const agentType =
+      sessionAgent && ONE_SHOT_AGENT_TYPES.includes(sessionAgent)
+        ? sessionAgent
+        : workspaceAgent && ONE_SHOT_AGENT_TYPES.includes(workspaceAgent)
+          ? workspaceAgent
+          : 'cursor-agent';
+    const workspaceRel = workspace.path.replace(/^\//, '');
+    const cwd = `${config.workspaceBrowseRoot}/${workspaceRel || '.'}`;
+    const raw = await runOneShotAgentText({
+      agentType,
+      cwd,
+      promptText: buildSessionTitlePrompt(text, imagePaths.length),
+      model: current.modelSelection || user?.modelSelection || 'auto',
+      claudeToken: user?.claudeToken ?? null,
+      runIdPrefix: 'session-title',
+      denyTools: true
+    });
+    const title = cleanSessionTitle(raw);
+    if (!title) {
+      return;
+    }
+    const latest = await db.getSession(sessionId);
+    if (!latest || latest.name.trim() !== '') {
+      return;
+    }
+    const updated = await db.updateSession(sessionId, { name: title });
+    if (updated) {
+      broadcastSessionListUpsert(updated.workspaceId, updated);
+    }
+  } catch (error) {
+    console.warn('[chat] failed to generate session title:', error);
+  } finally {
+    namingInFlight.delete(sessionId);
   }
 }
 
@@ -362,7 +419,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
           return;
         }
 
-        await maybeNameUntitledSession(id, text, imagePaths);
+        void maybeNameUntitledSession(id, text, imagePaths);
         await db.enqueueSessionQueueItem({
           sessionId: id,
           text,
