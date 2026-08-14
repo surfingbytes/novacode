@@ -21,6 +21,10 @@ export interface SubTask {
    * Populated by the orchestrator run logic when steps are run.
    */
   sessionId?: string | null;
+  /** 0-based indexes of steps that must succeed before this step runs. */
+  dependsOn?: number[];
+  /** Last run outcome for this step. */
+  runResult?: 'done' | 'failed' | 'skipped';
 }
 
 /** Stored in `subtasksJson` as JSON object with `subtasks` array (legacy: raw array only). */

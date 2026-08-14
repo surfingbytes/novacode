@@ -472,10 +472,14 @@ export interface FileEntry {
 export const filesApi = {
   list: (
     workspaceId: string,
-    path?: string
+    path?: string,
+    opts?: { hidden?: boolean }
   ): ReturnType<typeof http.get<{ path: string; entries: FileEntry[] }>> =>
     http.get<{ path: string; entries: FileEntry[] }>(`/workspaces/${workspaceId}/files/list`, {
-      params: path ? { path } : undefined
+      params: {
+        ...(path ? { path } : {}),
+        ...(opts?.hidden ? { hidden: '1' } : {})
+      }
     }),
 
   read: (
@@ -494,7 +498,20 @@ export const filesApi = {
     path: string,
     content: string
   ): ReturnType<typeof http.put<{ path: string }>> =>
-    http.put<{ path: string }>(`/workspaces/${workspaceId}/files/write`, { path, content })
+    http.put<{ path: string }>(`/workspaces/${workspaceId}/files/write`, { path, content }),
+
+  mkdir: (workspaceId: string, path: string): ReturnType<typeof http.post<{ path: string }>> =>
+    http.post<{ path: string }>(`/workspaces/${workspaceId}/files/mkdir`, { path }),
+
+  rename: (
+    workspaceId: string,
+    from: string,
+    to: string
+  ): ReturnType<typeof http.post<{ path: string }>> =>
+    http.post<{ path: string }>(`/workspaces/${workspaceId}/files/rename`, { from, to }),
+
+  remove: (workspaceId: string, path: string): ReturnType<typeof http.delete<{ path: string }>> =>
+    http.delete<{ path: string }>(`/workspaces/${workspaceId}/files`, { params: { path } })
 };
 
 // ---------------------------------- WebSocket ----------------------------------
@@ -758,7 +775,13 @@ export const orchestratorApi = {
     ),
 
   stop: (workspaceId: string, orchestratorId: string): ReturnType<typeof http.post<Orchestrator>> =>
-    http.post<Orchestrator>(`/workspaces/${workspaceId}/orchestrators/${orchestratorId}/stop`)
+    http.post<Orchestrator>(`/workspaces/${workspaceId}/orchestrators/${orchestratorId}/stop`),
+
+  clone: (
+    workspaceId: string,
+    orchestratorId: string
+  ): ReturnType<typeof http.post<Orchestrator>> =>
+    http.post<Orchestrator>(`/workspaces/${workspaceId}/orchestrators/${orchestratorId}/clone`)
 };
 
 // ---------------------------------- Role templates ----------------------------------

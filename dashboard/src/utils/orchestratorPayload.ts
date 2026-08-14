@@ -3,7 +3,9 @@
  * (shared/src/orchestratorPayload.ts). This shim keeps existing imports working.
  */
 export {
+  normalizeDependsOn,
   parseOrchestratorSubtasksJson,
+  remapDependsOnAfterDelete,
   serializeOrchestratorSubtasksPayload,
   subtasksFromStoredJson
 } from '@novacode/shared';

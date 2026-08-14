@@ -9,7 +9,14 @@ import 'md-editor-v3/lib/style.css';
 import { filesApi } from '@/classes/api';
 import { DEFAULT_THEME_ID, resolveStoredThemeId, themes } from '@/lib/themes';
 
+// components
+import ConfirmModal from '@/components/ConfirmModal.vue';
+import ContextMenu from '@/components/ContextMenu.vue';
+import PromptModal from '@/components/PromptModal.vue';
+import type { ContextMenuItem } from '@/components/ContextMenu.vue';
+
 // composables
+import { useLongPress } from '@/composables/useLongPress';
 import { usePaneLayout } from '@/composables/usePaneLayout';
 
 // types
@@ -67,6 +74,19 @@ const bCreatingFile = ref<boolean>(false);
 const bCreatingFileLoading = ref<boolean>(false);
 const newFilePath = ref<string>('');
 const createFileError = ref<string | null>(null);
+const createKind = ref<'file' | 'folder'>('file');
+const bShowHidden = ref<boolean>(localStorage.getItem('novacode:filesShowHidden') === '1');
+const bCtxMenuOpen = ref<boolean>(false);
+const ctxMenuX = ref<number>(0);
+const ctxMenuY = ref<number>(0);
+const ctxMenuItems = ref<ContextMenuItem[]>([]);
+const ctxTarget = ref<FileEntry | null>(null);
+const bShowDeleteModal = ref<boolean>(false);
+const bDeleting = ref<boolean>(false);
+const deleteTarget = ref<FileEntry | null>(null);
+const bShowRenameModal = ref<boolean>(false);
+const bRenaming = ref<boolean>(false);
+const renameTarget = ref<FileEntry | null>(null);
 let editor: Monaco.editor.IStandaloneCodeEditor | null = null;
 
 // Extension to Monaco language id
@@ -212,16 +232,18 @@ const bShowFileTree = computed((): boolean => listVisible(selectedPath.value !==
 const bShowEditor = computed((): boolean => detailVisible(selectedPath.value !== null));
 
 // -------------------------------------------------- Methods --------------------------------------------------
-const loadList = async (path: string): Promise<void> => {
+const loadList = async (path: string, bForce = false): Promise<void> => {
   const key = path || '';
-  if (entriesByPath.value[key]) {
+  if (!bForce && entriesByPath.value[key]) {
     return;
   }
   bListLoading.value = true;
   loadingPath.value = path || '';
   listError.value = null;
   try {
-    const response = await filesApi.list(props.workspaceId, path || undefined);
+    const response = await filesApi.list(props.workspaceId, path || undefined, {
+      hidden: bShowHidden.value
+    });
     const nextEntriesByPath = { ...entriesByPath.value };
     nextEntriesByPath[key] = response.data.entries;
     entriesByPath.value = nextEntriesByPath;
@@ -233,6 +255,14 @@ const loadList = async (path: string): Promise<void> => {
     loadingPath.value = null;
   }
 };
+
+async function reloadVisibleLists(): Promise<void> {
+  const paths = ['', ...expandedPaths.value];
+  entriesByPath.value = {};
+  for (const directoryPath of paths) {
+    await loadList(directoryPath, true);
+  }
+}
 
 const toggleExpand = (entry: FileEntry): void => {
   if (!entry.isDirectory) {
@@ -394,9 +424,19 @@ function normalizeNewFilePath(path: string): string {
   return path.trim().replace(/^\/+/, '').replace(/\/+/g, '/');
 }
 
-const openCreateFile = (): void => {
-  const selectedParent = selectedPath.value ? parentPath(selectedPath.value) : '';
-  newFilePath.value = selectedParent ? `${selectedParent}/new-file.txt` : 'new-file.txt';
+const openCreateFile = (kind: 'file' | 'folder' = 'file'): void => {
+  const selectedParent = selectedPath.value
+    ? parentPath(selectedPath.value)
+    : (ctxTarget.value?.isDirectory ? ctxTarget.value.path : parentPath(ctxTarget.value?.path ?? ''));
+  createKind.value = kind;
+  newFilePath.value =
+    kind === 'folder'
+      ? selectedParent
+        ? `${selectedParent}/new-folder`
+        : 'new-folder'
+      : selectedParent
+        ? `${selectedParent}/new-file.txt`
+        : 'new-file.txt';
   createFileError.value = null;
   bCreatingFile.value = true;
 };
@@ -411,7 +451,10 @@ const closeCreateFile = (): void => {
 const createFile = async (): Promise<void> => {
   const normalizedPath = normalizeNewFilePath(newFilePath.value);
   if (!normalizedPath || normalizedPath.endsWith('/')) {
-    createFileError.value = 'Enter a valid file path, for example src/new-file.ts.';
+    createFileError.value =
+      createKind.value === 'folder'
+        ? 'Enter a valid folder path, for example src/lib.'
+        : 'Enter a valid file path, for example src/new-file.ts.';
     return;
   }
   const pathSegments = normalizedPath.split('/');
@@ -423,7 +466,11 @@ const createFile = async (): Promise<void> => {
   bCreatingFileLoading.value = true;
   createFileError.value = null;
   try {
-    await filesApi.write(props.workspaceId, normalizedPath, '');
+    if (createKind.value === 'folder') {
+      await filesApi.mkdir(props.workspaceId, normalizedPath);
+    } else {
+      await filesApi.write(props.workspaceId, normalizedPath, '');
+    }
 
     const ancestors = normalizedPath.includes('/')
       ? normalizedPath
@@ -435,22 +482,144 @@ const createFile = async (): Promise<void> => {
           }, [])
       : [];
     expandedPaths.value = new Set([...expandedPaths.value, ...ancestors]);
-    entriesByPath.value = {};
-    await loadList('');
-    for (const directoryPath of ancestors) {
-      await loadList(directoryPath);
+    if (createKind.value === 'folder') {
+      expandedPaths.value = new Set([...expandedPaths.value, normalizedPath]);
     }
-
-    await readFilePath(normalizedPath);
+    await reloadVisibleLists();
+    if (createKind.value === 'folder') {
+      await loadList(normalizedPath, true);
+    } else {
+      await readFilePath(normalizedPath);
+    }
     closeCreateFile();
   } catch (error: unknown) {
     const errorWithMessage = error as { response?: { data?: { error?: string } }; message?: string };
     createFileError.value =
-      errorWithMessage?.response?.data?.error ?? errorWithMessage?.message ?? 'Failed to create file';
+      errorWithMessage?.response?.data?.error ??
+      errorWithMessage?.message ??
+      (createKind.value === 'folder' ? 'Failed to create folder' : 'Failed to create file');
   } finally {
     bCreatingFileLoading.value = false;
   }
 };
+
+function toggleShowHidden(): void {
+  bShowHidden.value = !bShowHidden.value;
+  localStorage.setItem('novacode:filesShowHidden', bShowHidden.value ? '1' : '0');
+  void reloadVisibleLists();
+}
+
+function entryContextItems(entry: FileEntry): ContextMenuItem[] {
+  return [
+    { key: 'rename', label: 'Rename…' },
+    { key: 'delete', label: 'Delete…', danger: true }
+  ];
+}
+
+function openEntryContextMenu(event: MouseEvent, entry: FileEntry): void {
+  ctxTarget.value = entry;
+  ctxMenuItems.value = entryContextItems(entry);
+  ctxMenuX.value = event.clientX;
+  ctxMenuY.value = event.clientY;
+  bCtxMenuOpen.value = true;
+}
+
+const longPress = useLongPress<FileEntry>((entry) => {
+  ctxTarget.value = entry;
+  ctxMenuItems.value = entryContextItems(entry);
+  ctxMenuX.value = 16;
+  ctxMenuY.value = 80;
+  bCtxMenuOpen.value = true;
+});
+
+function onCtxPick(key: string): void {
+  const entry = ctxTarget.value;
+  if (!entry) {
+    return;
+  }
+  if (key === 'rename') {
+    renameTarget.value = entry;
+    bShowRenameModal.value = true;
+    return;
+  }
+  if (key === 'delete') {
+    deleteTarget.value = entry;
+    bShowDeleteModal.value = true;
+  }
+}
+
+async function confirmDelete(): Promise<void> {
+  const entry = deleteTarget.value;
+  if (!entry) {
+    return;
+  }
+  bDeleting.value = true;
+  try {
+    await filesApi.remove(props.workspaceId, entry.path);
+    if (selectedPath.value === entry.path || selectedPath.value?.startsWith(`${entry.path}/`)) {
+      selectedPath.value = null;
+      emit('update:openPath', null);
+    }
+    deleteTarget.value = null;
+    bShowDeleteModal.value = false;
+    await reloadVisibleLists();
+  } catch (error: unknown) {
+    const errorWithMessage = error as { response?: { data?: { error?: string } }; message?: string };
+    listError.value =
+      errorWithMessage?.response?.data?.error ?? errorWithMessage?.message ?? 'Failed to delete';
+  } finally {
+    bDeleting.value = false;
+  }
+}
+
+async function confirmRename(nextName: string): Promise<void> {
+  const entry = renameTarget.value;
+  if (!entry) {
+    return;
+  }
+  const trimmed = nextName.trim();
+  if (!trimmed || trimmed.includes('/') || trimmed === '.' || trimmed === '..') {
+    listError.value = 'Enter a file or folder name without slashes.';
+    return;
+  }
+  const destination = parentPath(entry.path) ? `${parentPath(entry.path)}/${trimmed}` : trimmed;
+  if (destination === entry.path) {
+    bShowRenameModal.value = false;
+    renameTarget.value = null;
+    return;
+  }
+  bRenaming.value = true;
+  try {
+    const { data } = await filesApi.rename(props.workspaceId, entry.path, destination);
+    if (selectedPath.value === entry.path) {
+      await readFilePath(data.path);
+    } else if (selectedPath.value?.startsWith(`${entry.path}/`)) {
+      selectedPath.value = null;
+      emit('update:openPath', null);
+    }
+    bShowRenameModal.value = false;
+    renameTarget.value = null;
+    await reloadVisibleLists();
+  } catch (error: unknown) {
+    const errorWithMessage = error as { response?: { data?: { error?: string } }; message?: string };
+    listError.value =
+      errorWithMessage?.response?.data?.error ?? errorWithMessage?.message ?? 'Failed to rename';
+  } finally {
+    bRenaming.value = false;
+  }
+}
+
+function onEntryClick(entry: FileEntry): void {
+  if (longPress.bTriggered.value) {
+    longPress.bTriggered.value = false;
+    return;
+  }
+  if (entry.isDirectory) {
+    toggleExpand(entry);
+    return;
+  }
+  void selectFile(entry);
+}
 
 // -------------------------------------------------- Watchers --------------------------------------------------
 watch(
@@ -586,7 +755,34 @@ onUnmounted((): void => {
         Files
 
         <div class="flex items-center gap-1">
-          <button type="button" class="button is-icon is-transparent h-8!" aria-label="New file" title="New file" @click="openCreateFile">
+          <button
+            type="button"
+            class="button is-icon is-transparent h-8!"
+            :aria-pressed="bShowHidden"
+            :aria-label="bShowHidden ? 'Hide dotfiles' : 'Show hidden files'"
+            :title="bShowHidden ? 'Hide dotfiles' : 'Show hidden files'"
+            @click="toggleShowHidden"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path v-if="bShowHidden" d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+              <circle v-if="bShowHidden" cx="12" cy="12" r="3" />
+              <path v-else d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19M1 1l22 22" />
+            </svg>
+          </button>
+          <button type="button" class="button is-icon is-transparent h-8!" aria-label="New folder" title="New folder" @click="openCreateFile('folder')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/><path d="M12 11v6M9 14h6"/></svg>
+          </button>
+          <button type="button" class="button is-icon is-transparent h-8!" aria-label="New file" title="New file" @click="openCreateFile('file')">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
           </button>
 
@@ -619,7 +815,7 @@ onUnmounted((): void => {
           v-model="newFilePath"
           type="text"
           class="input w-full"
-          placeholder="src/new-file.ts"
+          :placeholder="createKind === 'folder' ? 'src/lib' : 'src/new-file.ts'"
           :disabled="bCreatingFileLoading"
           @keydown.enter.prevent="createFile"
           @keydown.esc.prevent="closeCreateFile"
@@ -631,8 +827,7 @@ onUnmounted((): void => {
             :disabled="bCreatingFileLoading"
             @click="createFile"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
-            <span> Create </span>
+            <span>{{ createKind === 'folder' ? 'Create folder' : 'Create' }}</span>
           </button>
           <button
             type="button"
@@ -664,7 +859,12 @@ onUnmounted((): void => {
                 : 'text-text-primary hover:bg-primary/10!'
             "
             :style="{ paddingLeft: 8 + depth * 12 + 'px' }"
-            @click="entry.isDirectory ? toggleExpand(entry) : selectFile(entry)"
+            @click="onEntryClick(entry)"
+            @contextmenu.prevent.stop="openEntryContextMenu($event, entry)"
+            @pointerdown="longPress.onPointerDown($event, entry)"
+            @pointerup="longPress.onPointerUp"
+            @pointercancel="longPress.onPointerUp"
+            @pointermove="longPress.onPointerMove"
           >
             <span class="select-none shrink-0 w-4 h-4 flex items-center justify-center">
               <template v-if="entry.isDirectory">
@@ -855,6 +1055,31 @@ onUnmounted((): void => {
       </div>
     </div>
   </div>
+
+  <ContextMenu
+    v-model="bCtxMenuOpen"
+    :x="ctxMenuX"
+    :y="ctxMenuY"
+    :items="ctxMenuItems"
+    @pick="onCtxPick"
+  />
+  <ConfirmModal
+    v-model="bShowDeleteModal"
+    :title="deleteTarget?.isDirectory ? 'Delete folder' : 'Delete file'"
+    :description="`Delete '${deleteTarget?.name ?? ''}'? This cannot be undone.`"
+    confirm-label="Delete"
+    :loading="bDeleting"
+    @confirm="confirmDelete"
+  />
+  <PromptModal
+    v-model="bShowRenameModal"
+    title="Rename"
+    label="Name"
+    :initial-value="renameTarget?.name ?? ''"
+    confirm-label="Rename"
+    :loading="bRenaming"
+    @confirm="confirmRename"
+  />
 </template>
 
 <style scoped>

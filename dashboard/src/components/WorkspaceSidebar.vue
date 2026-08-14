@@ -243,6 +243,7 @@ function orchestratorContextItems(orch: Orchestrator): ContextMenuItem[] {
   const arch = orch.archived === true;
   return [
     { key: 'open', label: 'Open', icon: 'open_in_new' },
+    { key: 'clone', label: 'Clone', icon: 'content_copy' },
     { key: 'archive', label: arch ? 'Unarchive' : 'Archive', icon: arch ? 'unarchive' : 'inventory_2' },
     { key: 'delete', label: 'Delete…', icon: 'delete', danger: true }
   ];
@@ -299,6 +300,22 @@ function onCtxPick(key: string): void {
       orchestrator,
       nestedSessions: orderedNestedSessions(orchestrator)
     });
+    return;
+  }
+  if (key === 'clone') {
+    void orchestratorApi
+      .clone(props.workspaceId, orchestrator.id)
+      .then(({ data: cloned }) => {
+        if (!cloned) {
+          return;
+        }
+        orchestratorsStore.upsertOrchestrator(cloned);
+        router.push({
+          name: 'orchestrator',
+          params: { id: props.workspaceId, orchestratorId: cloned.id }
+        });
+      })
+      .catch(() => toastStore.error('Failed to clone plan'));
     return;
   }
   if (key === 'archive') {

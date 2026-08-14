@@ -5,11 +5,15 @@
 export {
   appendHandoff,
   buildStepPrompt,
+  cloneSubtasksForNewPlan,
   collectStepSessionIdsFromSubtasksJson,
   mergeSubtasksJsonPatch,
+  normalizeDependsOn,
   normalizeSubtasksPayload,
   parseSubtasksPayloadString,
+  remapDependsOnAfterDelete,
   serializeSubtasksPayload,
+  shouldSkipOrchestratorStep,
   subtasksFromStoredJson,
   summarizeStepHandoff
 } from '@novacode/shared';

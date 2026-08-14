@@ -9,10 +9,13 @@ import { jwtPreHandler } from '../classes/auth';
 import {
   appendHandoff,
   buildStepPrompt,
+  cloneSubtasksForNewPlan,
   collectStepSessionIdsFromSubtasksJson,
   mergeSubtasksJsonPatch,
+  normalizeDependsOn,
   parseSubtasksPayloadString,
   serializeSubtasksPayload,
+  shouldSkipOrchestratorStep,
   summarizeStepHandoff
 } from '../classes/orchestratorPayload';
 import { deleteSessionImages } from './images';
@@ -123,7 +126,14 @@ function parseSubtasksArray(arr: unknown): SubTask[] | null {
     return null;
   }
   try {
-    const raw = arr as Array<{ name?: unknown; prompt?: unknown; category?: unknown }>;
+    const raw = arr as Array<{
+      name?: unknown;
+      prompt?: unknown;
+      category?: unknown;
+      dependsOn?: unknown;
+      runResult?: unknown;
+      sessionId?: unknown;
+    }>;
     const result: SubTask[] = [];
     for (const item of raw) {
       if (item == null || typeof item !== 'object') {
@@ -137,7 +147,20 @@ function parseSubtasksArray(arr: unknown): SubTask[] | null {
           : typeof item.category === 'string'
             ? item.category
             : String(item.category);
-      result.push({ name, prompt, category: category || null });
+      const dependsOn = normalizeDependsOn(item.dependsOn);
+      const runResult =
+        item.runResult === 'done' || item.runResult === 'failed' || item.runResult === 'skipped'
+          ? item.runResult
+          : undefined;
+      const sessionId = typeof item.sessionId === 'string' && item.sessionId.trim() ? item.sessionId : undefined;
+      result.push({
+        name,
+        prompt,
+        category: category || null,
+        ...(dependsOn && dependsOn.length > 0 ? { dependsOn } : {}),
+        ...(runResult ? { runResult } : {}),
+        ...(sessionId ? { sessionId } : {})
+      });
     }
     return result;
   } catch {
@@ -305,6 +328,37 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       }
       await db.deleteOrchestrator(orchestratorId);
       return reply.status(204).send();
+    }
+  );
+
+  // POST /api/workspaces/:workspaceId/orchestrators/:orchestratorId/clone
+  fastify.post(
+    '/api/workspaces/:workspaceId/orchestrators/:orchestratorId/clone',
+    { preHandler: jwtPreHandler },
+    async (request, reply) => {
+      const { workspaceId, orchestratorId } = request.params as {
+        workspaceId: string;
+        orchestratorId: string;
+      };
+      const orchestrator = await db.getOrchestrator(orchestratorId);
+      if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
+        return reply.status(404).send({ error: 'Orchestrator not found' });
+      }
+      const workspace = await db.getWorkspace(workspaceId);
+      if (!workspace) {
+        return reply.status(404).send({ error: 'Workspace not found' });
+      }
+      const cloned = await db.createOrchestrator({
+        workspaceId,
+        name: `Copy of ${orchestrator.name || 'task plan'}`,
+        tags: orchestrator.tags ?? null,
+        agentType: orchestrator.agentType
+      });
+      const clonedPayload = cloneSubtasksForNewPlan(orchestrator.subtasksJson);
+      const updated = await updateOrchestratorAndBroadcast(workspaceId, cloned.id, {
+        subtasksJson: serializeSubtasksPayload(clonedPayload)
+      });
+      return reply.status(201).send(updated ?? cloned);
     }
   );
 
@@ -497,6 +551,16 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         const task = subtasks[subtaskIndex];
         const globalIndex = subtaskIndex;
 
+        if (shouldSkipOrchestratorStep(globalIndex, subtasks)) {
+          task.runResult = 'skipped';
+          await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
+            runCurrentStep: globalIndex + 1,
+            runTotalSteps: total,
+            subtasksJson: serializeSubtasksPayload(payload)
+          });
+          continue;
+        }
+
         const createResult = await createSessionWithAgent({
           workspaceId,
           name: task.name,
@@ -506,13 +570,13 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
               : null
         });
         if (createResult.error || !createResult.session) {
+          task.runResult = 'failed';
           await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
-            runStatus: 'failed',
-            runCurrentStep: globalIndex,
+            runCurrentStep: globalIndex + 1,
             runTotalSteps: total,
             subtasksJson: serializeSubtasksPayload(payload)
           });
-          return;
+          continue;
         }
 
         // Attach the created session id to this subtask so the UI
@@ -526,14 +590,16 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
           timeoutMs: 60000_000
         });
         if (runResult.error) {
+          task.runResult = 'failed';
           await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
-            runStatus: 'failed',
-            runCurrentStep: globalIndex,
+            runCurrentStep: globalIndex + 1,
             runTotalSteps: total,
             subtasksJson: serializeSubtasksPayload(payload)
           });
-          return;
+          continue;
         }
+
+        task.runResult = 'done';
 
         const snippet = summarizeStepHandoff(runResult.messages);
         payload.handoffLog = appendHandoff(
@@ -549,8 +615,9 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
           subtasksJson: serializeSubtasksPayload(payload)
         });
       }
+      const anyFailed = subtasks.some((task) => task.runResult === 'failed');
       await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
-        runStatus: 'completed',
+        runStatus: anyFailed ? 'failed' : 'completed',
         runCurrentStep: total,
         runTotalSteps: total,
         subtasksJson: serializeSubtasksPayload(payload)
@@ -605,6 +672,15 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
 
       if (startIndex === 0) {
         payload.handoffLog = '';
+        for (const task of payload.subtasks) {
+          delete task.runResult;
+          delete task.sessionId;
+        }
+      } else {
+        for (let index = startIndex; index < payload.subtasks.length; index++) {
+          delete payload.subtasks[index].runResult;
+          delete payload.subtasks[index].sessionId;
+        }
       }
 
       const runStartedAt = new Date().toISOString();

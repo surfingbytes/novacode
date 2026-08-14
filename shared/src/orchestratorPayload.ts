@@ -52,6 +52,79 @@ export function serializeSubtasksPayload(p: OrchestratorSubtasksPayload): string
   });
 }
 
+export function normalizeDependsOn(raw: unknown): number[] {
+  const values = Array.isArray(raw) ? raw : raw === undefined || raw === null ? [] : [raw];
+  const out: number[] = [];
+  const seen = new Set<number>();
+  for (const value of values) {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+      continue;
+    }
+    if (seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
+export function shouldSkipOrchestratorStep(
+  index: number,
+  subtasks: SubTask[]
+): boolean {
+  const deps = normalizeDependsOn(subtasks[index]?.dependsOn);
+  for (const dep of deps) {
+    if (dep >= index) {
+      continue;
+    }
+    const result = subtasks[dep]?.runResult;
+    if (result === 'failed' || result === 'skipped') {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function cloneSubtasksForNewPlan(
+  json: string | null | undefined
+): OrchestratorSubtasksPayload {
+  const parsed = parseSubtasksPayloadString(json);
+  if (!parsed) {
+    return { sharedContext: '', handoffLog: '', subtasks: [] };
+  }
+  return {
+    sharedContext: parsed.sharedContext,
+    handoffLog: '',
+    subtasks: parsed.subtasks.map((task) => {
+      const dependsOn = normalizeDependsOn(task.dependsOn);
+      return {
+        name: task.name,
+        prompt: task.prompt,
+        category: task.category ?? null,
+        ...(dependsOn.length > 0 ? { dependsOn } : {})
+      };
+    })
+  };
+}
+
+/** After removing `deletedIndex`, drop that dependency and shift later indexes down. */
+export function remapDependsOnAfterDelete(subtasks: SubTask[], deletedIndex: number): SubTask[] {
+  return subtasks.map((task, index) => {
+    const dependsOn = normalizeDependsOn(task.dependsOn)
+      .filter((dep) => dep !== deletedIndex)
+      .map((dep) => (dep > deletedIndex ? dep - 1 : dep))
+      .filter((dep) => dep < index);
+    const next: SubTask = { ...task };
+    if (dependsOn.length > 0) {
+      next.dependsOn = dependsOn;
+    } else {
+      delete next.dependsOn;
+    }
+    return next;
+  });
+}
+
 /** Subtasks only (empty array when missing/invalid). */
 export function subtasksFromStoredJson(json: string | null | undefined): SubTask[] {
   return parseSubtasksPayloadString(json)?.subtasks ?? [];

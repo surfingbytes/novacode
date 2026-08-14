@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // node_modules
 import { ref, computed, watch, onMounted, nextTick } from 'vue';
+import { useRouter } from 'vue-router';
 
 // components
 import BaseModal from '@/components/BaseModal.vue';
@@ -9,7 +10,9 @@ import ModalHeader from '@/components/ModalHeader.vue';
 // classes
 import { orchestratorApi } from '@/classes/api';
 import {
+  normalizeDependsOn,
   parseOrchestratorSubtasksJson,
+  remapDependsOnAfterDelete,
   serializeOrchestratorSubtasksPayload
 } from '@/utils/orchestratorPayload';
 import { tagColorClass as categoryColorClass } from '@/utils/tagColors';
@@ -31,6 +34,7 @@ const props = defineProps<{
 
 // -------------------------------------------------- Store --------------------------------------------------
 
+const router = useRouter();
 const orchestratorsStore = useOrchestratorsStore();
 const toastStore = useToastStore();
 
@@ -41,6 +45,7 @@ const promptStorageKey = `orchestratorPrompt:${props.workspaceId}:${props.orches
 const bDecomposing = ref(false);
 const bStartingRun = ref(false);
 const bStopping = ref(false);
+const bCloning = ref(false);
 const bSavingSubtasks = ref(false);
 const decomposeError = ref<string | null>(null);
 const decomposeLastAssistantContent = ref<string>('');
@@ -56,10 +61,7 @@ const editDraft = ref<SubTask>({ name: '', prompt: '', category: null });
 // -------------------------------------------------- Computed --------------------------------------------------
 
 const isRunning = computed(() => props.orchestrator?.runStatus === 'running');
-const hasRunOnce = computed(
-  () => props.orchestrator?.runStatus === 'completed' || props.orchestrator?.runStatus === 'failed'
-);
-const canEdit = computed(() => !isRunning.value && !hasRunOnce.value);
+const canEdit = computed(() => !isRunning.value);
 
 const runProgress = computed(() => {
   const o = props.orchestrator;
@@ -89,6 +91,12 @@ const subtasks = computed<SubTask[]>(() => planPayload.value?.subtasks ?? []);
 
 const sharedContextDisplay = computed(() => planPayload.value?.sharedContext?.trim() ?? '');
 const handoffLogDisplay = computed(() => planPayload.value?.handoffLog?.trim() ?? '');
+const failedStepCount = computed(
+  () => subtasks.value.filter((task) => task.runResult === 'failed').length
+);
+const skippedStepCount = computed(
+  () => subtasks.value.filter((task) => task.runResult === 'skipped').length
+);
 
 // -------------------------------------------------- Watchers --------------------------------------------------
 
@@ -113,42 +121,44 @@ const hasEdits = computed(() => {
   if (a.length !== b.length) {
     return true;
   }
-  return a.some(
-    (t, i) => t.name !== b[i]?.name || t.prompt !== b[i]?.prompt || t.category !== b[i]?.category
-  );
+  return a.some((task, index) => {
+    const other = b[index];
+    const leftDeps = normalizeDependsOn(task.dependsOn).join(',');
+    const rightDeps = normalizeDependsOn(other?.dependsOn).join(',');
+    return (
+      task.name !== other?.name ||
+      task.prompt !== other?.prompt ||
+      task.category !== other?.category ||
+      leftDeps !== rightDeps
+    );
+  });
 });
 
 // -------------------------------------------------- Methods --------------------------------------------------
 
-function taskStatus(index: number): 'idle' | 'active' | 'done' {
+function taskStatus(index: number): 'idle' | 'active' | 'done' | 'failed' | 'skipped' {
+  const task = editedSubtasks.value[index] ?? subtasks.value[index];
+  if (task?.runResult === 'failed') {
+    return 'failed';
+  }
+  if (task?.runResult === 'skipped') {
+    return 'skipped';
+  }
+  if (task?.runResult === 'done') {
+    return 'done';
+  }
   const o = props.orchestrator;
   const total = subtasks.value.length;
-  if (!o || total === 0) {
+  if (!o || total === 0 || o.runStatus !== 'running') {
     return 'idle';
   }
   const completedCount = o.runCurrentStep ?? 0;
-
-  if (o.runStatus === 'completed') {
-    return 'done';
+  const clampedTotal = o.runTotalSteps ?? total;
+  const clampedCompleted = Math.min(completedCount, clampedTotal);
+  const activeIndex = clampedCompleted >= clampedTotal ? clampedTotal - 1 : clampedCompleted;
+  if (index === activeIndex) {
+    return 'active';
   }
-
-  if (o.runStatus === 'failed') {
-    return index < completedCount ? 'done' : 'idle';
-  }
-
-  if (o.runStatus === 'running') {
-    const clampedTotal = o.runTotalSteps ?? total;
-    const clampedCompleted = Math.min(completedCount, clampedTotal);
-    const activeIndex = clampedCompleted >= clampedTotal ? clampedTotal - 1 : clampedCompleted;
-    if (index < clampedCompleted) {
-      return 'done';
-    }
-    if (index === activeIndex) {
-      return 'active';
-    }
-    return 'idle';
-  }
-
   return 'idle';
 }
 
@@ -166,7 +176,12 @@ function openEditModal(index: number) {
     return;
   }
   editingTaskIndex.value = index;
-  editDraft.value = { name: task.name, prompt: task.prompt, category: task.category ?? null };
+  editDraft.value = {
+    name: task.name,
+    prompt: task.prompt,
+    category: task.category ?? null,
+    dependsOn: [...normalizeDependsOn(task.dependsOn)]
+  };
   bShowEditModal.value = true;
 }
 
@@ -184,12 +199,19 @@ function saveEditFromModal() {
   const list = [...editedSubtasks.value];
   const prev = list[i];
   const category = editDraft.value.category?.trim() || null;
-  list[i] = {
+  const dependsOn = normalizeDependsOn(editDraft.value.dependsOn).filter((dep) => dep < i);
+  const next: SubTask = {
     ...prev,
     name: editDraft.value.name.trim() || prev.name,
     prompt: editDraft.value.prompt.trim() || prev.prompt,
     category
   };
+  if (dependsOn.length > 0) {
+    next.dependsOn = dependsOn;
+  } else {
+    delete next.dependsOn;
+  }
+  list[i] = next;
   editedSubtasks.value = list;
   closeEditModal();
   saveSubtasks();
@@ -261,7 +283,7 @@ async function saveSubtasks() {
   }
 }
 
-async function startTasks() {
+async function startTasks(startIndex = 0) {
   if (subtasks.value.length === 0 || isRunning.value) {
     return;
   }
@@ -269,7 +291,7 @@ async function startTasks() {
   bStartingRun.value = true;
   try {
     const { data } = await orchestratorApi.run(props.workspaceId, props.orchestratorId, {
-      startIndex: 0
+      startIndex
     });
     if (data) {
       orchestratorsStore.upsertOrchestrator(data);
@@ -303,8 +325,50 @@ async function stopTasks() {
 }
 
 function removeTask(index: number) {
-  const list = editedSubtasks.value.filter((_, i) => i !== index);
-  editedSubtasks.value = list;
+  const without = editedSubtasks.value.filter((_, i) => i !== index);
+  editedSubtasks.value = remapDependsOnAfterDelete(without, index);
+}
+
+function toggleDependsOn(depIndex: number) {
+  const current = new Set(normalizeDependsOn(editDraft.value.dependsOn));
+  if (current.has(depIndex)) {
+    current.delete(depIndex);
+  } else {
+    current.add(depIndex);
+  }
+  editDraft.value = {
+    ...editDraft.value,
+    dependsOn: [...current].sort((left, right) => left - right)
+  };
+}
+
+function dependsOnLabel(task: SubTask): string {
+  const deps = normalizeDependsOn(task.dependsOn);
+  if (!deps.length) {
+    return '';
+  }
+  return deps.map((dep) => String(dep + 1)).join(', ');
+}
+
+async function clonePlan() {
+  if (bCloning.value) {
+    return;
+  }
+  bCloning.value = true;
+  try {
+    const { data } = await orchestratorApi.clone(props.workspaceId, props.orchestratorId);
+    if (data) {
+      orchestratorsStore.upsertOrchestrator(data);
+      await router.push({
+        name: 'orchestrator',
+        params: { id: props.workspaceId, orchestratorId: data.id }
+      });
+    }
+  } catch {
+    toastStore.error('Failed to clone plan');
+  } finally {
+    bCloning.value = false;
+  }
 }
 
 // -------------------------------------------------- Lifecycle --------------------------------------------------
@@ -442,7 +506,11 @@ onMounted(() => {
                   ? 'orch-active-border'
                   : taskStatus(i) === 'done'
                     ? 'border border-emerald-500/60'
-                    : 'border border-fg/15'
+                    : taskStatus(i) === 'failed'
+                      ? 'border border-destructive/60'
+                      : taskStatus(i) === 'skipped'
+                        ? 'border border-dashed border-fg/25 opacity-70'
+                        : 'border border-fg/15'
               ]"
             >
               <div
@@ -457,12 +525,41 @@ onMounted(() => {
                   task.name
                 }}</span>
                 <span
+                  v-if="task.runResult === 'skipped'"
+                  class="text-xs px-2 py-0.5 rounded-full border border-fg/20 text-text-muted shrink-0"
+                >
+                  Skipped
+                </span>
+                <span
+                  v-else-if="task.runResult === 'failed'"
+                  class="text-xs px-2 py-0.5 rounded-full border border-destructive/40 text-destructive shrink-0"
+                >
+                  Failed
+                </span>
+                <span
+                  v-if="dependsOnLabel(task)"
+                  class="text-xs text-text-muted shrink-0"
+                  :title="'Depends on steps ' + dependsOnLabel(task)"
+                >
+                  after {{ dependsOnLabel(task) }}
+                </span>
+                <span
                   v-if="task.category"
                   class="text-xs px-2 py-0.5 rounded-full border shrink-0"
                   :class="categoryColorClass(task.category)"
                 >
                   {{ task.category }}
                 </span>
+                <button
+                  v-if="!isRunning && i > 0"
+                  type="button"
+                  class="p-1.5 rounded text-text-muted hover:text-text-primary hover:bg-fg/10 transition-colors text-xs"
+                  title="Run from this step"
+                  :disabled="bStartingRun"
+                  @click="startTasks(i)"
+                >
+                  Run from here
+                </button>
                 <template v-if="canEdit">
                   <button
                     type="button"
@@ -554,6 +651,24 @@ onMounted(() => {
                     placeholder="Instruction for this step"
                   />
                 </div>
+                <div v-if="editingTaskIndex !== null && editingTaskIndex > 0">
+                  <p class="block text-xs font-medium text-text-muted mb-1">Depends on</p>
+                  <p class="text-xs text-text-muted mb-2">
+                    This step is skipped if a selected earlier step failed or was skipped.
+                  </p>
+                  <label
+                    v-for="(prior, depIndex) in editedSubtasks.slice(0, editingTaskIndex)"
+                    :key="'dep-' + depIndex"
+                    class="flex items-center gap-2 text-sm text-text-primary py-0.5"
+                  >
+                    <input
+                      type="checkbox"
+                      :checked="normalizeDependsOn(editDraft.dependsOn).includes(depIndex)"
+                      @change="toggleDependsOn(depIndex)"
+                    />
+                    <span>Step {{ depIndex + 1 }}: {{ prior.name }}</span>
+                  </label>
+                </div>
               </div>
               <div class="flex justify-end gap-2 mt-5">
                 <button
@@ -598,7 +713,10 @@ onMounted(() => {
           Completed {{ runProgress.total }}/{{ runProgress.total }}
         </span>
         <span v-else-if="runProgress.status === 'failed'">
-          Failed at step {{ runProgress.completed + 1 }}/{{ runProgress.total }}
+          Finished with {{ failedStepCount }} failed step{{ failedStepCount === 1 ? '' : 's'
+          }}<template v-if="skippedStepCount"
+            >, {{ skippedStepCount }} skipped</template
+          >
         </span>
         <span v-else>
           Stopped at step {{ runProgress.completed + 1 }}/{{ runProgress.total }}
@@ -614,33 +732,47 @@ onMounted(() => {
       <span class="text-sm text-text-muted">
         {{ subtasks.length }} task{{ subtasks.length === 1 ? '' : 's' }}
       </span>
-      <button
-        v-if="isRunning"
-        type="button"
-        @click="stopTasks"
-        :disabled="bStopping"
-        class="px-4 py-2.5 text-sm font-medium bg-destructive/80 text-on-accent rounded-lg hover:bg-destructive transition-colors flex items-center gap-2 disabled:opacity-60"
-      >
-        <span
-          v-if="bStopping"
-          class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0"
-        />
-        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" class="select-none shrink-0" aria-hidden="true"><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6"/></svg>
-        {{ bStopping ? 'Stopping…' : 'Stop run' }}
-      </button>
-      <button
-        v-else
-        type="button"
-        @click="startTasks"
-        :disabled="subtasks.length === 0 || bStartingRun"
-        class="px-4 py-2.5 text-sm font-medium btn-primary-solid rounded-lg disabled:opacity-40 transition-opacity flex items-center gap-2"
-      >
-        <span
-          v-if="bStartingRun"
-          class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0"
-        />
-        {{ bStartingRun ? 'Starting…' : 'Start tasks' }}
-      </button>
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          @click="clonePlan"
+          :disabled="bCloning"
+          class="px-4 py-2.5 text-sm font-medium border border-fg/20 text-text-primary rounded-lg hover:bg-fg/[0.06] transition-colors flex items-center gap-2 disabled:opacity-60"
+        >
+          <span
+            v-if="bCloning"
+            class="w-4 h-4 border-2 border-fg/30 border-t-primary rounded-full animate-spin shrink-0"
+          />
+          {{ bCloning ? 'Cloning…' : 'Clone plan' }}
+        </button>
+        <button
+          v-if="isRunning"
+          type="button"
+          @click="stopTasks"
+          :disabled="bStopping"
+          class="px-4 py-2.5 text-sm font-medium bg-destructive/80 text-on-accent rounded-lg hover:bg-destructive transition-colors flex items-center gap-2 disabled:opacity-60"
+        >
+          <span
+            v-if="bStopping"
+            class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0"
+          />
+          <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" class="select-none shrink-0" aria-hidden="true"><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6"/></svg>
+          {{ bStopping ? 'Stopping…' : 'Stop run' }}
+        </button>
+        <button
+          v-else
+          type="button"
+          @click="startTasks(0)"
+          :disabled="subtasks.length === 0 || bStartingRun"
+          class="px-4 py-2.5 text-sm font-medium btn-primary-solid rounded-lg disabled:opacity-40 transition-opacity flex items-center gap-2"
+        >
+          <span
+            v-if="bStartingRun"
+            class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0"
+          />
+          {{ bStartingRun ? 'Starting…' : 'Start tasks' }}
+        </button>
+      </div>
     </div>
   </div>
 </template>

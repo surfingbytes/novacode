@@ -4,7 +4,7 @@
 
 **Self-hosted dashboard for AI coding agents**
 
-Run [Cursor Agent](https://cursor.com), [Claude Code](https://claude.ai/code), and optionally **[Mistral Vibe](https://mistral.ai)** (`vibe` CLI) against your own repos through a clean web UI — no cloud, no lock-in.
+Run [Cursor Agent](https://cursor.com), [Claude Code](https://claude.ai/code), [Mistral Vibe](https://mistral.ai), [OpenCode](https://opencode.ai), and [Codex](https://openai.com/codex) against your own repos through a clean web UI — no cloud, no lock-in.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-24-green)](https://nodejs.org)
@@ -54,13 +54,13 @@ Nova Code was originally created by [Jonah Fintz](https://github.com/JonahFintzD
 |---|---|
 | **Home** | Session overview: busy and idle counts, recently active strip, optional compact list; jump to workspaces from there. |
 | **Workspaces** | Map any directory on your host to a named project. Group, color-code, tag, and archive. The workspace grid supports a **right-click** menu (open, edit, archive, delete). |
-| **Sessions** | Start a **Cursor Agent**, **Claude Code**, or **Mistral Vibe** session per workspace. Streaming chat over WebSocket, image attachments, tags, archive, and bulk actions via the sessions list multiselect bar. The in-workspace **Sessions** sidebar shows agent avatars, relative time, and a WhatsApp-style last-message preview (`You: …` for your messages). Session header action buttons use consistent square icon controls (edit/archive/delete). **Right-click** the sidebar, the sessions list, or the grid for open, edit (sessions), archive, and delete. |
-| **Global Search** | Quickly find workspaces, sessions, automations, settings, and rule templates across your entire Nova Code instance. Accessible via the search bar in the top navigation (desktop) or sidebar (mobile). Press `Ctrl+K` to open the search modal from anywhere. Results are grouped by category and include relevant metadata like workspace names for sessions. |
+| **Sessions** | Start a **Cursor Agent**, **Claude Code**, **Mistral Vibe**, **OpenCode**, or **Codex** session per workspace. All five talk over ACP. Streaming chat over WebSocket, image attachments, tags, archive, and bulk actions via the sessions list multiselect bar. The in-workspace **Sessions** sidebar shows agent avatars, relative time, and a WhatsApp-style last-message preview (`You: …` for your messages). Session header action buttons use consistent square icon controls (edit/archive/delete). **Right-click** the sidebar, the sessions list, or the grid for open, edit (sessions), archive, and delete. |
+| **Global Search** | Quickly find workspaces, sessions, orchestrators, automations, settings, and rule templates. Accessible via the search bar in the top navigation (desktop) or sidebar (mobile). Press `Ctrl+K` to open the search modal from anywhere. Results are grouped by category and include relevant metadata like workspace names for sessions. Session matches include chat body text. |
 | **Terminal** | Full PTY-backed terminal output via `node-pty` and xterm.js. |
-| **Orchestrators** | Multi-step task plans: decompose a goal into subtasks, run each step in its own session. The orchestrator detail header matches session controls (sidebar toggle, workspace subtitle, edit/archive/delete actions). Deleting an orchestrator removes its step sessions too. |
+| **Orchestrators** | Multi-step task plans: decompose a goal into subtasks, run each step in its own session. Edit steps after a run, set **depends on** earlier steps (failed/skipped deps are skipped), **run from step N**, or **clone** a plan. The orchestrator detail header matches session controls (sidebar toggle, workspace subtitle, edit/archive/delete actions). Deleting an orchestrator removes its step sessions too. |
 | **Automations** | Schedule recurring agent prompts per workspace (cron-style intervals). |
 | **Git** | Per-workspace Git status, diffs, and multi-repo discovery — right in the UI. |
-| **File browser** | Browse and read/write files inside a workspace without leaving the app. |
+| **File browser** | Browse, create, rename, and delete files and folders inside a workspace. Dotfiles are hidden by default; use the eye toggle to show them. |
 | **Workspace rules** | Markdown rule files injected into every agent prompt for that workspace. |
 | **Role templates** | Reusable instruction snippets for bootstrapping new rule files. |
 | **REST API** | JSON API under `/api` with JWT bearer auth only (no separate API-token or API-key table today; see root `feature-ideas.md` for possible future programmatic keys). |
@@ -73,7 +73,7 @@ Nova Code was originally created by [Jonah Fintz](https://github.com/JonahFintzD
 ## Requirements
 
 - **Docker + Docker Compose** (recommended) — or Node.js 24 + PostgreSQL 17 for a manual install
-- **Cursor Agent** and/or **Claude Code** CLI — installed and authenticated on the host (see [Agent setup](#agent-setup)); optional **Mistral Vibe** (`vibe` CLI + API key in Settings)
+- **Agent CLIs** — the Docker image includes Cursor Agent, Claude Code, Mistral Vibe, OpenCode, and Codex. Authenticate each agent you use from **Settings → Integrations** (see [Agent setup](#agent-setup)).
 - Directories you want to work on must appear under `/data-root` in the container (with the stock compose, that is everything under `~/.novacode/data` on the host, or extra bind mounts you add)
 
 ---
@@ -127,7 +127,7 @@ docker compose up -d
 > On first launch the app shows a **setup screen** — create your admin account there. No pre-seeding required.
 
 > [!NOTE]
-> The `novacode` container includes the Cursor Agent and Claude Code CLIs (Docker build). Log in to each from **Settings → Integrations → Agent Authentication**. For **Mistral Vibe**, install the `vibe` CLI on the image/host if you use it, and set the API key under **Settings → Integrations** (stored as `~/.vibe/.env` on the config volume).
+> The `novacode` container includes Cursor Agent, Claude Code, Mistral Vibe, OpenCode, and Codex (Docker build). Log in or paste API keys from **Settings → Integrations → Agent Authentication**.
 
 ---
 
@@ -165,25 +165,32 @@ Copy `.env.example` to `.env` and edit the values below.
 |----------|-------------|
 | `AGENT_ENV_*` | Any env var prefixed with `AGENT_ENV_` is forwarded to spawned agents with the prefix stripped |
 | `VIBE_COMMAND` | *(optional)* Executable for Mistral Vibe (default: `vibe` on `PATH`) |
+| `VIBE_ACP_COMMAND` | *(optional)* Vibe ACP server binary (default: `vibe-acp`) |
+| `OPENCODE_ACP_COMMAND` | *(optional)* OpenCode ACP command (default: `opencode`) |
+| `CODEX_ACP_COMMAND` | *(optional)* Codex ACP adapter (default: `codex-acp`) |
 | `TRUST_PROXY` | Set to `true` when behind a reverse proxy so login rate limits use `X-Forwarded-For` |
 
 ---
 
 ## Agent setup
 
-Nova Code spawns **Cursor Agent** and **Claude Code** as child processes inside the container (both installed in the Docker build). **Mistral Vibe** is optional: the `vibe` binary must be on `PATH` inside the container, and you configure the API key under **Settings → Mistral Vibe** (written to `.vibe/.env` under `/config`). Chat runs use `vibe --prompt "…" --output streaming` (JSONL, same stream shape as Cursor for the UI). The app does not rely on a session id from stdout: after each run it resolves the latest `session_*` folder under `~/.vibe/logs/session` (with `HOME=/config` in the default deployment, that is `/config/.vibe/logs/session`) using the timestamp embedded in the folder name when it matches `session_YYYYMMDD_HHMMSS_*`, otherwise the directory mtime, then persists the suffix after the final underscore as the id for `--resume` on the next turn. Set **`VIBE_HOME`** in the environment (or **`AGENT_ENV_VIBE_HOME`** to forward into agents) if you use a non-default Vibe data directory. After starting the app:
+All five agents speak **ACP** (Agent Client Protocol). Nova Code stores the ACP session id returned by `session/new` and resumes later turns with `session/load`. Chat events are ACP `SessionNotification` objects streamed to the dashboard.
+
+The Docker image installs the CLIs. After starting the app:
 
 1. Go to **Settings → Integrations → Agent Authentication**
-2. Log in to Cursor and/or Claude — the app opens an interactive terminal session for the auth flow
+2. Log in to **Cursor** and/or **Claude** (interactive terminal) and/or paste API keys for **Mistral Vibe**, **OpenCode**, and **Codex**
 3. Credentials are stored under `/config` (by default `~/.novacode/config` on the host via the stock compose file) and persist across restarts
 
-For **Mistral Vibe**, install the `vibe` CLI, set the API key under **Settings → Mistral Vibe**, and ensure the process can write Vibe’s log tree (under `/config` when `HOME` points there). Example of what Nova Code runs for each user message (workspace rules may be prepended inside the prompt string):
+| Agent | How Nova Code talks to it |
+|-------|---------------------------|
+| **Cursor** | `cursor-agent acp` subprocess per turn (`CURSOR_COMMAND`) |
+| **Claude** | In-process `@agentclientprotocol/claude-agent-acp` |
+| **Mistral Vibe** | `vibe-acp` subprocess per turn; API key in Settings (`~/.vibe/.env` under `/config`) |
+| **OpenCode** | `opencode acp` subprocess per turn |
+| **Codex** | `codex-acp` subprocess per turn; API key in Settings |
 
-```bash
-vibe --prompt "Your request here" --output streaming
-```
-
-Follow-up turns add `--resume <id>` once an id has been stored.
+Set **`VIBE_HOME`** (or **`AGENT_ENV_VIBE_HOME`**) if you use a non-default Vibe data directory.
 
 ### Troubleshooting (Claude Code)
 
@@ -193,15 +200,15 @@ Follow-up turns add `--resume <id>` once an id has been stored.
 
 | Agent | Where the external session id comes from |
 |-------|------------------------------------------|
-| **Cursor** | `cursor-agent -f create-chat` when the session is created |
-| **Claude** | `session_id` in Claude’s streaming JSON on the first prompt |
-| **Mistral Vibe** | **Not** from CLI stdout — after each run, the latest `session_*` folder under `~/.vibe/logs/session` (or `$VIBE_HOME/logs/session`), using embedded `YYYYMMDD_HHMMSS` in the name when present, else directory mtime; the stored id is the suffix after the final `_` (e.g. `session_20260330_220714_85007cf6` → `85007cf6`) |
+| **Cursor** | ACP `session/new` on the first prompt (`cursor-agent acp`) |
+| **Claude** | UUID returned by `ClaudeAcpAgent.newSession()` on the first prompt |
+| **Mistral Vibe** | UUID returned by `vibe-acp` `newSession()`, reused with `loadSession()` |
+| **OpenCode** | ACP `session/new` on the first prompt (`opencode acp`) |
+| **Codex** | ACP `session/new` on the first prompt (`codex-acp`) |
 
 ### Troubleshooting (Mistral Vibe)
 
-- **Agent unavailable in the UI** — `vibe` must pass `vibe --help` on the server `PATH`, and the API key must be saved in Settings (see `GET /api/settings/agent-capabilities` / `mistralVibeAvailable`). Override the binary with **`VIBE_COMMAND`** if needed.
-- **Resume not applied** — if no valid `session_*` directory appears after a run (permissions, wrong `HOME` / **`VIBE_HOME`**), the server logs a warning and the next turn may run **without** `--resume`. Check that `~/.vibe/logs/session` (or `$VIBE_HOME/logs/session`) exists and is writable by the API process.
-- **Wrong session picked** — ensure no other `vibe` runs are racing to create folders in the same log directory; the server picks the latest folder by the rules above.
+- **Agent unavailable in the UI** — `vibe-acp --version` must succeed on the server `PATH`, and the API key must be saved in Settings (see `GET /api/settings/agent-capabilities` / `mistralVibeAvailable`). Override the binaries with **`VIBE_COMMAND`** / **`VIBE_ACP_COMMAND`** if needed.
 - **Assistant text repeated in one bubble** — Vibe may emit the same final assistant chunk more than once or send **cumulative** full-text updates instead of token deltas. The dashboard merges consecutive assistant chunks (skip identical repeats; treat longer strings that extend the previous chunk as replacements) so you should not see doubled sentences like `Task completed.Task completed.`
 
 ---
@@ -340,7 +347,7 @@ app/
 | Real-time | WebSocket (`@fastify/websocket`) |
 | Terminal | [node-pty](https://github.com/microsoft/node-pty) · [xterm.js](https://xtermjs.org) |
 | Frontend | [Vue 3](https://vuejs.org) · [Pinia](https://pinia.vuejs.org) · [Tailwind CSS v4](https://tailwindcss.com) |
-| Agents | Cursor Agent CLI · Claude Code CLI · Mistral Vibe CLI (`vibe`, optional) |
+| Agents | Cursor Agent · Claude Code · Mistral Vibe · OpenCode · Codex (all via ACP) |
 
 ---
 

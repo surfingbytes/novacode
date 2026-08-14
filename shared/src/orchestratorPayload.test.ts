@@ -5,13 +5,17 @@ import { describe, it, expect } from 'vitest';
 import {
   appendHandoff,
   buildStepPrompt,
+  cloneSubtasksForNewPlan,
   collectStepSessionIdsFromSubtasksJson,
   mergeSubtasksJsonPatch,
   normalizeSubtasksPayload,
   parseSubtasksPayloadString,
+  remapDependsOnAfterDelete,
   serializeSubtasksPayload,
+  shouldSkipOrchestratorStep,
   subtasksFromStoredJson
 } from './orchestratorPayload.js';
+import type { SubTask } from './types.js';
 
 describe('normalizeSubtasksPayload', () => {
   it('wraps legacy raw arrays', () => {
@@ -106,5 +110,61 @@ describe('appendHandoff', () => {
   it('appends numbered blocks', () => {
     expect(appendHandoff('', 1, 'Setup', 'done')).toBe('### Step 1: Setup\n\ndone');
     expect(appendHandoff('### Step 1: A\n\nx', 2, 'B', 'y')).toContain('### Step 2: B');
+  });
+});
+
+describe('shouldSkipOrchestratorStep', () => {
+  it('skips when a dependency failed or was skipped', () => {
+    const subtasks: SubTask[] = [
+      { name: 'a', prompt: 'a', runResult: 'failed' },
+      { name: 'b', prompt: 'b', dependsOn: [0] },
+      { name: 'c', prompt: 'c', dependsOn: [1] }
+    ];
+    expect(shouldSkipOrchestratorStep(1, subtasks)).toBe(true);
+    subtasks[1].runResult = 'skipped';
+    expect(shouldSkipOrchestratorStep(2, subtasks)).toBe(true);
+  });
+
+  it('does not skip when dependencies succeeded', () => {
+    const subtasks: SubTask[] = [
+      { name: 'a', prompt: 'a', runResult: 'done' },
+      { name: 'b', prompt: 'b', dependsOn: [0] }
+    ];
+    expect(shouldSkipOrchestratorStep(1, subtasks)).toBe(false);
+  });
+});
+
+describe('cloneSubtasksForNewPlan', () => {
+  it('strips session ids, run results, and handoff', () => {
+    const cloned = cloneSubtasksForNewPlan(
+      JSON.stringify({
+        sharedContext: 'ctx',
+        handoffLog: 'old notes',
+        subtasks: [
+          { name: 'a', prompt: 'do a', sessionId: 'sess-1', runResult: 'done' },
+          { name: 'b', prompt: 'do b', category: 'tests', dependsOn: [0] }
+        ]
+      })
+    );
+    expect(cloned.sharedContext).toBe('ctx');
+    expect(cloned.handoffLog).toBe('');
+    expect(cloned.subtasks).toEqual([
+      { name: 'a', prompt: 'do a', category: null },
+      { name: 'b', prompt: 'do b', category: 'tests', dependsOn: [0] }
+    ]);
+  });
+});
+
+describe('remapDependsOnAfterDelete', () => {
+  it('drops the deleted step and shifts later indexes', () => {
+    const remapped = remapDependsOnAfterDelete(
+      [
+        { name: 'b', prompt: 'b', dependsOn: [0] },
+        { name: 'c', prompt: 'c', dependsOn: [0, 1] }
+      ],
+      0
+    );
+    expect(remapped[0]?.dependsOn).toBeUndefined();
+    expect(remapped[1]?.dependsOn).toEqual([0]);
   });
 });
