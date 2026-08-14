@@ -1,6 +1,6 @@
 # API service
 
-JSON under `/api`. Dashboard sessions use a JWT (`Authorization: Bearer`). Scripts can use a hashed **API key** from **Account → API keys** the same way.
+JSON under `/api`. The dashboard signs in with an **httpOnly session cookie** (7-day JWT, refreshed on `/api/auth/validate`). Scripts should use a hashed **API key** from **Account → API keys** as `Authorization: Bearer`.
 
 ## Role templates
 

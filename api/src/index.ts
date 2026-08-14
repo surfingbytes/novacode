@@ -36,6 +36,7 @@ import { searchRoutes } from './routes/search';
 import { ensureVapidKeys } from './classes/push';
 import { ensureSshKey } from './classes/sshKey';
 import { logger } from './classes/logger';
+import { resolveCorsOrigin } from './classes/corsOrigin';
 
 const startTime = Date.now();
 
@@ -64,16 +65,31 @@ async function main(): Promise<void> {
 
   // plugins
   await fastify.register(fastifyHelmet, {
-    // SPA + WebSockets + Monaco workers: a strict CSP is a separate project.
     // HSTS is off because many self-hosted installs are plain HTTP on a LAN.
-    contentSecurityPolicy: false,
     hsts: false,
     crossOriginEmbedderPolicy: false,
-    crossOriginResourcePolicy: false
+    crossOriginResourcePolicy: false,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-eval'", 'blob:'],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
+        imgSrc: ["'self'", 'data:', 'blob:'],
+        mediaSrc: ["'self'", 'blob:'],
+        connectSrc: ["'self'", 'https://fonts.googleapis.com', 'https://fonts.gstatic.com'],
+        workerSrc: ["'self'", 'blob:'],
+        childSrc: ["'self'", 'blob:'],
+        frameSrc: ["'none'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"]
+      }
+    }
   });
 
   await fastify.register(fastifyCors, {
-    origin: true,
+    origin: resolveCorsOrigin(),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
   });

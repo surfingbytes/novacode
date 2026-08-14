@@ -6,6 +6,7 @@ import type { WebSocket } from 'ws';
 import { rejectUnauthorizedWebSocket } from '../classes/auth';
 import { db } from '../classes/database';
 import { config } from '../classes/config';
+import { WS_ROUTE_RATE_LIMIT } from '../classes/rateLimits';
 import { broadcastSessionListUpsert } from '../classes/sessionListBroadcast';
 import {
   buildSessionTitlePrompt,
@@ -270,7 +271,10 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
     });
   }
 
-  fastify.get('/api/ws/chat/:id', { websocket: true }, async (socket: WebSocket, request) => {
+  fastify.get(
+    '/api/ws/chat/:id',
+    { websocket: true, config: { rateLimit: WS_ROUTE_RATE_LIMIT } },
+    async (socket: WebSocket, request) => {
     if (await rejectUnauthorizedWebSocket(socket, request)) {
       return;
     }

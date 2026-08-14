@@ -37,7 +37,8 @@ import type {
 
 // ---------------------------------- HTTP ----------------------------------
 export const http = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || location.origin + '/api'
+  baseURL: import.meta.env.VITE_API_URL || location.origin + '/api',
+  withCredentials: true
 });
 
 http.interceptors.request.use((requestConfig) => {
@@ -75,7 +76,7 @@ function isAuthFlowUrl(url: string | undefined): boolean {
   if (!url) {
     return false;
   }
-  return url.includes('/auth/login') || url.includes('/auth/setup') || url.includes('/auth/validate');
+  return url.includes('/auth/login') || url.includes('/auth/setup') || url.includes('/auth/validate') || url.includes('/auth/logout');
 }
 
 http.interceptors.response.use(
@@ -111,6 +112,8 @@ export const authApi = {
       // Bound the wait — a timeout is treated as "stay logged in" by the caller.
       timeout: 10000
     }),
+
+  logout: (): ReturnType<typeof http.post<void>> => http.post('/auth/logout'),
 
   changePassword: (
     currentPassword: string,
@@ -685,7 +688,8 @@ export const sessionsApi = {
   imageUrl: (sessionId: string, filename: string): string => {
     const base = (import.meta.env.VITE_API_URL ?? location.origin + '/api').replace(/\/$/, '');
     const token = localStorage.getItem('token') ?? '';
-    return `${base}/sessions/${sessionId}/images/${encodeURIComponent(filename)}?token=${encodeURIComponent(token)}`;
+    const url = `${base}/sessions/${sessionId}/images/${encodeURIComponent(filename)}`;
+    return token ? `${url}?token=${encodeURIComponent(token)}` : url;
   }
 };
 
@@ -745,6 +749,7 @@ export const orchestratorApi = {
       `${baseURL}/workspaces/${workspaceId}/orchestrators/${orchestratorId}/decompose`,
       {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {})

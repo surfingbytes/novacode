@@ -30,4 +30,12 @@ describe('extractWsToken', () => {
     expect(extractWsToken({ headers: { 'sec-websocket-protocol': 'chat' } })).toBeNull();
     expect(extractWsToken({ headers: {} })).toBeNull();
   });
+
+  it('falls back to the session cookie', () => {
+    expect(
+      extractWsToken({
+        headers: { cookie: 'nc_session=cookie-jwt; other=1' }
+      })
+    ).toBe('cookie-jwt');
+  });
 });

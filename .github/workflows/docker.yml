@@ -66,9 +66,6 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Prepare .env for Docker build
-        run: cp .env.example .env
-
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry

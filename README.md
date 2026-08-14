@@ -58,7 +58,7 @@ Nova Code was originally created by [Jonah Fintz](https://github.com/JonahFintzD
 | **File browser** | Browse, create, rename, and delete files and folders inside a workspace. Dotfiles are hidden by default; use the eye toggle to show them. |
 | **Workspace rules** | Markdown rule files injected into every agent prompt for that workspace. |
 | **Role templates** | Reusable instruction snippets for bootstrapping new rule files. |
-| **REST API** | JSON API under `/api`. The dashboard uses a JWT; scripts can use a hashed **API key** from **Account → API keys** (`Authorization: Bearer nck_…`). |
+| **REST API** | JSON API under `/api`. The dashboard uses an httpOnly session cookie; scripts should use a hashed **API key** from **Account → API keys** (`Authorization: Bearer nck_…`). |
 | **Usage** | Token/cost snapshots from ACP `usage_update` events are stored per turn and shown in chat plus a workspace total. |
 | **Web Push** | Browser notifications when sessions finish; the body previews the last assistant text or tool result (title still names workspace/session). Notifications include a **Reply** action that opens the PWA directly to that session. VAPID keys are created automatically in the config volume. |
 | **Health endpoint** | `GET /api/health` — unauthenticated, ready for Docker `HEALTHCHECK` and uptime monitors. Compose and the image probe this path; Postgres is not published to the host. |
@@ -136,7 +136,7 @@ Copy `.env.example` to `.env` and edit the values below.
 | Variable | Description |
 |----------|-------------|
 | `POSTGRES_PASSWORD` | Password for the PostgreSQL user |
-| `JWT_SECRET` | Long random string for signing JWTs — `openssl rand -hex 32` (required at startup; the example placeholder is rejected. Keep stable across restarts/upgrades; changing it invalidates existing browser tokens) |
+| `JWT_SECRET` | Long random string for signing JWTs — `openssl rand -hex 32` (required at startup; the example placeholder is rejected. Keep stable across restarts/upgrades; changing it invalidates existing browser sessions) |
 
 ### PostgreSQL
 
@@ -164,7 +164,8 @@ Copy `.env.example` to `.env` and edit the values below.
 | `VIBE_ACP_COMMAND` | *(optional)* Vibe ACP server binary (default: `vibe-acp`) |
 | `OPENCODE_ACP_COMMAND` | *(optional)* OpenCode ACP command (default: `opencode`) |
 | `CODEX_ACP_COMMAND` | *(optional)* Codex ACP adapter (default: `codex-acp`) |
-| `TRUST_PROXY` | Set to `true` when behind a reverse proxy so login rate limits use `X-Forwarded-For` |
+| `TRUST_PROXY` | Set to `true` when behind a reverse proxy so login rate limits use `X-Forwarded-For` and session cookies can be marked Secure |
+| `CORS_ORIGIN` | Comma-separated browser origins allowed to call the API. Unset: same-origin only in production, any origin in dev. `*` reflects the request Origin |
 
 ---
 

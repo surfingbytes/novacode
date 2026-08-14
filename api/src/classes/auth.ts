@@ -8,6 +8,13 @@ import { config } from './config';
 import { db } from './database';
 import { extractWsToken } from './wsToken';
 import { isApiKeyToken } from './apiTokens';
+import {
+  clearSessionCookieHeader,
+  isSecureRequest,
+  JWT_EXPIRES_IN,
+  readSessionCookie,
+  sessionCookieHeader
+} from './sessionCookie';
 
 // types
 import type { UserModel } from '../generated/client/models';
@@ -32,7 +39,31 @@ async function getJwtSecret(): Promise<string> {
 
 export async function signToken(username: string, id: string): Promise<string> {
   const secret = await getJwtSecret();
-  return jwt.sign({ username, id }, secret, { expiresIn: '30d' });
+  return jwt.sign({ username, id }, secret, { expiresIn: JWT_EXPIRES_IN });
+}
+
+function cookieHeaderFromRequest(request: FastifyRequest): string | undefined {
+  const header = request.headers.cookie;
+  return typeof header === 'string' ? header : undefined;
+}
+
+/** Bearer API key / JWT, then the httpOnly session cookie. */
+export function extractRequestToken(request: FastifyRequest): string | null {
+  return extractBearerToken(request) ?? readSessionCookie(cookieHeaderFromRequest(request));
+}
+
+export function attachSessionCookie(request: FastifyRequest, reply: FastifyReply, token: string): void {
+  reply.header(
+    'Set-Cookie',
+    sessionCookieHeader(token, { secure: isSecureRequest(request.headers, request.protocol) })
+  );
+}
+
+export function clearSessionCookie(request: FastifyRequest, reply: FastifyReply): void {
+  reply.header(
+    'Set-Cookie',
+    clearSessionCookieHeader(isSecureRequest(request.headers, request.protocol))
+  );
 }
 
 export async function verifyToken(token: string): Promise<JwtPayload> {
@@ -182,7 +213,7 @@ export function extractBearerToken(request: FastifyRequest): string | null {
 
 // validates JWT or API key and attaches user info to the request
 export async function jwtPreHandler(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-  const token = extractBearerToken(request);
+  const token = extractRequestToken(request);
   if (!token) {
     await reply.code(401).send({ error: 'Missing authorization token' });
     return;

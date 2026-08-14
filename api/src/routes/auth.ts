@@ -7,12 +7,14 @@ import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import {
   checkCredentials,
   signToken,
-  extractBearerToken,
+  extractRequestToken,
   verifyToken,
   createAuthUser,
   changePassword,
   changeUsername,
-  jwtPreHandler
+  jwtPreHandler,
+  attachSessionCookie,
+  clearSessionCookie
 } from '../classes/auth';
 import { db } from '../classes/database';
 import { clearVibeApiKey, config } from '../classes/config';
@@ -61,6 +63,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       const user = await createAuthUser(username, password);
       clearVibeApiKey(config.configDir);
       const token = await signToken(user.username, user.id);
+      attachSessionCookie(request, reply, token);
       return { token };
     }
   );
@@ -90,7 +93,24 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(401).send({ error: 'Invalid credentials' });
       }
       const token = await signToken(user.username, user.id);
+      attachSessionCookie(request, reply, token);
       return { token };
+    }
+  );
+
+  // POST /api/auth/logout — clear the session cookie
+  fastifyInstance.post(
+    '/api/auth/logout',
+    {
+      schema: {
+        response: {
+          204: Type.Null()
+        }
+      }
+    },
+    async (request, reply) => {
+      clearSessionCookie(request, reply);
+      return reply.code(204).send(null);
     }
   );
 
@@ -106,12 +126,14 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       }
     },
     async (request, reply) => {
-      const token = extractBearerToken(request);
+      const token = extractRequestToken(request);
       if (!token) {
         return reply.code(401).send({ error: 'No token' });
       }
       try {
         const payload = await verifyToken(token);
+        const refreshed = await signToken(payload.username, payload.id);
+        attachSessionCookie(request, reply, refreshed);
         return { valid: true, username: payload.username };
       } catch {
         return reply.code(401).send({ error: 'Invalid token' });
@@ -171,6 +193,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
       const token = await signToken(user.username, user.id);
+      attachSessionCookie(request, reply, token);
       return { token };
     }
   );

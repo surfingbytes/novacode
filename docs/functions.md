@@ -18,9 +18,9 @@ Optional features include **scheduled automations**, **role templates**, and **b
 ## 2. Authentication and accounts
 
 - **First-run setup**: If no user exists, the app exposes a setup flow (`/api/auth/setup`) to create the initial account (username + password).
-- **Login**: Password-based login returns a **JWT** used for API and WebSocket connections.
-- **Account**: Password change, username change, and **API keys** (`GET`/`POST`/`DELETE /api/auth/api-tokens`). Keys are stored as SHA-256 hashes; the plaintext `nck_…` token is returned only on create. Send it as `Authorization: Bearer` (or the WebSocket `bearer.<token>` subprotocol).
-- **REST auth**: JWT **or** an API key. There is no separate unscoped “service account”.
+- **Login**: Password-based login sets an **httpOnly session cookie** (7-day JWT, sliding refresh on `/api/auth/validate`). The JSON body still includes `token` for scripts; the dashboard does not keep it in `localStorage`.
+- **Account**: Password change, username change, and **API keys** (`GET`/`POST`/`DELETE /api/auth/api-tokens`). Keys are stored as SHA-256 hashes; the plaintext `nck_…` token is returned only on create. Send it as `Authorization: Bearer` (or the WebSocket `bearer.<token>` subprotocol). `POST /api/auth/logout` clears the session cookie.
+- **REST auth**: Session cookie, JWT Bearer, **or** an API key. There is no separate unscoped “service account”.
 - **Claude token setup**: `POST /api/agent-auth/claude/login` spawns a `claude setup-token` PTY session; the terminal overlay auto-detects the token and saves it via `POST /api/agent-auth/claude/token`. `GET /api/agent-auth/claude/status` and `DELETE /api/agent-auth/claude/logout` complete the flow.
 - **Mistral Vibe key setup**: Stored via `PUT /api/settings/vibe-api-key`; status checked with `GET /api/settings/vibe-api-key`; cleared with `DELETE /api/settings/vibe-api-key`.
 
@@ -61,7 +61,7 @@ Optional features include **scheduled automations**, **role templates**, and **b
 
 ## 5. Chat and agent execution
 
-- **Streaming chat**: WebSocket connection at `/api/ws/chat/:id` (JWT subprotocol `bearer.<jwt>`) for streaming agent output and chat events.
+- **Streaming chat**: WebSocket connection at `/api/ws/chat/:id` (session cookie, or JWT/API key subprotocol `bearer.<token>`) for streaming agent output and chat events.
 - **Chat engine**: Coordinates **active runs**, subscribers, **prompt dispatch**, cancellation, and persistence of **message history** (including streaming JSON lines from agents). On **cancel**, subprocess ACP agents receive `session/cancel` and a short grace period to settle the turn before the subprocess is killed, and the ACP session id resolved mid-turn is still persisted so the next prompt resumes via `session/load`; if a `session/load` fails and the agent falls back to a fresh session, a `session_reset_notice` event is persisted into the chat stream and shown as a notice in the dashboard.
 - **Claude ACP integration**: Prompts are dispatched to `ClaudeAcpAgent` from `@agentclientprotocol/claude-agent-acp` (in-process, no subprocess). ACP `SessionNotification` objects (`{ sessionId, update }`) are serialised as-is and forwarded to the dashboard; **no conversion to a legacy format is performed**. The frontend detects ACP events by `typeof event.sessionId === 'string' && event.update` and handles `agent_message_chunk`, `tool_call`, and `tool_call_update` natively. Legacy cursor-style events stored in older sessions are still parsed for backward compatibility. All tool permissions are auto-approved by the embedded ACP client proxy.
 - **Subprocess ACP agents** (`cursorAcp.ts`, `vibeAcp.ts`, `openCodeAcp.ts`, `codexAcp.ts`): Use `acpSubprocessRunner.ts` (`ClientSideConnection` + `ndJsonStream` from `@agentclientprotocol/sdk`) to talk to a per-prompt ACP subprocess over stdio. They emit the same `SessionNotification` shape as Claude — the frontend handles all agents identically. History replay events from `session/load` are discarded so only the current turn's events reach the dashboard.
@@ -74,7 +74,7 @@ Optional features include **scheduled automations**, **role templates**, and **b
 ## 6. Terminal and WebSocket session output
 
 - **PTY-based sessions**: `node-pty` runs agent processes (`PtyProcess`) with environment forwarded from `AGENT_ENV_*` and config (`HOME` under `/config`, Cursor/Claude config dirs, etc.).
-- **WebSocket** `/api/ws/session/:id` for terminal I/O and session lifecycle (attach with JWT).
+- **WebSocket** `/api/ws/session/:id` for terminal I/O and session lifecycle (session cookie or Bearer).
 - **Session manager**: Short-lived **auth PTYs** (e.g. Cursor login) are managed separately from normal chat sessions.
 
 ---

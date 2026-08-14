@@ -20,7 +20,6 @@ RUN npm ci
 FROM deps AS dashboard-builder
 
 COPY dashboard/ dashboard/
-COPY .env dashboard/.env
 RUN npm run build -w novacode-dashboard
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -43,25 +42,30 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code CLI globally so "Login to Claude" works in the app
-RUN npm install -g @anthropic-ai/claude-code
+ARG CLAUDE_CODE_VERSION=2.1.232
+RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 
 # Ensure user-local and global bin dirs are on PATH before any CLI installs
 ENV PATH="/root/.local/bin:/root/.opencode/bin:/usr/local/bin:${PATH}"
 
-# Install Cursor agent CLI
+# Install Cursor agent CLI (official installer does not expose a version pin)
 RUN curl https://cursor.com/install -fsS | bash
 
-# Install Mistral Vibe CLI
+# Install Mistral Vibe CLI (official installer does not expose a version pin)
 RUN curl -LsSf https://mistral.ai/vibe/install.sh | bash
 
 # Install OpenCode CLI
-RUN curl -fsSL https://opencode.ai/install | bash
+ARG OPENCODE_VERSION=1.18.18
+RUN curl -fsSL https://opencode.ai/install | bash -s -- --version "${OPENCODE_VERSION}"
 
 # Install Codex + Codex ACP adapter
-RUN npm install -g @openai/codex @zed-industries/codex-acp
+ARG CODEX_VERSION=0.147.0
+ARG CODEX_ACP_VERSION=0.16.0
+RUN npm install -g "@openai/codex@${CODEX_VERSION}" "@zed-industries/codex-acp@${CODEX_ACP_VERSION}"
 
 # Install Playwright core so agents can connect to a Playwright server
-RUN npm install -g playwright-core
+ARG PLAYWRIGHT_CORE_VERSION=1.62.1
+RUN npm install -g "playwright-core@${PLAYWRIGHT_CORE_VERSION}"
 
 WORKDIR /app
 

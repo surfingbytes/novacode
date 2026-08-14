@@ -5,7 +5,7 @@ import { join, extname, basename } from 'node:path';
 import { existsSync } from 'node:fs';
 
 // classes
-import { jwtPreHandler, authenticateToken } from '../classes/auth';
+import { jwtPreHandler, authenticateToken, extractRequestToken } from '../classes/auth';
 import { db } from '../classes/database';
 import { config } from '../classes/config';
 
@@ -167,13 +167,13 @@ export async function imageRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  // GET /api/sessions/:sessionId/images/:filename — serve an uploaded image
-  // Accepts token as query param so <img> tags can load authenticated images.
+  // GET /api/sessions/:sessionId/images/:filename — serve an uploaded image.
+  // Cookie (dashboard) or Bearer, with a query-token fallback for old <img> URLs.
   fastify.get(
     '/api/sessions/:sessionId/images/:filename',
     async (request, reply) => {
       const query = request.query as Record<string, string>;
-      const token = query['token'] ?? (request.headers['authorization'] ?? '').replace(/^Bearer /, '');
+      const token = extractRequestToken(request) ?? query['token'] ?? '';
       const user = await authenticateToken(token);
       if (!user) {
         return reply.status(401).send({ error: 'Unauthorized' });

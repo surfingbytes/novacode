@@ -1,6 +1,6 @@
 # Nova Code — remaining improvements
 
-Shipped work has been removed from this list. Items below are still open. Splitting oversized UI surfaces and security hardening are tracked as later phases.
+Shipped work has been removed from this list. Items below are still open. Splitting oversized UI surfaces is tracked as a later phase.
 
 ## Features
 
@@ -35,17 +35,6 @@ Split oversized views before adding more UI in them:
 - `GitView.vue` (~1.8k)
 - `SessionChat.vue` (~1.6k)
 - `SessionListView.vue` (~1.3k)
-
-## Security (phase 4)
-
-Fine for LAN use; tighten before exposing on a hostname:
-
-- Shorter-lived JWTs or httpOnly cookies (tokens currently live 30 days in `localStorage`).
-- Restrict CORS (`origin: true` today).
-- Content-Security-Policy (Helmet CSP is off for Monaco + WebSockets).
-- Rate-limit chat / orchestrator / automation routes (login is already limited).
-- Pin agent CLI versions in the Dockerfile (`curl | bash` at image build).
-- Stop copying `.env` into the dashboard Docker build context.
 
 ## Testing and docs
 

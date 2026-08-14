@@ -98,7 +98,7 @@ onMounted(async (): Promise<void> => {
   // Mid-session 401 on any API call → log out and send the user back to
   // login, preserving the deep link they were on.
   setUnauthorizedHandler(() => {
-    if (!auth.token) {
+    if (!auth.bSignedIn) {
       return;
     }
     auth.logout();
@@ -113,7 +113,7 @@ onMounted(async (): Promise<void> => {
   void apiHealth.ping();
   scheduleHealthPolling();
   document.addEventListener('visibilitychange', onDocumentVisibilityChange);
-  if (auth.token && !auth.bValidated) {
+  if (auth.bSignedIn && !auth.bValidated) {
     await auth.validate();
   }
   if (auth.bValidated) {

@@ -6,6 +6,7 @@ import { db, normalizeTagStringList } from '../classes/database';
 import { createSessionWithAgent } from '../classes/sessionService';
 import { dispatchPrompt, dispatchPromptAndWait } from '../classes/chatEngine';
 import { jwtPreHandler } from '../classes/auth';
+import { AGENT_ROUTE_RATE_LIMIT } from '../classes/rateLimits';
 import {
   appendHandoff,
   buildStepPrompt,
@@ -367,7 +368,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
   // Streams SSE: { type: 'thinking', text } for live thinking only (no tool calls); then { type: 'done', orchestrator } or { type: 'error', error }
   fastify.post(
     '/api/workspaces/:workspaceId/orchestrators/:orchestratorId/decompose',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, config: { rateLimit: AGENT_ROUTE_RATE_LIMIT } },
     async (request, reply) => {
       const { workspaceId, orchestratorId } = request.params as {
         workspaceId: string;
@@ -658,7 +659,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
   // POST /api/workspaces/:workspaceId/orchestrators/:orchestratorId/run — start run in background, return 202
   fastify.post(
     '/api/workspaces/:workspaceId/orchestrators/:orchestratorId/run',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, config: { rateLimit: AGENT_ROUTE_RATE_LIMIT } },
     async (request, reply) => {
       const { workspaceId, orchestratorId } = request.params as {
         workspaceId: string;

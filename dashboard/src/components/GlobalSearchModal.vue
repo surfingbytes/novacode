@@ -3,9 +3,6 @@
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 
-// stores
-import { useAuthStore } from '@/stores/auth';
-
 // types
 interface SearchResult {
   id: string;
@@ -99,7 +96,6 @@ function commandMatches(command: PaletteCommand, query: string): boolean {
 }
 
 // -------------------------------------------------- Store --------------------------------------------------
-const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
 
@@ -266,8 +262,8 @@ async function performSearch(): Promise<void> {
 
     // Use server-side search API
     const response = await fetch(`/api/search?query=${encodeURIComponent(query)}`, {
+      credentials: 'include',
       headers: {
-        Authorization: `Bearer ${auth.token}`,
         'Content-Type': 'application/json'
       }
     });

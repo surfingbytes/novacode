@@ -11,6 +11,7 @@ import { getActiveSessionIds } from './chat';
 import { subscribeBusy } from '../classes/chatEngine';
 import { registerSessionListBroadcaster } from '../classes/sessionListBroadcast';
 import { workspaceTerminalManager } from '../classes/workspaceTerminalManager';
+import { WS_ROUTE_RATE_LIMIT } from '../classes/rateLimits';
 
 // types
 import type { WsClientMessage, WsServerMessage } from '../@types/index';
@@ -86,7 +87,7 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
     });
   }
 
-  fastify.get('/api/ws/session/:id', { websocket: true }, async (socket: WebSocket, request) => {
+  fastify.get('/api/ws/session/:id', { websocket: true, config: { rateLimit: WS_ROUTE_RATE_LIMIT } }, async (socket: WebSocket, request) => {
     wsClients.add(socket);
     if (await rejectUnauthorizedWebSocket(socket, request)) {
       return;
@@ -150,7 +151,7 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.get(
     '/api/ws/workspaces/:workspaceId/sessions/:sessionId/terminal',
-    { websocket: true },
+    { websocket: true, config: { rateLimit: WS_ROUTE_RATE_LIMIT } },
     async (socket: WebSocket, request) => {
       wsClients.add(socket);
       if (await rejectUnauthorizedWebSocket(socket, request)) {
@@ -223,7 +224,7 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.get(
     '/api/ws/sessions',
-    { websocket: true },
+    { websocket: true, config: { rateLimit: WS_ROUTE_RATE_LIMIT } },
     async (socket: WebSocket, request) => {
       wsClients.add(socket);
       globalSessionClients.add(socket);
@@ -256,7 +257,7 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.get(
     '/api/ws/workspaces/:workspaceId/sessions',
-    { websocket: true },
+    { websocket: true, config: { rateLimit: WS_ROUTE_RATE_LIMIT } },
     async (socket: WebSocket, request) => {
       wsClients.add(socket);
       if (await rejectUnauthorizedWebSocket(socket, request)) {

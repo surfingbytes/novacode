@@ -117,7 +117,7 @@ router.beforeEach((to) => {
   if (to.meta.public) {
     return true;
   }
-  if (!auth.token) {
+  if (!auth.bSignedIn) {
     return { name: 'login', query: to.fullPath !== '/' ? { redirect: to.fullPath } : {} };
   }
   if (!auth.bValidated) {

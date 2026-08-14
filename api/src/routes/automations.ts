@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { db } from '../classes/database';
 import { jwtPreHandler } from '../classes/auth';
 import { runAutomation } from '../classes/automationScheduler';
+import { AGENT_ROUTE_RATE_LIMIT } from '../classes/rateLimits';
 
 export async function automationRoutes(fastify: FastifyInstance): Promise<void> {
   // GET /api/automations — list all automations (global)
@@ -27,7 +28,10 @@ export async function automationRoutes(fastify: FastifyInstance): Promise<void> 
   );
 
   // POST /api/automations — create automation
-  fastify.post('/api/automations', { preHandler: jwtPreHandler }, async (request, reply) => {
+  fastify.post(
+    '/api/automations',
+    { preHandler: jwtPreHandler, config: { rateLimit: AGENT_ROUTE_RATE_LIMIT } },
+    async (request, reply) => {
     const body = request.body as {
       name?: string;
       workspaceId?: string;
@@ -116,7 +120,7 @@ export async function automationRoutes(fastify: FastifyInstance): Promise<void> 
   // POST /api/automations/:id/trigger — manually trigger a run now
   fastify.post(
     '/api/automations/:id/trigger',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, config: { rateLimit: AGENT_ROUTE_RATE_LIMIT } },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const automation = await db.getAutomation(id);
