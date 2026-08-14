@@ -1,6 +1,6 @@
 # Nova Code — remaining improvements
 
-Shipped work has been removed from this list. Items below are still open. Splitting oversized UI surfaces is tracked as a later phase.
+Shipped work has been removed from this list. Items below are still open.
 
 ## Features
 
@@ -26,15 +26,6 @@ Shipped work has been removed from this list. Items below are still open. Splitt
 - Accessibility: modal focus trap, remaining `aria-label`s, `prefers-reduced-motion`.
 - Custom theme colors.
 - Global toast on 403/5xx (401 logout is already handled).
-
-## Maintainability (phase 3)
-
-Split oversized views before adding more UI in them:
-
-- `SettingsView.vue` (~2.2k lines)
-- `GitView.vue` (~1.8k)
-- `SessionChat.vue` (~1.6k)
-- `SessionListView.vue` (~1.3k)
 
 ## Testing and docs
 

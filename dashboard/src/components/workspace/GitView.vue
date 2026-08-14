@@ -2,19 +2,10 @@
 // node_modules
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import {
-  ArrowLeft,
-  Check,
-  ChevronRight,
   CloudDownload,
-  CloudUpload,
   GitBranch as GitBranchIcon,
-  History,
-  Minus,
-  MoreHorizontal,
   Plus,
-  RefreshCw,
-  Sparkles,
-  Trash2
+  RefreshCw
 } from 'lucide-vue-next';
 
 // classes
@@ -29,6 +20,9 @@ import ModalHeader from '@/components/ModalHeader.vue';
 import ConfirmModal from '@/components/ConfirmModal.vue';
 import ContextMenu from '@/components/ContextMenu.vue';
 import type { ContextMenuItem } from '@/components/ContextMenu.vue';
+import GitChangesList from '@/components/workspace/git/GitChangesList.vue';
+import GitDiffPane from '@/components/workspace/git/GitDiffPane.vue';
+import { gitFileKey as fileKey, gitParseFileKey as parseFileKey } from '@/components/workspace/git/gitDisplay';
 
 // -------------------------------------------------- Props --------------------------------------------------
 const props = withDefaults(
@@ -99,7 +93,6 @@ const bShowCreateBranch = ref<boolean>(false);
 const bGitActionsMenuOpen = ref<boolean>(false);
 const gitActionsMenuX = ref<number>(0);
 const gitActionsMenuY = ref<number>(0);
-const gitActionsButtonRef = ref<HTMLElement | null>(null);
 const listPane = ref<'changes' | 'history'>('changes');
 const commits = ref<GitCommit[]>([]);
 const bHistoryLoading = ref<boolean>(false);
@@ -321,12 +314,6 @@ const gitActionsMenuItems = computed(
   ]
 );
 
-const fileKey = (file: GitFile): string => `${file.repo}::${file.file}`;
-const parseFileKey = (key: string): { repo: string; file: string } => {
-  const sep = key.indexOf('::');
-  if (sep < 0) return { repo: '', file: key };
-  return { repo: key.slice(0, sep), file: key.slice(sep + 2) };
-};
 const canGenerateCommitMessage = (targetRepo: string): boolean =>
   selectedCountInRepo(targetRepo) > 0 &&
   committingRepo.value === null &&
@@ -440,17 +427,6 @@ const clearSelectedFile = (): void => {
   commitPatch.value = '';
   emit('update:selectedFilePath', null);
 };
-
-function formatCommitDate(iso: string): string {
-  if (!iso) {
-    return '';
-  }
-  const parsed = new Date(iso);
-  if (Number.isNaN(parsed.getTime())) {
-    return iso;
-  }
-  return parsed.toLocaleString();
-}
 
 async function loadHistory(): Promise<void> {
   const repo = activeRepo.value?.repo ?? selectedGitRepo.value;
@@ -682,8 +658,8 @@ const openCreateBranchDialog = (): void => {
   bShowCreateBranch.value = true;
 };
 
-const openGitActions = (): void => {
-  const button = gitActionsButtonRef.value;
+const openGitActions = (e?: MouseEvent): void => {
+  const button = (e?.currentTarget as HTMLElement | undefined) ?? null;
   if (!button || window.matchMedia('(max-width: 767px)').matches) {
     bShowGitActions.value = true;
     return;
@@ -821,31 +797,6 @@ const pushChanges = async (targetRepo: string): Promise<void> => {
   }
 };
 
-const statusBadgeClass = (status: string): string => {
-  const s = status.toUpperCase();
-  if (s === 'M' || s === 'MM' || s === ' M' || s === 'M ')
-    return 'bg-yellow-500/20 text-yellow-400';
-  if (s === 'A' || s === 'A ') return 'bg-green-500/20 text-green-400';
-  if (s === 'D' || s === ' D' || s === 'D ') return 'bg-red-500/20 text-red-400';
-  if (s === 'R' || s.startsWith('R')) return 'bg-blue-500/20 text-blue-400';
-  if (s === '??') return 'bg-text-muted/20 text-text-muted';
-  return 'bg-text-muted/20 text-text-muted';
-};
-
-const diffRowClass = (line: string): string => {
-  if (line.startsWith('+') && !line.startsWith('+++')) return 'diff-row--added';
-  if (line.startsWith('-') && !line.startsWith('---')) return 'diff-row--removed';
-  if (line.startsWith('@@')) return 'diff-row--hunk';
-  if (
-    line.startsWith('diff ') ||
-    line.startsWith('index ') ||
-    line.startsWith('--- ') ||
-    line.startsWith('+++ ')
-  )
-    return 'diff-row--meta';
-  return '';
-};
-
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 // When files load and initialFilePath is set, open that file (e.g. from URL ?file=path)
 watch(
@@ -916,670 +867,83 @@ onUnmounted((): void => {
 
 <template>
   <div class="flex h-full min-h-0 overflow-hidden bg-bg">
-    <!-- Changed-files list: full width on narrow; sidebar on wide (foldable / tablet+) -->
-    <div
-      v-show="bShowList"
-      class="flex flex-col min-h-0 overflow-hidden shrink-0"
-      :class="bWidePane ? 'w-[min(22rem,40%)] border-r border-fg/[0.08]' : 'w-full'"
-    >
-      <div
-        class="flex flex-col gap-2 px-3 py-2 border-b border-fg/[0.08] flex-shrink-0"
-      >
-        <div v-if="repos.length > 1" class="flex flex-col gap-1">
-          <label class="text-xs font-medium text-text-muted" for="git-repo-select">Repository</label>
-          <select
-            id="git-repo-select"
-            v-model="selectedGitRepo"
-            class="w-full min-w-0 bg-card border border-fg/[0.08] rounded-lg px-3 py-2 text-sm text-text-primary font-mono outline-none focus:border-primary/50"
-          >
-            <option v-for="r in repos" :key="r.repo || '.'" :value="r.repo">
-              {{ r.repo || '.' }}{{ r.files.length ? ` · ${r.files.length} changed` : ''
-              }}{{ r.aheadCount > 0 ? ` · ↑${r.aheadCount}` : '' }}
-            </option>
-          </select>
-        </div>
-        <div
-          v-if="activeRepo"
-          class="rounded-xl border border-fg/[0.08] bg-card/60 p-2"
-        >
-          <div class="flex items-center justify-between gap-2">
-            <button
-              class="min-w-0 flex-1 flex items-center gap-2 text-left rounded-lg px-2 py-1.5 hover:bg-fg/[0.04] transition-colors"
-              type="button"
-              @click="openSwitchBranchDialog"
-            >
-              <GitBranchIcon :size="14" :stroke-width="1.6" class="select-none flex-shrink-0 text-text-muted" aria-hidden="true" />
-              <span class="min-w-0 flex-1">
-                <span class="block truncate font-mono text-sm text-text-primary">
-                  {{ activeRepo.currentBranch }}
-                </span>
-                <span class="block truncate text-[11px] text-text-muted">
-                  <template v-if="activeRepo.upstreamBranch">{{ activeRepo.upstreamBranch }}</template>
-                  <template v-else>No upstream</template>
-                </span>
-              </span>
-            </button>
-            <div class="flex items-center gap-1.5 flex-shrink-0">
-              <span
-                v-if="activeRepo.detached"
-                class="hidden sm:inline rounded-full bg-text-muted/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-text-muted"
-              >
-                Detached
-              </span>
-              <span v-if="activeRepo.aheadCount > 0" class="text-xs text-text-muted">↑{{ activeRepo.aheadCount }}</span>
-              <span v-if="activeRepo.behindCount > 0" class="text-xs text-text-muted">↓{{ activeRepo.behindCount }}</span>
-              <button
-                ref="gitActionsButtonRef"
-                class="h-8 px-2.5 rounded-lg border border-fg/10 text-text-muted hover:text-text-primary hover:bg-fg/[0.04] transition-colors"
-                type="button"
-                title="Git actions"
-                @click="openGitActions"
-              >
-                <MoreHorizontal :size="16" :stroke-width="1.8" class="select-none" aria-hidden="true" />
-              </button>
-            </div>
-          </div>
-
-          <p
-            v-if="
-              gitActionResult &&
-              (gitActionResult.repo === undefined || gitActionResult.repo === selectedGitRepo)
-            "
-            class="text-xs"
-            :class="gitActionResult.type === 'success' ? 'text-success' : 'text-destructive'"
-          >
-            {{ gitActionResult.text }}
-          </p>
-        </div>
-        <div class="flex items-center justify-between gap-2">
-          <div class="flex items-center gap-2 min-w-0">
-            <div class="button-select-small h-7! p-0.5!">
-              <button
-                type="button"
-                class="button is-icon px-2! h-6! text-[11px]"
-                :class="{ 'is-active': listPane === 'changes' }"
-                @click="setListPane('changes')"
-              >
-                Changes
-              </button>
-              <button
-                type="button"
-                class="button is-icon px-2! h-6! text-[11px]"
-                :class="{ 'is-active': listPane === 'history' }"
-                @click="setListPane('history')"
-              >
-                History
-              </button>
-            </div>
-          </div>
-          <div class="flex items-center gap-1 flex-shrink-0">
-            <button
-              class="text-text-muted hover:text-text-primary transition-colors px-1"
-              :class="{ 'animate-spin': listPane === 'changes' ? bIsLoading : bHistoryLoading }"
-              title="Refresh"
-              @click="listPane === 'history' ? loadHistory() : refresh()"
-            >
-              <RefreshCw :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
-            </button>
-            <button
-              v-if="bSidePanelToggleVisible"
-              type="button"
-              class="inline-flex items-center justify-center w-9 h-9 rounded-lg text-text-muted hover:text-text-primary hover:bg-fg/[0.06] transition-colors"
-              title="Hide file list"
-              aria-label="Hide file list"
-              @click="setSidePanelOpen(false)"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M14 9l-3 3 3 3"/></svg>
-            </button>
-          </div>
-        </div>
-        <div v-if="listPane === 'changes'" class="flex items-center gap-2 min-w-0">
-          <button
-            v-if="filesInSelectedRepo.length"
-            class="flex items-center justify-center w-4 h-4 rounded border transition-colors flex-shrink-0"
-            :class="
-              allSelected
-                ? 'bg-primary border-primary'
-                : someSelected
-                  ? 'bg-primary/40 border-primary'
-                  : 'border-fg/20 hover:border-fg/40'
-            "
-            title="Select all / none"
-            @click.stop="toggleAll"
-          >
-            <Check v-if="allSelected" :size="10" :stroke-width="1.6" class="select-none text-white" aria-hidden="true" />
-            <Minus v-else-if="someSelected" :size="10" :stroke-width="1.6" class="select-none text-white" aria-hidden="true" />
-          </button>
-          <span class="text-xs font-medium text-text-muted truncate">
-            Changed files
-            <span
-              v-if="repos.length > 1 ? filesInSelectedRepo.length : files.length"
-              class="ml-1 text-text-muted/60"
-              >({{ repos.length > 1 ? filesInSelectedRepo.length : files.length }})</span
-            >
-          </span>
-        </div>
-        <div v-else class="text-xs font-medium text-text-muted truncate">Recent commits</div>
-      </div>
-
-      <div
-        v-if="error"
-        class="flex flex-col items-center justify-center flex-1 gap-3 px-6 text-center"
-      >
-        <p class="text-text-muted text-sm">{{ error }}</p>
-        <button
-          class="text-xs text-primary hover:text-primary-hover transition-colors"
-          @click="refresh"
-        >
-          Try again
-        </button>
-      </div>
-
-      <!-- Git file list skeleton -->
-      <div v-else-if="listPane === 'changes' && bIsLoading && !bHasLoadedStatus" class="flex-1 overflow-hidden flex flex-col">
-        <div
-          v-for="i in 5"
-          :key="'git-skel-' + i"
-          class="w-full flex items-center gap-2.5 px-3 py-2 border-b border-fg/[0.03]"
-        >
-          <div class="w-4 h-4 rounded border border-fg/10 bg-fg/5 animate-pulse flex-shrink-0" />
-          <div class="h-3 w-8 rounded bg-fg/10 animate-pulse flex-shrink-0" />
-          <div class="h-3 rounded bg-fg/10 animate-pulse flex-1 min-w-0 max-w-[220px]" />
-        </div>
-      </div>
-
-      <div
-        v-else-if="listPane === 'changes' && !files.length && repos.length === 1"
-        class="flex flex-col items-center justify-center flex-1 gap-1"
-      >
-        <p class="text-text-muted text-sm">No changes</p>
-        <p class="text-text-muted/50 text-xs">Working tree clean</p>
-      </div>
-
-      <div
-        v-else-if="listPane === 'changes' && !files.length && repos.length > 1"
-        class="flex flex-col items-center justify-center flex-1 gap-1 px-6 text-center"
-      >
-        <p class="text-text-muted text-sm">No changes</p>
-        <p class="text-text-muted/50 text-xs">Working tree clean in all repositories</p>
-      </div>
-
-      <div
-        v-else-if="listPane === 'changes' && repos.length > 1 && files.length && !filesInSelectedRepo.length"
-        class="flex flex-col items-center justify-center flex-1 gap-1 px-6 text-center"
-      >
-        <p class="text-text-muted text-sm">No changes in this repository</p>
-        <p class="text-text-muted/50 text-xs">Switch repository above to see other files</p>
-      </div>
-
-      <div v-else-if="listPane === 'history'" class="flex-1 overflow-y-auto min-h-0">
-        <div
-          v-if="bHistoryLoading && commits.length === 0"
-          class="px-3 py-2 text-xs text-text-muted"
-        >
-          Loading history…
-        </div>
-        <div
-          v-else-if="commits.length === 0"
-          class="flex flex-col items-center justify-center h-full gap-1 px-6 text-center"
-        >
-          <History :size="20" :stroke-width="1.5" class="opacity-40" aria-hidden="true" />
-          <p class="text-text-muted text-sm">No commits yet</p>
-        </div>
-        <button
-          v-for="commit in commits"
-          :key="commit.hash"
-          type="button"
-          class="w-full text-left px-3 py-2 border-b border-fg/[0.03] hover:bg-fg/[0.04] transition-colors"
-          :class="selectedCommit?.hash === commit.hash ? 'bg-primary/15' : ''"
-          @click="openCommit(commit)"
-        >
-          <p class="text-xs text-text-primary truncate">{{ commit.subject }}</p>
-          <p class="text-[11px] text-text-muted mt-0.5 truncate font-mono">
-            {{ commit.shortHash }} · {{ commit.author }} · {{ formatCommitDate(commit.date) }}
-          </p>
-        </button>
-      </div>
-
-      <div v-else class="flex-1 overflow-y-auto min-h-0">
-        <div
-          v-for="f in filesInSelectedRepo"
-          :key="fileKey(f)"
-          class="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-fg/[0.04] transition-colors text-left border-b border-fg/[0.03]"
-          :class="
-            selectedFile && fileKey(selectedFile) === fileKey(f) ? 'bg-primary/15' : ''
-          "
-        >
-          <button
-            class="flex items-center justify-center w-4 h-4 rounded border transition-colors flex-shrink-0"
-            :class="
-              selectedFiles.has(fileKey(f))
-                ? 'bg-primary border-primary'
-                : 'border-fg/20 hover:border-fg/40'
-            "
-            @click.stop="toggleFile(f)"
-          >
-            <Check v-if="selectedFiles.has(fileKey(f))" :size="10" :stroke-width="1.6" class="select-none text-white" aria-hidden="true" />
-          </button>
-          <button class="flex items-center gap-2.5 flex-1 min-w-0" @click="openFile(f)">
-            <span
-              class="flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded font-mono tracking-wide"
-              :class="statusBadgeClass(f.status)"
-              >{{ f.status || '?' }}</span
-            >
-            <span
-              class="text-xs truncate font-mono flex-1 text-left"
-              :class="
-                selectedFile && fileKey(selectedFile) === fileKey(f)
-                  ? 'text-primary'
-                  : 'text-text-primary'
-              "
-              >{{ f.file }}</span
-            >
-            <ChevronRight
-              v-if="!bWidePane"
-              :size="14"
-              :stroke-width="1.6"
-              class="select-none flex-shrink-0 text-text-muted/50"
-              aria-hidden="true"
-            />
-          </button>
-          <button
-            class="flex-shrink-0 text-text-muted hover:text-destructive transition-colors p-1 disabled:opacity-40 disabled:cursor-not-allowed"
-            title="Discard changes"
-            :disabled="bDiscarding"
-            @click.stop="discardFiles([f.file], f.repo)"
-          >
-            <Trash2 :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
-          </button>
-        </div>
-      </div>
-
-      <!-- Commit & Push actions -->
-      <div
-        v-if="!error && repos.length && listPane === 'changes'"
-        class="flex-shrink-0 border-t border-fg/[0.08] px-3 py-3 flex flex-col gap-2"
-      >
-        <!-- Single Git root: one bar -->
-        <template v-if="repos.length === 1">
-          <template v-if="files.length">
-            <div class="flex items-stretch gap-2">
-              <textarea
-                v-model="commitMessage"
-                rows="2"
-                class="min-w-0 flex-1 bg-card border border-fg/[0.08] focus:border-primary/50 focus:ring-2 focus:ring-primary/10 rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all resize-none"
-                placeholder="Commit message..."
-                :disabled="committingRepo !== null || bGeneratingCommitMessage"
-              />
-              <button
-                class="flex-shrink-0 w-10 rounded-lg text-text-muted hover:text-primary hover:bg-fg/[0.06] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
-                type="button"
-                title="Generate commit message"
-                aria-label="Generate commit message"
-                :disabled="!canGenerateCommitMessage(repos[0].repo)"
-                @click="generateCommitMessage(repos[0].repo)"
-              >
-                <div
-                  v-if="bGeneratingCommitMessage"
-                  class="w-4 h-4 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
-                ></div>
-                <Sparkles v-else :size="17" :stroke-width="1.7" class="select-none" aria-hidden="true" />
-              </button>
-            </div>
-          </template>
-          <!-- Wide split: Commit full-width, Push/Discard share a row. Laptop: one even row. -->
-          <div v-if="bWidePane" class="flex flex-col gap-2">
-            <button
-              v-if="files.length"
-              class="h-9 w-full text-sm px-3 btn-primary-solid rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5"
-              :disabled="!canCommit"
-              @click="commitChanges(repos[0].repo)"
-            >
-              <div
-                v-if="committingRepo === repos[0].repo"
-                class="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin"
-              ></div>
-              <Check v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
-              Commit ({{ selectedFiles.size }})
-            </button>
-            <div class="flex gap-2 w-full min-w-0">
-              <button
-                class="h-9 flex-1 text-sm px-3 text-text-primary border border-fg/10 hover:border-primary/30 hover:bg-primary/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5 min-w-0"
-                :disabled="!canPushSingleRepo"
-                @click="pushChanges(repos[0].repo)"
-              >
-                <div
-                  v-if="pushingRepo === repos[0].repo"
-                  class="w-3 h-3 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
-                ></div>
-                <CloudUpload v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
-                Push<template v-if="repos[0].aheadCount > 0"> ({{ repos[0].aheadCount }})</template>
-              </button>
-              <button
-                v-if="files.length"
-                class="h-9 flex-1 text-sm px-3 text-destructive border border-destructive/20 hover:border-destructive/40 hover:bg-destructive/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5 min-w-0"
-                :disabled="!canDiscardSelected"
-                @click="discardFiles(selectedFilesInActiveRepo, repos[0].repo)"
-              >
-                <div
-                  v-if="bDiscarding"
-                  class="w-3 h-3 border border-destructive/30 border-t-destructive rounded-full animate-spin"
-                ></div>
-                <Trash2 v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
-                Discard ({{ selectedFilesInActiveRepo.length }})
-              </button>
-            </div>
-          </div>
-          <div v-else class="flex flex-wrap gap-2">
-            <button
-              v-if="files.length"
-              class="h-9 text-sm px-3 btn-primary-solid rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5"
-              :disabled="!canCommit"
-              @click="commitChanges(repos[0].repo)"
-            >
-              <div
-                v-if="committingRepo === repos[0].repo"
-                class="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin"
-              ></div>
-              <Check v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
-              Commit ({{ selectedFiles.size }})
-            </button>
-            <button
-              class="h-9 text-sm px-3 text-text-primary border border-fg/10 hover:border-primary/30 hover:bg-primary/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5"
-              :disabled="!canPushSingleRepo"
-              @click="pushChanges(repos[0].repo)"
-            >
-              <div
-                v-if="pushingRepo === repos[0].repo"
-                class="w-3 h-3 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
-              ></div>
-              <CloudUpload v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
-              Push<template v-if="repos[0].aheadCount > 0"> ({{ repos[0].aheadCount }})</template>
-            </button>
-            <button
-              v-if="files.length"
-              class="h-9 text-sm px-3 text-destructive border border-destructive/20 hover:border-destructive/40 hover:bg-destructive/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5"
-              :disabled="!canDiscardSelected"
-              @click="discardFiles(selectedFilesInActiveRepo, repos[0].repo)"
-            >
-              <div
-                v-if="bDiscarding"
-                class="w-3 h-3 border border-destructive/30 border-t-destructive rounded-full animate-spin"
-              ></div>
-              <Trash2 v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
-              Discard ({{ selectedFilesInActiveRepo.length }})
-            </button>
-          </div>
-          <p
-            v-if="commitResult"
-            class="text-xs"
-            :class="commitResult.type === 'success' ? 'text-success' : 'text-destructive'"
-          >
-            {{ commitResult.text }}
-          </p>
-          <p
-            v-if="pushResult"
-            class="text-xs"
-            :class="pushResult.type === 'success' ? 'text-success' : 'text-destructive'"
-          >
-            {{ pushResult.text }}
-          </p>
-          <p v-if="hasMixedSelection" class="text-xs text-text-muted">
-            Select files from a single repository for commit/push.
-          </p>
-        </template>
-
-        <!-- Multiple Git roots: one message + actions for the repository selected above -->
-        <template v-else-if="activeRepo">
-          <template v-if="activeRepo.files.length">
-            <div class="flex items-stretch gap-2">
-              <textarea
-                v-model="commitMessagesByRepo[selectedGitRepo]"
-                rows="2"
-                class="min-w-0 flex-1 bg-card border border-fg/[0.08] focus:border-primary/50 focus:ring-2 focus:ring-primary/10 rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all resize-none"
-                placeholder="Commit message..."
-                :disabled="committingRepo !== null || bGeneratingCommitMessage"
-              />
-              <button
-                class="flex-shrink-0 w-10 rounded-lg text-text-muted hover:text-primary hover:bg-fg/[0.06] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
-                type="button"
-                title="Generate commit message"
-                aria-label="Generate commit message"
-                :disabled="!canGenerateCommitMessage(activeRepo.repo)"
-                @click="generateCommitMessage(activeRepo.repo)"
-              >
-                <div
-                  v-if="bGeneratingCommitMessage"
-                  class="w-4 h-4 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
-                ></div>
-                <Sparkles v-else :size="17" :stroke-width="1.7" class="select-none" aria-hidden="true" />
-              </button>
-            </div>
-          </template>
-          <div v-if="bWidePane" class="flex flex-col gap-2">
-            <button
-              v-if="activeRepo.files.length"
-              class="h-9 w-full text-sm px-3 btn-primary-solid rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5"
-              :disabled="!canCommitActiveRepo"
-              @click="commitChanges(activeRepo.repo)"
-            >
-              <div
-                v-if="committingRepo === activeRepo.repo"
-                class="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin"
-              ></div>
-              <Check v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
-              Commit ({{ selectedCountInRepo(activeRepo.repo) }})
-            </button>
-            <div class="flex gap-2 w-full min-w-0">
-              <button
-                class="h-9 flex-1 text-sm px-3 text-text-primary border border-fg/10 hover:border-primary/30 hover:bg-primary/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5 min-w-0"
-                :disabled="!canPushActiveRepo"
-                @click="pushChanges(activeRepo.repo)"
-              >
-                <div
-                  v-if="pushingRepo === activeRepo.repo"
-                  class="w-3 h-3 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
-                ></div>
-                <CloudUpload v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
-                Push<template v-if="activeRepo.aheadCount > 0"> ({{ activeRepo.aheadCount }})</template>
-              </button>
-              <button
-                v-if="activeRepo.files.length"
-                class="h-9 flex-1 text-sm px-3 text-destructive border border-destructive/20 hover:border-destructive/40 hover:bg-destructive/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5 min-w-0"
-                :disabled="!canDiscardSelected"
-                @click="discardFiles(selectedFilesInActiveRepo, activeRepo.repo)"
-              >
-                <div
-                  v-if="bDiscarding"
-                  class="w-3 h-3 border border-destructive/30 border-t-destructive rounded-full animate-spin"
-                ></div>
-                <Trash2 v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
-                Discard ({{ selectedFilesInActiveRepo.length }})
-              </button>
-            </div>
-          </div>
-          <div v-else class="flex flex-wrap gap-2">
-            <button
-              v-if="activeRepo.files.length"
-              class="h-9 text-sm px-3 btn-primary-solid rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5"
-              :disabled="!canCommitActiveRepo"
-              @click="commitChanges(activeRepo.repo)"
-            >
-              <div
-                v-if="committingRepo === activeRepo.repo"
-                class="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin"
-              ></div>
-              <Check v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
-              Commit ({{ selectedCountInRepo(activeRepo.repo) }})
-            </button>
-            <button
-              class="h-9 text-sm px-3 text-text-primary border border-fg/10 hover:border-primary/30 hover:bg-primary/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5"
-              :disabled="!canPushActiveRepo"
-              @click="pushChanges(activeRepo.repo)"
-            >
-              <div
-                v-if="pushingRepo === activeRepo.repo"
-                class="w-3 h-3 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
-              ></div>
-              <CloudUpload v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
-              Push<template v-if="activeRepo.aheadCount > 0"> ({{ activeRepo.aheadCount }})</template>
-            </button>
-            <button
-              v-if="activeRepo.files.length"
-              class="h-9 text-sm px-3 text-destructive border border-destructive/20 hover:border-destructive/40 hover:bg-destructive/[0.06] rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1.5"
-              :disabled="!canDiscardSelected"
-              @click="discardFiles(selectedFilesInActiveRepo, activeRepo.repo)"
-            >
-              <div
-                v-if="bDiscarding"
-                class="w-3 h-3 border border-destructive/30 border-t-destructive rounded-full animate-spin"
-              ></div>
-              <Trash2 v-else :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
-              Discard ({{ selectedFilesInActiveRepo.length }})
-            </button>
-          </div>
-          <p
-            v-if="
-              commitResult &&
-              (!commitResult.repo || commitResult.repo === selectedGitRepo)
-            "
-            class="text-xs"
-            :class="commitResult.type === 'success' ? 'text-success' : 'text-destructive'"
-          >
-            {{ commitResult.text }}
-          </p>
-          <p
-            v-if="pushResult && (!pushResult.repo || pushResult.repo === selectedGitRepo)"
-            class="text-xs"
-            :class="pushResult.type === 'success' ? 'text-success' : 'text-destructive'"
-          >
-            {{ pushResult.text }}
-          </p>
-        </template>
-      </div>
-    </div>
-
-    <!-- Diff pane: always on wide; replaces list on narrow when a file is open -->
-    <div
-      v-show="bShowDetail"
-      class="flex flex-col min-h-0 min-w-0 overflow-hidden"
-      :class="bWidePane ? 'flex-1' : 'w-full flex-1'"
-    >
-      <div
-        class="flex items-center gap-2 px-3 py-2 border-b border-fg/[0.08] flex-shrink-0 min-w-0"
-      >
-        <button
-          v-if="bSidePanelToggleVisible && !bSidePanelOpen"
-          type="button"
-          class="flex-shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-lg text-text-muted hover:text-text-primary hover:bg-fg/[0.06] transition-colors"
-          title="Show file list"
-          aria-label="Show file list"
-          @click="setSidePanelOpen(true)"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M11 9l3 3-3 3"/></svg>
-        </button>
-        <button
-          v-if="!bWidePane && (selectedFile || selectedCommit)"
-          class="flex-shrink-0 text-xs text-primary hover:text-primary-hover transition-colors"
-          @click="clearSelectedFile"
-        >
-          <ArrowLeft :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
-          Back
-        </button>
-        <template v-if="selectedCommit">
-          <span class="text-[10px] font-mono text-text-muted shrink-0">{{ selectedCommit.shortHash }}</span>
-          <span class="text-xs text-text-primary truncate">{{ selectedCommit.subject }}</span>
-        </template>
-        <template v-else-if="selectedFile">
-          <span
-            class="flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded font-mono"
-            :class="statusBadgeClass(selectedFile.status)"
-            >{{ selectedFile.status || '?' }}</span
-          >
-          <span class="text-xs text-text-muted font-mono truncate">{{ selectedFile.file }}</span>
-          <button
-            class="ml-auto flex-shrink-0 text-xs text-destructive hover:text-destructive/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            :disabled="bDiscarding"
-            @click="discardFiles([selectedFile.file], selectedFile.repo)"
-          >
-            Discard
-          </button>
-        </template>
-        <span v-else class="text-xs text-text-muted truncate">Select a file or commit</span>
-      </div>
-
-      <div
-        v-if="selectedCommit"
-        class="flex-1 min-h-0 flex flex-col"
-      >
-        <div
-          v-if="bCommitPatchLoading"
-          class="flex-1 overflow-auto px-3 py-2 space-y-1"
-        >
-          <div class="h-3 rounded bg-fg/10 animate-pulse w-full max-w-[280px]" />
-          <div class="h-3 rounded bg-fg/10 animate-pulse w-full" />
-          <div class="h-3 rounded bg-fg/10 animate-pulse w-4/5" />
-        </div>
-        <div
-          v-else-if="commitPatchError"
-          class="flex flex-col items-center justify-center flex-1 gap-2 px-6 text-center"
-        >
-          <p class="text-text-muted text-sm">{{ commitPatchError }}</p>
-        </div>
-        <div v-else class="flex-1 overflow-auto">
-          <div
-            v-for="(line, i) in commitPatchLines"
-            :key="'commit-' + i"
-            class="px-3 py-0 leading-5 whitespace-pre-wrap break-all text-xs font-mono"
-            :class="diffRowClass(line)"
-          >
-            {{ line }}
-          </div>
-        </div>
-      </div>
-
-      <div
-        v-else-if="!selectedFile"
-        class="flex flex-1 flex-col items-center justify-center gap-1 px-6 text-center"
-      >
-        <p class="text-text-muted text-sm">Select a changed file</p>
-        <p class="text-text-muted/50 text-xs">Diff preview appears here</p>
-      </div>
-
-      <!-- Diff skeleton -->
-      <div v-else-if="bDiffLoading" class="flex-1 overflow-auto px-3 py-2 space-y-1">
-        <div class="h-3 rounded bg-fg/10 animate-pulse w-full max-w-[280px]" />
-        <div class="h-3 rounded bg-fg/10 animate-pulse w-full max-w-[180px]" />
-        <div class="h-3 rounded bg-fg/10 animate-pulse w-full" />
-        <div class="h-3 rounded bg-fg/10 animate-pulse w-4/5" />
-        <div class="h-3 rounded bg-fg/10 animate-pulse w-full" />
-        <div class="h-3 rounded bg-fg/10 animate-pulse w-3/4" />
-        <div class="h-3 rounded bg-fg/10 animate-pulse w-full" />
-        <div class="h-3 rounded bg-fg/10 animate-pulse w-5/6" />
-      </div>
-
-      <div
-        v-else-if="diffError"
-        class="flex flex-col items-center justify-center flex-1 gap-2 px-6 text-center"
-      >
-        <p class="text-text-muted text-sm">{{ diffError }}</p>
-      </div>
-
-      <div v-else-if="!diffContent.trim()" class="flex items-center justify-center flex-1">
-        <p class="text-text-muted text-sm">No diff available</p>
-      </div>
-
-      <div v-else class="flex-1 overflow-auto">
-        <div
-          v-for="(line, i) in diffLines"
-          :key="i"
-          class="px-3 py-0 leading-5 whitespace-pre-wrap break-all text-xs font-mono"
-          :class="diffRowClass(line)"
-        >
-          {{ line || '\u00a0' }}
-        </div>
-      </div>
-    </div>
+    <GitChangesList
+      v-model:selected-git-repo="selectedGitRepo"
+      v-model:commit-message="commitMessage"
+      :b-show-list="bShowList"
+      :b-wide-pane="bWidePane"
+      :b-side-panel-toggle-visible="bSidePanelToggleVisible"
+      :repos="repos"
+      :active-repo="activeRepo"
+      :files="files"
+      :files-in-selected-repo="filesInSelectedRepo"
+      :selected-files="selectedFiles"
+      :selected-file="selectedFile"
+      :selected-commit="selectedCommit"
+      :b-is-loading="bIsLoading"
+      :b-has-loaded-status="bHasLoadedStatus"
+      :error="error"
+      :list-pane="listPane"
+      :b-history-loading="bHistoryLoading"
+      :commits="commits"
+      :committing-repo="committingRepo"
+      :pushing-repo="pushingRepo"
+      :b-generating-commit-message="bGeneratingCommitMessage"
+      :b-discarding="bDiscarding"
+      :commit-result="commitResult"
+      :push-result="pushResult"
+      :git-action-result="gitActionResult"
+      :can-commit="canCommit"
+      :can-commit-active-repo="canCommitActiveRepo"
+      :can-discard-selected="canDiscardSelected"
+      :can-push-active-repo="canPushActiveRepo"
+      :can-push-single-repo="canPushSingleRepo"
+      :all-selected="allSelected"
+      :some-selected="someSelected"
+      :has-mixed-selection="hasMixedSelection"
+      :selected-files-in-active-repo="selectedFilesInActiveRepo"
+      :commit-messages-by-repo="commitMessagesByRepo"
+      :open-switch-branch-dialog="openSwitchBranchDialog"
+      :open-git-actions="openGitActions"
+      :set-side-panel-open="setSidePanelOpen"
+      :set-list-pane="setListPane"
+      :refresh="refresh"
+      :load-history="loadHistory"
+      :open-file="openFile"
+      :open-commit="openCommit"
+      :toggle-file="toggleFile"
+      :toggle-all="toggleAll"
+      :discard-files="discardFiles"
+      :commit-changes="commitChanges"
+      :push-changes="pushChanges"
+      :generate-commit-message="generateCommitMessage"
+      :can-generate-commit-message="canGenerateCommitMessage"
+      :selected-count-in-repo="selectedCountInRepo"
+      @update:commit-message-for-repo="
+        (repo, value) => {
+          commitMessagesByRepo[repo] = value;
+        }
+      "
+    />
+    <GitDiffPane
+      :b-show-detail="bShowDetail"
+      :b-wide-pane="bWidePane"
+      :b-side-panel-open="bSidePanelOpen"
+      :b-side-panel-toggle-visible="bSidePanelToggleVisible"
+      :selected-commit="selectedCommit"
+      :selected-file="selectedFile"
+      :b-commit-patch-loading="bCommitPatchLoading"
+      :commit-patch-error="commitPatchError"
+      :commit-patch-lines="commitPatchLines"
+      :b-diff-loading="bDiffLoading"
+      :diff-error="diffError"
+      :diff-content="diffContent"
+      :diff-lines="diffLines"
+      :b-discarding="bDiscarding"
+      :set-side-panel-open="setSidePanelOpen"
+      :clear-selected-file="clearSelectedFile"
+      :discard-files="discardFiles"
+    />
   </div>
 
   <BaseModal
@@ -1800,37 +1164,3 @@ onUnmounted((): void => {
     @confirm="confirmDiscardFiles"
   />
 </template>
-
-<style scoped>
-/* Cursor-style diff rows: tinted bg + colored text + left gutter bar.
-   Derived from theme tokens so they adapt to every dark/light theme. */
-.diff-row--added {
-  background: color-mix(in oklab, var(--success) 14%, transparent);
-  color: var(--success);
-  box-shadow: inset 2px 0 0 color-mix(in oklab, var(--success) 55%, transparent);
-}
-
-.diff-row--removed {
-  background: color-mix(in oklab, var(--danger) 14%, transparent);
-  color: var(--danger);
-  box-shadow: inset 2px 0 0 color-mix(in oklab, var(--danger) 55%, transparent);
-}
-
-.diff-row--hunk {
-  background: var(--accent-soft);
-  color: var(--fg-muted);
-}
-
-.diff-row--meta {
-  color: var(--fg-subtle);
-}
-
-/* Light themes: deepen text colors so they stay readable on the tinted rows. */
-:global(html[data-theme='light']) .diff-row--added {
-  color: color-mix(in oklab, var(--success), #000 25%);
-}
-
-:global(html[data-theme='light']) .diff-row--removed {
-  color: color-mix(in oklab, var(--danger), #000 20%);
-}
-</style>

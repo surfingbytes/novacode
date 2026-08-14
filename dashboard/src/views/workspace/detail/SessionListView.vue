@@ -9,8 +9,11 @@ import ContextMenu from '@/components/ContextMenu.vue';
 import SessionEditModal from '@/components/SessionEditModal.vue';
 import NewSessionModal from '@/components/NewSessionModal.vue';
 import NewOrchestratorModal from '@/components/NewOrchestratorModal.vue';
-import SessionCard from '@/components/workspace/SessionCard.vue';
-import OrchestratorCard from '@/components/workspace/OrchestratorCard.vue';
+import SessionListToolbar from './session-list/SessionListToolbar.vue';
+import SessionListGrid from './session-list/SessionListGrid.vue';
+import SessionListRows from './session-list/SessionListRows.vue';
+import SessionListArchived from './session-list/SessionListArchived.vue';
+import SessionListMultiselectBar from './session-list/SessionListMultiselectBar.vue';
 
 // composables
 import { useLongPress } from '@/composables/useLongPress';
@@ -30,6 +33,7 @@ import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
 // types
 import type { ContextMenuItem } from '@/components/ContextMenu.vue';
 import type { Session, Orchestrator, AgentType, ApprovalPolicy, Workspace } from '@/@types/index';
+import type { CombinedItem } from './session-list/types';
 
 // -------------------------------------------------- Props --------------------------------------------------
 const props = defineProps<{
@@ -220,10 +224,6 @@ const filteredArchivedSessions = computed(() => {
   );
 });
 
-type CombinedItem =
-  | { kind: 'session'; session: Session }
-  | { kind: 'orchestrator'; orchestrator: Orchestrator; nestedSessions: Session[] };
-
 const combinedItems = computed<CombinedItem[]>(() => {
   const sessionItems = filteredSessions.value.map((session) => ({
     kind: 'session' as const,
@@ -364,6 +364,10 @@ function handleSessionClick(session: Session, e: Event): void {
     toggleSelect(session.id);
     return;
   }
+}
+
+function setArchivedListViewEl(el: unknown): void {
+  archivedListViewRef.value = el instanceof HTMLElement ? el : null;
 }
 
 function pickMultiselectAnchorEl(): HTMLElement | null {
@@ -805,96 +809,12 @@ watch(
     </button>
   </div>
 
-  <!-- Top: view mode selector + new session / orchestrator -->
-  <div class="flex flex-wrap justify-between sm:justify-end gap-y-2 mb-3">
-    <div class="button-select-small mr-2 mt-0">
-      <button
-        class="button is-icon"
-        :class="{ 'is-active': viewMode === 'list' }"
-        aria-label="List view"
-        :aria-pressed="viewMode === 'list'"
-        @click="viewMode = 'list'"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.6"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          width="16"
-          height="16"
-          aria-hidden="true"
-        >
-          <line x1="8" y1="6" x2="21" y2="6" />
-          <line x1="8" y1="12" x2="21" y2="12" />
-          <line x1="8" y1="18" x2="21" y2="18" />
-          <line x1="3" y1="6" x2="3.01" y2="6" />
-          <line x1="3" y1="12" x2="3.01" y2="12" />
-          <line x1="3" y1="18" x2="3.01" y2="18" />
-        </svg>
-      </button>
-      <button
-        class="button is-icon"
-        :class="{ 'is-active': viewMode === 'grid' }"
-        aria-label="Grid view"
-        :aria-pressed="viewMode === 'grid'"
-        @click="viewMode = 'grid'"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.6"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          width="16"
-          height="16"
-          aria-hidden="true"
-        >
-          <rect x="3" y="3" width="7" height="7" />
-          <rect x="14" y="3" width="7" height="7" />
-          <rect x="3" y="14" width="7" height="7" />
-          <rect x="14" y="14" width="7" height="7" />
-        </svg>
-      </button>
-    </div>
-    <div class="flex flex-wrap items-center gap-2 shrink-0">
-      <button type="button" class="button" @click="bShowNewOrchestratorModal = true">
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.6"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          width="16"
-          height="16"
-          aria-hidden="true"
-        >
-          <path d="M21 3H15v4h6V3zM9 3H3v4h6V3zM15 17H9v4h6v-4z" />
-          <path d="M12 7v4M6 7v6h12V7" />
-        </svg>
-        New orchestrator
-      </button>
-      <button type="button" @click="bShowNewSessionModal = true" class="button is-primary">
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.6"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          width="16"
-          height="16"
-          aria-hidden="true"
-        >
-          <path d="M12 5v14M5 12h14" />
-        </svg>
-        New Session
-      </button>
-    </div>
-  </div>
+  <SessionListToolbar
+    :view-mode="viewMode"
+    @update:view-mode="viewMode = $event"
+    @new-session="bShowNewSessionModal = true"
+    @new-orchestrator="bShowNewOrchestratorModal = true"
+  />
 
   <div
     v-if="sessionsLoading || !bOrchestratorsInitialFetched"
@@ -904,340 +824,81 @@ watch(
     <p class="text-sm text-text-muted">Loading sessions…</p>
   </div>
   <template v-else>
-    <!-- Grid View -->
-    <div class="grid-view" v-if="viewMode === 'grid'">
-      <TransitionGroup name="list-stagger" tag="div" class="grid-view-items">
-        <template
-          v-for="(item, index) in combinedItems"
-          :key="item.kind === 'session' ? item.session.id : item.orchestrator.id"
-        >
-          <SessionCard
-            v-if="item.kind === 'session'"
-            :session="item.session"
-            :workspace-id="workspaceId"
-            b-grid
-            :style="{ '--stagger-index': index }"
-            @contextmenu.prevent.stop="onSessionContextMenu($event, item.session)"
-            @edit="sessionToEdit = item.session"
-            @archive="toggleArchive(item.session)"
-            @delete="showDeleteModal(item)"
-          />
-          <OrchestratorCard
-            v-else
-            :orchestrator="item.orchestrator"
-            :workspace-id="workspaceId"
-            b-grid
-            :style="{ '--stagger-index': index }"
-            @contextmenu.prevent.stop="onOrchestratorContextMenu($event, item.orchestrator)"
-            @archive="toggleArchiveOrchestrator(item.orchestrator)"
-            @delete="showDeleteModal(item)"
-          />
-        </template>
-      </TransitionGroup>
-    </div>
+    <SessionListGrid
+      v-if="viewMode === 'grid'"
+      :items="combinedItems"
+      :workspace-id="workspaceId"
+      @session-context-menu="onSessionContextMenu"
+      @orchestrator-context-menu="onOrchestratorContextMenu"
+      @edit="sessionToEdit = $event"
+      @archive="toggleArchive"
+      @archive-orchestrator="toggleArchiveOrchestrator"
+      @delete="showDeleteModal"
+    />
     <div v-else-if="viewMode === 'list'" ref="listViewRef" class="list-view">
-      <TransitionGroup name="list-stagger" tag="div" class="list-view-items">
-        <div
-          v-for="(item, index) in combinedItems"
-          :key="item.kind === 'session' ? item.session.id : item.orchestrator.id"
-          :style="{ '--stagger-index': index }"
-          class="flex flex-col"
-        >
-          <SessionCard
-            v-if="item.kind === 'session'"
-            :session="item.session"
-            :workspace-id="workspaceId"
-            :b-selected="selectedIds.has(item.session.id)"
-            :b-selection-active="selectionActive || orchestratorSelectionActive"
-            @pointerdown="sessionLongPress.onPointerDown($event, item.session.id)"
-            @pointerup="sessionLongPress.onPointerUp"
-            @pointerleave="sessionLongPress.onPointerUp"
-            @pointercancel="sessionLongPress.onPointerUp"
-            @pointermove="sessionLongPress.onPointerMove"
-            @click="handleSessionClick(item.session, $event)"
-            @contextmenu.prevent.stop="onSessionContextMenu($event, item.session)"
-            @edit="sessionToEdit = item.session"
-            @archive="toggleArchive(item.session)"
-            @delete="showDeleteModal(item)"
-            @toggle-select="toggleSelect(item.session.id)"
-          />
-
-          <template v-else>
-            <OrchestratorCard
-              :orchestrator="item.orchestrator"
-              :workspace-id="workspaceId"
-              :b-selected="orchestratorSelectedIds.has(item.orchestrator.id)"
-              :b-selection-active="selectionActive || orchestratorSelectionActive"
-              @pointerdown="orchestratorLongPress.onPointerDown($event, item.orchestrator.id)"
-              @pointerup="orchestratorLongPress.onPointerUp"
-              @pointerleave="orchestratorLongPress.onPointerUp"
-              @pointercancel="orchestratorLongPress.onPointerUp"
-              @pointermove="orchestratorLongPress.onPointerMove"
-              @click="handleOrchestratorClick(item.orchestrator, $event)"
-              @contextmenu.prevent.stop="onOrchestratorContextMenu($event, item.orchestrator)"
-              @archive="toggleArchiveOrchestrator(item.orchestrator)"
-              @delete="showDeleteModal(item)"
-              @toggle-select="toggleSelectOrchestrator(item.orchestrator.id)"
-            />
-
-            <SessionCard
-              v-for="child in item.nestedSessions"
-              :key="child.id"
-              :session="child"
-              :workspace-id="workspaceId"
-              b-nested
-              @contextmenu.prevent.stop="onSessionContextMenu($event, child)"
-            />
-          </template>
-        </div>
-      </TransitionGroup>
+      <SessionListRows
+        :items="combinedItems"
+        :workspace-id="workspaceId"
+        :selected-ids="selectedIds"
+        :orchestrator-selected-ids="orchestratorSelectedIds"
+        :b-selection-active="selectionActive || orchestratorSelectionActive"
+        @session-context-menu="onSessionContextMenu"
+        @orchestrator-context-menu="onOrchestratorContextMenu"
+        @edit="sessionToEdit = $event"
+        @archive="toggleArchive"
+        @archive-orchestrator="toggleArchiveOrchestrator"
+        @delete="showDeleteModal"
+        @toggle-select="toggleSelect"
+        @toggle-select-orchestrator="toggleSelectOrchestrator"
+        @session-click="handleSessionClick"
+        @orchestrator-click="handleOrchestratorClick"
+        @session-pointer-down="sessionLongPress.onPointerDown"
+        @session-pointer-up="sessionLongPress.onPointerUp"
+        @session-pointer-move="sessionLongPress.onPointerMove"
+        @orchestrator-pointer-down="orchestratorLongPress.onPointerDown"
+        @orchestrator-pointer-up="orchestratorLongPress.onPointerUp"
+        @orchestrator-pointer-move="orchestratorLongPress.onPointerMove"
+      />
     </div>
 
-    <!-- Archived sessions toggle (matches workspace list behavior) -->
-    <div v-if="archivedCount > 0" class="mt-6">
-      <button
-        class="flex items-center gap-2 text-sm text-text-muted hover:text-text-primary transition-colors font-medium select-none"
-        :disabled="sessionsLoading"
-        @click="bShowArchived = !bShowArchived"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.6"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          width="16"
-          height="16"
-          class="transition-transform duration-200"
-          :class="bShowArchived ? 'rotate-90' : ''"
-          aria-hidden="true"
-        >
-          <polyline points="9 18 15 12 9 6" />
-        </svg>
-        Archived
-        <span class="text-xs bg-fg/[0.07] border border-fg/[0.1] rounded-full px-2 py-0.5">{{
-          archivedCount
-        }}</span>
-      </button>
-
-      <Transition name="fade">
-        <div v-if="bShowArchived" class="mt-4">
-          <div class="grid-view" v-if="viewMode === 'grid'">
-            <TransitionGroup name="list-stagger" tag="div" class="grid-view-items">
-              <SessionCard
-                v-for="(session, index) in filteredArchivedSessions"
-                :key="'arch-' + session.id"
-                :session="session"
-                :workspace-id="workspaceId"
-                b-grid
-                b-archived
-                :style="{ '--stagger-index': index }"
-                @contextmenu.prevent.stop="onSessionContextMenu($event, session)"
-                @archive="toggleArchive(session)"
-                @delete="showDeleteModal({ kind: 'session', session })"
-              />
-            </TransitionGroup>
-
-            <template v-if="filteredArchivedOrchestrators.length > 0">
-              <p
-                v-if="filteredArchivedSessions.length > 0"
-                class="text-xs font-medium text-text-muted mt-6 mb-2"
-              >
-                Orchestrators
-              </p>
-              <TransitionGroup name="list-stagger" tag="div" class="grid-view-items">
-                <OrchestratorCard
-                  v-for="(orch, index) in filteredArchivedOrchestrators"
-                  :key="'arch-orch-' + orch.id"
-                  :orchestrator="orch"
-                  :workspace-id="workspaceId"
-                  b-grid
-                  b-archived
-                  :style="{ '--stagger-index': index }"
-                  @contextmenu.prevent.stop="onOrchestratorContextMenu($event, orch)"
-                  @archive="toggleArchiveOrchestrator(orch)"
-                  @delete="
-                    showDeleteModal({
-                      kind: 'orchestrator',
-                      orchestrator: orch,
-                      nestedSessions: orderedNestedSessions(orch)
-                    })
-                  "
-                />
-              </TransitionGroup>
-            </template>
-          </div>
-
-          <div v-else class="list-view" ref="archivedListViewRef">
-            <TransitionGroup name="list-stagger" tag="div" class="list-view-items">
-              <SessionCard
-                v-for="(session, index) in filteredArchivedSessions"
-                :key="'arch-' + session.id"
-                :session="session"
-                :workspace-id="workspaceId"
-                :b-selected="selectedIds.has(session.id)"
-                :b-selection-active="selectionActive || orchestratorSelectionActive"
-                b-archived
-                :style="{ '--stagger-index': index }"
-                @contextmenu.prevent.stop="onSessionContextMenu($event, session)"
-                @archive="toggleArchive(session)"
-                @delete="showDeleteModal({ kind: 'session', session })"
-                @toggle-select="toggleSelect(session.id)"
-              />
-            </TransitionGroup>
-
-            <template v-if="filteredArchivedOrchestrators.length > 0">
-              <p
-                v-if="filteredArchivedSessions.length > 0"
-                class="text-xs font-medium text-text-muted mt-6 mb-2 px-2"
-              >
-                Orchestrators
-              </p>
-              <TransitionGroup name="list-stagger" tag="div" class="list-view-items">
-                <div
-                  v-for="(orch, oix) in filteredArchivedOrchestrators"
-                  :key="'arch-orch-' + orch.id"
-                  :style="{ '--stagger-index': oix }"
-                  class="flex flex-col"
-                >
-                  <OrchestratorCard
-                    :orchestrator="orch"
-                    :workspace-id="workspaceId"
-                    :b-selected="orchestratorSelectedIds.has(orch.id)"
-                    :b-selection-active="selectionActive || orchestratorSelectionActive"
-                    b-archived
-                    @contextmenu.prevent.stop="onOrchestratorContextMenu($event, orch)"
-                    @archive="toggleArchiveOrchestrator(orch)"
-                    @delete="
-                      showDeleteModal({
-                        kind: 'orchestrator',
-                        orchestrator: orch,
-                        nestedSessions: orderedNestedSessions(orch)
-                      })
-                    "
-                    @toggle-select="toggleSelectOrchestrator(orch.id)"
-                  />
-
-                  <SessionCard
-                    v-for="child in orderedNestedSessions(orch)"
-                    :key="'arch-orch-' + orch.id + '-sub-' + child.id"
-                    :session="child"
-                    :workspace-id="workspaceId"
-                    b-nested
-                    b-archived
-                    @contextmenu.prevent.stop="onSessionContextMenu($event, child)"
-                  />
-                </div>
-              </TransitionGroup>
-            </template>
-          </div>
-        </div>
-      </Transition>
-    </div>
+    <SessionListArchived
+      v-if="archivedCount > 0"
+      :b-show-archived="bShowArchived"
+      :archived-count="archivedCount"
+      :sessions-loading="sessionsLoading"
+      :view-mode="viewMode"
+      :workspace-id="workspaceId"
+      :sessions="filteredArchivedSessions"
+      :orchestrators="filteredArchivedOrchestrators"
+      :selected-ids="selectedIds"
+      :orchestrator-selected-ids="orchestratorSelectedIds"
+      :b-selection-active="selectionActive || orchestratorSelectionActive"
+      :ordered-nested-sessions="orderedNestedSessions"
+      :set-list-view-el="setArchivedListViewEl"
+      @update:b-show-archived="bShowArchived = $event"
+      @session-context-menu="onSessionContextMenu"
+      @orchestrator-context-menu="onOrchestratorContextMenu"
+      @archive="toggleArchive"
+      @archive-orchestrator="toggleArchiveOrchestrator"
+      @delete="showDeleteModal"
+      @toggle-select="toggleSelect"
+      @toggle-select-orchestrator="toggleSelectOrchestrator"
+    />
   </template>
 
-  <Transition name="fade">
-    <div
-      v-if="selectionActive || orchestratorSelectionActive"
-      class="fixed bottom-4 z-40 bg-surface border border-border rounded-xl px-3 py-2 shadow-xl"
-      :class="
-        multiselectLeft === null ? 'left-1/2 -translate-x-1/2 w-[min(960px,calc(100%-1rem))]' : ''
-      "
-      :style="
-        multiselectLeft === null
-          ? undefined
-          : {
-              left: `${multiselectLeft}px`,
-              width: `${multiselectWidth ?? 0}px`,
-              transform: 'translateX(0)'
-            }
-      "
-    >
-      <div class="flex flex-wrap items-center justify-between gap-y-2 gap-x-3 w-full">
-        <div class="flex flex-wrap items-center gap-x-2 gap-y-2 min-w-0">
-          <span class="text-sm text-text-muted whitespace-nowrap">
-            {{ multiselectTotalCount }} item{{ multiselectTotalCount === 1 ? '' : 's' }}
-          </span>
-          <button type="button" class="button" @click="toggleSelectAllMultiselect">
-            {{ multiselectAllSelected ? 'Clear all' : 'Select all' }}
-          </button>
-        </div>
-        <div class="flex items-center gap-2 shrink-0 ml-auto">
-          <button
-            v-if="selectedIds.size > 0 || orchestratorSelectedIds.size > 0"
-            type="button"
-            class="button is-icon hover:bg-warning/10! hover:border-warning!"
-            :disabled="bBulkArchiving"
-            @click="onMultiselectArchive"
-            :aria-label="
-              multiselectArchiveShouldUnarchive ? 'Unarchive selected' : 'Archive selected'
-            "
-            :title="multiselectArchiveShouldUnarchive ? 'Unarchive selected' : 'Archive selected'"
-          >
-            <svg
-              v-if="multiselectArchiveShouldUnarchive"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.6"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              width="14"
-              height="14"
-              class="text-warning"
-              aria-hidden="true"
-            >
-              <path
-                d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"
-              />
-            </svg>
-            <svg
-              v-else
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.6"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              width="14"
-              height="14"
-              class="text-warning"
-              aria-hidden="true"
-            >
-              <path
-                d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"
-              />
-            </svg>
-          </button>
-          <button
-            v-if="selectedIds.size > 0 || orchestratorSelectedIds.size > 0"
-            type="button"
-            class="button is-icon is-primary"
-            @click="bShowBulkDeleteCombined = true"
-            aria-label="Delete selected"
-            title="Delete selected"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.6"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              width="14"
-              height="14"
-              aria-hidden="true"
-            >
-              <path
-                d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"
-              />
-            </svg>
-          </button>
-        </div>
-      </div>
-    </div>
-  </Transition>
+  <SessionListMultiselectBar
+    :b-visible="selectionActive || orchestratorSelectionActive"
+    :total-count="multiselectTotalCount"
+    :b-all-selected="multiselectAllSelected"
+    :b-bulk-archiving="bBulkArchiving"
+    :b-should-unarchive="multiselectArchiveShouldUnarchive"
+    :b-has-selection="selectedIds.size > 0 || orchestratorSelectedIds.size > 0"
+    :left="multiselectLeft"
+    :width="multiselectWidth"
+    @toggle-select-all="toggleSelectAllMultiselect"
+    @archive="onMultiselectArchive"
+    @delete="bShowBulkDeleteCombined = true"
+  />
 
   <ConfirmModal
     :model-value="sessionToDelete !== null"

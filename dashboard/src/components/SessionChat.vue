@@ -2,8 +2,6 @@
 // node_modules
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ChevronDown } from 'lucide-vue-next';
-
 // components
 import FilesView from '@/components/workspace/FilesComponent.vue';
 import GitView from '@/components/workspace/GitView.vue';
@@ -14,6 +12,8 @@ import ClaudeLimitPopup from '@/components/ClaudeLimitPopup.vue';
 import ChatMessageList from '@/components/chat/ChatMessageList.vue';
 import ChatComposer, { type PendingAttachment } from '@/components/chat/ChatComposer.vue';
 import ChatTodoPanel from '@/components/chat/ChatTodoPanel.vue';
+import SessionPlanTab from '@/components/chat/SessionPlanTab.vue';
+import ImageLightbox from '@/components/chat/ImageLightbox.vue';
 import EntityDetailHeader from '@/components/ui/EntityDetailHeader.vue';
 import BottomTabBar from '@/components/ui/BottomTabBar.vue';
 
@@ -24,9 +24,7 @@ import { readSessionCache, writeSessionCache } from '@/lib/sessionCache';
 import { sessionChatToMarkdown, sessionExportFilename } from '@/utils/sessionChatMarkdown';
 import {
   getToolIconSvg,
-  isPlanEntryCompleted,
   parseHistoryEventsCached,
-  planStatusIcon,
   prepareDisplayItem,
   renderMdCached
 } from '@/utils/chatDisplayItems';
@@ -95,8 +93,6 @@ const bShowDeleteModal = ref(false);
 const bDeletingSession = ref(false);
 const bShowDeletePlanModal = ref(false);
 const bDeletingPlan = ref(false);
-const bPlanActionsMenuOpen = ref(false);
-const planActionsMenuRef = ref<HTMLElement | null>(null);
 const sessionChatRootRef = ref<HTMLElement | null>(null);
 const chatListRef = ref<InstanceType<typeof ChatMessageList> | null>(null);
 const composerRef = ref<InstanceType<typeof ChatComposer> | null>(null);
@@ -408,7 +404,6 @@ const planDocs = usePlanDocuments({
   activeTab,
   modelSelection,
   onStartPlanSession: (payload) => {
-    closePlanActionsMenu();
     emit('start-plan-session', payload);
   }
 });
@@ -614,23 +609,6 @@ function handleChatErrorAction(): void {
   if (chatErrorCode.value === 'timeout') {
     chatSocket.retryLastPrompt(modelSelection.value);
   }
-}
-
-function closePlanActionsMenu(): void {
-  bPlanActionsMenuOpen.value = false;
-}
-
-function handleDocumentClickMobileMenu(e: MouseEvent): void {
-  const target = e.target as Node;
-  const planActionsEl = planActionsMenuRef.value;
-  if (bPlanActionsMenuOpen.value && planActionsEl && !planActionsEl.contains(target)) {
-    closePlanActionsMenu();
-  }
-}
-
-function handleKeydownMobileMenu(e: KeyboardEvent): void {
-  if (e.key === 'Escape' && lightboxSrc.value) lightboxSrc.value = null;
-  if (e.key === 'Escape' && bPlanActionsMenuOpen.value) closePlanActionsMenu();
 }
 
 // ── Session edit/delete/archive ──────────────────────────────────────────────
@@ -910,8 +888,6 @@ onMounted(async () => {
   } catch {
     // keep defaults
   }
-  document.addEventListener('click', handleDocumentClickMobileMenu);
-  document.addEventListener('keydown', handleKeydownMobileMenu);
   scheduleMermaidRender();
   applySessionQueryFromRoute();
 });
@@ -933,8 +909,6 @@ onUnmounted(() => {
   }
   planDocs.clearPlanDocumentsRefreshTimers();
   chatSocket.disconnect();
-  document.removeEventListener('click', handleDocumentClickMobileMenu);
-  document.removeEventListener('keydown', handleKeydownMobileMenu);
   setViewingSession(null);
 });
 </script>
@@ -1117,228 +1091,17 @@ onUnmounted(() => {
         />
       </div>
 
-      <!-- Plan -->
-      <div v-if="activeTab === 'plan'" class="flex-1 min-h-0 overflow-hidden flex flex-col bg-bg">
-        <div
-          class="shrink-0 border-b border-fg/10 px-4 md:px-6 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3"
-        >
-          <div class="min-w-0 sm:flex-1">
-            <div v-if="planDocuments.length <= 1" class="flex items-center gap-2">
-              <span class="truncate text-sm font-semibold text-text-primary">
-                {{ selectedPlanDocument?.title ?? 'Plan' }}
-              </span>
-              <span
-                v-if="selectedPlanDocument?.live"
-                class="shrink-0 rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
-              >
-                Live
-              </span>
-            </div>
-            <div v-if="selectedPlanDocument" class="text-xs text-text-muted whitespace-nowrap">
-              <template v-if="selectedPlanDocument.startableEntries.length">
-                {{ selectedPlanDocument.completedCount }}/{{
-                  selectedPlanDocument.startableEntries.length
-                }}
-                completed
-              </template>
-              <template v-else>Plan document</template>
-            </div>
-          </div>
-
-          <div class="flex min-w-0 items-center gap-2 sm:ml-auto sm:shrink-0">
-            <select
-              v-if="planDocuments.length > 1"
-              class="min-w-0 flex-1 max-w-none rounded-md border border-fg/15 bg-bg px-2 py-1 text-xs text-text-primary outline-none focus:border-primary sm:max-w-[12rem] sm:flex-none"
-              :value="selectedPlanDocument?.id"
-              aria-label="Select plan document"
-              @change="selectedPlanId = ($event.target as HTMLSelectElement).value"
-            >
-              <option v-for="plan in planDocuments" :key="plan.id" :value="plan.id">
-                {{ plan.title }}{{ plan.live ? ' (live)' : '' }}
-              </option>
-            </select>
-
-            <div
-              v-if="selectedPlanDocument"
-              ref="planActionsMenuRef"
-              class="relative inline-flex shrink-0"
-            >
-              <button
-                type="button"
-                class="button is-transparent rounded-r-none! text-xs"
-                title="Download plan as Markdown"
-                @click="
-                  closePlanActionsMenu();
-                  planDocs.downloadPlan(selectedPlanDocument);
-                "
-              >
-                Download
-              </button>
-              <button
-                type="button"
-                class="button is-transparent is-icon rounded-l-none! border-l border-fg/10"
-                title="Plan actions"
-                aria-label="Plan actions"
-                @click.stop="bPlanActionsMenuOpen = !bPlanActionsMenuOpen"
-              >
-                <ChevronDown class="h-3.5 w-3.5" />
-              </button>
-              <div
-                v-if="bPlanActionsMenuOpen"
-                class="absolute right-0 top-full z-30 mt-1 min-w-56 overflow-hidden rounded-lg border border-fg/10 bg-surface shadow-xl"
-              >
-                <button
-                  type="button"
-                  class="flex w-full items-center px-3 py-2 text-left text-xs text-text-primary hover:bg-fg/[0.06]"
-                  @click="
-                    closePlanActionsMenu();
-                    planDocs.startSessionFromFullPlan(selectedPlanDocument);
-                  "
-                >
-                  Start whole plan in new session
-                </button>
-                <button
-                  type="button"
-                  class="flex w-full items-center px-3 py-2 text-left text-xs text-text-primary hover:bg-fg/[0.06]"
-                  @click="
-                    closePlanActionsMenu();
-                    planDocs.downloadPlan(selectedPlanDocument);
-                  "
-                >
-                  Download markdown
-                </button>
-                <button
-                  type="button"
-                  class="flex w-full items-center px-3 py-2 text-left text-xs text-red-400 hover:bg-fg/[0.06]"
-                  @click="
-                    closePlanActionsMenu();
-                    bShowDeletePlanModal = true;
-                  "
-                >
-                  Delete plan
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="flex-1 min-h-0 overflow-y-auto px-4 md:px-8 py-6">
-          <div v-if="selectedPlanDocument" class="mx-auto flex max-w-3xl flex-col gap-4">
-            <div class="rounded-2xl border border-fg/10 bg-fg/[0.03] px-5 py-4 md:px-8 md:py-6">
-              <div
-                class="chat-markdown plan-markdown text-sm text-text-primary"
-                v-html="selectedPlanDocument.renderedHtml"
-                @click="planDocs.onPlanMarkdownClick"
-              ></div>
-            </div>
-            <div
-              v-if="selectedPlanDocument.startableEntries.length"
-              class="rounded-2xl border border-fg/10 bg-fg/[0.03] overflow-hidden"
-            >
-              <div class="flex items-center gap-2 border-b border-fg/10 px-4 py-2.5">
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.6"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  class="select-none text-text-muted shrink-0"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2M9 12l2 2 4-4"
-                  />
-                </svg>
-                <span class="text-xs font-medium text-text-primary">Plan points</span>
-                <span class="ml-auto text-xs text-text-muted">
-                  {{ selectedPlanDocument.completedCount }}/{{
-                    selectedPlanDocument.startableEntries.length
-                  }}
-                </span>
-              </div>
-              <ul class="space-y-1.5 px-4 py-3">
-                <li
-                  v-for="(entry, index) in selectedPlanDocument.startableEntries"
-                  :key="`${selectedPlanDocument.id}-todo-${index}`"
-                  class="flex items-start gap-2 text-xs"
-                >
-                  <svg
-                    v-if="planStatusIcon(entry.status) === 'completed'"
-                    width="13"
-                    height="13"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.6"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    class="text-green-500 select-none shrink-0 mt-px"
-                    aria-hidden="true"
-                  >
-                    <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
-                    <polyline points="22 4 12 14.01 9 11.01" />
-                  </svg>
-                  <svg
-                    v-else-if="planStatusIcon(entry.status) === 'in_progress'"
-                    width="13"
-                    height="13"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.6"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    class="text-primary select-none shrink-0 mt-px"
-                    aria-hidden="true"
-                  >
-                    <circle cx="12" cy="12" r="10" />
-                    <polyline points="12 6 12 12 16 14" />
-                  </svg>
-                  <svg
-                    v-else
-                    width="13"
-                    height="13"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.6"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    class="text-text-muted select-none shrink-0 mt-px"
-                    aria-hidden="true"
-                  >
-                    <circle cx="12" cy="12" r="10" />
-                  </svg>
-                  <span
-                    class="min-w-0 flex-1 leading-snug"
-                    :class="
-                      isPlanEntryCompleted(entry.status)
-                        ? 'text-text-muted line-through'
-                        : 'text-text-primary'
-                    "
-                  >
-                    {{ entry.content }}
-                  </span>
-                  <button
-                    type="button"
-                    class="shrink-0 rounded-md border border-fg/10 px-2 py-1 text-[11px] font-medium text-primary hover:bg-primary/10"
-                    title="Start a new session from this plan point"
-                    @click="planDocs.startSessionFromPlanEntry(selectedPlanDocument, entry, index)"
-                  >
-                    Start session
-                  </button>
-                </li>
-              </ul>
-            </div>
-          </div>
-          <div v-else class="h-full flex items-center justify-center text-sm text-text-muted">
-            No plan has been created for this session yet.
-          </div>
-        </div>
-      </div>
+      <SessionPlanTab
+        v-if="activeTab === 'plan'"
+        :plan-documents="planDocuments"
+        :selected-plan-document="selectedPlanDocument"
+        @select="selectedPlanId = $event"
+        @download="planDocs.downloadPlan"
+        @delete="bShowDeletePlanModal = true"
+        @start-full-plan="planDocs.startSessionFromFullPlan"
+        @start-plan-entry="({ plan, entry, index }) => planDocs.startSessionFromPlanEntry(plan, entry, index)"
+        @markdown-click="planDocs.onPlanMarkdownClick"
+      />
 
       <!-- Terminal -->
       <div v-if="activeTab === 'terminal'" class="flex-1 min-h-0 p-2 md:p-4">
@@ -1403,45 +1166,7 @@ onUnmounted(() => {
       @confirm="deleteSelectedPlan"
     />
 
-    <!-- Image lightbox -->
-    <Teleport to="body">
-      <Transition name="lightbox">
-        <div
-          v-if="lightboxSrc"
-          class="lightbox-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Attached image preview"
-          @click.self="lightboxSrc = null"
-        >
-          <button
-            type="button"
-            class="absolute top-4 right-4 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-fg/10 text-white hover:bg-fg/20 transition-colors"
-            aria-label="Close image preview"
-            @click="lightboxSrc = null"
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M18 6L6 18M6 6l12 12" />
-            </svg>
-          </button>
-          <img
-            :src="lightboxSrc"
-            alt="Attached image preview"
-            class="lightbox-img max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
-          />
-        </div>
-      </Transition>
-    </Teleport>
+    <ImageLightbox v-model="lightboxSrc" />
   </div>
 
   <!-- Claude Limit Popup -->
@@ -1455,140 +1180,3 @@ onUnmounted(() => {
   />
 </template>
 
-<style scoped>
-.lightbox-enter-active,
-.lightbox-leave-active {
-  transition: opacity 0.22s ease;
-}
-
-.lightbox-enter-active .lightbox-img,
-.lightbox-leave-active .lightbox-img {
-  transition:
-    transform 0.24s cubic-bezier(0.16, 1, 0.3, 1),
-    opacity 0.22s ease;
-}
-
-.lightbox-enter-from,
-.lightbox-leave-to {
-  opacity: 0;
-}
-
-.lightbox-enter-from .lightbox-img,
-.lightbox-leave-to .lightbox-img {
-  opacity: 0;
-  transform: scale(0.94);
-}
-
-.lightbox-enter-to .lightbox-img,
-.lightbox-leave-from .lightbox-img {
-  opacity: 1;
-  transform: scale(1);
-}
-
-.plan-markdown {
-  line-height: 1.65;
-}
-
-.plan-markdown :deep(h1),
-.plan-markdown :deep(h2),
-.plan-markdown :deep(h3) {
-  color: var(--color-text-primary);
-  font-weight: 700;
-  line-height: 1.25;
-}
-
-.plan-markdown :deep(h1) {
-  margin: 0 0 1rem;
-  font-size: 1.5rem;
-}
-
-.plan-markdown :deep(h2) {
-  margin: 1.5rem 0 0.65rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid color-mix(in srgb, var(--color-fg) 10%, transparent);
-  font-size: 1.125rem;
-}
-
-.plan-markdown :deep(h3) {
-  margin: 1.15rem 0 0.5rem;
-  font-size: 0.98rem;
-}
-
-.plan-markdown :deep(p),
-.plan-markdown :deep(ul),
-.plan-markdown :deep(ol),
-.plan-markdown :deep(blockquote),
-.plan-markdown :deep(pre) {
-  margin: 0.65rem 0;
-}
-
-.plan-markdown :deep(ul),
-.plan-markdown :deep(ol) {
-  padding-left: 1.25rem;
-}
-
-.plan-markdown :deep(ul) {
-  list-style: disc;
-}
-
-.plan-markdown :deep(ol) {
-  list-style: decimal;
-}
-
-.plan-markdown :deep(li) {
-  margin: 0.35rem 0;
-  padding-left: 0.15rem;
-}
-
-.plan-markdown :deep(.plan-start-action-inline) {
-  margin: -0.25rem 0 0.75rem;
-}
-
-.plan-markdown :deep(.plan-start-session-btn) {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  border: 1px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
-  border-radius: 0.45rem;
-  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
-  padding: 0.3rem 0.5rem;
-  color: var(--color-primary);
-  font-size: 0.72rem;
-  font-weight: 600;
-  line-height: 1;
-  vertical-align: middle;
-}
-
-.plan-markdown :deep(.plan-start-session-btn:hover) {
-  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
-}
-
-.plan-markdown :deep(strong) {
-  color: var(--color-text-primary);
-  font-weight: 700;
-}
-
-.plan-markdown :deep(blockquote) {
-  border-left: 3px solid color-mix(in srgb, var(--color-fg) 18%, transparent);
-  padding-left: 0.9rem;
-  color: var(--color-text-muted);
-}
-
-.plan-markdown :deep(code) {
-  border-radius: 0.35rem;
-  background: color-mix(in srgb, var(--color-fg) 8%, transparent);
-  padding: 0.1rem 0.3rem;
-  font-size: 0.86em;
-}
-
-.plan-markdown :deep(pre) {
-  border-radius: 0.75rem;
-  background: color-mix(in srgb, var(--color-fg) 6%, transparent);
-  padding: 0.85rem 1rem;
-}
-
-.plan-markdown :deep(pre code) {
-  background: transparent;
-  padding: 0;
-}
-</style>

@@ -1,0 +1,320 @@
+/* Tab bar */
+.settings-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--line);
+  margin-top: 6px;
+  margin-bottom: 28px;
+  overflow-x: auto;
+  gap: 0;
+}
+
+.settings-tab {
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--fg-muted);
+  font-weight: 500;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  background: transparent;
+  white-space: nowrap;
+  transition: color 0.12s, border-color 0.12s;
+  font-family: inherit;
+}
+
+.settings-tab:hover {
+  color: var(--fg);
+}
+
+.settings-tab--active {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+
+/* Section labels */
+.settings-section-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 36px;
+  margin-bottom: 12px;
+}
+
+.settings-section-label:first-child {
+  margin-top: 0;
+}
+
+.settings-section-desc {
+  font-size: 12.5px;
+  color: var(--fg-subtle);
+  margin: -4px 0 12px;
+  line-height: 1.55;
+}
+
+/* Pref rows */
+.settings-pref-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-pref-row {
+  background: var(--bg-elev);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.settings-pref-row__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-pref-row__title {
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--fg);
+}
+
+.settings-pref-row__desc {
+  font-size: 12.5px;
+  color: var(--fg-subtle);
+  margin-top: 3px;
+  line-height: 1.5;
+}
+
+.settings-pref-row__warn {
+  color: var(--danger);
+  display: block;
+  margin-top: 4px;
+}
+
+/* Theme swatches */
+.settings-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+@media (max-width: 767px) {
+  .settings-theme-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.settings-theme-swatch {
+  padding: 12px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  background: var(--bg-elev);
+  box-shadow: inset 0 0 0 1px var(--line);
+  position: relative;
+  text-align: left;
+  border: none;
+  font-family: inherit;
+  transition: box-shadow 0.12s;
+}
+
+.settings-theme-swatch:hover {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.settings-theme-swatch--active {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.settings-theme-swatch__dots {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+
+.settings-theme-swatch__dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.settings-theme-swatch__name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.settings-theme-swatch__active-dot {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Auth cards (General + Integrations tabs) */
+.settings-auth-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-auth-card {
+  background: var(--bg-elev);
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+
+.settings-auth-card__top {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.settings-auth-card__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-auth-card__name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.settings-auth-card__desc {
+  font-size: 12.5px;
+  color: var(--fg-subtle);
+  margin-top: 4px;
+  line-height: 1.55;
+}
+
+.settings-auth-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.settings-auth-card__hint {
+  font-size: 12.5px;
+  color: var(--fg-subtle);
+  margin-top: 10px;
+}
+
+.settings-auth-card__success {
+  font-size: 12.5px;
+  color: var(--success);
+  margin-top: 8px;
+}
+
+.settings-auth-card__error {
+  font-size: 12.5px;
+  color: var(--danger);
+  margin-top: 8px;
+}
+
+.settings-mono-chip {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  background: var(--bg);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--fg-muted);
+  border: 1px solid var(--line);
+}
+
+.settings-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.settings-btn:hover { background: var(--bg-hover); border-color: var(--fg-faint); }
+.settings-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.settings-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  background: var(--fg);
+  color: var(--bg);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+.settings-btn-primary:hover { opacity: 0.92; }
+.settings-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.settings-btn-accent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+.settings-btn-accent:hover { opacity: 0.88; }
+.settings-btn-accent:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.settings-auth-link {
+  font-size: 13px;
+  color: var(--accent);
+  text-decoration: none;
+  transition: opacity 0.12s;
+}
+.settings-auth-link:hover { opacity: 0.8; }
+
+.settings-inline-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.settings-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
