@@ -12,6 +12,10 @@ import NewSessionModal from '@/components/NewSessionModal.vue';
 // classes
 import { apiErrorMessage, sessionsApi } from '@/classes/api';
 
+// lib
+import { setPendingSessionPrompt } from '@/lib/pendingSessionPrompt';
+import { safeSessionGetItem, safeSessionSetItem } from '@/lib/safeLocalStorage';
+
 // composables
 import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
 
@@ -107,18 +111,27 @@ async function createSession(payload: {
       sessionMode: pendingPlanHandoff.value?.defaultSessionMode,
       modelSelection: payload.modelSelection ?? pendingPlanHandoff.value?.defaultModelSelection,
     });
+    if (!newSession?.id) {
+      createSessionError.value = 'Failed to create session';
+      return;
+    }
     if (pendingPlanHandoff.value?.draftPrompt) {
-      localStorage.setItem(
-        `sessionPrompt:${workspaceId.value}:${newSession.id}`,
+      setPendingSessionPrompt(
+        workspaceId.value,
+        newSession.id,
         pendingPlanHandoff.value.draftPrompt
       );
     }
     showNewSessionModal.value = false;
     pendingPlanHandoff.value = null;
-    await router.push({
-      name: 'session',
-      params: { id: workspaceId.value, sessionId: newSession.id }
-    });
+    try {
+      await router.push({
+        name: 'session',
+        params: { id: workspaceId.value, sessionId: newSession.id }
+      });
+    } catch (navError) {
+      console.error('Failed to open new session:', navError);
+    }
   } catch (error) {
     console.error('Failed to create session:', error);
     createSessionError.value = apiErrorMessage(error, 'Failed to create session');
@@ -146,20 +159,12 @@ function handleStartPlanSession(payload: {
 }
 
 function readStoredDesktopSidebarVisible(): boolean {
-  try {
-    return sessionStorage.getItem(SESSION_LIST_PANEL_KEY) !== '0';
-  } catch {
-    return true;
-  }
+  return safeSessionGetItem(SESSION_LIST_PANEL_KEY) !== '0';
 }
 
 function setDesktopSidebarVisible(visible: boolean): void {
   desktopSidebarVisible.value = visible;
-  try {
-    sessionStorage.setItem(SESSION_LIST_PANEL_KEY, visible ? '1' : '0');
-  } catch {
-    /* ignore quota / private mode */
-  }
+  safeSessionSetItem(SESSION_LIST_PANEL_KEY, visible ? '1' : '0');
 }
 
 function setDesktopState(matchesDesktop: boolean): void {

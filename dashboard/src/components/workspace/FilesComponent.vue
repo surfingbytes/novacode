@@ -8,6 +8,7 @@ import 'md-editor-v3/lib/style.css';
 // classes
 import { filesApi } from '@/classes/api';
 import { DEFAULT_THEME_ID, resolveStoredThemeId, themes } from '@/lib/themes';
+import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 
 // components
 import ConfirmModal from '@/components/ConfirmModal.vue';
@@ -75,7 +76,7 @@ const bCreatingFileLoading = ref<boolean>(false);
 const newFilePath = ref<string>('');
 const createFileError = ref<string | null>(null);
 const createKind = ref<'file' | 'folder'>('file');
-const bShowHidden = ref<boolean>(localStorage.getItem('novacode:filesShowHidden') === '1');
+const bShowHidden = ref<boolean>(safeGetItem('novacode:filesShowHidden') === '1');
 const bCtxMenuOpen = ref<boolean>(false);
 const ctxMenuX = ref<number>(0);
 const ctxMenuY = ref<number>(0);
@@ -223,7 +224,7 @@ const bIsMonacoFile = computed((): boolean => {
   );
 });
 const bIsDarkTheme = computed((): boolean => {
-  const themeId = resolveStoredThemeId(localStorage.getItem('theme') ?? DEFAULT_THEME_ID);
+  const themeId = resolveStoredThemeId(safeGetItem('theme') ?? DEFAULT_THEME_ID);
   const theme = themes.find((themeOption) => themeOption.id === themeId);
   return theme?.dark ?? false;
 });
@@ -505,7 +506,7 @@ const createFile = async (): Promise<void> => {
 
 function toggleShowHidden(): void {
   bShowHidden.value = !bShowHidden.value;
-  localStorage.setItem('novacode:filesShowHidden', bShowHidden.value ? '1' : '0');
+  safeSetItem('novacode:filesShowHidden', bShowHidden.value ? '1' : '0');
   void reloadVisibleLists();
 }
 

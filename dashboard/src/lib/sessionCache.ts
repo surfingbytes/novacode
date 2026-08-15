@@ -5,9 +5,12 @@
  * REST/WebSocket.
  *
  * Deliberately small and best-effort: only the latest messages are kept,
- * bulky client-only fields are stripped, and all failures (quota, private
- * mode, corrupt JSON) are swallowed.
+ * bulky client-only fields are stripped, old sessions are evicted, and all
+ * failures (quota, private mode, corrupt JSON) are swallowed.
  */
+
+// lib
+import { safeGetItem, safeLocalStorageKeys, safeRemoveItem, safeSetItem } from '@/lib/safeLocalStorage';
 
 // types
 import type { ChatMessage, Session } from '@/@types/index';
@@ -16,6 +19,7 @@ const CACHE_VERSION = 1;
 const KEY_PREFIX = 'nova:sessionCache:';
 const MAX_CACHED_MESSAGES = 50;
 const RETRY_CACHED_MESSAGES = 10;
+const MAX_CACHED_SESSIONS = 5;
 
 export interface SessionCacheSnapshot {
   session: Session | null;
@@ -32,12 +36,45 @@ function cacheKey(workspaceId: string, sessionId: string): string {
   return `${KEY_PREFIX}${workspaceId}:${sessionId}`;
 }
 
+function listCacheEntries(): { key: string; cachedAt: number }[] {
+  const entries: { key: string; cachedAt: number }[] = [];
+  for (const key of safeLocalStorageKeys()) {
+    if (!key.startsWith(KEY_PREFIX)) continue;
+    const raw = safeGetItem(key);
+    let cachedAt = 0;
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as { cachedAt?: string };
+        cachedAt = Date.parse(parsed.cachedAt ?? '') || 0;
+      } catch {
+        cachedAt = 0;
+      }
+    }
+    entries.push({ key, cachedAt });
+  }
+  return entries.sort((a, b) => b.cachedAt - a.cachedAt);
+}
+
+function evictExcessSessionCaches(keepKey?: string): void {
+  const entries = listCacheEntries();
+  if (keepKey) {
+    const idx = entries.findIndex((entry) => entry.key === keepKey);
+    if (idx > 0) {
+      const [current] = entries.splice(idx, 1);
+      entries.unshift(current);
+    }
+  }
+  for (const entry of entries.slice(MAX_CACHED_SESSIONS)) {
+    safeRemoveItem(entry.key);
+  }
+}
+
 export function readSessionCache(
   workspaceId: string,
   sessionId: string
 ): SessionCacheSnapshot | null {
   try {
-    const raw = localStorage.getItem(cacheKey(workspaceId, sessionId));
+    const raw = safeGetItem(cacheKey(workspaceId, sessionId));
     if (!raw) {
       return null;
     }
@@ -77,6 +114,7 @@ export function writeSessionCache(
   if (!snapshot.session && messages.length === 0) {
     return;
   }
+  const key = cacheKey(workspaceId, sessionId);
   const base: SessionCachePayload = {
     version: CACHE_VERSION,
     cachedAt: new Date().toISOString(),
@@ -94,12 +132,32 @@ export function writeSessionCache(
     bHasMore
   };
   for (const limit of [MAX_CACHED_MESSAGES, RETRY_CACHED_MESSAGES]) {
-    try {
-      const payload = { ...base, messages: base.messages.slice(-limit) };
-      localStorage.setItem(cacheKey(workspaceId, sessionId), JSON.stringify(payload));
+    const payload = { ...base, messages: base.messages.slice(-limit) };
+    const serialized = JSON.stringify(payload);
+    if (safeSetItem(key, serialized)) {
+      evictExcessSessionCaches(key);
       return;
-    } catch {
-      // quota exceeded — retry with fewer messages, then give up silently
+    }
+    const oldest = listCacheEntries().filter((entry) => entry.key !== key).at(-1);
+    if (oldest) {
+      safeRemoveItem(oldest.key);
+      if (safeSetItem(key, serialized)) {
+        evictExcessSessionCaches(key);
+        return;
+      }
+    }
+  }
+}
+
+export function removeSessionCache(workspaceId: string, sessionId: string): void {
+  safeRemoveItem(cacheKey(workspaceId, sessionId));
+}
+
+export function removeSessionCachesForId(sessionId: string): void {
+  const suffix = `:${sessionId}`;
+  for (const key of safeLocalStorageKeys()) {
+    if (key.startsWith(KEY_PREFIX) && key.endsWith(suffix)) {
+      safeRemoveItem(key);
     }
   }
 }

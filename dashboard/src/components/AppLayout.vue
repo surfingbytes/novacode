@@ -9,17 +9,19 @@ import {
   FULL_HEIGHT_ROUTE_NAMES,
   PANE_LAYOUT_MIN_WIDTH
 } from '@/constants/layout';
+import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
+
 const SIDEBAR_COLLAPSED_KEY = 'sidebarCollapsed';
 
 const route = useRoute();
 const bSidebarIsOpen = ref(false);
-const bSidebarCollapsed = ref(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true');
+const bSidebarCollapsed = ref(safeGetItem(SIDEBAR_COLLAPSED_KEY) === 'true');
 const bSearchModalOpen = ref(false);
 const isFullHeightRoute = computed(() => FULL_HEIGHT_ROUTE_NAMES.has(route.name as string));
 const hideMobileTopBar = computed(() => isFullHeightRoute.value);
 
 watch(bSidebarCollapsed, (val) => {
-  localStorage.setItem(SIDEBAR_COLLAPSED_KEY, val ? 'true' : 'false');
+  safeSetItem(SIDEBAR_COLLAPSED_KEY, val ? 'true' : 'false');
 });
 
 watch(

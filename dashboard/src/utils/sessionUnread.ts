@@ -1,4 +1,5 @@
 import { ref } from 'vue';
+import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 
 const STORAGE_KEY = 'novacode:sessionUnread';
 
@@ -7,7 +8,7 @@ const unreadIds = ref<Set<string>>(loadUnreadIds());
 
 function loadUnreadIds(): Set<string> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = safeGetItem(STORAGE_KEY);
     if (!raw) {
       return new Set();
     }
@@ -23,7 +24,7 @@ function loadUnreadIds(): Set<string> {
 
 function persistUnreadIds(): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([...unreadIds.value]));
+    safeSetItem(STORAGE_KEY, JSON.stringify([...unreadIds.value]));
   } catch {
     // quota / private mode
   }

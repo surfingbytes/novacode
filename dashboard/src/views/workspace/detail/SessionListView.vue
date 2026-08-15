@@ -26,6 +26,7 @@ import { useOrchestratorsStore } from '@/stores/orchestrators';
 
 // classes
 import { apiErrorMessage, sessionsApi, orchestratorApi } from '@/classes/api';
+import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 import { subtasksFromStoredJson } from '@/utils/orchestratorPayload';
 
 // composables
@@ -64,10 +65,10 @@ const sessionToEdit = ref<Session | null>(null);
 const bSavingEdit = ref(false);
 const bShowNewOrchestratorModal = ref(false);
 const viewMode = ref<'list' | 'grid'>(
-  (localStorage.getItem('sessionsViewMode') as 'list' | 'grid') ?? 'list'
+  (safeGetItem('sessionsViewMode') as 'list' | 'grid') ?? 'list'
 );
 const orchestratorsViewMode = ref<'list' | 'grid'>(
-  (localStorage.getItem('orchestratorsViewMode') as 'list' | 'grid') ?? 'list'
+  (safeGetItem('orchestratorsViewMode') as 'list' | 'grid') ?? 'list'
 );
 const bShowArchived = ref(false);
 
@@ -412,10 +413,10 @@ function sessionHasTag(s: Session, tag: string | null): boolean {
 
 // -------------------------------------------------- Watchers --------------------------------------------------
 watch(viewMode, (v) => {
-  localStorage.setItem('sessionsViewMode', v);
+  safeSetItem('sessionsViewMode', v);
 });
 watch(orchestratorsViewMode, (v) => {
-  localStorage.setItem('orchestratorsViewMode', v);
+  safeSetItem('orchestratorsViewMode', v);
 });
 
 // -------------------------------------------------- Methods --------------------------------------------------

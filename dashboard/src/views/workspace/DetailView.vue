@@ -14,6 +14,7 @@ import { useToastStore } from '@/stores/toasts';
 
 // classes
 import { apiErrorMessage, workspaceApi } from '@/classes/api';
+import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 
 // composables
 import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
@@ -35,10 +36,10 @@ const toggleAppNav = inject(APP_NAV_TOGGLE_KEY, null);
 const bOrchestratorsLoading = ref(false);
 const workspaceUsage = ref<WorkspaceUsageSummary | null>(null);
 const viewMode = ref<'list' | 'grid'>(
-  (localStorage.getItem('sessionsViewMode') as 'list' | 'grid') ?? 'list'
+  (safeGetItem('sessionsViewMode') as 'list' | 'grid') ?? 'list'
 );
 const orchestratorsViewMode = ref<'list' | 'grid'>(
-  (localStorage.getItem('orchestratorsViewMode') as 'list' | 'grid') ?? 'list'
+  (safeGetItem('orchestratorsViewMode') as 'list' | 'grid') ?? 'list'
 );
 const bShowArchived = ref(false);
 const selectedIds = ref<Set<string>>(new Set());
@@ -55,10 +56,10 @@ const isFilesRoute = computed(() => route.name === 'workspace-files');
 // -------------------------------------------------- Watchers --------------------------------------------------
 
 watch(viewMode, (v) => {
-  localStorage.setItem('sessionsViewMode', v);
+  safeSetItem('sessionsViewMode', v);
 });
 watch(orchestratorsViewMode, (v) => {
-  localStorage.setItem('orchestratorsViewMode', v);
+  safeSetItem('orchestratorsViewMode', v);
 });
 watch(workspaceId, (id) => {
   if (!id) {

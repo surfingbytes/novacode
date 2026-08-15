@@ -1,5 +1,6 @@
 // classes
 import { pushApi } from '@/classes/api';
+import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 
 const STORAGE_KEY = 'notificationsEnabled';
 const DEFAULT_ICON = '/favicon.ico';
@@ -14,11 +15,11 @@ type ExtendedNotificationOptions = NotificationOptions & {
 };
 
 export function isNotificationsEnabled(): boolean {
-  return localStorage.getItem(STORAGE_KEY) === 'true';
+  return safeGetItem(STORAGE_KEY) === 'true';
 }
 
 export function setNotificationsEnabled(enabled: boolean): void {
-  localStorage.setItem(STORAGE_KEY, String(enabled));
+  safeSetItem(STORAGE_KEY, String(enabled));
 }
 
 export function canRequestPermission(): boolean {

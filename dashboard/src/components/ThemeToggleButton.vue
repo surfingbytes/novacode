@@ -8,6 +8,7 @@ import {
   DEFAULT_LIGHT_THEME_ID,
   stopAutoThemeWatcher
 } from '@/lib/themes';
+import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 
 withDefaults(
   defineProps<{
@@ -30,13 +31,13 @@ function syncModeFromDom(): void {
 async function toggleTheme(): Promise<void> {
   const isDark = currentMode.value === 'dark';
   const nextThemeId = isDark
-    ? resolveStoredThemeId(localStorage.getItem('lightTheme') ?? DEFAULT_LIGHT_THEME_ID)
-    : resolveStoredThemeId(localStorage.getItem('darkTheme') ?? DEFAULT_DARK_THEME_ID);
+    ? resolveStoredThemeId(safeGetItem('lightTheme') ?? DEFAULT_LIGHT_THEME_ID)
+    : resolveStoredThemeId(safeGetItem('darkTheme') ?? DEFAULT_DARK_THEME_ID);
   const nextMode = isDark ? 'light' : 'dark';
 
   applyTheme(nextThemeId);
-  localStorage.setItem('theme', nextThemeId);
-  localStorage.setItem('autoTheme', 'false');
+  safeSetItem('theme', nextThemeId);
+  safeSetItem('autoTheme', 'false');
   stopAutoThemeWatcher();
   currentMode.value = nextMode;
 

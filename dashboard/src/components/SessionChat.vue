@@ -20,6 +20,8 @@ import BottomTabBar from '@/components/ui/BottomTabBar.vue';
 // classes
 import { sessionsApi, settingsApi, workspaceRulesApi, buildSessionTerminalWsUrl } from '@/classes/api';
 import { renderMermaidDiagrams } from '@/lib/mermaid';
+import { clearSessionPrompt, persistSessionPrompt, readSessionPrompt } from '@/lib/pendingSessionPrompt';
+import { safeGetItem, safeRemoveItem, safeSetItem } from '@/lib/safeLocalStorage';
 import { readSessionCache, writeSessionCache } from '@/lib/sessionCache';
 import { sessionChatToMarkdown, sessionExportFilename } from '@/utils/sessionChatMarkdown';
 import {
@@ -110,28 +112,16 @@ const hideThinkingOutput = ref(readHideThinkingFromLs());
 const hideToolCalls = ref(readHideToolCallsFromLs());
 
 function readHideThinkingFromLs(): boolean {
-  try {
-    return localStorage.getItem(HIDE_THINKING_LS_KEY) === '1';
-  } catch {
-    return false;
-  }
+  return safeGetItem(HIDE_THINKING_LS_KEY) === '1';
 }
 
 function readHideToolCallsFromLs(): boolean {
-  try {
-    return localStorage.getItem(HIDE_TOOL_CALLS_LS_KEY) === '1';
-  } catch {
-    return false;
-  }
+  return safeGetItem(HIDE_TOOL_CALLS_LS_KEY) === '1';
 }
 
 function persistChatToggle(key: string, checked: boolean): void {
-  try {
-    if (checked) localStorage.setItem(key, '1');
-    else localStorage.removeItem(key);
-  } catch {
-    // ignore quota / private mode
-  }
+  if (checked) safeSetItem(key, '1');
+  else safeRemoveItem(key);
 }
 
 function onHideThinkingToggle(checked: boolean): void {
@@ -451,8 +441,6 @@ const bUploadingImage = ref(false);
 const bChatInputMdUp = ref(false);
 let chatInputMql: MediaQueryList | null = null;
 
-const promptStorageKey = computed(() => `sessionPrompt:${props.workspaceId}:${props.sessionId}`);
-
 function syncChatInputBreakpoint(): void {
   bChatInputMdUp.value = chatInputMql?.matches ?? window.matchMedia('(min-width: 768px)').matches;
 }
@@ -490,6 +478,7 @@ function onUploadFiles(files: File[]): void {
 }
 
 function onComposerSend(payload: { text: string; imagePaths: string[] }): void {
+  clearSessionPrompt(props.workspaceId, props.sessionId);
   chatSocket.sendPrompt({
     text: payload.text,
     model: modelSelection.value,
@@ -815,12 +804,7 @@ watch(
 );
 
 watch(promptText, (val) => {
-  const key = promptStorageKey.value;
-  if (!val) {
-    localStorage.removeItem(key);
-  } else {
-    localStorage.setItem(key, val);
-  }
+  persistSessionPrompt(props.workspaceId, props.sessionId, val);
 });
 
 watch(
@@ -868,7 +852,7 @@ watch(
       void nextTick(() => chatListRef.value?.forceInitialScrollToBottom());
     }
 
-    const savedPrompt = localStorage.getItem(promptStorageKey.value);
+    const savedPrompt = readSessionPrompt(props.workspaceId, newId);
     promptText.value = savedPrompt ?? '';
 
     // Fetch and socket run in parallel — the WS history frame must not wait on
@@ -889,7 +873,7 @@ onMounted(async () => {
   syncChatInputBreakpoint();
   chatInputMql.addEventListener('change', syncChatInputBreakpoint);
 
-  const savedPrompt = localStorage.getItem(promptStorageKey.value);
+  const savedPrompt = readSessionPrompt(props.workspaceId, props.sessionId);
   if (savedPrompt != null) promptText.value = savedPrompt;
 
   // Fetch and socket run in parallel — the WS history frame must not wait on

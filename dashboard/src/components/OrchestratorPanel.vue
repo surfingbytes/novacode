@@ -10,6 +10,11 @@ import ModalHeader from '@/components/ModalHeader.vue';
 // classes
 import { orchestratorApi } from '@/classes/api';
 import {
+  clearOrchestratorPrompt,
+  persistOrchestratorPrompt,
+  readOrchestratorPrompt
+} from '@/lib/pendingSessionPrompt';
+import {
   normalizeDependsOn,
   parseOrchestratorSubtasksJson,
   remapDependsOnAfterDelete,
@@ -41,7 +46,6 @@ const toastStore = useToastStore();
 // -------------------------------------------------- Refs --------------------------------------------------
 
 const userInput = ref('');
-const promptStorageKey = `orchestratorPrompt:${props.workspaceId}:${props.orchestratorId}`;
 const bDecomposing = ref(false);
 const bStartingRun = ref(false);
 const bStopping = ref(false);
@@ -163,11 +167,7 @@ function taskStatus(index: number): 'idle' | 'active' | 'done' | 'failed' | 'ski
 }
 
 watch(userInput, (val) => {
-  if (!val) {
-    localStorage.removeItem(promptStorageKey);
-  } else {
-    localStorage.setItem(promptStorageKey, val);
-  }
+  persistOrchestratorPrompt(props.workspaceId, props.orchestratorId, val);
 });
 
 function openEditModal(index: number) {
@@ -247,6 +247,7 @@ async function generateTasks() {
     if (data) {
       orchestratorsStore.upsertOrchestrator(data);
     }
+    clearOrchestratorPrompt(props.workspaceId, props.orchestratorId);
     userInput.value = '';
   } catch (e: unknown) {
     const caughtError = e as Error & { lastAssistantContent?: string; expectedSchema?: string };
@@ -374,7 +375,7 @@ async function clonePlan() {
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 
 onMounted(() => {
-  const savedPrompt = localStorage.getItem(promptStorageKey);
+  const savedPrompt = readOrchestratorPrompt(props.workspaceId, props.orchestratorId);
   if (savedPrompt != null) {
     userInput.value = savedPrompt;
   }

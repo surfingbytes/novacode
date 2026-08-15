@@ -1,3 +1,5 @@
+import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
+
 export interface Theme {
   id: string;
   name: string;
@@ -233,11 +235,11 @@ export function resolveStoredThemeId(themeId: string): string {
 
 export function migrateLegacyThemeLocalStorage(): void {
   for (const key of ['theme', 'darkTheme', 'lightTheme'] as const) {
-    const v = localStorage.getItem(key);
+    const v = safeGetItem(key);
     if (v) {
       const migrated = resolveStoredThemeId(v);
       if (migrated !== v) {
-        localStorage.setItem(key, migrated);
+        safeSetItem(key, migrated);
       }
     }
   }
@@ -305,9 +307,9 @@ let _colorSchemeQuery: MediaQueryList | null = null;
 export function resolveAutoTheme(): string {
   const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
   if (prefersDark) {
-    return resolveStoredThemeId(localStorage.getItem('darkTheme') ?? DEFAULT_DARK_THEME_ID);
+    return resolveStoredThemeId(safeGetItem('darkTheme') ?? DEFAULT_DARK_THEME_ID);
   }
-  return resolveStoredThemeId(localStorage.getItem('lightTheme') ?? DEFAULT_LIGHT_THEME_ID);
+  return resolveStoredThemeId(safeGetItem('lightTheme') ?? DEFAULT_LIGHT_THEME_ID);
 }
 
 export function startAutoThemeWatcher(): void {
@@ -330,7 +332,7 @@ export function stopAutoThemeWatcher(): void {
 /** Apply theme from localStorage (manual theme or OS auto). Safe to call before Vue mounts. */
 export function applyActiveTheme(): void {
   migrateLegacyThemeLocalStorage();
-  const autoThemeSetting = localStorage.getItem('autoTheme');
+  const autoThemeSetting = safeGetItem('autoTheme');
   // null = never set on this device → follow OS until settings sync writes an explicit value
   const autoTheme = autoThemeSetting === null ? true : autoThemeSetting === 'true';
   if (autoTheme) {
@@ -338,6 +340,6 @@ export function applyActiveTheme(): void {
     startAutoThemeWatcher();
   } else {
     stopAutoThemeWatcher();
-    applyTheme(localStorage.getItem('theme') ?? DEFAULT_THEME_ID);
+    applyTheme(safeGetItem('theme') ?? DEFAULT_THEME_ID);
   }
 }

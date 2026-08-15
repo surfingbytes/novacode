@@ -16,6 +16,7 @@ import { authApi, agentAuthApi, settingsApi } from '@/classes/api';
 
 // classes
 import { themes, applyTheme, DEFAULT_THEME_ID, resolveStoredThemeId } from '@/lib/themes';
+import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 import {
   isNotificationsEnabled,
   setNotificationsEnabled,
@@ -37,7 +38,7 @@ const username = ref<string>('');
 const password = ref<string>('');
 const passwordConfirm = ref<string>('');
 const selectedThemeId = ref<string>(
-  resolveStoredThemeId(localStorage.getItem('theme') ?? DEFAULT_THEME_ID)
+  resolveStoredThemeId(safeGetItem('theme') ?? DEFAULT_THEME_ID)
 );
 const profileError = ref<string>('');
 const bSavingProfile = ref<boolean>(false);
@@ -117,7 +118,7 @@ const stepStatuses = computed<Record<1 | 2 | 3 | 4, 'complete' | 'active' | 'pen
 // --- profile ---
 const selectTheme = (themeId: string): void => {
   selectedThemeId.value = themeId;
-  localStorage.setItem('theme', themeId);
+  safeSetItem('theme', themeId);
   applyTheme(themeId);
 };
 

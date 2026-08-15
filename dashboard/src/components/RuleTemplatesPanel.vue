@@ -8,6 +8,7 @@ import ListPageSkeleton from '@/components/ui/ListPageSkeleton.vue';
 
 // classes
 import { roleTemplatesApi } from '@/classes/api';
+import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 
 // types
 import type { RoleTemplate } from '@/@types/index';
@@ -20,7 +21,7 @@ const errorMessage = ref<string | null>(null);
 const successMessage = ref<string | null>(null);
 
 const viewMode = ref<'list' | 'grid'>(
-  (localStorage.getItem('ruleTemplatesViewMode') as 'list' | 'grid') ?? 'list',
+  (safeGetItem('ruleTemplatesViewMode') as 'list' | 'grid') ?? 'list',
 );
 
 // Create modal
@@ -77,7 +78,7 @@ function showSuccess(msg: string): void {
 
 function setViewMode(mode: 'list' | 'grid'): void {
   viewMode.value = mode;
-  localStorage.setItem('ruleTemplatesViewMode', mode);
+  safeSetItem('ruleTemplatesViewMode', mode);
 }
 
 // --- Create ---

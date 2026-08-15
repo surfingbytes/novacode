@@ -4,7 +4,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
 // lib
-import { readSessionCache, writeSessionCache } from '@/lib/sessionCache';
+import { readSessionCache, removeSessionCache, writeSessionCache } from '@/lib/sessionCache';
 
 // types
 import type { ChatMessage, Session } from '@/@types/index';
@@ -141,6 +141,29 @@ describe('sessionCache', () => {
     const cached = readSessionCache('ws-1', 'session-1');
     expect(cached?.messages).toHaveLength(0);
     expect(cached?.bHasMore).toBe(false);
+  });
+
+  it('keeps only the latest 5 session caches', () => {
+    for (let i = 0; i < 7; i += 1) {
+      writeSessionCache('ws-1', `session-${i}`, {
+        session: makeSession({ id: `session-${i}` }),
+        messages: makeMessages(1),
+        bHasMore: false
+      });
+    }
+    const keys = Object.keys(localStorage).filter((key) => key.startsWith('nova:sessionCache:'));
+    expect(keys).toHaveLength(5);
+    expect(localStorage.getItem('nova:sessionCache:ws-1:session-6')).not.toBeNull();
+  });
+
+  it('removes a session cache on delete', () => {
+    writeSessionCache('ws-1', 'session-1', {
+      session: makeSession(),
+      messages: makeMessages(2),
+      bHasMore: false
+    });
+    removeSessionCache('ws-1', 'session-1');
+    expect(readSessionCache('ws-1', 'session-1')).toBeNull();
   });
 
   it('returns null for corrupt or foreign data', () => {

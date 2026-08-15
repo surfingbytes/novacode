@@ -1,6 +1,7 @@
 // node_modules
 import axios, { isAxiosError } from 'axios';
 import { getActivePinia } from 'pinia';
+import { safeGetItem } from '@/lib/safeLocalStorage';
 
 // stores
 import { useApiHealthStore } from '@/stores/apiHealth';
@@ -42,7 +43,7 @@ export const http = axios.create({
 });
 
 http.interceptors.request.use((requestConfig) => {
-  const token: string | null = localStorage.getItem('token');
+  const token: string | null = safeGetItem('token');
   if (token) {
     requestConfig.headers['Authorization'] = `Bearer ${token}`;
   }
@@ -687,7 +688,7 @@ export const sessionsApi = {
 
   imageUrl: (sessionId: string, filename: string): string => {
     const base = (import.meta.env.VITE_API_URL ?? location.origin + '/api').replace(/\/$/, '');
-    const token = localStorage.getItem('token') ?? '';
+    const token = safeGetItem('token') ?? '';
     const url = `${base}/sessions/${sessionId}/images/${encodeURIComponent(filename)}`;
     return token ? `${url}?token=${encodeURIComponent(token)}` : url;
   }
@@ -744,7 +745,7 @@ export const orchestratorApi = {
     opts: { onThinking: (text: string) => void }
   ): Promise<Orchestrator | null> {
     const baseURL = (import.meta.env.VITE_API_URL ?? location.origin + '/api').replace(/\/$/, '');
-    const token = localStorage.getItem('token');
+    const token = safeGetItem('token');
     const response = await fetch(
       `${baseURL}/workspaces/${workspaceId}/orchestrators/${orchestratorId}/decompose`,
       {

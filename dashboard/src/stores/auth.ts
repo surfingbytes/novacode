@@ -5,21 +5,18 @@ import { ref } from 'vue';
 
 // classes
 import { authApi } from '@/classes/api';
+import { safeGetItem, safeRemoveItem, safeSetItem } from '@/lib/safeLocalStorage';
 
 const SIGNED_IN_KEY = 'nova:signedIn';
 const LEGACY_TOKEN_KEY = 'token';
 
 function readSignedInFlag(): boolean {
-  try {
-    if (localStorage.getItem(SIGNED_IN_KEY) === '1') {
-      return true;
-    }
-    if (localStorage.getItem(LEGACY_TOKEN_KEY)) {
-      localStorage.setItem(SIGNED_IN_KEY, '1');
-      return true;
-    }
-  } catch {
-    // ignore quota / private mode
+  if (safeGetItem(SIGNED_IN_KEY) === '1') {
+    return true;
+  }
+  if (safeGetItem(LEGACY_TOKEN_KEY)) {
+    safeSetItem(SIGNED_IN_KEY, '1');
+    return true;
   }
   return false;
 }
@@ -34,12 +31,8 @@ export const useAuthStore = defineStore('auth', () => {
     bSignedIn.value = true;
     bValidated.value = true;
     username.value = name;
-    try {
-      localStorage.setItem(SIGNED_IN_KEY, '1');
-      localStorage.removeItem(LEGACY_TOKEN_KEY);
-    } catch {
-      // ignore quota / private mode
-    }
+    safeSetItem(SIGNED_IN_KEY, '1');
+    safeRemoveItem(LEGACY_TOKEN_KEY);
   }
 
   // -------------------------------------------------- Methods --------------------------------------------------
@@ -86,12 +79,8 @@ export const useAuthStore = defineStore('auth', () => {
     bSignedIn.value = false;
     username.value = null;
     bValidated.value = false;
-    try {
-      localStorage.removeItem(SIGNED_IN_KEY);
-      localStorage.removeItem(LEGACY_TOKEN_KEY);
-    } catch {
-      // ignore quota / private mode
-    }
+    safeRemoveItem(SIGNED_IN_KEY);
+    safeRemoveItem(LEGACY_TOKEN_KEY);
   };
 
   // -------------------------------------------------- Export --------------------------------------------------

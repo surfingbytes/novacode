@@ -4,6 +4,7 @@ import { computed, ref } from 'vue';
 
 // classes
 import { orchestratorApi } from '@/classes/api';
+import { forgetLocalStateForId } from '@/lib/sessionLocalState';
 
 // types
 import type { Orchestrator } from '@/@types/index';
@@ -67,6 +68,7 @@ export const useOrchestratorsStore = defineStore('orchestrators', () => {
       }
     }
     orchestratorsByWorkspace.value = next;
+    forgetLocalStateForId(orchestratorId);
   }
 
   /** Fetch once per workspace unless forced; safe to call repeatedly. */

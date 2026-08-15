@@ -13,6 +13,7 @@ import ListPageSkeleton from '@/components/ui/ListPageSkeleton.vue';
 
 // api
 import { automationsApi, workspaceApi } from '@/classes/api';
+import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 
 // stores
 import { useToastStore } from '@/stores/toasts';
@@ -46,7 +47,7 @@ const automations = ref<Automation[]>([]);
 const bLoading = ref(true);
 const errorMessage = ref<string | null>(null);
 const viewMode = ref<'list' | 'grid'>(
-  (localStorage.getItem('automationsViewMode') as 'list' | 'grid') ?? 'list'
+  (safeGetItem('automationsViewMode') as 'list' | 'grid') ?? 'list'
 );
 
 // selected automation for run report panel
@@ -83,7 +84,7 @@ const deleteConfirmDescription = computed(() =>
 
 function setViewMode(mode: 'list' | 'grid'): void {
   viewMode.value = mode;
-  localStorage.setItem('automationsViewMode', mode);
+  safeSetItem('automationsViewMode', mode);
 }
 
 async function fetchAll(): Promise<void> {

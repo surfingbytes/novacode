@@ -25,19 +25,20 @@ import {
   requestPermission,
   syncPushSubscription
 } from '@/lib/notifications';
+import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const activeThemeId = ref<string>(
-  resolveStoredThemeId(localStorage.getItem('theme') ?? DEFAULT_THEME_ID)
+  resolveStoredThemeId(safeGetItem('theme') ?? DEFAULT_THEME_ID)
 );
 const bAutoTheme = ref<boolean>(
-  localStorage.getItem('autoTheme') === null ? true : localStorage.getItem('autoTheme') === 'true'
+  safeGetItem('autoTheme') === null ? true : safeGetItem('autoTheme') === 'true'
 );
 const darkThemeId = ref<string>(
-  resolveStoredThemeId(localStorage.getItem('darkTheme') ?? DEFAULT_DARK_THEME_ID)
+  resolveStoredThemeId(safeGetItem('darkTheme') ?? DEFAULT_DARK_THEME_ID)
 );
 const lightThemeId = ref<string>(
-  resolveStoredThemeId(localStorage.getItem('lightTheme') ?? DEFAULT_LIGHT_THEME_ID)
+  resolveStoredThemeId(safeGetItem('lightTheme') ?? DEFAULT_LIGHT_THEME_ID)
 );
 const bSavingTheme = ref<boolean>(false);
 
@@ -74,7 +75,7 @@ const selectTheme = async (themeId: string): Promise<void> => {
     return;
   }
   activeThemeId.value = themeId;
-  localStorage.setItem('theme', themeId);
+  safeSetItem('theme', themeId);
   applyTheme(themeId);
   bSavingTheme.value = true;
   try {
@@ -91,7 +92,7 @@ const selectDarkTheme = async (themeId: string): Promise<void> => {
     return;
   }
   darkThemeId.value = themeId;
-  localStorage.setItem('darkTheme', themeId);
+  safeSetItem('darkTheme', themeId);
   if (bAutoTheme.value) {
     applyTheme(resolveAutoTheme());
   }
@@ -110,7 +111,7 @@ const selectLightTheme = async (themeId: string): Promise<void> => {
     return;
   }
   lightThemeId.value = themeId;
-  localStorage.setItem('lightTheme', themeId);
+  safeSetItem('lightTheme', themeId);
   if (bAutoTheme.value) {
     applyTheme(resolveAutoTheme());
   }
@@ -126,7 +127,7 @@ const selectLightTheme = async (themeId: string): Promise<void> => {
 
 const toggleAutoTheme = async (): Promise<void> => {
   bAutoTheme.value = !bAutoTheme.value;
-  localStorage.setItem('autoTheme', String(bAutoTheme.value));
+  safeSetItem('autoTheme', String(bAutoTheme.value));
   if (bAutoTheme.value) {
     applyTheme(resolveAutoTheme());
     startAutoThemeWatcher();
@@ -161,19 +162,19 @@ const loadSettings = async (): Promise<void> => {
     const response = await settingsApi.get();
     if (response.data.darkTheme) {
       darkThemeId.value = response.data.darkTheme;
-      localStorage.setItem('darkTheme', response.data.darkTheme);
+      safeSetItem('darkTheme', response.data.darkTheme);
     }
     if (response.data.lightTheme) {
       lightThemeId.value = response.data.lightTheme;
-      localStorage.setItem('lightTheme', response.data.lightTheme);
+      safeSetItem('lightTheme', response.data.lightTheme);
     }
     if (typeof response.data.autoTheme === 'boolean') {
       bAutoTheme.value = response.data.autoTheme;
-      localStorage.setItem('autoTheme', String(response.data.autoTheme));
+      safeSetItem('autoTheme', String(response.data.autoTheme));
     }
     if (response.data.theme) {
       activeThemeId.value = response.data.theme;
-      localStorage.setItem('theme', response.data.theme);
+      safeSetItem('theme', response.data.theme);
     }
     if (typeof response.data.claudeAutoContinue === 'boolean') {
       bClaudeAutoContinue.value = response.data.claudeAutoContinue;

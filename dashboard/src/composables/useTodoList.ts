@@ -6,6 +6,7 @@ import { PANE_LAYOUT_MIN_WIDTH } from '@/constants/layout';
 
 // utils
 import type { DisplayItem, TodoDisplayItem } from '@/utils/chatDisplayItems';
+import { safeGetItem, safeRemoveItem, safeSetItem } from '@/lib/safeLocalStorage';
 
 /**
  * Derives the agent's current todo list from chat display items (live stream +
@@ -31,13 +32,9 @@ const PANEL_CLOSED_LS_KEY = 'nova:chat:todoPanelClosed';
 const PANEL_STATES: TodoPanelState[] = ['collapsed', 'full'];
 
 function readInitialPanelState(): TodoPanelState {
-  try {
-    const stored = localStorage.getItem(PANEL_STATE_LS_KEY);
-    if (stored && (PANEL_STATES as string[]).includes(stored)) {
-      return stored as TodoPanelState;
-    }
-  } catch {
-    // ignore quota / private mode
+  const stored = safeGetItem(PANEL_STATE_LS_KEY);
+  if (stored && (PANEL_STATES as string[]).includes(stored)) {
+    return stored as TodoPanelState;
   }
   const bWidePane =
     typeof window !== 'undefined' &&
@@ -47,11 +44,7 @@ function readInitialPanelState(): TodoPanelState {
 }
 
 function readInitialClosed(): boolean {
-  try {
-    return localStorage.getItem(PANEL_CLOSED_LS_KEY) === '1';
-  } catch {
-    return false;
-  }
+  return safeGetItem(PANEL_CLOSED_LS_KEY) === '1';
 }
 
 // -------------------------------------------------- Composable --------------------------------------------------
@@ -97,29 +90,17 @@ export function useTodoList(options: {
 
   function togglePanelState(): void {
     panelState.value = panelState.value === 'full' ? 'collapsed' : 'full';
-    try {
-      localStorage.setItem(PANEL_STATE_LS_KEY, panelState.value);
-    } catch {
-      // ignore quota / private mode
-    }
+    safeSetItem(PANEL_STATE_LS_KEY, panelState.value);
   }
 
   function closePanel(): void {
     bPanelClosed.value = true;
-    try {
-      localStorage.setItem(PANEL_CLOSED_LS_KEY, '1');
-    } catch {
-      // ignore quota / private mode
-    }
+    safeSetItem(PANEL_CLOSED_LS_KEY, '1');
   }
 
   function openPanel(): void {
     bPanelClosed.value = false;
-    try {
-      localStorage.removeItem(PANEL_CLOSED_LS_KEY);
-    } catch {
-      // ignore quota / private mode
-    }
+    safeRemoveItem(PANEL_CLOSED_LS_KEY);
   }
 
   return {

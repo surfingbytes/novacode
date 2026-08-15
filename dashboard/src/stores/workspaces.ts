@@ -8,6 +8,7 @@ import { createManagedSocket, type ManagedSocket } from '@/lib/wsClient';
 
 // stores
 import { useOrchestratorsStore } from '@/stores/orchestrators';
+import { forgetLocalStateForId } from '@/lib/sessionLocalState';
 import { markSessionFinished } from '@/utils/sessionUnread';
 
 // types
@@ -110,6 +111,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
 
   function removeSession(sessionId: string): void {
     allSessions.value = allSessions.value.filter((session) => session.id !== sessionId);
+    forgetLocalStateForId(sessionId);
   }
 
   function setSessionBusy(sessionId: string, busy: boolean): void {

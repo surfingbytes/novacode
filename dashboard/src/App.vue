@@ -17,6 +17,7 @@ import { useToastStore } from '@/stores/toasts';
 import router from '@/classes/router';
 import { settingsApi, setUnauthorizedHandler } from '@/classes/api';
 import { applyActiveTheme, stopAutoThemeWatcher } from '@/lib/themes';
+import { safeSetItem } from '@/lib/safeLocalStorage';
 import { isNotificationsEnabled, syncPushSubscription } from '@/lib/notifications';
 
 // -------------------------------------------------- Store --------------------------------------------------
@@ -46,19 +47,19 @@ async function syncSettingsFromDb(): Promise<void> {
   try {
     const { data } = await settingsApi.get();
     if (data.darkTheme) {
-      localStorage.setItem('darkTheme', data.darkTheme);
+      safeSetItem('darkTheme', data.darkTheme);
     }
     if (data.lightTheme) {
-      localStorage.setItem('lightTheme', data.lightTheme);
+      safeSetItem('lightTheme', data.lightTheme);
     }
     // Authenticated settings are the source of truth — always write autoTheme,
     // including false. Skipping false left localStorage null, which the client
     // treats as "follow OS" and forced light mode on most laptops.
     if (typeof data.autoTheme === 'boolean') {
-      localStorage.setItem('autoTheme', String(data.autoTheme));
+      safeSetItem('autoTheme', String(data.autoTheme));
     }
     if (data.theme) {
-      localStorage.setItem('theme', data.theme);
+      safeSetItem('theme', data.theme);
     }
     applyActiveTheme();
   } catch {

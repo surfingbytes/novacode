@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 
 // constants
 import { PANE_LAYOUT_MIN_WIDTH } from '@/constants/layout';
+import { safeSessionGetItem, safeSessionSetItem } from '@/lib/safeLocalStorage';
 
 /**
  * Wide-viewport master-detail layout helper for foldables / tablets.
@@ -17,25 +18,17 @@ export function usePaneLayout(storageKey?: string) {
   let mediaQuery: MediaQueryList | null = null;
 
   function readStoredOpen(): boolean | null {
-    if (!storageKey || typeof sessionStorage === 'undefined') return null;
-    try {
-      const stored = sessionStorage.getItem(storageKey);
-      if (stored === '0') return false;
-      if (stored === '1') return true;
-    } catch {
-      /* ignore quota / private mode */
-    }
+    if (!storageKey) return null;
+    const stored = safeSessionGetItem(storageKey);
+    if (stored === '0') return false;
+    if (stored === '1') return true;
     return null;
   }
 
   function setSidePanelOpen(open: boolean): void {
     bSidePanelOpen.value = open;
-    if (!storageKey || typeof sessionStorage === 'undefined') return;
-    try {
-      sessionStorage.setItem(storageKey, open ? '1' : '0');
-    } catch {
-      /* ignore */
-    }
+    if (!storageKey) return;
+    safeSessionSetItem(storageKey, open ? '1' : '0');
   }
 
   function toggleSidePanel(): void {

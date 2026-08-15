@@ -12,6 +12,8 @@
  *  - Close code 4001 (auth) → no reconnect, surfaced via onUnauthorized.
  */
 
+import { safeGetItem } from '@/lib/safeLocalStorage';
+
 export interface ManagedSocketOptions {
   /** ws(s):// URL without credentials */
   url: string;
@@ -89,7 +91,7 @@ export function createManagedSocket(options: ManagedSocketOptions): ManagedSocke
     if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
       return;
     }
-    const token = localStorage.getItem('token') ?? '';
+    const token = safeGetItem('token') ?? '';
     socket = new WebSocket(options.url, token ? [`bearer.${token}`] : undefined);
 
     socket.onopen = () => {
