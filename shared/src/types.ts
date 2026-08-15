@@ -299,6 +299,9 @@ export interface WorkspaceUsageSummary {
   costCurrency: string | null;
 }
 
+/** Token/cost totals for one session (sum of persisted usage turns). */
+export type SessionUsageSummary = WorkspaceUsageSummary;
+
 /** Stored API key metadata. The plaintext token is only returned once, on create. */
 export interface ApiToken {
   id: string;

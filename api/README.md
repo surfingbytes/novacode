@@ -28,5 +28,5 @@ Send `Authorization: Bearer nck_…` on REST calls (and as the WebSocket `bearer
 
 Agents that emit ACP `usage_update` events persist a snapshot per turn.
 
-- `GET /api/workspaces/:workspaceId/sessions/:sessionId/usage` — `{ turns: SessionUsageTurn[] }`
+- `GET /api/workspaces/:workspaceId/sessions/:sessionId/usage` — `{ turns: SessionUsageTurn[], summary: SessionUsageSummary }`
 - `GET /api/workspaces/:workspaceId/usage` — workspace totals

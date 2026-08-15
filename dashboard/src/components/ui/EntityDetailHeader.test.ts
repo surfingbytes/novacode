@@ -60,6 +60,15 @@ describe('EntityDetailHeader', () => {
     expect(onExport).toHaveBeenCalledTimes(1);
   });
 
+  it('renders subtitle-trailing after the workspace name', () => {
+    const wrapper = mount(EntityDetailHeader, {
+      props: { title: 'My session', subtitle: 'novacode' },
+      slots: { 'subtitle-trailing': '<span>$0.0123</span>' }
+    });
+    expect(wrapper.text()).toContain('novacode');
+    expect(wrapper.text()).toContain('$0.0123');
+  });
+
   it('emits selectSubtitle from the workspace switcher', async () => {
     const onSelectSubtitle = vi.fn();
     const wrapper = mount(EntityDetailHeader, {

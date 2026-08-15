@@ -187,8 +187,11 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       if (!session || session.workspaceId !== workspaceId) {
         return reply.status(404).send({ error: 'Session not found' });
       }
-      const turns = await db.listSessionUsage(sessionId);
-      return reply.send({ turns });
+      const [turns, summary] = await Promise.all([
+        db.listSessionUsage(sessionId),
+        db.summarizeSessionUsage(sessionId)
+      ]);
+      return reply.send({ turns, summary });
     }
   );
 

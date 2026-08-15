@@ -18,6 +18,10 @@ const denyAllPermission: AcpPermissionHandler = () => ({
 
 const SESSION_TITLE_MAX_LENGTH = 60;
 const SESSION_TITLE_PROMPT_MAX_CHARS = 1500;
+const COMMIT_MESSAGE_SUBJECT_MAX_LENGTH = 72;
+const COMMIT_MESSAGE_BODY_MAX_CHARS = 400;
+const RULES_PREAMBLE_RE =
+  /\b(?:i(?:'ve| have)? loaded|rules? (?:are |were )?loaded|the following rules|workspace rules\b.*\bapply|i will follow|follow them as)\b/i;
 
 export const ONE_SHOT_AGENT_TYPES: AgentType[] = [
   'cursor-agent',
@@ -77,19 +81,95 @@ export function cleanGeneratedAgentText(raw: string): string {
     .trim();
 }
 
+function truncateOnWordBoundary(text: string, maxLength: number): string {
+  if (text.length <= maxLength) {
+    return text;
+  }
+  const sliced = text.slice(0, maxLength);
+  const lastSpace = sliced.lastIndexOf(' ');
+  const cut = lastSpace >= 18 ? sliced.slice(0, lastSpace) : sliced;
+  return cut.trimEnd();
+}
+
+function splitSentences(text: string): string[] {
+  return text.split(/(?<=[.!?])\s+(?=[A-Z])/);
+}
+
+function isRulesPreamble(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return true;
+  }
+  return /\brules?\b/i.test(trimmed) && RULES_PREAMBLE_RE.test(trimmed);
+}
+
+function isEntirelyRulesPreamble(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return true;
+  }
+  const sentences = splitSentences(trimmed);
+  return sentences.every((sentence) => isRulesPreamble(sentence));
+}
+
+function stripRulesPreamble(text: string): string {
+  const paragraphs = text.split(/\n\s*\n/);
+  while (paragraphs.length > 0 && isEntirelyRulesPreamble(paragraphs[0] ?? '')) {
+    paragraphs.shift();
+  }
+  let remaining = paragraphs.join('\n\n').trim();
+  const lines = remaining.split('\n');
+  while (lines.length > 0 && isEntirelyRulesPreamble(lines[0] ?? '')) {
+    lines.shift();
+  }
+  remaining = lines.join('\n').trim();
+  const sentences = splitSentences(remaining);
+  while (sentences.length > 1 && isRulesPreamble(sentences[0] ?? '')) {
+    sentences.shift();
+  }
+  return sentences.join(' ').trim();
+}
+
 export function cleanSessionTitle(raw: string): string {
   const firstLine = cleanGeneratedAgentText(raw).split('\n')[0]?.trim() ?? '';
   const collapsed = firstLine.replace(/\s+/g, ' ').replace(/[.]+$/g, '').trim();
   if (!collapsed) {
     return '';
   }
-  if (collapsed.length <= SESSION_TITLE_MAX_LENGTH) {
-    return collapsed;
+  return truncateOnWordBoundary(collapsed, SESSION_TITLE_MAX_LENGTH);
+}
+
+export function cleanCommitMessage(raw: string): string {
+  const text = stripRulesPreamble(cleanGeneratedAgentText(raw));
+  if (!text) {
+    return '';
   }
-  const sliced = collapsed.slice(0, SESSION_TITLE_MAX_LENGTH);
-  const lastSpace = sliced.lastIndexOf(' ');
-  const cut = lastSpace >= 18 ? sliced.slice(0, lastSpace) : sliced;
-  return cut.trimEnd();
+  const [firstLine, ...rest] = text.split('\n');
+  const subject = truncateOnWordBoundary(firstLine.replace(/\s+/g, ' ').trim(), COMMIT_MESSAGE_SUBJECT_MAX_LENGTH);
+  if (!subject) {
+    return '';
+  }
+  const body = stripRulesPreamble(rest.join('\n').trim());
+  if (!body) {
+    return subject;
+  }
+  return `${subject}\n\n${truncateOnWordBoundary(body, COMMIT_MESSAGE_BODY_MAX_CHARS)}`;
+}
+
+export function buildCommitMessagePrompt(diff: string): string {
+  return `Write the git commit message for these changes. Your entire reply is used as the commit message.
+
+Rules:
+- Return only the commit message text.
+- Do not mention rules, tools, files, or your process.
+- Do not use tools or read files.
+- Use an imperative subject line.
+- Keep the subject under 72 characters.
+- Add a short body only if it helps explain why.
+- Do not wrap the answer in quotes or markdown fences.
+
+Diff:
+${diff}`;
 }
 
 export function buildSessionTitlePrompt(text: string, imageCount: number): string {

@@ -117,6 +117,28 @@ function ilikeContains(term: string): { contains: string; mode: 'insensitive' } 
   return { contains: escapeIlikeContains(term), mode: 'insensitive' };
 }
 
+async function summarizeUsageWhere(
+  where: { workspaceId: string } | { sessionId: string }
+): Promise<WorkspaceUsageSummary> {
+  const aggregate = await _prisma.sessionUsage.aggregate({
+    where,
+    _count: { id: true },
+    _sum: { used: true, size: true, costAmount: true }
+  });
+  const withCurrency = await _prisma.sessionUsage.findFirst({
+    where: { ...where, costCurrency: { not: null } },
+    orderBy: { createdAt: 'desc' },
+    select: { costCurrency: true }
+  });
+  return {
+    turnCount: aggregate._count.id,
+    used: aggregate._sum.used ?? 0,
+    size: aggregate._sum.size ?? 0,
+    costAmount: aggregate._sum.costAmount ?? null,
+    costCurrency: withCurrency?.costCurrency ?? null
+  };
+}
+
 export const db = {
   // -------------------------------------------------- Health --------------------------------------------------
 
@@ -692,23 +714,11 @@ export const db = {
   },
 
   async summarizeWorkspaceUsage(workspaceId: string): Promise<WorkspaceUsageSummary> {
-    const aggregate = await _prisma.sessionUsage.aggregate({
-      where: { workspaceId },
-      _count: { id: true },
-      _sum: { used: true, size: true, costAmount: true }
-    });
-    const withCurrency = await _prisma.sessionUsage.findFirst({
-      where: { workspaceId, costCurrency: { not: null } },
-      orderBy: { createdAt: 'desc' },
-      select: { costCurrency: true }
-    });
-    return {
-      turnCount: aggregate._count.id,
-      used: aggregate._sum.used ?? 0,
-      size: aggregate._sum.size ?? 0,
-      costAmount: aggregate._sum.costAmount ?? null,
-      costCurrency: withCurrency?.costCurrency ?? null
-    };
+    return summarizeUsageWhere({ workspaceId });
+  },
+
+  async summarizeSessionUsage(sessionId: string): Promise<WorkspaceUsageSummary> {
+    return summarizeUsageWhere({ sessionId });
   },
 
   async listSessionQueue(sessionId: string): Promise<ChatQueueItem[]> {

@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   appendAssistantText,
+  buildCommitMessagePrompt,
   buildSessionTitlePrompt,
   buildSessionTitlePromptFromAssistant,
+  cleanCommitMessage,
   cleanGeneratedAgentText,
   cleanSessionTitle,
   extractFirstAssistantText
@@ -33,6 +35,54 @@ describe('cleanSessionTitle', () => {
         'Rewrite the authentication middleware so every request uses the new session store'
       )
     ).toBe('Rewrite the authentication middleware so every request uses');
+  });
+});
+
+describe('cleanCommitMessage', () => {
+  it('keeps a short subject and optional body', () => {
+    expect(cleanCommitMessage('Add session usage display\n\nShow token counts in the header.')).toBe(
+      'Add session usage display\n\nShow token counts in the header.'
+    );
+  });
+
+  it('strips a rules-loaded preamble and keeps the commit text', () => {
+    expect(
+      cleanCommitMessage(
+        "I've loaded the workspace rules from .cursor/rules.\n\nAdd session usage display\n\nShow token counts in the header."
+      )
+    ).toBe('Add session usage display\n\nShow token counts in the header.');
+  });
+
+  it('strips a same-paragraph rules preamble', () => {
+    expect(
+      cleanCommitMessage(
+        'Workspace rules (from .cursor/rules) apply to this task. Add session usage display.'
+      )
+    ).toBe('Add session usage display.');
+  });
+
+  it('does not strip a commit that is actually about rules', () => {
+    expect(cleanCommitMessage('Add workspace rules injection for chat prompts')).toBe(
+      'Add workspace rules injection for chat prompts'
+    );
+  });
+
+  it('truncates a long subject on a word boundary', () => {
+    expect(
+      cleanCommitMessage(
+        'Rewrite the authentication middleware so every request uses the new session store and retries'
+      )
+    ).toBe('Rewrite the authentication middleware so every request uses the new');
+  });
+});
+
+describe('buildCommitMessagePrompt', () => {
+  it('says the reply is used as the commit message', () => {
+    const prompt = buildCommitMessagePrompt('diff --git a/app.ts');
+    expect(prompt).toContain('Your entire reply is used as the commit message');
+    expect(prompt).toContain('Do not mention rules, tools, files, or your process');
+    expect(prompt).toContain('Do not use tools or read files');
+    expect(prompt).toContain('diff --git a/app.ts');
   });
 });
 

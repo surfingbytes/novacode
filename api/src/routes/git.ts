@@ -12,7 +12,12 @@ import { jwtPreHandler } from '../classes/auth';
 import { db } from '../classes/database';
 import { config } from '../classes/config';
 import { sshEnvForGit } from '../classes/sshKey';
-import { ONE_SHOT_AGENT_TYPES, runOneShotAgentText } from '../classes/oneShotAgentText';
+import {
+  ONE_SHOT_AGENT_TYPES,
+  buildCommitMessagePrompt,
+  cleanCommitMessage,
+  runOneShotAgentText
+} from '../classes/oneShotAgentText';
 import { parseGitLog } from '../classes/gitLog';
 
 // types
@@ -294,20 +299,6 @@ async function listBranches(cwd: string): Promise<{
   };
 }
 
-function buildCommitMessagePrompt(diff: string): string {
-  return `Generate a concise git commit message for the following changes.
-
-Rules:
-- Return only the commit message text.
-- Use an imperative subject line.
-- Keep the subject under 72 characters.
-- Add a short body only if it helps explain why.
-- Do not wrap the answer in quotes or markdown fences.
-
-Diff:
-${diff}`;
-}
-
 export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
   const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
 
@@ -529,14 +520,19 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         const agentType = configuredAgentType && ONE_SHOT_AGENT_TYPES.includes(configuredAgentType)
           ? configuredAgentType
           : 'cursor-agent';
-        const message = await runOneShotAgentText({
+        const raw = await runOneShotAgentText({
           agentType,
           cwd: context.cwd,
           promptText: buildCommitMessagePrompt(diff),
           model: user?.modelSelection ?? 'auto',
           claudeToken: user?.claudeToken ?? null,
-          runIdPrefix: 'git-commit-message'
+          runIdPrefix: 'git-commit-message',
+          denyTools: true
         });
+        const message = cleanCommitMessage(raw);
+        if (!message) {
+          return reply.code(400).send({ error: 'AI did not return a commit message' });
+        }
 
         return { message };
       } catch (err) {

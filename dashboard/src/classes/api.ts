@@ -33,6 +33,7 @@ import type {
   ApiToken,
   CreatedApiToken,
   SessionUsageTurn,
+  SessionUsageSummary,
   WorkspaceUsageSummary
 } from '@/@types/index';
 
@@ -612,8 +613,8 @@ export const sessionsApi = {
   listUsage: (
     workspaceId: string,
     sessionId: string
-  ): ReturnType<typeof http.get<{ turns: SessionUsageTurn[] }>> =>
-    http.get<{ turns: SessionUsageTurn[] }>(
+  ): ReturnType<typeof http.get<{ turns: SessionUsageTurn[]; summary: SessionUsageSummary }>> =>
+    http.get<{ turns: SessionUsageTurn[]; summary: SessionUsageSummary }>(
       `/workspaces/${workspaceId}/sessions/${sessionId}/usage`
     ),
 

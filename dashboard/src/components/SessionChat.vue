@@ -32,6 +32,7 @@ import {
 } from '@/utils/chatDisplayItems';
 import { toWorkspaceRelativePath } from '@/utils/workspaceFilePath';
 import { setViewingSession } from '@/utils/sessionUnread';
+import { formatSessionCostLabel, resolveSessionCostAmount } from '@/utils/sessionUsageDisplay';
 
 // composables
 import { useAgentOptions } from '@/composables/useAgentOptions';
@@ -46,7 +47,14 @@ import { useToastStore } from '@/stores/toasts';
 import { useAuthStore } from '@/stores/auth';
 
 // types
-import type { ApprovalPolicy, ChatMessage, LinkedPlanContext, Session, SessionUsageTurn } from '@/@types/index';
+import type {
+  ApprovalPolicy,
+  ChatMessage,
+  LinkedPlanContext,
+  Session,
+  SessionUsageSummary,
+  SessionUsageTurn
+} from '@/@types/index';
 
 // -------------------------------------------------- Props --------------------------------------------------
 const props = defineProps<{
@@ -87,6 +95,7 @@ const auth = useAuthStore();
 const initialCache = readSessionCache(props.workspaceId, props.sessionId);
 const session = ref<Session | null>(initialCache?.session ?? null);
 const usageTurns = ref<SessionUsageTurn[]>([]);
+const usageSummary = ref<SessionUsageSummary | null>(null);
 const bLoading = ref(!initialCache);
 const error = ref<string | null>(null);
 const bShowEditModal = ref(false);
@@ -500,6 +509,26 @@ const subtitleWorkspaces = computed(() =>
     .map((workspace) => ({ id: workspace.id, name: workspace.name }))
     .sort((left, right) => left.name.localeCompare(right.name))
 );
+const sessionCostLabel = computed(() => {
+  const amount = resolveSessionCostAmount({
+    persistedAmount: usageSummary.value?.costAmount,
+    liveAmount: streamingUsage.value?.cost?.amount,
+    bStreaming: bIsStreaming.value
+  });
+  if (amount == null) {
+    return null;
+  }
+  return formatSessionCostLabel(
+    amount,
+    streamingUsage.value?.cost?.currency ?? usageSummary.value?.costCurrency
+  );
+});
+const rulesSubtitleLabel = computed(() => {
+  if (rulesCount.value <= 0) {
+    return null;
+  }
+  return `${rulesCount.value} rule${rulesCount.value === 1 ? '' : 's'}`;
+});
 
 function tabFromQuery(raw: unknown): SessionTab | null {
   if (raw === 'chat' || raw === 'terminal' || raw === 'files' || raw === 'git' || raw === 'plan') {
@@ -755,6 +784,7 @@ async function fetchUsageTurns(): Promise<void> {
   try {
     const response = await sessionsApi.listUsage(props.workspaceId, props.sessionId);
     usageTurns.value = response.data.turns;
+    usageSummary.value = response.data.summary ?? null;
     const latest = usageTurns.value[0];
     if (latest && !bIsStreaming.value && streamingUsage.value == null) {
       streamingUsage.value = latest;
@@ -830,6 +860,8 @@ watch(
     planDocs.resetPlanDocuments();
     chatSocket.resetChatState();
     chatSocket.disconnect();
+    usageTurns.value = [];
+    usageSummary.value = null;
     expandedToolOutputIds.value = new Set();
     filesOpenPath.value = null;
     const queryTab = tabFromQuery(route.query.tab);
@@ -937,11 +969,26 @@ onUnmounted(() => {
       @select-subtitle="onSelectWorkspace"
       @archive="toggleArchive"
       @delete="bShowDeleteModal = true"
-    />
+    >
+      <template #subtitle-trailing>
+        <template v-if="sessionCostLabel">
+          <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>
+          <span class="shrink-0 tabular-nums" :title="sessionCostLabel">{{ sessionCostLabel }}</span>
+        </template>
+        <RouterLink
+          v-if="rulesSubtitleLabel"
+          :to="{ name: 'workspace-rules', params: { id: workspaceId } }"
+          class="md:hidden inline-flex items-center gap-1 min-w-0 hover:text-text-primary"
+        >
+          <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>
+          <span class="truncate">{{ rulesSubtitleLabel }}</span>
+        </RouterLink>
+      </template>
+    </EntityDetailHeader>
 
     <div
       v-if="rulesCount > 0 && activeTab === 'chat'"
-      class="px-4 md:px-6 py-1.5 border-b border-fg/10 shrink-0"
+      class="hidden md:block px-4 md:px-6 py-1.5 border-b border-fg/10 shrink-0"
     >
       <RouterLink
         :to="{ name: 'workspace-rules', params: { id: workspaceId } }"

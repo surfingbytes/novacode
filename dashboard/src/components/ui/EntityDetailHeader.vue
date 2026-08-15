@@ -166,41 +166,47 @@ onUnmounted(() => {
           <h1 class="text-base font-semibold text-text-primary truncate">
             {{ bLoading ? '…' : title }}
           </h1>
-          <!-- workspace name -->
-          <div v-if="subtitleItems.length > 0" ref="subtitleMenuRef" class="relative min-w-0">
-            <button
-              type="button"
-              class="flex items-center gap-1 max-w-full text-xs text-text-muted hover:text-text-primary truncate"
-              :aria-expanded="bSubtitleMenuOpen"
-              aria-haspopup="menu"
-              aria-label="Switch workspace"
-              title="Switch workspace"
-              @click.stop="bSubtitleMenuOpen = !bSubtitleMenuOpen"
-            >
-              <span class="truncate">{{ subtitle }}</span>
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
-            </button>
-            <div
-              v-if="bSubtitleMenuOpen"
-              class="absolute left-0 top-full mt-1 z-50 min-w-[12rem] max-h-64 overflow-y-auto rounded-lg border border-border bg-surface py-1 shadow-lg"
-              role="menu"
-            >
+          <!-- workspace name + optional trailing meta (cost, rules, …) -->
+          <div
+            v-if="subtitle || subtitleItems.length > 0 || $slots['subtitle-trailing']"
+            class="flex items-center gap-1 min-w-0 text-xs text-text-muted"
+          >
+            <div v-if="subtitleItems.length > 0" ref="subtitleMenuRef" class="relative min-w-0">
               <button
-                v-for="item in subtitleItems"
-                :key="item.id"
                 type="button"
-                class="w-full px-3 py-2 text-sm text-left truncate hover:bg-fg/[0.06]"
-                :class="item.id === currentSubtitleId ? 'text-text-primary font-medium' : 'text-text-muted'"
-                role="menuitem"
-                @click="onSelectSubtitle(item.id)"
+                class="flex items-center gap-1 max-w-full hover:text-text-primary truncate"
+                :aria-expanded="bSubtitleMenuOpen"
+                aria-haspopup="menu"
+                aria-label="Switch workspace"
+                title="Switch workspace"
+                @click.stop="bSubtitleMenuOpen = !bSubtitleMenuOpen"
               >
-                {{ item.name }}
+                <span class="truncate">{{ subtitle }}</span>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
               </button>
+              <div
+                v-if="bSubtitleMenuOpen"
+                class="absolute left-0 top-full mt-1 z-50 min-w-[12rem] max-h-64 overflow-y-auto rounded-lg border border-border bg-surface py-1 shadow-lg"
+                role="menu"
+              >
+                <button
+                  v-for="item in subtitleItems"
+                  :key="item.id"
+                  type="button"
+                  class="w-full px-3 py-2 text-sm text-left truncate hover:bg-fg/[0.06]"
+                  :class="item.id === currentSubtitleId ? 'text-text-primary font-medium' : 'text-text-muted'"
+                  role="menuitem"
+                  @click="onSelectSubtitle(item.id)"
+                >
+                  {{ item.name }}
+                </button>
+              </div>
             </div>
+            <p v-else-if="subtitle" class="truncate min-w-0">
+              {{ subtitle }}
+            </p>
+            <slot name="subtitle-trailing" />
           </div>
-          <p v-else-if="subtitle" class="text-xs text-text-muted">
-            {{ subtitle }}
-          </p>
           <span
             v-if="tags.length"
             class="inline-flex flex-wrap items-center gap-1 mt-0.5"
