@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest';
 import {
   appendAssistantText,
   buildSessionTitlePrompt,
+  buildSessionTitlePromptFromAssistant,
   cleanGeneratedAgentText,
-  cleanSessionTitle
+  cleanSessionTitle,
+  extractFirstAssistantText
 } from './oneShotAgentText';
 
 describe('cleanGeneratedAgentText', () => {
@@ -44,6 +46,75 @@ describe('buildSessionTitlePrompt', () => {
 
   it('mentions attachments', () => {
     expect(buildSessionTitlePrompt('look at this', 2)).toContain('2 images');
+  });
+});
+
+describe('buildSessionTitlePromptFromAssistant', () => {
+  it('asks for a topic title from the assistant reply', () => {
+    const prompt = buildSessionTitlePromptFromAssistant(
+      'This screenshot shows a TypeError in the login form.'
+    );
+    expect(prompt).toContain('assistant\'s first reply');
+    expect(prompt).toContain('TypeError in the login form');
+    expect(prompt).toContain('only an image');
+  });
+});
+
+describe('extractFirstAssistantText', () => {
+  it('uses content when present', () => {
+    expect(
+      extractFirstAssistantText([
+        { role: 'user', content: '', imagePaths: ['/img.png'], createdAt: '1' },
+        { role: 'assistant', content: 'Login form TypeError', createdAt: '2' }
+      ])
+    ).toBe('Login form TypeError');
+  });
+
+  it('collects ACP agent_message_chunk text from the first assistant turn', () => {
+    expect(
+      extractFirstAssistantText([
+        { role: 'user', imagePaths: ['/img.png'], createdAt: '1' },
+        {
+          role: 'assistant',
+          events: [
+            JSON.stringify({
+              sessionId: 's1',
+              update: {
+                sessionUpdate: 'agent_message_chunk',
+                content: { type: 'text', text: 'Broken ' }
+              }
+            }),
+            JSON.stringify({
+              sessionId: 's1',
+              update: {
+                sessionUpdate: 'agent_message_chunk',
+                content: { type: 'text', text: 'nav button' }
+              }
+            })
+          ],
+          createdAt: '2'
+        },
+        { role: 'assistant', content: 'later turn', createdAt: '3' }
+      ])
+    ).toBe('Broken nav button');
+  });
+
+  it('returns empty when the assistant has not replied yet', () => {
+    expect(
+      extractFirstAssistantText([
+        { role: 'user', imagePaths: ['/img.png'], createdAt: '1' }
+      ])
+    ).toBe('');
+  });
+
+  it('skips a tool-only assistant turn and uses the next text reply', () => {
+    expect(
+      extractFirstAssistantText([
+        { role: 'user', imagePaths: ['/img.png'], createdAt: '1' },
+        { role: 'assistant', events: [], createdAt: '2' },
+        { role: 'assistant', content: 'The screenshot is a 404 page', createdAt: '3' }
+      ])
+    ).toBe('The screenshot is a 404 page');
   });
 });
 

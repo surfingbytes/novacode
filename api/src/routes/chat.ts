@@ -10,7 +10,9 @@ import { WS_ROUTE_RATE_LIMIT } from '../classes/rateLimits';
 import { broadcastSessionListUpsert } from '../classes/sessionListBroadcast';
 import {
   buildSessionTitlePrompt,
+  buildSessionTitlePromptFromAssistant,
   cleanSessionTitle,
+  extractFirstAssistantText,
   ONE_SHOT_AGENT_TYPES,
   runOneShotAgentText
 } from '../classes/oneShotAgentText';
@@ -125,8 +127,9 @@ async function tryProcessQueue(sessionId: string): Promise<void> {
       // session-broadcast subscriber (installed via the busy hook below);
       // this subscriber only sequences the queue.
       onStream: () => {},
-      onDone: () => {
+      onDone: (messages) => {
         void broadcastQueueUpdate(sessionId);
+        void maybeNameUntitledSessionFromAssistant(sessionId, messages);
         void tryProcessQueue(sessionId);
       },
       onError: () => {
@@ -172,23 +175,12 @@ async function loadSessionMessages(sessionId: string): Promise<ChatMessage[]> {
 
 const namingInFlight = new Set<string>();
 
-async function maybeNameUntitledSession(
+async function generateAndApplySessionTitle(
   sessionId: string,
-  text: string,
-  imagePaths: string[]
+  promptText: string
 ): Promise<void> {
   const current = await db.getSession(sessionId);
   if (!current || current.name.trim() !== '') {
-    return;
-  }
-  if (!text.trim() && imagePaths.length > 0) {
-    const updated = await db.updateSession(sessionId, { name: 'Image' });
-    if (updated) {
-      broadcastSessionListUpsert(updated.workspaceId, updated);
-    }
-    return;
-  }
-  if (!text.trim()) {
     return;
   }
   if (namingInFlight.has(sessionId)) {
@@ -214,7 +206,7 @@ async function maybeNameUntitledSession(
     const raw = await runOneShotAgentText({
       agentType,
       cwd,
-      promptText: buildSessionTitlePrompt(text, imagePaths.length),
+      promptText,
       model: current.modelSelection || user?.modelSelection || 'auto',
       claudeToken: user?.claudeToken ?? null,
       runIdPrefix: 'session-title',
@@ -237,6 +229,34 @@ async function maybeNameUntitledSession(
   } finally {
     namingInFlight.delete(sessionId);
   }
+}
+
+async function maybeNameUntitledSession(
+  sessionId: string,
+  text: string,
+  imagePaths: string[]
+): Promise<void> {
+  if (!text.trim()) {
+    // Image-only prompts have no usable text. Wait for the first assistant
+    // reply and name from that in maybeNameUntitledSessionFromAssistant.
+    return;
+  }
+  await generateAndApplySessionTitle(sessionId, buildSessionTitlePrompt(text, imagePaths.length));
+}
+
+async function maybeNameUntitledSessionFromAssistant(
+  sessionId: string,
+  messages: ChatMessage[]
+): Promise<void> {
+  const firstUser = messages.find((message) => message.role === 'user');
+  if (!firstUser || firstUser.content?.trim() || !firstUser.imagePaths?.length) {
+    return;
+  }
+  const assistantText = extractFirstAssistantText(messages);
+  if (!assistantText) {
+    return;
+  }
+  await generateAndApplySessionTitle(sessionId, buildSessionTitlePromptFromAssistant(assistantText));
 }
 
 // ---------------------------------- Routes ----------------------------------

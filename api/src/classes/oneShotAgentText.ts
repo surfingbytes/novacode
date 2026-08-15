@@ -10,7 +10,7 @@ import { runVibeAcp } from './vibeAcp';
 import type { AcpPermissionHandler } from './acpSubprocessRunner';
 
 // types
-import type { AgentType } from '../@types';
+import type { AgentType, ChatMessage } from '../@types';
 
 const denyAllPermission: AcpPermissionHandler = () => ({
   outcome: { outcome: 'cancelled' }
@@ -109,6 +109,45 @@ Rules:
 
 User message:
 ${clipped || '(no text)'}${attachmentLine}`;
+}
+
+export function buildSessionTitlePromptFromAssistant(assistantText: string): string {
+  const clipped = assistantText.trim().slice(0, SESSION_TITLE_PROMPT_MAX_CHARS);
+  return `Generate a short title for a coding chat session from the assistant's first reply. The user sent only an image, so this reply is the best description of the topic.
+
+Rules:
+- Return only the title text.
+- 3 to 8 words that capture the topic.
+- Do not quote or truncate the reply.
+- No quotes, markdown, or trailing punctuation.
+- Do not use tools or read files.
+
+Assistant reply:
+${clipped || '(no text)'}`;
+}
+
+/** Plain assistant prose from the first assistant turn that has text. */
+export function extractFirstAssistantText(messages: ChatMessage[]): string {
+  for (const message of messages) {
+    if (message.role !== 'assistant') {
+      continue;
+    }
+    if (message.content?.trim()) {
+      return message.content.trim();
+    }
+    if (!message.events?.length) {
+      continue;
+    }
+    const chunks: string[] = [];
+    for (const line of message.events) {
+      appendAssistantText(line, chunks);
+    }
+    const text = chunks.join('').trim();
+    if (text) {
+      return text;
+    }
+  }
+  return '';
 }
 
 export async function runOneShotAgentText(params: {
