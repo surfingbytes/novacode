@@ -21,6 +21,11 @@ RUN npm install -g @openai/codex @zed-industries/codex-acp
 # Install Playwright core so agents can connect to a Playwright server
 RUN npm install -g playwright-core
 
+# App runs as the host UID via gosu; agent CLIs live under /root.
+RUN chmod a+x /root \
+    && chmod -R a+rX /root/.local \
+    && if [ -d /root/.opencode ]; then chmod -R a+rX /root/.opencode; fi
+
 # install gosu and other base tools (ffmpeg so agents can analyse video)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl bash gosu openssh-client ffmpeg \
@@ -38,6 +43,7 @@ RUN npm ci
 
 COPY api/tsconfig.json api/
 COPY api/docker-entrypoint.dev.sh /docker-entrypoint.sh
+COPY api/scripts/startup-page.mjs /startup-page.mjs
 RUN chmod +x /docker-entrypoint.sh
 
 # The API runs from its workspace dir (src is bind-mounted here by compose)

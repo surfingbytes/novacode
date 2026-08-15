@@ -37,6 +37,7 @@ import { ensureVapidKeys } from './classes/push';
 import { ensureSshKey } from './classes/sshKey';
 import { logger } from './classes/logger';
 import { resolveCorsOrigin } from './classes/corsOrigin';
+import { signalStartupReady } from './classes/startupStatus';
 
 const startTime = Date.now();
 
@@ -134,19 +135,6 @@ async function main(): Promise<void> {
   await fastify.register(pushRoutes);
   await fastify.register(searchRoutes);
 
-  // recover stale orchestrator runs from previous process
-  try {
-    const failedCount = await db.failStaleRunningOrchestrators();
-    if (failedCount > 0) {
-      fastify.log.info(
-        { failedCount },
-        'Marked running orchestrator runs from previous process as failed'
-      );
-    }
-  } catch (err) {
-    fastify.log.error({ err }, 'Failed to mark stale orchestrator runs as failed');
-  }
-
   // health check (no auth, for monitoring/Docker HEALTHCHECK)
   fastify.get('/api/health', async (_request, reply) => {
     let dbOk = false;
@@ -179,14 +167,6 @@ async function main(): Promise<void> {
     fastify.log.warn('Dashboard dist not found — serving API only');
   }
 
-  // write global .gitconfig with safe.directory and optional user identity
-  const firstUser = await db.getFirstUser();
-  writeGlobalGitConfig(
-    config.configDir,
-    firstUser?.gitUserName ?? null,
-    firstUser?.gitUserEmail ?? null
-  );
-
   // graceful shutdown
   const shutdown = async (signal: string): Promise<void> => {
     fastify.log.info(`${signal} received, shutting down gracefully`);
@@ -201,9 +181,46 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  // start listening
-  await fastify.listen({ port: config.port, host: '0.0.0.0' });
+  // Bind as soon as routes are registered. reusePort lets this overlap the
+  // entrypoint progress server; signalStartupReady then tells that server to exit.
+  try {
+    await fastify.listen({
+      port: config.port,
+      host: '0.0.0.0',
+      reusePort: true
+    } as { port: number; host: string });
+  } catch (err) {
+    const code = err && typeof err === 'object' && 'code' in err ? (err as { code?: string }).code : undefined;
+    if (code !== 'EADDRINUSE') {
+      throw err;
+    }
+    signalStartupReady();
+    await new Promise((r) => setTimeout(r, 400));
+    await fastify.listen({ port: config.port, host: '0.0.0.0' });
+  }
+  signalStartupReady();
   fastify.log.info(`Server listening on port ${config.port}`);
+
+  // recover stale orchestrator runs from previous process
+  try {
+    const failedCount = await db.failStaleRunningOrchestrators();
+    if (failedCount > 0) {
+      fastify.log.info(
+        { failedCount },
+        'Marked running orchestrator runs from previous process as failed'
+      );
+    }
+  } catch (err) {
+    fastify.log.error({ err }, 'Failed to mark stale orchestrator runs as failed');
+  }
+
+  // write global .gitconfig with safe.directory and optional user identity
+  const firstUser = await db.getFirstUser();
+  writeGlobalGitConfig(
+    config.configDir,
+    firstUser?.gitUserName ?? null,
+    firstUser?.gitUserEmail ?? null
+  );
 
   // automation scheduler
   startAutomationScheduler();

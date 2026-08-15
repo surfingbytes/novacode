@@ -61,7 +61,7 @@ Nova Code was originally created by [Jonah Fintz](https://github.com/JonahFintzD
 | **REST API** | JSON API under `/api`. The dashboard uses an httpOnly session cookie; scripts should use a hashed **API key** from **Account → API keys** (`Authorization: Bearer nck_…`). |
 | **Usage** | Token/cost snapshots from ACP `usage_update` events are stored per turn and shown in chat plus a workspace total. |
 | **Web Push** | Browser notifications when sessions finish; the body previews the last assistant text or tool result (title still names workspace/session). Notifications include a **Reply** action that opens the PWA directly to that session. VAPID keys are created automatically in the config volume. |
-| **Health endpoint** | `GET /api/health` — unauthenticated, ready for Docker `HEALTHCHECK` and uptime monitors. Compose and the image probe this path; Postgres is not published to the host. |
+| **Health endpoint** | `GET /api/health` — unauthenticated, ready for Docker `HEALTHCHECK` and uptime monitors. Compose and the image probe this path; Postgres is not published to the host. During container start a progress page binds the port immediately so a reverse proxy does not sit on 502. |
 | **MCP connectivity check** | In **Settings → MCP**, **Test connectivity** dry-runs each registered MCP server (stdio spawn, HTTP GET) on the host before agents use them. |
 
 ---
@@ -166,6 +166,8 @@ Copy `.env.example` to `.env` and edit the values below.
 | `CODEX_ACP_COMMAND` | *(optional)* Codex ACP adapter (default: `codex-acp`) |
 | `TRUST_PROXY` | Set to `true` when behind a reverse proxy so login rate limits use `X-Forwarded-For` and session cookies can be marked Secure |
 | `CORS_ORIGIN` | Comma-separated browser origins allowed to call the API. Unset: same-origin only in production, any origin in dev. `*` reflects the request Origin |
+| `NOVACODE_CHOWN_CONFIG` | Set to `1` to force a recursive `chown` of `/config` on every start (normally skipped when the volume is already owned by `UID`) |
+| `NOVACODE_VERIFY_CURSOR_AGENT` | Set to `1` to run `cursor-agent --version` during container start (slow; skipped by default) |
 
 ---
 

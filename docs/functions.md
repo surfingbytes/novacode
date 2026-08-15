@@ -158,7 +158,7 @@ Optional features include **scheduled automations**, **role templates**, and **b
 
 ## 15. Health and operations
 
-- **`GET /api/health`**: Unauthenticated; returns `status` (`ok` / `degraded`), **uptime**, and **dbOk** after a simple DB check.
+- **`GET /api/health`**: Unauthenticated; returns `status` (`ok` / `degraded`), **uptime**, and **dbOk** after a simple DB check. While the container entrypoint is still running, a tiny progress server binds the same port and serves a “Starting Nova Code” page; `/api/health` is **503** with `status: starting` until Fastify takes over (so Docker `HEALTHCHECK` still waits).
 - **Graceful shutdown**: On `SIGTERM`/`SIGINT`, broadcasts **server-shutdown** over WebSockets, stops the automation scheduler, waits briefly, stops auth PTYs, closes Fastify.
 
 ---

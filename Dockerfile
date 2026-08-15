@@ -67,6 +67,11 @@ RUN npm install -g "@openai/codex@${CODEX_VERSION}" "@zed-industries/codex-acp@$
 ARG PLAYWRIGHT_CORE_VERSION=1.62.1
 RUN npm install -g "playwright-core@${PLAYWRIGHT_CORE_VERSION}"
 
+# App runs as the host UID via gosu; agent CLIs live under /root.
+RUN chmod a+x /root \
+    && chmod -R a+rX /root/.local \
+    && if [ -d /root/.opencode ]; then chmod -R a+rX /root/.opencode; fi
+
 WORKDIR /app
 
 # Copy compiled API
@@ -86,8 +91,9 @@ COPY --from=dashboard-builder /app/dashboard/dist ./dashboard-dist
 # Config directory for SQLite DB (mounted as a named volume)
 RUN mkdir -p /config
 
-# Entrypoint: chown /config to host UID/GID, then run app as that user
+# Entrypoint: optional /config chown, then run app as the host user
 COPY api/docker-entrypoint.dev.sh /docker-entrypoint.sh
+COPY api/scripts/startup-page.mjs /startup-page.mjs
 RUN chmod +x /docker-entrypoint.sh
 
 EXPOSE 3000
