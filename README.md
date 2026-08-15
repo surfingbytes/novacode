@@ -364,4 +364,4 @@ The dashboard chat surface is decomposed: stream→display parsing is pure logic
 
 ## License
 
-[MIT](LICENSE) © Jonah Fintz (original author). See [Project status](#project-status).
+[MIT](LICENSE) © Jonah Fintz (original author) and surfingbytes. See [Project status](#project-status).
