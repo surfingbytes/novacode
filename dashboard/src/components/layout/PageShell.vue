@@ -16,6 +16,7 @@
   display: flex;
   flex-direction: column;
   flex: 1;
+  overflow: hidden;
   background: var(--bg);
   width: 100%;
 }
@@ -24,6 +25,9 @@
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   width: 100%;
   max-width: 1040px;
   margin: 0 auto;

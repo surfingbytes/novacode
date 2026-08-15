@@ -753,8 +753,8 @@ hr {
     }
   }*/
 
-  /* mobile: bottom */
-  @apply flex items-stretch fixed bottom-0 left-0 right-0 bg-bg border-t border-border mb-0 h-12;
+  /* mobile: bottom — keep above scrolling/editor content */
+  @apply flex items-stretch fixed bottom-0 left-0 right-0 z-20 bg-bg border-t border-border mb-0 h-12;
   a {
     @apply flex-1 flex items-center justify-center text-center px-3 py-2  pb-1.5 text-sm font-medium  transition-colors flex items-center gap-1.5;
     &.is-active {

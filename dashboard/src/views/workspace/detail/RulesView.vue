@@ -420,6 +420,7 @@ onMounted(async () => {
 </script>
 
 <template>
+  <div>
   <!-- Header -->
   <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
     <div>
@@ -532,9 +533,9 @@ onMounted(async () => {
 
         <!-- Editor -->
         <section
-          class="relative rounded-lg border border-fg/10 bg-fg/[0.02] p-4 flex flex-col min-h-[260px]"
+          class="relative flex min-h-[20rem] flex-col overflow-hidden rounded-lg border border-fg/10 bg-fg/[0.02] p-4"
         >
-          <header class="flex items-center justify-between gap-2 mb-3">
+          <header class="mb-3 flex items-center justify-between gap-2">
             <div class="min-w-0">
               <p class="text-sm font-medium text-text-primary truncate">
                 {{ fileLabel || 'Select a rule file' }}
@@ -563,12 +564,12 @@ onMounted(async () => {
             </div>
           </header>
 
-          <div class="relative flex-1 min-h-[180px]">
+          <div class="relative min-h-[16rem] flex-1">
             <textarea
               v-model="content"
               :disabled="bContentLoading || !selectedFilename"
-              rows="12"
-              class="w-full h-full min-h-[180px] font-mono text-xs md:text-sm bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all resize-y"
+              rows="16"
+              class="h-64 min-h-[16rem] w-full resize-y overflow-y-auto font-mono text-xs md:text-sm bg-surface border border-fg/15 rounded-lg px-3 py-2.5 text-text-primary placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all"
               placeholder="Select a rule file from the list to view and edit its contents."
             />
 
@@ -885,4 +886,5 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+  </div>
 </template>
