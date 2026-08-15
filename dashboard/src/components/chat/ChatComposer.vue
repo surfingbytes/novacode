@@ -15,7 +15,8 @@ import {
   ListChecks,
   ListTodo,
   MessageSquare,
-  Shield
+  Shield,
+  Wrench
 } from 'lucide-vue-next';
 
 // components
@@ -71,6 +72,7 @@ const props = withDefaults(
     bConfigLoading: boolean;
     bSavingSessionConfig: boolean;
     hideThinkingOutput: boolean;
+    hideToolCalls: boolean;
     approvalPolicy: ApprovalPolicy;
     bSavingApprovalPolicy: boolean;
     bMdUp: boolean;
@@ -80,7 +82,8 @@ const props = withDefaults(
     agentType: null,
     thinkingValue: null,
     approvalPolicy: 'ask',
-    bSavingApprovalPolicy: false
+    bSavingApprovalPolicy: false,
+    hideToolCalls: false
   }
 );
 
@@ -97,6 +100,7 @@ const emit = defineEmits<{
   (e: 'modelUpdate', value: string): void;
   (e: 'thinkingUpdate', value: string): void;
   (e: 'hideThinkingToggle', checked: boolean): void;
+  (e: 'hideToolCallsToggle', checked: boolean): void;
   (e: 'approvalPolicyChange', policy: ApprovalPolicy): void;
   (e: 'lightbox', src: string): void;
   (e: 'uploadFiles', files: File[]): void;
@@ -797,6 +801,27 @@ defineExpose({
             aria-hidden="true"
           />
           <span>Thinking</span>
+        </button>
+        <button
+          type="button"
+          class="flex h-5 items-center gap-1 rounded px-0.5 text-[11px] transition-colors"
+          :class="
+            !hideToolCalls
+              ? 'text-warning hover:text-warning/80'
+              : 'text-text-muted hover:text-text-primary'
+          "
+          :aria-pressed="!hideToolCalls"
+          :aria-label="hideToolCalls ? 'Show tool calls' : 'Hide tool calls'"
+          :title="hideToolCalls ? 'Show tool calls' : 'Hide tool calls'"
+          @click="emit('hideToolCallsToggle', !hideToolCalls)"
+        >
+          <Wrench
+            :size="14"
+            :stroke-width="1.8"
+            :fill="!hideToolCalls ? 'currentColor' : 'none'"
+            aria-hidden="true"
+          />
+          <span>Tools</span>
         </button>
       </div>
       <span v-if="bSelectedModelMissing" class="w-full text-[10px] text-warning">

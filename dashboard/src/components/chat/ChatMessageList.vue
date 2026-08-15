@@ -19,7 +19,7 @@ import { sessionsApi } from '@/classes/api';
 // utils
 import { relativeTimeShort } from '@/utils/relativeTime';
 import { agentTypeShortLabel } from '@/utils/agentTypeMeta';
-import type { DisplayItem, StreamUsage } from '@/utils/chatDisplayItems';
+import { isToolCallDisplayItem, type DisplayItem, type StreamUsage } from '@/utils/chatDisplayItems';
 
 // types
 import type {
@@ -58,6 +58,7 @@ const props = withDefaults(
     chatError: string | null;
     chatErrorActionLabel: string;
     hideThinkingOutput: boolean;
+    hideToolCalls: boolean;
     expandedToolOutputIds: Set<string>;
     agentType?: AgentType | null;
     userName?: string | null;
@@ -67,7 +68,8 @@ const props = withDefaults(
     agentType: null,
     userName: null,
     viewportHeight: null,
-    usageTurns: () => []
+    usageTurns: () => [],
+    hideToolCalls: false
   }
 );
 
@@ -110,6 +112,12 @@ const agentInitial = computed(() => {
 });
 
 const agentDisplayName = computed(() => agentTypeShortLabel(props.agentType ?? '') || 'agent');
+
+const visibleStreamingDisplayItems = computed(() =>
+  props.hideToolCalls
+    ? props.streamingDisplayItems.filter((item) => !isToolCallDisplayItem(item))
+    : props.streamingDisplayItems
+);
 
 const userInitial = computed(() => {
   const name = props.userName ?? '';
@@ -413,6 +421,9 @@ const findInputRef = ref<HTMLInputElement | null>(null);
 function displayMessageSearchText(entry: DisplayChatMessage): string {
   const parts = [entry.msg.content ?? ''];
   for (const item of entry.items) {
+    if (props.hideToolCalls && isToolCallDisplayItem(item)) {
+      continue;
+    }
     if (item.text) {
       parts.push(item.text);
     }
@@ -702,6 +713,7 @@ defineExpose({
               <template v-if="msg.role === 'assistant'">
                 <ChatDisplayItems
                   :items="items"
+                  :hide-tool-calls="hideToolCalls"
                   :expanded-tool-output-ids="expandedToolOutputIds"
                   @toggle-tool-output="(callId) => emit('toggleToolOutput', callId)"
                   @open-plan="(planId) => emit('openPlan', planId)"
@@ -736,6 +748,7 @@ defineExpose({
             <ChatDisplayItems
               :items="streamingDisplayItems"
               :b-live="true"
+              :hide-tool-calls="hideToolCalls"
               :expanded-tool-output-ids="expandedToolOutputIds"
               @toggle-tool-output="(callId) => emit('toggleToolOutput', callId)"
               @open-plan="(planId) => emit('openPlan', planId)"
@@ -927,7 +940,7 @@ defineExpose({
 
             <!-- Thinking indicator (no streamed content yet) -->
             <div
-              v-if="streamingDisplayItems.length === 0 && (!streamingThinkingText.trim() || hideThinkingOutput)"
+              v-if="visibleStreamingDisplayItems.length === 0 && (!streamingThinkingText.trim() || hideThinkingOutput)"
               class="flex justify-start"
             >
               <div class="chat-bubble px-3.5 py-3 rounded-lg">

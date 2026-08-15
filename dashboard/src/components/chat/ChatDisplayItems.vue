@@ -6,18 +6,31 @@
  * `bLive` adds the running spinners only shown during streaming.
  */
 
+// node_modules
+import { computed } from 'vue';
+
 // components
-import { getToolIconSvg, filePathFromToolItem, type DisplayItem } from '@/utils/chatDisplayItems';
+import {
+  getToolIconSvg,
+  filePathFromToolItem,
+  isToolCallDisplayItem,
+  type DisplayItem
+} from '@/utils/chatDisplayItems';
 
 // -------------------------------------------------- Props --------------------------------------------------
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     items: DisplayItem[];
     bLive?: boolean;
     expandedToolOutputIds: Set<string>;
+    hideToolCalls?: boolean;
   }>(),
-  { bLive: false }
+  { bLive: false, hideToolCalls: false }
+);
+
+const visibleItems = computed(() =>
+  props.hideToolCalls ? props.items.filter((item) => !isToolCallDisplayItem(item)) : props.items
 );
 
 // -------------------------------------------------- Emits --------------------------------------------------
@@ -31,7 +44,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <template v-for="(item, j) in items" :key="j">
+  <template v-for="(item, j) in visibleItems" :key="j">
     <!-- Text bubble -->
     <div v-if="item.kind === 'text'" class="flex justify-start">
       <div

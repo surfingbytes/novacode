@@ -33,6 +33,7 @@ function mountComposer(overrides: Record<string, unknown> = {}) {
       bConfigLoading: false,
       bSavingSessionConfig: false,
       hideThinkingOutput: true,
+      hideToolCalls: false,
       approvalPolicy: 'ask',
       bSavingApprovalPolicy: false,
       bMdUp: true,
@@ -143,5 +144,24 @@ describe('ChatComposer send controls', () => {
     await nextTick();
     const onButton = wrapper.get('button[aria-label="Hide thinking process"]');
     expect(onButton.attributes('aria-pressed')).toBe('true');
+  });
+
+  it('toggles tool-call visibility from the tools control', async () => {
+    const onHideToolCallsToggle = vi.fn();
+    const wrapper = mountComposer({
+      hideToolCalls: false,
+      onHideToolCallsToggle
+    });
+    await nextTick();
+    const button = wrapper.get('button[aria-label="Hide tool calls"]');
+    expect(button.text()).toContain('Tools');
+    expect(button.attributes('aria-pressed')).toBe('true');
+    await button.trigger('click');
+    expect(onHideToolCallsToggle).toHaveBeenCalledWith(true);
+
+    await wrapper.setProps({ hideToolCalls: true });
+    await nextTick();
+    const offButton = wrapper.get('button[aria-label="Show tool calls"]');
+    expect(offButton.attributes('aria-pressed')).toBe('false');
   });
 });

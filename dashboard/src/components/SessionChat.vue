@@ -105,7 +105,9 @@ const claudeLimitResetTimeReadable = ref('');
 const bClaudeAutoContinueEnabled = ref(false);
 
 const HIDE_THINKING_LS_KEY = 'nova:chat:hideThinkingOutput';
+const HIDE_TOOL_CALLS_LS_KEY = 'nova:chat:hideToolCalls';
 const hideThinkingOutput = ref(readHideThinkingFromLs());
+const hideToolCalls = ref(readHideToolCallsFromLs());
 
 function readHideThinkingFromLs(): boolean {
   try {
@@ -115,15 +117,32 @@ function readHideThinkingFromLs(): boolean {
   }
 }
 
-function onHideThinkingToggle(checked: boolean): void {
-  hideThinkingOutput.value = checked;
-  if (checked) chatSocket.streamingThinkingText.value = '';
+function readHideToolCallsFromLs(): boolean {
   try {
-    if (checked) localStorage.setItem(HIDE_THINKING_LS_KEY, '1');
-    else localStorage.removeItem(HIDE_THINKING_LS_KEY);
+    return localStorage.getItem(HIDE_TOOL_CALLS_LS_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function persistChatToggle(key: string, checked: boolean): void {
+  try {
+    if (checked) localStorage.setItem(key, '1');
+    else localStorage.removeItem(key);
   } catch {
     // ignore quota / private mode
   }
+}
+
+function onHideThinkingToggle(checked: boolean): void {
+  hideThinkingOutput.value = checked;
+  if (checked) chatSocket.streamingThinkingText.value = '';
+  persistChatToggle(HIDE_THINKING_LS_KEY, checked);
+}
+
+function onHideToolCallsToggle(checked: boolean): void {
+  hideToolCalls.value = checked;
+  persistChatToggle(HIDE_TOOL_CALLS_LS_KEY, checked);
 }
 
 const approvalPolicy = ref<ApprovalPolicy>('ask');
@@ -981,6 +1000,7 @@ onUnmounted(() => {
             :chat-error="chatError"
             :chat-error-action-label="chatErrorActionLabel"
             :hide-thinking-output="hideThinkingOutput"
+            :hide-tool-calls="hideToolCalls"
             :expanded-tool-output-ids="expandedToolOutputIds"
             :agent-type="session?.agentType"
             :user-name="auth.username"
@@ -1057,6 +1077,7 @@ onUnmounted(() => {
             :b-config-loading="bConfigLoading"
             :b-saving-session-config="bSavingSessionConfig"
             :hide-thinking-output="hideThinkingOutput"
+            :hide-tool-calls="hideToolCalls"
             :approval-policy="approvalPolicy"
             :b-saving-approval-policy="bSavingApprovalPolicy"
             :b-md-up="bChatInputMdUp"
@@ -1071,6 +1092,7 @@ onUnmounted(() => {
             @model-update="onSharedModelPickerUpdate"
             @thinking-update="onSharedThinkingPickerUpdate"
             @hide-thinking-toggle="onHideThinkingToggle"
+            @hide-tool-calls-toggle="onHideToolCallsToggle"
             @approval-policy-change="onApprovalPolicyChange"
             @lightbox="(src) => (lightboxSrc = src)"
             @upload-files="onUploadFiles"

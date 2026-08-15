@@ -27,6 +27,7 @@ function mountList(overrides: Record<string, unknown> = {}) {
       chatError: null,
       chatErrorActionLabel: '',
       hideThinkingOutput: false,
+      hideToolCalls: false,
       expandedToolOutputIds: new Set<string>(),
       ...overrides
     }
@@ -72,6 +73,54 @@ describe('ChatMessageList loading states', () => {
     await wrapper.vm.$nextTick();
     const input = wrapper.get('input[aria-label="Find in conversation"]');
     await input.setValue('hello');
+    await wrapper.vm.$nextTick();
+    expect(wrapper.text()).toContain('1/1');
+  });
+
+  it('hides tool-call cards when hideToolCalls is on', () => {
+    const wrapper = mountList({
+      hideToolCalls: true,
+      displayMessages: [
+        {
+          msg: { role: 'assistant', content: '', createdAt: '1' },
+          key: '1-0',
+          items: [
+            { kind: 'text', text: 'hello', renderedHtml: 'hello' },
+            { kind: 'tool', toolName: 'Read', toolSummary: 'src/app.ts' },
+            { kind: 'todos', todoItems: [{ id: 't1', content: 'do it', status: 'pending' }], todoDoneCount: 0 }
+          ],
+          fallbackHtml: ''
+        }
+      ]
+    });
+    expect(wrapper.text()).toContain('hello');
+    expect(wrapper.text()).not.toContain('Read');
+    expect(wrapper.text()).not.toContain('Todos');
+    expect(wrapper.text()).not.toContain('src/app.ts');
+  });
+
+  it('excludes hidden tool calls from find matches', async () => {
+    const wrapper = mountList({
+      hideToolCalls: true,
+      displayMessages: [
+        {
+          msg: { role: 'assistant', content: '', createdAt: '1' },
+          key: '1-0',
+          items: [{ kind: 'tool', toolName: 'Read', toolSummary: 'unique-tool-path.ts' }],
+          fallbackHtml: ''
+        },
+        {
+          msg: { role: 'user', content: 'unique-tool-path.ts please', createdAt: '2' },
+          key: '2-1',
+          items: [],
+          fallbackHtml: ''
+        }
+      ]
+    });
+    wrapper.vm.openFind();
+    await wrapper.vm.$nextTick();
+    const input = wrapper.get('input[aria-label="Find in conversation"]');
+    await input.setValue('unique-tool-path');
     await wrapper.vm.$nextTick();
     expect(wrapper.text()).toContain('1/1');
   });

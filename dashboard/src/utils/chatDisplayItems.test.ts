@@ -9,6 +9,7 @@ import {
   mergeStreamingTextChunks,
   prepareDisplayItem,
   filePathFromToolItem,
+  isToolCallDisplayItem,
   entriesFromPlanMarkdown,
   shouldSkipDuplicateVibeEventLine,
   indexSeenVibeIdsFromEvents,
@@ -711,5 +712,15 @@ describe('filePathFromToolItem', () => {
 
   it('ignores grep-style summaries', () => {
     expect(filePathFromToolItem({ kind: 'tool', toolSummary: '"pattern"  src' })).toBeNull();
+  });
+});
+
+describe('isToolCallDisplayItem', () => {
+  it('matches tool cards and compact todo traces', () => {
+    expect(isToolCallDisplayItem({ kind: 'tool' })).toBe(true);
+    expect(isToolCallDisplayItem({ kind: 'todos' })).toBe(true);
+    expect(isToolCallDisplayItem({ kind: 'text', text: 'hi' })).toBe(false);
+    expect(isToolCallDisplayItem({ kind: 'plan' })).toBe(false);
+    expect(isToolCallDisplayItem({ kind: 'notice', text: 'reset' })).toBe(false);
   });
 });

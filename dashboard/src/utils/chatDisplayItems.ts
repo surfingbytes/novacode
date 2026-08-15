@@ -52,6 +52,11 @@ export interface DisplayItem {
   planRenderedHtml?: string;
 }
 
+/** Tool-call traces in the transcript (generic tools + compact todos). */
+export function isToolCallDisplayItem(item: DisplayItem): boolean {
+  return item.kind === 'tool' || item.kind === 'todos';
+}
+
 /** Raw path from a tool card (locations first, then a summary that looks like a path). */
 export function filePathFromToolItem(item: DisplayItem): string | null {
   if (item.kind !== 'tool') {
