@@ -92,6 +92,16 @@ export async function syncPushSubscription(enabled: boolean): Promise<void> {
   await pushApi.subscribe({ endpoint: subscription.endpoint, keys });
 }
 
+async function hasActivePushSubscription(): Promise<boolean> {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    return (await registration.pushManager.getSubscription()) !== null;
+  } catch {
+    return false;
+  }
+}
+
 async function showNotification(title: string, options: ExtendedNotificationOptions): Promise<void> {
   if (!isNotificationsEnabled()) return;
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
@@ -152,12 +162,19 @@ export function notifyTaskDone(
   const context = [workspaceName, sessionName || 'Session'].filter(Boolean).join(' • ');
   const body = compactText(agentLastMessage || context || 'Task finished');
   const sessionUrl = `/workspace/${encodeURIComponent(workspaceId)}/session/${encodeURIComponent(sessionId)}`;
-  void showNotification(`Task finished: ${context}`, {
-    body,
-    icon: DEFAULT_ICON,
-    tag: 'task-done',
-    data: { url: sessionUrl },
-    actions: [{ action: REPLY_ACTION_ID, title: 'Reply' }],
-    requireInteraction: true
-  });
+  // Chat `done` only arrives while this session is open. The server also sends a
+  // Web Push with the same tag — skip the local copy when push will deliver it,
+  // or when the user is already looking at the result.
+  void (async () => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible') return;
+    if (await hasActivePushSubscription()) return;
+    await showNotification(`Task finished: ${context}`, {
+      body,
+      icon: DEFAULT_ICON,
+      tag: `session-${sessionId}`,
+      data: { url: sessionUrl },
+      actions: [{ action: REPLY_ACTION_ID, title: 'Reply' }],
+      requireInteraction: true
+    });
+  })();
 }
