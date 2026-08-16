@@ -1172,10 +1172,12 @@ onUnmounted(() => {
       <!-- Files -->
       <FilesView
         v-if="activeTab === 'files'"
+        :key="sessionId"
         class="flex-1 min-h-0"
         :workspace-id="workspaceId"
         :active="activeTab === 'files'"
         :open-path="filesOpenPath"
+        :reload-token="sessionId"
         @update:open-path="onFilesOpenPath"
       />
 

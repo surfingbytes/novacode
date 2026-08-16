@@ -38,6 +38,8 @@ const props = defineProps<{
   workspaceId: string;
   active: boolean;
   openPath?: string | null;
+  /** When this changes (e.g. session id), re-read the open file from disk. */
+  reloadToken?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -636,15 +638,35 @@ function onEntryClick(entry: FileEntry): void {
 }
 
 // -------------------------------------------------- Watchers --------------------------------------------------
+async function reloadOpenFileFromDisk(): Promise<void> {
+  if (!selectedPath.value) {
+    return;
+  }
+  await readFilePath(selectedPath.value, false);
+}
+
 watch(
   () => props.active,
   (active: boolean) => {
-    if (active && editorContainerRef.value && !editor) {
-      initEditor();
+    if (active) {
+      void reloadOpenFileFromDisk();
+      if (editorContainerRef.value && !editor) {
+        initEditor();
+      }
     }
     if (!active) {
       disposeEditor();
     }
+  }
+);
+
+watch(
+  () => props.reloadToken,
+  (token, previous) => {
+    if (previous === undefined || token === previous || !props.active) {
+      return;
+    }
+    void reloadOpenFileFromDisk();
   }
 );
 

@@ -1,6 +1,7 @@
 /**
- * Last-opened workspace file (files tab). Shared across sessions in the same
- * workspace so switching chats does not lose the editor; a different workspace
+ * Last-opened workspace file path (files tab). Only the path is remembered —
+ * never file contents. The editor always re-reads from disk when the pane
+ * opens. Shared across sessions in the same workspace; a different workspace
  * starts with no selection.
  */
 
