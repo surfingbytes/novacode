@@ -19,6 +19,7 @@ import BottomTabBar from '@/components/ui/BottomTabBar.vue';
 
 // classes
 import { sessionsApi, settingsApi, workspaceRulesApi, buildSessionTerminalWsUrl } from '@/classes/api';
+import { readFilesOpenPath, writeFilesOpenPath } from '@/lib/filesOpenPath';
 import { renderMermaidDiagrams } from '@/lib/mermaid';
 import { clearSessionPrompt, persistSessionPrompt, readSessionPrompt } from '@/lib/pendingSessionPrompt';
 import { safeGetItem, safeRemoveItem, safeSetItem } from '@/lib/safeLocalStorage';
@@ -188,7 +189,7 @@ function toggleToolOutput(callId: string): void {
 
 type SessionTab = 'chat' | 'terminal' | 'files' | 'git' | 'plan';
 const activeTab = ref<SessionTab>('chat');
-const filesOpenPath = ref<string | null>(null);
+const filesOpenPath = ref<string | null>(readFilesOpenPath(props.workspaceId));
 const rulesCount = ref(0);
 
 let mermaidRenderTimer: ReturnType<typeof setTimeout> | null = null;
@@ -545,9 +546,12 @@ function applySessionQueryFromRoute(): void {
   const file = route.query.file;
   if (typeof file === 'string' && file.trim()) {
     filesOpenPath.value = file;
+    writeFilesOpenPath(props.workspaceId, file);
     if (!tab) {
       activeTab.value = 'files';
     }
+  } else if (!filesOpenPath.value) {
+    filesOpenPath.value = readFilesOpenPath(props.workspaceId);
   }
 }
 
@@ -575,12 +579,14 @@ function openWorkspaceFile(rawPath: string): void {
     return;
   }
   filesOpenPath.value = relative;
+  writeFilesOpenPath(props.workspaceId, relative);
   activeTab.value = 'files';
   syncSessionQuery();
 }
 
 function onFilesOpenPath(path: string | null): void {
   filesOpenPath.value = path;
+  writeFilesOpenPath(props.workspaceId, path);
   syncSessionQuery();
 }
 
@@ -827,8 +833,11 @@ watch(
 
 watch(
   () => props.workspaceId,
-  () => {
+  (workspaceId) => {
     void loadRulesCount();
+    const file = route.query.file;
+    filesOpenPath.value =
+      typeof file === 'string' && file.trim() ? file : readFilesOpenPath(workspaceId);
   },
   { immediate: true }
 );
@@ -863,7 +872,6 @@ watch(
     usageTurns.value = [];
     usageSummary.value = null;
     expandedToolOutputIds.value = new Set();
-    filesOpenPath.value = null;
     const queryTab = tabFromQuery(route.query.tab);
     activeTab.value = queryTab ?? 'chat';
     const cached = readSessionCache(props.workspaceId, newId);

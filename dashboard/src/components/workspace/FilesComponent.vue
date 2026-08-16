@@ -7,8 +7,9 @@ import 'md-editor-v3/lib/style.css';
 
 // classes
 import { filesApi } from '@/classes/api';
-import { DEFAULT_THEME_ID, resolveStoredThemeId, themes } from '@/lib/themes';
+import { readFilesOpenPath, writeFilesOpenPath } from '@/lib/filesOpenPath';
 import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
+import { DEFAULT_THEME_ID, resolveStoredThemeId, themes } from '@/lib/themes';
 
 // components
 import ConfirmModal from '@/components/ConfirmModal.vue';
@@ -279,11 +280,23 @@ const toggleExpand = (entry: FileEntry): void => {
   loadList(entry.path);
 };
 
-const readFilePath = async (path: string, bEmit = true): Promise<void> => {
-  selectedPath.value = path;
+function commitOpenPath(path: string | null, bEmit = true): void {
+  writeFilesOpenPath(props.workspaceId, path);
   if (bEmit) {
     emit('update:openPath', path);
   }
+}
+
+function pathToRestore(): string | null {
+  if (props.openPath && props.openPath.trim()) {
+    return props.openPath;
+  }
+  return readFilesOpenPath(props.workspaceId);
+}
+
+const readFilePath = async (path: string, bEmit = true): Promise<void> => {
+  selectedPath.value = path;
+  commitOpenPath(path, bEmit);
   readError.value = null;
   bReadLoading.value = true;
   fileContent.value = '';
@@ -332,7 +345,7 @@ async function revealAndOpen(path: string): Promise<void> {
   for (const directoryPath of ancestors) {
     await loadList(directoryPath);
   }
-  await readFilePath(normalized, false);
+  await readFilePath(normalized);
 }
 
 const isExpanded = (path: string): boolean => expandedPaths.value.has(path);
@@ -559,7 +572,7 @@ async function confirmDelete(): Promise<void> {
     await filesApi.remove(props.workspaceId, entry.path);
     if (selectedPath.value === entry.path || selectedPath.value?.startsWith(`${entry.path}/`)) {
       selectedPath.value = null;
-      emit('update:openPath', null);
+      commitOpenPath(null);
     }
     deleteTarget.value = null;
     bShowDeleteModal.value = false;
@@ -596,7 +609,7 @@ async function confirmRename(nextName: string): Promise<void> {
       await readFilePath(data.path);
     } else if (selectedPath.value?.startsWith(`${entry.path}/`)) {
       selectedPath.value = null;
-      emit('update:openPath', null);
+      commitOpenPath(null);
     }
     bShowRenameModal.value = false;
     renameTarget.value = null;
@@ -710,8 +723,10 @@ watch(
     selectedPath.value = null;
     fileContent.value = '';
     await loadList('');
-    if (props.openPath) {
-      await revealAndOpen(props.openPath);
+    // Parent openPath can still be the previous workspace's file for a tick.
+    const restorePath = readFilesOpenPath(props.workspaceId);
+    if (restorePath) {
+      await revealAndOpen(restorePath);
     }
   }
 );
@@ -720,8 +735,9 @@ watch(
 onMounted(async (): Promise<void> => {
   window.addEventListener('keydown', onWindowKeydown);
   await loadList('');
-  if (props.openPath) {
-    await revealAndOpen(props.openPath);
+  const restorePath = pathToRestore();
+  if (restorePath) {
+    await revealAndOpen(restorePath);
   }
 });
 
@@ -800,7 +816,7 @@ onUnmounted((): void => {
           </button>
 
           <button
-            v-if="bSidePanelToggleVisible"
+            v-if="bSidePanelToggleVisible && selectedPath"
             type="button"
             class="button is-icon is-transparent h-9! w-9!"
             aria-label="Hide file list"

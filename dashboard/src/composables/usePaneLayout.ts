@@ -5,6 +5,23 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { PANE_LAYOUT_MIN_WIDTH } from '@/constants/layout';
 import { safeSessionGetItem, safeSessionSetItem } from '@/lib/safeLocalStorage';
 
+/** List column: always when nothing is selected so the pane is never an empty content stub. */
+export function paneListVisible(
+  bWide: boolean,
+  bSidePanelOpen: boolean,
+  hasSelection: boolean
+): boolean {
+  if (!hasSelection) return true;
+  if (bWide) return bSidePanelOpen;
+  return false;
+}
+
+/** Detail column: always on wide; on narrow only when something is selected. */
+export function paneDetailVisible(bWide: boolean, hasSelection: boolean): boolean {
+  if (bWide) return true;
+  return hasSelection;
+}
+
 /**
  * Wide-viewport master-detail layout helper for foldables / tablets.
  * Side panel can be fully hidden (toolbar toggle) to maximize content space.
@@ -52,16 +69,14 @@ export function usePaneLayout(storageKey?: string) {
     mediaQuery = null;
   });
 
-  /** List column: always on narrow when nothing selected; on wide only when open. */
+  /** List column: always when nothing is selected; otherwise wide+open, or narrow hidden. */
   function listVisible(hasSelection: boolean): boolean {
-    if (bWidePane.value) return bSidePanelOpen.value;
-    return !hasSelection;
+    return paneListVisible(bWidePane.value, bSidePanelOpen.value, hasSelection);
   }
 
   /** Detail column: always on wide; on narrow only when something is selected. */
   function detailVisible(hasSelection: boolean): boolean {
-    if (bWidePane.value) return true;
-    return hasSelection;
+    return paneDetailVisible(bWidePane.value, hasSelection);
   }
 
   const bSidePanelToggleVisible = computed(() => bWidePane.value);
