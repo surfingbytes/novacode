@@ -1129,6 +1129,30 @@ onUnmounted((): void => {
 }
 
 /*
+ * Tailwind preflight sets list-style: none on ul/ol. md-editor-v3 only adds padding
+ * and relies on browser markers, so preview lists look indented with no bullets/numbers.
+ */
+:deep(.md-editor-preview ul) {
+  list-style: disc;
+}
+
+:deep(.md-editor-preview ol) {
+  list-style: decimal;
+}
+
+:deep(.md-editor-preview ul ul) {
+  list-style: circle;
+}
+
+:deep(.md-editor-preview ul ul ul) {
+  list-style: square;
+}
+
+:deep(.md-editor-preview .task-list-item) {
+  list-style: none;
+}
+
+/*
  * MdPreview sets height:auto + overflow:visible, which grows past the pane and gets
  * clipped by the parent overflow:hidden. Keep content natural height so the wrapper scrolls.
  */
