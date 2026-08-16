@@ -13,7 +13,8 @@ import {
   buildSessionTitlePromptFromAssistant,
   cleanSessionTitle,
   extractFirstAssistantText,
-  ONE_SHOT_AGENT_TYPES,
+  resolveOneShotAgentType,
+  resolveOneShotModel,
   runOneShotAgentText
 } from '../classes/oneShotAgentText';
 import {
@@ -29,7 +30,6 @@ import {
 
 // types
 import type {
-  AgentType,
   ChatMessage,
   ChatApprovalRequest,
   ChatQuestionRequest,
@@ -193,21 +193,18 @@ async function generateAndApplySessionTitle(
       return;
     }
     const user = await db.getFirstUser();
-    const sessionAgent = current.agentType as AgentType | null | undefined;
-    const workspaceAgent = workspace.defaultAgentType as AgentType | null | undefined;
-    const agentType =
-      sessionAgent && ONE_SHOT_AGENT_TYPES.includes(sessionAgent)
-        ? sessionAgent
-        : workspaceAgent && ONE_SHOT_AGENT_TYPES.includes(workspaceAgent)
-          ? workspaceAgent
-          : 'cursor-agent';
+    const agentType = resolveOneShotAgentType(
+      user?.utilityAgentType,
+      current.agentType,
+      workspace.defaultAgentType
+    );
     const workspaceRel = workspace.path.replace(/^\//, '');
     const cwd = `${config.workspaceBrowseRoot}/${workspaceRel || '.'}`;
     const raw = await runOneShotAgentText({
       agentType,
       cwd,
       promptText,
-      model: current.modelSelection || user?.modelSelection || 'auto',
+      model: resolveOneShotModel(user?.utilityModelSelection, agentType),
       claudeToken: user?.claudeToken ?? null,
       runIdPrefix: 'session-title',
       denyTools: true

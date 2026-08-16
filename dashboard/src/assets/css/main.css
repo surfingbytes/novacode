@@ -414,7 +414,16 @@ button.button {
   }
 
   &.is-icon {
-    @apply px-2.5! aspect-square!;
+    @apply px-0! aspect-square!;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+
+    > svg {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+    }
   }
 
   .loading-spinner {

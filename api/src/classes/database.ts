@@ -188,6 +188,8 @@ export const db = {
       lightTheme?: string;
       modelSelection?: string;
       claudeToken?: string | null;
+      utilityAgentType?: string | null;
+      utilityModelSelection?: string;
     }
   ): Promise<UserModel | undefined> {
     const existingUser = await _prisma.user.findUnique({ where: { id } });

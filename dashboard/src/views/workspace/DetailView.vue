@@ -188,8 +188,8 @@ onBeforeUnmount(() => {
           @click="handleToggleFavorite"
         >
           <svg
-            width="16"
-            height="16"
+            width="18"
+            height="18"
             viewBox="0 0 24 24"
             :fill="workspace.isFavorite ? 'currentColor' : 'none'"
             stroke="currentColor"
@@ -338,11 +338,11 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
   margin-left: 2px;
   border: none;
-  border-radius: 7px;
+  border-radius: 8px;
   background: transparent;
   color: var(--fg-subtle);
   cursor: pointer;

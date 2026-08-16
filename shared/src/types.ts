@@ -416,6 +416,10 @@ export interface AppSettings {
   lightTheme: string;
   modelSelection: string;
   claudeAutoContinue: boolean;
+  /** Agent for automatic commit messages and session titles. Null inherits workspace/session. */
+  utilityAgentType: AgentType | null;
+  /** Model for those short tasks. Empty picks a cheaper model for the chosen agent. */
+  utilityModelSelection: string;
   /** ed25519 public key — add to your Git host for SSH git access */
   sshPublicKey: string;
   /** Same keypair’s private key — secret; stored on server config volume */

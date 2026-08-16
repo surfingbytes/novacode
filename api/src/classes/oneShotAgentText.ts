@@ -2,6 +2,7 @@
 import { randomUUID } from 'node:crypto';
 
 // classes
+import { getAgentModels } from './agentModels';
 import { runClaudeAcp } from './claudeAcp';
 import { runCodexAcp } from './codexAcp';
 import { runCursorAcp } from './cursorAcp';
@@ -10,7 +11,14 @@ import { runVibeAcp } from './vibeAcp';
 import type { AcpPermissionHandler } from './acpSubprocessRunner';
 
 // types
+import { pickInexpensiveModel } from '@novacode/shared';
 import type { AgentType, ChatMessage } from '../@types';
+
+export {
+  ONE_SHOT_AGENT_TYPES,
+  isOneShotAgentType,
+  resolveOneShotAgentType
+} from '@novacode/shared';
 
 const denyAllPermission: AcpPermissionHandler = () => ({
   outcome: { outcome: 'cancelled' }
@@ -23,13 +31,20 @@ const COMMIT_MESSAGE_BODY_MAX_CHARS = 400;
 const RULES_PREAMBLE_RE =
   /\b(?:i(?:'ve| have)? loaded|rules? (?:are |were )?loaded|the following rules|workspace rules\b.*\bapply|i will follow|follow them as)\b/i;
 
-export const ONE_SHOT_AGENT_TYPES: AgentType[] = [
-  'cursor-agent',
-  'claude',
-  'mistral-vibe',
-  'open-code',
-  'codex'
-];
+export function resolveOneShotModel(
+  configured: string | null | undefined,
+  agentType: AgentType
+): string {
+  const trimmed = configured?.trim();
+  if (trimmed) {
+    return trimmed;
+  }
+  try {
+    return pickInexpensiveModel(getAgentModels(agentType).models);
+  } catch {
+    return 'auto';
+  }
+}
 
 export function appendAssistantText(line: string, chunks: string[]): void {
   let event: Record<string, unknown>;

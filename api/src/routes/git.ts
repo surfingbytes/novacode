@@ -13,15 +13,13 @@ import { db } from '../classes/database';
 import { config } from '../classes/config';
 import { sshEnvForGit } from '../classes/sshKey';
 import {
-  ONE_SHOT_AGENT_TYPES,
   buildCommitMessagePrompt,
   cleanCommitMessage,
+  resolveOneShotAgentType,
+  resolveOneShotModel,
   runOneShotAgentText
 } from '../classes/oneShotAgentText';
 import { parseGitLog } from '../classes/gitLog';
-
-// types
-import type { AgentType } from '../@types';
 
 const execFileAsync = promisify(execFile);
 const COMMIT_MESSAGE_DIFF_MAX_CHARS = 60_000;
@@ -516,15 +514,15 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         if (!diff) return reply.code(400).send({ error: 'No diff found for selected files' });
 
         const user = await db.getFirstUser();
-        const configuredAgentType = context.workspace.defaultAgentType as AgentType | null | undefined;
-        const agentType = configuredAgentType && ONE_SHOT_AGENT_TYPES.includes(configuredAgentType)
-          ? configuredAgentType
-          : 'cursor-agent';
+        const agentType = resolveOneShotAgentType(
+          user?.utilityAgentType,
+          context.workspace.defaultAgentType
+        );
         const raw = await runOneShotAgentText({
           agentType,
           cwd: context.cwd,
           promptText: buildCommitMessagePrompt(diff),
-          model: user?.modelSelection ?? 'auto',
+          model: resolveOneShotModel(user?.utilityModelSelection, agentType),
           claudeToken: user?.claudeToken ?? null,
           runIdPrefix: 'git-commit-message',
           denyTools: true

@@ -1,15 +1,23 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 import ThemeToggleButton from '@/components/ThemeToggleButton.vue';
 
 defineProps<{
   sidebarOpen: boolean;
-  onMenuClick: () => void;
-  onSearchClick: () => void;
   hideOnMobile?: boolean;
 }>();
 
+const emit = defineEmits<{
+  menuClick: [];
+  searchClick: [];
+}>();
+
 const auth = useAuthStore();
+
+const searchShortcutLabel = computed(() =>
+  /Mac|iPhone|iPad|iPod/.test(navigator.userAgent) ? '⌘K' : 'Ctrl+K'
+);
 
 function userInitial(): string {
   const name = auth.username ?? '';
@@ -25,11 +33,11 @@ function userInitial(): string {
       class="topbar__mobile-menu pane:hidden!"
       aria-label="Toggle navigation menu"
       :aria-expanded="sidebarOpen"
-      @click="onMenuClick"
+      @click="emit('menuClick')"
     >
       <svg
-        width="15"
-        height="15"
+        width="18"
+        height="18"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -43,7 +51,12 @@ function userInitial(): string {
     </button>
 
     <!-- Search -->
-    <button class="topbar__search" aria-label="Search" @click="onSearchClick">
+    <button
+      type="button"
+      class="topbar__search"
+      aria-label="Search"
+      @click.stop="emit('searchClick')"
+    >
       <svg
         width="14"
         height="14"
@@ -59,7 +72,7 @@ function userInitial(): string {
         <path d="M16.5 16.5L21 21" />
       </svg>
       <span class="topbar__search-placeholder">Search or jump to…</span>
-      <kbd class="topbar__kbd">⌘K</kbd>
+      <kbd class="topbar__kbd">{{ searchShortcutLabel }}</kbd>
     </button>
 
     <div class="topbar__spacer" aria-hidden="true" />
@@ -94,9 +107,9 @@ function userInitial(): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
   border: none;
   background: transparent;
   color: var(--fg-muted);

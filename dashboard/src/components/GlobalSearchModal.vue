@@ -24,11 +24,11 @@ interface SearchResultsGrouped {
 // -------------------------------------------------- Props --------------------------------------------------
 const props = defineProps<{
   isOpen: boolean;
-  onClose: () => void;
 }>();
 
 // -------------------------------------------------- Emits --------------------------------------------------
 const emit = defineEmits<{
+  (e: 'close'): void;
   (e: 'navigate'): void;
 }>();
 
@@ -325,19 +325,11 @@ async function performSearch(): Promise<void> {
   }
 }
 
-function handleDocumentClick(event: MouseEvent): void {
-  if (!props.isOpen || !modalRef.value) {
+function handleDocumentKeydown(event: KeyboardEvent): void {
+  if (!props.isOpen || event.key !== 'Escape') {
     return;
   }
-  if (!modalRef.value.contains(event.target as Node)) {
-    props.onClose();
-  }
-}
-
-function handleDocumentKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape') {
-    props.onClose();
-  }
+  emit('close');
 }
 
 function scrollActiveResultIntoView(): void {
@@ -429,7 +421,7 @@ function runPaletteCommand(commandId: string): void {
 }
 
 function navigateToResult(result: SearchResult): void {
-  props.onClose();
+  emit('close');
   emit('navigate');
 
   switch (result.type) {
@@ -519,12 +511,10 @@ watch(
 
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 onMounted(() => {
-  document.addEventListener('click', handleDocumentClick);
   document.addEventListener('keydown', handleDocumentKeydown);
 });
 
 onBeforeUnmount(() => {
-  document.removeEventListener('click', handleDocumentClick);
   document.removeEventListener('keydown', handleDocumentKeydown);
 });
 </script>
@@ -537,7 +527,7 @@ onBeforeUnmount(() => {
         class="search-overlay"
         aria-modal="true"
         role="dialog"
-        @click="props.onClose()"
+        @click="emit('close')"
       >
         <div ref="modalRef" class="search-panel" @click.stop>
           <!-- Search input -->
@@ -592,7 +582,7 @@ onBeforeUnmount(() => {
                 <path d="M18 6L6 18 M6 6l12 12" />
               </svg>
             </button>
-            <button class="search-close lg:hidden" aria-label="Close" @click="props.onClose()">
+            <button class="search-close lg:hidden" aria-label="Close" @click="emit('close')">
               <svg
                 width="13"
                 height="13"

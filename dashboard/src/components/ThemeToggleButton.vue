@@ -69,8 +69,8 @@ onUnmounted(() => {
   >
     <svg
       v-if="currentMode === 'dark'"
-      width="15"
-      height="15"
+      width="18"
+      height="18"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -85,8 +85,8 @@ onUnmounted(() => {
     </svg>
     <svg
       v-else
-      width="15"
-      height="15"
+      width="18"
+      height="18"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -106,24 +106,15 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
   border: none;
   background: transparent;
   color: var(--fg-muted);
   cursor: pointer;
   transition: background 0.1s, color 0.1s;
   flex-shrink: 0;
-}
-
-.theme-toggle {
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-}
-
-.theme-toggle--compact {
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
 }
 
 .theme-toggle:hover,

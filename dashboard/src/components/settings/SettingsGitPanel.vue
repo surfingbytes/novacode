@@ -102,6 +102,7 @@ onMounted((): void => {
           <div class="settings-section-label nc-eyebrow">Git Identity</div>
           <p class="settings-section-desc">
             Global git user name and email. Individual workspaces can override these.
+            Automatic commit messages use the Background AI agent and model on the General tab.
           </p>
           <div class="bg-fg/[0.02] border border-fg/[0.07] rounded-xl p-5 space-y-4">
             <div>

@@ -1,6 +1,10 @@
 <script setup lang="ts">
 // node_modules
-import { ref, onMounted } from 'vue';
+import { computed, onMounted, ref } from 'vue';
+import { isOneShotAgentType, pickInexpensiveModel } from '@novacode/shared';
+
+// components
+import AgentModelPicker from '@/components/AgentModelPicker.vue';
 
 // classes
 import { settingsApi } from '@/classes/api';
@@ -27,6 +31,12 @@ import {
 } from '@/lib/notifications';
 import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 
+// types
+import type { AgentModelOption, AgentType } from '@/@types/index';
+
+// utils
+import { agentSelectedStyle, agentTypeLabel } from '@/utils/agentTypeMeta';
+
 // -------------------------------------------------- Refs --------------------------------------------------
 const activeThemeId = ref<string>(
   resolveStoredThemeId(safeGetItem('theme') ?? DEFAULT_THEME_ID)
@@ -47,6 +57,43 @@ const notifPermission = ref<NotificationPermission | 'unsupported'>(getPermissio
 
 const bClaudeAutoContinue = ref<boolean>(false);
 const bSavingClaudeAutoContinue = ref<boolean>(false);
+
+const utilityAgentType = ref<AgentType | null>(null);
+const utilityModelSelection = ref<string>('');
+const utilityModelOptions = ref<AgentModelOption[]>([]);
+const bLoadingUtilityModels = ref<boolean>(false);
+const bSavingUtility = ref<boolean>(false);
+const bCursorAvailable = ref<boolean>(true);
+const bClaudeAvailable = ref<boolean>(true);
+const bMistralVibeAvailable = ref<boolean>(true);
+const bOpenCodeAvailable = ref<boolean>(true);
+const bCodexAvailable = ref<boolean>(true);
+
+const availableUtilityAgents = computed(() => {
+  const agents: AgentType[] = [];
+  if (bCursorAvailable.value) agents.push('cursor-agent');
+  if (bMistralVibeAvailable.value) agents.push('mistral-vibe');
+  if (bClaudeAvailable.value) agents.push('claude');
+  if (bOpenCodeAvailable.value) agents.push('open-code');
+  if (bCodexAvailable.value) agents.push('codex');
+  if (utilityAgentType.value && !agents.includes(utilityAgentType.value)) {
+    agents.push(utilityAgentType.value);
+  }
+  return agents;
+});
+
+const utilityAgentGridClass = computed(
+  () => `grid-cols-${Math.min(availableUtilityAgents.value.length + 1, 3)}`
+);
+
+function isUtilityAgentAvailable(agent: AgentType): boolean {
+  if (agent === 'cursor-agent') return bCursorAvailable.value;
+  if (agent === 'claude') return bClaudeAvailable.value;
+  if (agent === 'mistral-vibe') return bMistralVibeAvailable.value;
+  if (agent === 'open-code') return bOpenCodeAvailable.value;
+  if (agent === 'codex') return bCodexAvailable.value;
+  return false;
+}
 
 // -------------------------------------------------- Methods --------------------------------------------------
 const toggleNotifications = async (): Promise<void> => {
@@ -145,6 +192,74 @@ const toggleAutoTheme = async (): Promise<void> => {
   }
 };
 
+const loadUtilityModels = async (agent: AgentType | null): Promise<void> => {
+  if (!agent) {
+    utilityModelOptions.value = [];
+    return;
+  }
+  bLoadingUtilityModels.value = true;
+  try {
+    const { data } = await settingsApi.getAgentOptions(agent);
+    utilityModelOptions.value =
+      data.models.length > 0
+        ? data.models
+        : [{ id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto', fast: null }];
+    if (
+      utilityModelSelection.value &&
+      !utilityModelOptions.value.some((option) => option.id === utilityModelSelection.value)
+    ) {
+      utilityModelSelection.value = pickInexpensiveModel(utilityModelOptions.value);
+    }
+    if (!utilityModelSelection.value) {
+      utilityModelSelection.value = pickInexpensiveModel(utilityModelOptions.value);
+    }
+  } catch {
+    utilityModelOptions.value = [
+      { id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto', fast: null }
+    ];
+    if (!utilityModelSelection.value) {
+      utilityModelSelection.value = 'auto';
+    }
+  } finally {
+    bLoadingUtilityModels.value = false;
+  }
+};
+
+const saveUtilitySettings = async (): Promise<void> => {
+  bSavingUtility.value = true;
+  try {
+    await settingsApi.update({
+      utilityAgentType: utilityAgentType.value,
+      utilityModelSelection: utilityModelSelection.value
+    });
+  } catch {
+    // ignore
+  } finally {
+    bSavingUtility.value = false;
+  }
+};
+
+const selectUtilityAgent = async (agent: AgentType | null): Promise<void> => {
+  if (agent && !isUtilityAgentAvailable(agent)) {
+    return;
+  }
+  if (agent === utilityAgentType.value) {
+    return;
+  }
+  utilityAgentType.value = agent;
+  utilityModelSelection.value = '';
+  await loadUtilityModels(agent);
+  await saveUtilitySettings();
+};
+
+const onUtilityModelChange = async (value: string): Promise<void> => {
+  if (value === utilityModelSelection.value) {
+    return;
+  }
+  utilityModelSelection.value = value;
+  await saveUtilitySettings();
+};
+
 const toggleClaudeAutoContinue = async (): Promise<void> => {
   bClaudeAutoContinue.value = !bClaudeAutoContinue.value;
   bSavingClaudeAutoContinue.value = true;
@@ -179,6 +294,21 @@ const loadSettings = async (): Promise<void> => {
     if (typeof response.data.claudeAutoContinue === 'boolean') {
       bClaudeAutoContinue.value = response.data.claudeAutoContinue;
     }
+    try {
+      const caps = await settingsApi.getAgentCapabilities();
+      bCursorAvailable.value = caps.data.cursorAvailable;
+      bClaudeAvailable.value = caps.data.claudeAvailable;
+      bMistralVibeAvailable.value = caps.data.mistralVibeAvailable;
+      bOpenCodeAvailable.value = caps.data.openCodeAvailable;
+      bCodexAvailable.value = caps.data.codexAvailable;
+    } catch {
+      // keep defaults
+    }
+    utilityAgentType.value = isOneShotAgentType(response.data.utilityAgentType)
+      ? response.data.utilityAgentType
+      : null;
+    utilityModelSelection.value = response.data.utilityModelSelection ?? '';
+    await loadUtilityModels(utilityAgentType.value);
     if (bAutoTheme.value) {
       applyTheme(resolveAutoTheme());
       startAutoThemeWatcher();
@@ -302,6 +432,66 @@ onMounted((): void => {
             </div>
           </div>
         </template>
+
+        <div class="settings-section-label nc-eyebrow" style="margin-top: 36px;">Background AI</div>
+        <p class="settings-section-desc">
+          Agent and model used for automatic commit messages and session titles. Automatic keeps the
+          session or workspace agent and picks a cheaper model. Pin both if you want a specific cheap
+          setup.
+        </p>
+        <div class="bg-fg/[0.02] border border-fg/[0.07] rounded-xl p-5 space-y-4">
+          <div class="nc-field">
+            <span class="nc-field-label">Agent</span>
+            <div
+              class="grid rounded-lg border border-fg/[0.12] bg-fg/[0.04] p-0.5 gap-1"
+              :class="utilityAgentGridClass"
+            >
+              <button
+                type="button"
+                class="text-xs px-2 py-1.5 rounded-md border transition-colors"
+                :class="
+                  utilityAgentType === null
+                    ? 'border-fg/20 bg-fg/[0.1] text-text-primary'
+                    : 'border-transparent text-text-muted hover:text-text-primary hover:bg-fg/[0.06]'
+                "
+                :disabled="bSavingUtility"
+                title="Use the session or workspace agent with a cheaper model"
+                @click="selectUtilityAgent(null)"
+              >
+                Automatic
+              </button>
+              <button
+                v-for="agent in availableUtilityAgents"
+                :key="agent"
+                type="button"
+                class="text-xs px-2 py-1.5 rounded-md border border-transparent transition-colors text-text-muted hover:text-text-primary hover:bg-fg/[0.06]"
+                :style="utilityAgentType === agent ? agentSelectedStyle(agent) : {}"
+                :disabled="bSavingUtility"
+                :title="agentTypeLabel(agent)"
+                @click="selectUtilityAgent(agent)"
+              >
+                {{ agentTypeLabel(agent) }}
+              </button>
+            </div>
+            <p v-if="availableUtilityAgents.length === 0" class="text-[11px] text-warning mt-2">
+              No agents available. Configure an agent in Integrations.
+            </p>
+          </div>
+          <div v-if="utilityAgentType" class="nc-field">
+            <span class="nc-field-label">Model</span>
+            <AgentModelPicker
+              :model-value="utilityModelSelection"
+              :agent-type="utilityAgentType"
+              :model-options="utilityModelOptions"
+              :disabled="bSavingUtility || bLoadingUtilityModels"
+              variant="modal"
+              @update:model-value="onUtilityModelChange"
+            />
+          </div>
+          <p v-else class="text-[12.5px] text-text-muted">
+            A cheaper model is chosen automatically for the session or workspace agent.
+          </p>
+        </div>
 
   </div>
 </template>

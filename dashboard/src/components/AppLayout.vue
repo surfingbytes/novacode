@@ -74,7 +74,11 @@ function handleKeyDown(event: KeyboardEvent): void {
   const key = event.key.toLowerCase();
   if (key === 'k') {
     event.preventDefault();
-    openSearchModal();
+    if (bSearchModalOpen.value) {
+      closeSearchModal();
+    } else {
+      openSearchModal();
+    }
     return;
   }
   if (bSearchModalOpen.value) {
@@ -86,8 +90,8 @@ function handleKeyDown(event: KeyboardEvent): void {
   }
 }
 
-onMounted(() => { window.addEventListener('keydown', handleKeyDown); });
-onBeforeUnmount(() => { window.removeEventListener('keydown', handleKeyDown); });
+onMounted(() => { window.addEventListener('keydown', handleKeyDown, true); });
+onBeforeUnmount(() => { window.removeEventListener('keydown', handleKeyDown, true); });
 </script>
 
 <template>
@@ -106,8 +110,8 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', handleKeyDown); })
       <NavTopBar
         :hide-on-mobile="hideMobileTopBar"
         :sidebar-open="bSidebarIsOpen"
-        :on-menu-click="toggleSidebar"
-        :on-search-click="openSearchModal"
+        @menu-click="toggleSidebar"
+        @search-click="openSearchModal"
       />
 
       <main
@@ -121,7 +125,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', handleKeyDown); })
 
       <GlobalSearchModal
         :is-open="bSearchModalOpen"
-        :on-close="closeSearchModal"
+        @close="closeSearchModal"
         @navigate="handleSearchNavigate"
       />
     </div>

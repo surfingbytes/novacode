@@ -46,6 +46,8 @@ type AppSettingsUser = {
   darkTheme: string | null;
   lightTheme: string | null;
   modelSelection: string | null;
+  utilityAgentType: string | null;
+  utilityModelSelection: string | null;
 };
 
 /** Legacy dashboard theme id `rust` was replaced by OLED. */
@@ -65,6 +67,8 @@ type AppSettings = {
   darkTheme: string;
   lightTheme: string;
   modelSelection: string;
+  utilityAgentType: string | null;
+  utilityModelSelection: string;
   sshPublicKey: string;
   sshPrivateKey: string;
 };
@@ -77,6 +81,8 @@ const AppSettingsSchema = Type.Object({
   darkTheme: Type.String(),
   lightTheme: Type.String(),
   modelSelection: Type.String(),
+  utilityAgentType: Type.Union([Type.String(), Type.Null()]),
+  utilityModelSelection: Type.String(),
   /** SSH public key (e.g. register on GitHub/GitLab) — persisted under config volume `.ssh/` */
   sshPublicKey: Type.String(),
   /** Private key for the same pair — treat as a secret */
@@ -98,6 +104,8 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       darkTheme: normalizeThemeId(user?.darkTheme ?? 'deep-space'),
       lightTheme: normalizeThemeId(user?.lightTheme ?? 'cloud'),
       modelSelection: user?.modelSelection ?? 'auto',
+      utilityAgentType: user?.utilityAgentType && isAgentType(user.utilityAgentType) ? user.utilityAgentType : null,
+      utilityModelSelection: user?.utilityModelSelection ?? '',
       sshPublicKey: ssh.sshPublicKey,
       sshPrivateKey: ssh.sshPrivateKey
     };
@@ -133,7 +141,9 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
           autoTheme: Type.Optional(Type.Boolean()),
           darkTheme: Type.Optional(Type.String()),
           lightTheme: Type.Optional(Type.String()),
-          modelSelection: Type.Optional(Type.String())
+          modelSelection: Type.Optional(Type.String()),
+          utilityAgentType: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+          utilityModelSelection: Type.Optional(Type.String())
         }),
         response: { 200: AppSettingsSchema }
       }
@@ -160,6 +170,14 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         body.lightTheme !== undefined ? body.lightTheme : existing.lightTheme ?? 'cloud'
       );
       const modelSelection = body.modelSelection !== undefined ? body.modelSelection : existing.modelSelection ?? 'auto';
+      const utilityAgentTypeRaw =
+        body.utilityAgentType !== undefined ? body.utilityAgentType : existing.utilityAgentType ?? null;
+      const utilityAgentType =
+        utilityAgentTypeRaw && isAgentType(utilityAgentTypeRaw) ? utilityAgentTypeRaw : null;
+      const utilityModelSelection =
+        body.utilityModelSelection !== undefined
+          ? body.utilityModelSelection.trim()
+          : existing.utilityModelSelection ?? '';
 
       if (body.gitUserName !== undefined || body.gitUserEmail !== undefined) {
         writeGlobalGitConfig(config.configDir, gitUserName, gitUserEmail);
@@ -172,7 +190,9 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         autoTheme,
         darkTheme,
         lightTheme,
-        modelSelection
+        modelSelection,
+        utilityAgentType,
+        utilityModelSelection
       });
       if (!user) {
         throw new Error('Failed to update user');

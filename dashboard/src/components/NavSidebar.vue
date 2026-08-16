@@ -249,8 +249,8 @@ onBeforeUnmount(() => {
         @click="emit('toggle-collapsed')"
       >
         <svg
-          width="15"
-          height="15"
+          width="18"
+          height="18"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -547,10 +547,10 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   background: transparent;
   color: var(--fg-muted);
   cursor: pointer;

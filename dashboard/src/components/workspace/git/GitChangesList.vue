@@ -395,16 +395,23 @@ function onRepoCommitMessageInput(event: Event): void {
                 :disabled="committingRepo !== null || bGeneratingCommitMessage"
               />
               <button
-                class="flex-shrink-0 w-10 rounded-lg text-text-muted hover:text-primary hover:bg-fg/[0.06] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
+                class="flex-shrink-0 w-10 rounded-lg transition-all flex items-center justify-center"
+                :class="
+                  bGeneratingCommitMessage
+                    ? 'text-primary'
+                    : 'text-text-muted hover:text-primary hover:bg-fg/[0.06] disabled:opacity-40 disabled:cursor-not-allowed'
+                "
                 type="button"
                 title="Generate commit message"
                 aria-label="Generate commit message"
+                :aria-busy="bGeneratingCommitMessage"
                 :disabled="!canGenerateCommitMessage(repos[0].repo)"
                 @click="generateCommitMessage(repos[0].repo)"
               >
                 <div
                   v-if="bGeneratingCommitMessage"
-                  class="w-4 h-4 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
+                  class="w-4 h-4 border-2 border-primary/35 border-t-primary rounded-full animate-spin"
+                  aria-hidden="true"
                 ></div>
                 <Sparkles v-else :size="17" :stroke-width="1.7" class="select-none" aria-hidden="true" />
               </button>
@@ -525,16 +532,23 @@ function onRepoCommitMessageInput(event: Event): void {
                 :disabled="committingRepo !== null || bGeneratingCommitMessage"
               />
               <button
-                class="flex-shrink-0 w-10 rounded-lg text-text-muted hover:text-primary hover:bg-fg/[0.06] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center"
+                class="flex-shrink-0 w-10 rounded-lg transition-all flex items-center justify-center"
+                :class="
+                  bGeneratingCommitMessage
+                    ? 'text-primary'
+                    : 'text-text-muted hover:text-primary hover:bg-fg/[0.06] disabled:opacity-40 disabled:cursor-not-allowed'
+                "
                 type="button"
                 title="Generate commit message"
                 aria-label="Generate commit message"
+                :aria-busy="bGeneratingCommitMessage"
                 :disabled="!canGenerateCommitMessage(activeRepo.repo)"
                 @click="generateCommitMessage(activeRepo.repo)"
               >
                 <div
                   v-if="bGeneratingCommitMessage"
-                  class="w-4 h-4 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
+                  class="w-4 h-4 border-2 border-primary/35 border-t-primary rounded-full animate-spin"
+                  aria-hidden="true"
                 ></div>
                 <Sparkles v-else :size="17" :stroke-width="1.7" class="select-none" aria-hidden="true" />
               </button>
