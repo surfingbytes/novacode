@@ -1,6 +1,7 @@
-/* Tab bar */
+/* Tab bar — flex-shrink: 0 so PageShell's column flex cannot collapse this to 0px. */
 .settings-tabs {
   display: flex;
+  flex-shrink: 0;
   border-bottom: 1px solid var(--line);
   margin-top: 6px;
   margin-bottom: 28px;
