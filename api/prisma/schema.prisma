@@ -99,6 +99,8 @@ model Session {
   createdAt   String    @map("created_at")
   updatedAt   String    @default(dbgenerated("CURRENT_TIMESTAMP")) @map("updated_at")
   archived    Boolean   @default(false)
+  /** True when a run finished while no client was viewing this session. */
+  unread      Boolean   @default(false)
   claudeLimitResetAt String? @map("claude_limit_reset_at")
 
   @@map("sessions")

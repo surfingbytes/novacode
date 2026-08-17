@@ -8,6 +8,7 @@ import { db } from '../classes/database';
 import { config } from '../classes/config';
 import { WS_ROUTE_RATE_LIMIT } from '../classes/rateLimits';
 import { broadcastSessionListUpsert } from '../classes/sessionListBroadcast';
+import { markSessionRead } from '../classes/sessionUnread';
 import {
   buildSessionTitlePrompt,
   buildSessionTitlePromptFromAssistant,
@@ -48,6 +49,11 @@ const HISTORY_PAGE_SIZE = 50;
 const chatSessionClients = new Map<string, Set<WebSocket>>();
 const queueWorkers = new Set<string>();
 
+/** True when at least one chat WebSocket is connected to this session (a viewer). */
+export function hasChatSessionViewers(sessionId: string): boolean {
+  return (chatSessionClients.get(sessionId)?.size ?? 0) > 0;
+}
+
 // ---------------------------------- Socket Helpers ----------------------------------
 function send(socket: WebSocket, message: ChatWsServerMessage): void {
   if (socket.readyState === 1) {
@@ -62,6 +68,7 @@ function registerChatSocket(sessionId: string, socket: WebSocket): void {
     chatSessionClients.set(sessionId, socketSet);
   }
   socketSet.add(socket);
+  void markSessionRead(sessionId);
 }
 
 function unregisterChatSocket(sessionId: string, socket: WebSocket): void {

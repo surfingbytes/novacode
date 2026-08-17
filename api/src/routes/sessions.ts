@@ -19,6 +19,7 @@ import {
   broadcastWorkspaceSessionUpsert,
   broadcastWorkspaceSessionsRefresh
 } from './ws';
+import { markSessionRead } from '../classes/sessionUnread';
 
 // types
 import type { AgentType } from '../@types/index';
@@ -171,6 +172,21 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
           session.sessionId
         ),
       });
+    }
+  );
+
+  // POST /api/sessions/:sessionId/read — mark a chat read (syncs to other devices)
+  fastify.post(
+    '/api/sessions/:sessionId/read',
+    { preHandler: jwtPreHandler },
+    async (request, reply) => {
+      const { sessionId } = request.params as { sessionId: string };
+      const session = await db.getSession(sessionId);
+      if (!session) {
+        return reply.status(404).send({ error: 'Session not found' });
+      }
+      const updated = await markSessionRead(sessionId);
+      return reply.send(normalizeSessionForApi(updated ?? session));
     }
   );
 

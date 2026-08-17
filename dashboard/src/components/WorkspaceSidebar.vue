@@ -533,7 +533,7 @@ watch(
                 Busy
               </span>
               <span
-                v-else-if="isSessionUnread(item.session.id)"
+                v-else-if="isSessionUnread(item.session)"
                 class="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0 self-center border border-primary/40 bg-primary/15 text-primary"
                 title="Finished — unread"
               >

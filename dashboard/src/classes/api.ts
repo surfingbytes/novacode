@@ -647,6 +647,9 @@ export const sessionsApi = {
   ): ReturnType<typeof http.patch<Session>> =>
     http.patch<Session>(`/workspaces/${workspaceId}/sessions/${sessionId}`, patch),
 
+  markRead: (sessionId: string): ReturnType<typeof http.post<Session>> =>
+    http.post<Session>(`/sessions/${sessionId}/read`),
+
   remove: (workspaceId: string, sessionId: string): ReturnType<typeof http.delete> =>
     http.delete(`/workspaces/${workspaceId}/sessions/${sessionId}`),
 

@@ -54,7 +54,7 @@ function workspaceName(workspaceId: string): string {
           <span class="session-row__name-row">
             <span class="session-row__name">{{ session.name?.trim() || 'Untitled session' }}</span>
             <span
-              v-if="isSessionUnread(session.id) && !session.busy"
+              v-if="isSessionUnread(session) && !session.busy"
               class="session-row__done"
               title="Finished — unread"
             >

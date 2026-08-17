@@ -7,8 +7,9 @@ import { rejectUnauthorizedWebSocket } from '../classes/auth';
 import { sessionManager } from '../classes/sessionManager';
 import { db } from '../classes/database';
 import { normalizeSessionForApi } from '../classes/sessionNormalize';
-import { getActiveSessionIds } from './chat';
+import { getActiveSessionIds, hasChatSessionViewers } from './chat';
 import { subscribeBusy } from '../classes/chatEngine';
+import { markSessionFinishedUnread } from '../classes/sessionUnread';
 import { registerSessionListBroadcaster } from '../classes/sessionListBroadcast';
 import { workspaceTerminalManager } from '../classes/workspaceTerminalManager';
 import { WS_ROUTE_RATE_LIMIT } from '../classes/rateLimits';
@@ -84,6 +85,9 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
     subscribeBusy((sessionId, workspaceId, busy) => {
       broadcastWorkspace(workspaceId, { type: 'busy-changed', id: sessionId, busy });
       broadcastGlobalSessions({ type: 'busy-changed', id: sessionId, busy, workspaceId });
+      if (!busy) {
+        void markSessionFinishedUnread(sessionId, hasChatSessionViewers(sessionId));
+      }
     });
   }
 

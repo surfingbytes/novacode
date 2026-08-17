@@ -593,6 +593,25 @@ export const db = {
     return row;
   },
 
+  /**
+   * Toggle the unread flag without bumping updatedAt (read/unread should not
+   * reshuffle session lists). Returns undefined when the row is missing or
+   * already has the requested value.
+   */
+  async setSessionUnread(id: string, unread: boolean): Promise<Session | undefined> {
+    const existingSession = await _prisma.session.findUnique({
+      where: { id },
+      select: { unread: true }
+    });
+    if (!existingSession || existingSession.unread === unread) {
+      return undefined;
+    }
+    return _prisma.session.update({
+      where: { id },
+      data: { unread }
+    });
+  },
+
   async listSessionMessages(sessionId: string): Promise<ChatMessage[]> {
     const rows = await _prisma.sessionMessage.findMany({
       where: { sessionId },

@@ -9,7 +9,7 @@ import { createManagedSocket, type ManagedSocket } from '@/lib/wsClient';
 // stores
 import { useOrchestratorsStore } from '@/stores/orchestrators';
 import { forgetLocalStateForId } from '@/lib/sessionLocalState';
-import { markSessionFinished } from '@/utils/sessionUnread';
+import { isViewingSession } from '@/utils/sessionUnread';
 
 // types
 import type { Workspace, CreateWorkspacePayload, UpdateWorkspacePayload, Session, Orchestrator } from '@/@types/index';
@@ -102,11 +102,14 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     };
     if (sessionIndex === -1) {
       allSessions.value = [merged, ...allSessions.value];
-      return;
+    } else {
+      const updated = [...allSessions.value];
+      updated[sessionIndex] = merged;
+      allSessions.value = updated;
     }
-    const updated = [...allSessions.value];
-    updated[sessionIndex] = merged;
-    allSessions.value = updated;
+    if (merged.unread && isViewingSession(merged.id)) {
+      void markSessionRead(merged.id);
+    }
   }
 
   function removeSession(sessionId: string): void {
@@ -114,13 +117,34 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     forgetLocalStateForId(sessionId);
   }
 
+  function setSessionUnread(sessionId: string, unread: boolean): void {
+    allSessions.value = allSessions.value.map((session) =>
+      session.id === sessionId ? { ...session, unread } : session
+    );
+  }
+
+  async function markSessionRead(sessionId: string): Promise<void> {
+    const current = allSessions.value.find((session) => session.id === sessionId);
+    if (current?.unread !== true) {
+      return;
+    }
+    setSessionUnread(sessionId, false);
+    try {
+      await sessionsApi.markRead(sessionId);
+    } catch {
+      // list snapshot / upsert will correct if the persist failed
+    }
+  }
+
   function setSessionBusy(sessionId: string, busy: boolean): void {
     const previous = allSessions.value.find((session) => session.id === sessionId);
     allSessions.value = allSessions.value.map((session) =>
       session.id === sessionId ? { ...session, busy } : session
     );
-    if (previous?.busy && !busy) {
-      markSessionFinished(sessionId);
+    // If this device is viewing the chat (e.g. files tab, no chat WS), persist
+    // read so the server's "finished unread" write does not stick on other devices.
+    if (previous?.busy && !busy && isViewingSession(sessionId)) {
+      void markSessionRead(sessionId);
     }
   }
 
@@ -256,6 +280,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     setActiveWorkspace,
     fetchAllSessions,
     ensureSessionsInitialized,
+    markSessionRead,
     createWorkspace,
     updateWorkspace,
     toggleFavorite,

@@ -352,10 +352,10 @@ onBeforeUnmount(() => {
         :key="'nav-' + session.id"
         :to="{ name: 'session', params: { id: session.workspaceId, sessionId: session.id } }"
         class="sidebar__session-item nc-row-hover"
-        :class="{ 'sidebar__session-item--unread': isSessionUnread(session.id) && !session.busy }"
+        :class="{ 'sidebar__session-item--unread': isSessionUnread(session) && !session.busy }"
         active-class="sidebar__session-item--active"
         :title="
-          isSessionUnread(session.id) && !session.busy
+          isSessionUnread(session) && !session.busy
             ? `${session.name || 'Untitled'} — finished, unread`
             : bIsCollapsed
               ? session.name
@@ -364,7 +364,7 @@ onBeforeUnmount(() => {
         @click="handleClose"
       >
         <svg
-          v-if="bIsCollapsed && isSessionUnread(session.id) && !session.busy"
+          v-if="bIsCollapsed && isSessionUnread(session) && !session.busy"
           class="sidebar__session-done-icon"
           width="12"
           height="12"
@@ -390,7 +390,7 @@ onBeforeUnmount(() => {
                 {{ session.name || 'Untitled' }}
               </div>
               <span
-                v-if="isSessionUnread(session.id) && !session.busy"
+                v-if="isSessionUnread(session) && !session.busy"
                 class="sidebar__session-done"
                 title="Finished — unread"
               >

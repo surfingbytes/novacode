@@ -827,6 +827,9 @@ watch(
   () => props.sessionId,
   (sessionId) => {
     setViewingSession(sessionId);
+    if (sessionId) {
+      void workspacesStore.markSessionRead(sessionId);
+    }
   },
   { immediate: true }
 );

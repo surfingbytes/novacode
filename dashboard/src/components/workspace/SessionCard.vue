@@ -55,7 +55,7 @@ const linkTo = computed(() => ({
   params: { id: props.workspaceId, sessionId: props.session.id }
 }));
 
-const bUnread = computed(() => isSessionUnread(props.session.id));
+const bUnread = computed(() => isSessionUnread(props.session));
 
 const rootClass = computed(() => {
   const classes = [props.bGrid ? 'grid-item' : 'list-item'];

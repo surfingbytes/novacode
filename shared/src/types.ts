@@ -274,6 +274,8 @@ export interface Session {
   updatedAt: string;
   archived: boolean;
   busy?: boolean;
+  /** True when a run finished while no client was viewing this session. Omitted on older API responses. */
+  unread?: boolean;
 }
 
 /** Token/cost snapshot reported by an agent (ACP `usage_update`). */
