@@ -36,6 +36,10 @@ describe('cleanSessionTitle', () => {
       )
     ).toBe('Rewrite the authentication middleware so every request uses');
   });
+
+  it('rejects Cursor paywall text', () => {
+    expect(cleanSessionTitle('Upgrade your plan to continue.')).toBe('');
+  });
 });
 
 describe('cleanCommitMessage', () => {
@@ -65,6 +69,10 @@ describe('cleanCommitMessage', () => {
     expect(cleanCommitMessage('Add workspace rules injection for chat prompts')).toBe(
       'Add workspace rules injection for chat prompts'
     );
+  });
+
+  it('rejects Cursor paywall text', () => {
+    expect(cleanCommitMessage('Upgrade your plan to continue.')).toBe('');
   });
 
   it('truncates a long subject on a word boundary', () => {

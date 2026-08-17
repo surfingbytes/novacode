@@ -436,8 +436,8 @@ onMounted((): void => {
         <div class="settings-section-label nc-eyebrow" style="margin-top: 36px;">Background AI</div>
         <p class="settings-section-desc">
           Agent and model used for automatic commit messages and session titles. Automatic keeps the
-          session or workspace agent and picks a cheaper model. Pin both if you want a specific cheap
-          setup.
+          session or workspace agent and prefers Composer or Haiku, then Auto — not paid
+          GPT/Claude/Gemini ids. Pin both if you want a specific cheap setup.
         </p>
         <div class="bg-fg/[0.02] border border-fg/[0.07] rounded-xl p-5 space-y-4">
           <div class="nc-field">
@@ -455,7 +455,7 @@ onMounted((): void => {
                     : 'border-transparent text-text-muted hover:text-text-primary hover:bg-fg/[0.06]'
                 "
                 :disabled="bSavingUtility"
-                title="Use the session or workspace agent with a cheaper model"
+                title="Use the session or workspace agent with Composer, Haiku, or Auto"
                 @click="selectUtilityAgent(null)"
               >
                 Automatic
@@ -489,7 +489,7 @@ onMounted((): void => {
             />
           </div>
           <p v-else class="text-[12.5px] text-text-muted">
-            A cheaper model is chosen automatically for the session or workspace agent.
+            Composer, Haiku, or Auto is chosen for the session or workspace agent.
           </p>
         </div>
 

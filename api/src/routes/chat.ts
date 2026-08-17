@@ -207,17 +207,19 @@ async function generateAndApplySessionTitle(
     );
     const workspaceRel = workspace.path.replace(/^\//, '');
     const cwd = `${config.workspaceBrowseRoot}/${workspaceRel || '.'}`;
+    const model = resolveOneShotModel(user?.utilityModelSelection, agentType);
     const raw = await runOneShotAgentText({
       agentType,
       cwd,
       promptText,
-      model: resolveOneShotModel(user?.utilityModelSelection, agentType),
+      model,
       claudeToken: user?.claudeToken ?? null,
       runIdPrefix: 'session-title',
       denyTools: true
     });
     const title = cleanSessionTitle(raw);
     if (!title) {
+      console.warn('[chat] skipped unusable session title', { agentType, model });
       return;
     }
     const latest = await db.getSession(sessionId);

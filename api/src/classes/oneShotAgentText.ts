@@ -30,6 +30,8 @@ const COMMIT_MESSAGE_SUBJECT_MAX_LENGTH = 72;
 const COMMIT_MESSAGE_BODY_MAX_CHARS = 400;
 const RULES_PREAMBLE_RE =
   /\b(?:i(?:'ve| have)? loaded|rules? (?:are |were )?loaded|the following rules|workspace rules\b.*\bapply|i will follow|follow them as)\b/i;
+const PAYWALL_TEXT_RE =
+  /upgrade your plan|plan to continue|usage (?:limit|quota)|out of (?:extra )?requests|limit reached/i;
 
 export function resolveOneShotModel(
   configured: string | null | undefined,
@@ -148,7 +150,7 @@ function stripRulesPreamble(text: string): string {
 export function cleanSessionTitle(raw: string): string {
   const firstLine = cleanGeneratedAgentText(raw).split('\n')[0]?.trim() ?? '';
   const collapsed = firstLine.replace(/\s+/g, ' ').replace(/[.]+$/g, '').trim();
-  if (!collapsed) {
+  if (!collapsed || PAYWALL_TEXT_RE.test(collapsed)) {
     return '';
   }
   return truncateOnWordBoundary(collapsed, SESSION_TITLE_MAX_LENGTH);
@@ -156,7 +158,7 @@ export function cleanSessionTitle(raw: string): string {
 
 export function cleanCommitMessage(raw: string): string {
   const text = stripRulesPreamble(cleanGeneratedAgentText(raw));
-  if (!text) {
+  if (!text || PAYWALL_TEXT_RE.test(text)) {
     return '';
   }
   const [firstLine, ...rest] = text.split('\n');

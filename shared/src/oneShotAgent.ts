@@ -22,23 +22,57 @@ export function resolveOneShotAgentType(...candidates: Array<string | null | und
   return 'cursor-agent';
 }
 
-const INEXPENSIVE_MODEL_RE = /composer|haiku|mini|flash|fast|lite/i;
+type InexpensiveModelOption = {
+  id: string;
+  label?: string;
+  model?: string;
+  fast?: boolean | null;
+};
+
+function modelBlob(model: InexpensiveModelOption): string {
+  return `${model.id} ${model.label ?? ''} ${model.model ?? ''}`;
+}
+
+function isFastVariant(model: InexpensiveModelOption): boolean {
+  return model.fast === true || /(?:^|[-_/])fast(?:$|[-_/])/i.test(model.id);
+}
+
+/**
+ * Rank included/cheap families only. Cursor lists paid `*-fast` / `*-mini` / `*-flash`
+ * models first (gpt, claude, gemini, grok), so a generic "fast|mini|flash" match
+ * would bill extra usage instead of Composer/Auto.
+ *
+ * Lower is better. `Infinity` means skip.
+ */
+function inexpensiveRank(model: InexpensiveModelOption): number {
+  const id = model.id.trim();
+  if (!id) {
+    return Number.POSITIVE_INFINITY;
+  }
+  if (id.toLowerCase() === 'auto') {
+    return 40;
+  }
+  const blob = modelBlob(model);
+  if (/composer/i.test(blob)) {
+    return isFastVariant(model) ? 0 : 1;
+  }
+  if (/haiku/i.test(blob)) {
+    return isFastVariant(model) ? 2 : 3;
+  }
+  return Number.POSITIVE_INFINITY;
+}
 
 /** Prefer a fast/cheap model so short utility prompts do not use chat-tier models. */
-export function pickInexpensiveModel(
-  models: Array<{ id: string; label?: string; model?: string; fast?: boolean | null }>
-): string {
-  const fast = models.find((model) => model.fast === true);
-  if (fast) {
-    return fast.id;
+export function pickInexpensiveModel(models: InexpensiveModelOption[]): string {
+  let best: { id: string; rank: number } | null = null;
+  for (const model of models) {
+    const rank = inexpensiveRank(model);
+    if (!Number.isFinite(rank)) {
+      continue;
+    }
+    if (!best || rank < best.rank) {
+      best = { id: model.id, rank };
+    }
   }
-  const cheap = models.find(
-    (model) =>
-      model.id !== 'auto' &&
-      INEXPENSIVE_MODEL_RE.test(`${model.id} ${model.label ?? ''} ${model.model ?? ''}`)
-  );
-  if (cheap) {
-    return cheap.id;
-  }
-  return models.find((model) => model.id !== 'auto')?.id ?? 'auto';
+  return best?.id ?? 'auto';
 }

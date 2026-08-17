@@ -30,7 +30,7 @@ describe('resolveOneShotAgentType', () => {
 });
 
 describe('pickInexpensiveModel', () => {
-  it('prefers an explicit fast model', () => {
+  it('prefers an explicit fast composer over other models', () => {
     expect(
       pickInexpensiveModel([
         { id: 'auto', label: 'Auto', fast: null },
@@ -40,7 +40,7 @@ describe('pickInexpensiveModel', () => {
     ).toBe('composer-fast');
   });
 
-  it('falls back to a cheap-looking id when none are marked fast', () => {
+  it('picks composer when none are marked fast', () => {
     expect(
       pickInexpensiveModel([
         { id: 'auto', label: 'Auto' },
@@ -48,6 +48,29 @@ describe('pickInexpensiveModel', () => {
         { id: 'composer-2.5', label: 'Composer 2.5' }
       ])
     ).toBe('composer-2.5');
+  });
+
+  it('does not treat paid *-fast / mini / flash ids as cheap', () => {
+    expect(
+      pickInexpensiveModel([
+        { id: 'auto', label: 'Auto' },
+        { id: 'gpt-5.3-codex-low-fast', label: 'Codex 5.3 Low Fast' },
+        { id: 'gpt-5-mini', label: 'GPT-5 Mini' },
+        { id: 'gemini-3.7-flash-high', label: 'Gemini 3.7 Flash' },
+        { id: 'composer-2.5', label: 'Composer 2.5' },
+        { id: 'composer-2.5-fast', label: 'Composer 2.5 Fast' }
+      ])
+    ).toBe('composer-2.5-fast');
+  });
+
+  it('falls back to auto instead of a paid flagship model', () => {
+    expect(
+      pickInexpensiveModel([
+        { id: 'auto', label: 'Auto' },
+        { id: 'gpt-5.3-codex-low-fast', label: 'Codex 5.3 Low Fast' },
+        { id: 'claude-opus-5-thinking-high', label: 'Claude Opus 5' }
+      ])
+    ).toBe('auto');
   });
 
   it('uses auto when that is the only option', () => {
