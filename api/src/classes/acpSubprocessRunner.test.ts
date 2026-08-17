@@ -46,6 +46,7 @@ function setupMock(mode: string): { workDir: string; logPath: string } {
 afterEach(() => {
   delete process.env.MOCK_MODE;
   delete process.env.MOCK_LOG;
+  delete process.env.ACP_PROMPT_IDLE_TIMEOUT_MS;
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
     if (dir) rmSync(dir, { recursive: true, force: true });
@@ -309,6 +310,67 @@ describe('runAcpSubprocessPrompt', () => {
       { id: '3', content: 'Write unit tests', status: 'pending' },
     ]);
   });
+
+  it('times out a silent in-flight prompt', async () => {
+    process.env.ACP_PROMPT_IDLE_TIMEOUT_MS = '250';
+    const { workDir } = setupMock('prompt-silent-hang');
+
+    const result = await runMock('nova-idle-silent', null, workDir);
+
+    expect(result.error).toMatch(/no output for \d+s and was stopped/);
+  }, 10_000);
+
+  it('keeps the prompt alive when a subagent emits session/update on a different session id', async () => {
+    process.env.ACP_PROMPT_IDLE_TIMEOUT_MS = '250';
+    const { workDir } = setupMock('prompt-subagent-session-updates');
+    const events: Array<Record<string, unknown>> = [];
+
+    const result = await runMock('nova-subagent-updates', null, workDir, (line) => {
+      try {
+        events.push(JSON.parse(line) as Record<string, unknown>);
+      } catch {
+        // ignore non-json
+      }
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.stopReason).toBe('end_turn');
+    const thoughts = events.filter((event) => {
+      const update = event.update as { sessionUpdate?: string; content?: { text?: string } } | undefined;
+      return (
+        event.sessionId === 'mock-subagent-session' &&
+        update?.sessionUpdate === 'agent_thought_chunk' &&
+        typeof update.content?.text === 'string'
+      );
+    });
+    expect(thoughts.length).toBeGreaterThanOrEqual(8);
+  }, 10_000);
+
+  it('keeps the prompt alive when Cursor sends cursor/task notifications', async () => {
+    process.env.ACP_PROMPT_IDLE_TIMEOUT_MS = '250';
+    const { workDir } = setupMock('prompt-cursor-task');
+    const events: Array<Record<string, unknown>> = [];
+
+    const result = await runMock(
+      'nova-cursor-task',
+      null,
+      workDir,
+      (line) => {
+        try {
+          events.push(JSON.parse(line) as Record<string, unknown>);
+        } catch {
+          // ignore non-json
+        }
+      },
+      undefined,
+      undefined,
+      true
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.stopReason).toBe('end_turn');
+    expect(events.filter((event) => event.type === 'cursor_task').length).toBeGreaterThanOrEqual(8);
+  }, 10_000);
 });
 
 describe('mergeCursorTodos', () => {

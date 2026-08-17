@@ -10,6 +10,9 @@
  *             'prompt-permission'    — session/prompt asks the client for tool permission first
  *             'prompt-ask-question'  — session/prompt asks via cursor/ask_question first
  *             'prompt-update-todos'  — session/prompt sends cursor/update_todos first
+ *             'prompt-silent-hang'   — session/prompt never responds and emits no updates
+ *             'prompt-subagent-session-updates' — hangs while emitting session/update on a child session id
+ *             'prompt-cursor-task'   — hangs while emitting cursor/task notifications
  *   MOCK_LOG  — path; every incoming message is appended as one JSON line.
  */
 
@@ -38,12 +41,38 @@ let pendingPromptId = null;
 let pendingPermissionRequestId = null;
 let pendingAskQuestionRequestId = null;
 let pendingUpdateTodosRequestId = null;
+let activityTimer = null;
+
+function clearActivityTimer() {
+  if (activityTimer !== null) {
+    clearInterval(activityTimer);
+    activityTimer = null;
+  }
+}
 
 function settlePrompt(stopReason) {
+  clearActivityTimer();
   if (pendingPromptId !== null) {
     send({ jsonrpc: '2.0', id: pendingPromptId, result: { stopReason } });
     pendingPromptId = null;
   }
+}
+
+function startActivityInterval(emit, times = 8, intervalMs = 80) {
+  let n = 0;
+  const tick = () => {
+    n += 1;
+    emit(n);
+    if (n >= times) {
+      settlePrompt('end_turn');
+    }
+  };
+  tick();
+  if (pendingPromptId === null) return;
+  activityTimer = setInterval(() => {
+    if (pendingPromptId === null) return;
+    tick();
+  }, intervalMs);
 }
 
 const rl = readline.createInterface({ input: process.stdin });
@@ -183,6 +212,37 @@ rl.on('line', (line) => {
               { id: '3', content: 'Write unit tests', status: 'pending' },
             ],
           },
+        });
+      } else if (mode === 'prompt-silent-hang') {
+        pendingPromptId = msg.id;
+      } else if (mode === 'prompt-subagent-session-updates') {
+        pendingPromptId = msg.id;
+        startActivityInterval((n) => {
+          send({
+            jsonrpc: '2.0',
+            method: 'session/update',
+            params: {
+              sessionId: 'mock-subagent-session',
+              update: {
+                sessionUpdate: 'agent_thought_chunk',
+                content: { type: 'text', text: `subagent thinking ${n}` },
+              },
+            },
+          });
+        });
+      } else if (mode === 'prompt-cursor-task') {
+        pendingPromptId = msg.id;
+        startActivityInterval((n) => {
+          send({
+            jsonrpc: '2.0',
+            method: 'cursor/task',
+            params: {
+              toolCallId: 'mock-task-1',
+              description: `Explore codebase ${n}`,
+              prompt: 'Find where authentication is handled.',
+              subagentType: 'explore',
+            },
+          });
         });
       } else {
         send({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } });

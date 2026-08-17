@@ -150,10 +150,28 @@ const configSyncHandlers = new Map<string, SessionConfigSyncHandler>();
 
 /** Grace period for the agent to honour session/cancel before the subprocess is killed. */
 const CANCEL_GRACE_MS = 3_000;
-const promptIdleTimeoutEnv = Number.parseInt(process.env['ACP_PROMPT_IDLE_TIMEOUT_MS'] ?? '', 10);
-const PROMPT_IDLE_TIMEOUT_MS = Number.isFinite(promptIdleTimeoutEnv)
-  ? promptIdleTimeoutEnv
-  : 120_000;
+const DEFAULT_PROMPT_IDLE_TIMEOUT_MS = 120_000;
+
+function promptIdleTimeoutMs(): number {
+  const raw = Number.parseInt(process.env['ACP_PROMPT_IDLE_TIMEOUT_MS'] ?? '', 10);
+  return Number.isFinite(raw) ? raw : DEFAULT_PROMPT_IDLE_TIMEOUT_MS;
+}
+
+/**
+ * Subagents emit `session/update` (and Cursor `cursor/task`) with their own ACP
+ * session id on the same connection. Those must still reach the in-flight prompt
+ * handler — otherwise the parent looks idle and the 2-minute timeout kills it.
+ */
+function resolveEventHandler(
+  sessionId: string | null | undefined,
+  fallback?: () => AcpEventHandler | undefined
+): AcpEventHandler | undefined {
+  if (sessionId) {
+    const handler = activeHandlers.get(sessionId);
+    if (handler) return handler;
+  }
+  return fallback?.();
+}
 
 /** User-visible notice emitted when a failed session/load silently resets the conversation. */
 const CONTEXT_RESET_NOTICE_TEXT =
@@ -433,9 +451,32 @@ function extractCursorPlanPayload(params: unknown): CursorPlanPayload {
   };
 }
 
+function emitCursorTaskActivity(
+  params: unknown,
+  getSessionId: () => string | null,
+  fallback?: () => AcpEventHandler | undefined
+): void {
+  const sessionId = getSessionId();
+  const handler = resolveEventHandler(sessionId, fallback);
+  if (!handler) return;
+
+  const payload =
+    params && typeof params === 'object' && !Array.isArray(params)
+      ? (params as Record<string, unknown>)
+      : {};
+  handler(
+    JSON.stringify({
+      type: 'cursor_task',
+      sessionId,
+      ...payload,
+    })
+  );
+}
+
 function emitCursorPlanRequest(
   params: unknown,
-  getSessionId: () => string | null
+  getSessionId: () => string | null,
+  fallback?: () => AcpEventHandler | undefined
 ): void {
   const plan = extractCursorPlanPayload(params);
   if (plan.entries.length === 0 && !plan.markdown) {
@@ -443,11 +484,7 @@ function emitCursorPlanRequest(
   }
 
   const sessionId = getSessionId();
-  if (!sessionId) {
-    return;
-  }
-
-  const handler = activeHandlers.get(sessionId);
+  const handler = resolveEventHandler(sessionId, fallback);
   if (!handler) {
     return;
   }
@@ -571,12 +608,11 @@ export function mergeCursorTodos(
 function emitCursorTodosUpdate(
   params: CursorUpdateTodosParams,
   acceptedTodos: CursorTodoItem[],
-  getSessionId: () => string | null
+  getSessionId: () => string | null,
+  fallback?: () => AcpEventHandler | undefined
 ): void {
   const sessionId = getSessionId();
-  if (!sessionId) return;
-
-  const handler = activeHandlers.get(sessionId);
+  const handler = resolveEventHandler(sessionId, fallback);
   if (!handler) return;
 
   const rawInput = { todos: acceptedTodos };
@@ -608,7 +644,8 @@ function emitCursorTodosUpdate(
 
 function handleCursorUpdateTodos(
   params: unknown,
-  getSessionId: () => string | null
+  getSessionId: () => string | null,
+  fallback?: () => AcpEventHandler | undefined
 ): {
   outcome:
     | { outcome: 'accepted'; todos: CursorTodoItem[] }
@@ -630,7 +667,7 @@ function handleCursorUpdateTodos(
     cursorTodoStateBySession.set(sessionId, acceptedTodos);
   }
 
-  emitCursorTodosUpdate(parsed, acceptedTodos, getSessionId);
+  emitCursorTodosUpdate(parsed, acceptedTodos, getSessionId, fallback);
 
   return {
     outcome: {
@@ -690,11 +727,12 @@ function buildClientApp(
   cursorExtensions?: boolean,
   getActiveSessionId: () => string | null = () => null,
   onRequestPermission: AcpPermissionHandler = autoApprovePermission,
-  onAskQuestion?: AcpAskQuestionHandler
+  onAskQuestion?: AcpAskQuestionHandler,
+  fallbackEventHandler?: () => AcpEventHandler | undefined
 ) {
   let app = client({ name: 'nova-code' })
     .onNotification(methods.client.session.update, ({ params }) => {
-      const handler = activeHandlers.get(params.sessionId);
+      const handler = resolveEventHandler(params.sessionId, fallbackEventHandler);
       if (handler) {
         handleSessionNotification(params, handler, onConfigSync);
       }
@@ -722,13 +760,22 @@ function buildClientApp(
         return onAskQuestion(parsed);
       })
       .onRequest('cursor/create_plan', parseUnknown, async ({ params }: { params: unknown }) => {
-        emitCursorPlanRequest(params, getActiveSessionId);
+        emitCursorPlanRequest(params, getActiveSessionId, fallbackEventHandler);
         return { outcome: { outcome: 'accepted' } };
       })
       .onRequest('cursor/update_todos', parseUnknown, async ({ params }: { params: unknown }) =>
-        handleCursorUpdateTodos(params, getActiveSessionId)
+        handleCursorUpdateTodos(params, getActiveSessionId, fallbackEventHandler)
       )
-      .onRequest('cursor/task', parseUnknown, async () => ({ outcome: { outcome: 'completed' } }))
+      .onNotification('cursor/update_todos', parseUnknown, ({ params }: { params: unknown }) => {
+        handleCursorUpdateTodos(params, getActiveSessionId, fallbackEventHandler);
+      })
+      .onRequest('cursor/task', parseUnknown, async ({ params }: { params: unknown }) => {
+        emitCursorTaskActivity(params, getActiveSessionId, fallbackEventHandler);
+        return { outcome: { outcome: 'completed' } };
+      })
+      .onNotification('cursor/task', parseUnknown, ({ params }: { params: unknown }) => {
+        emitCursorTaskActivity(params, getActiveSessionId, fallbackEventHandler);
+      })
       .onRequest('cursor/generate_image', parseUnknown, async () => ({
         outcome: { outcome: 'rejected', reason: 'Nova Code does not support image generation yet.' },
       }));
@@ -805,13 +852,14 @@ export async function runAcpSubprocessPrompt(
   };
 
   const armPromptIdleTimer = (): void => {
-    if (!bPromptInFlight || PROMPT_IDLE_TIMEOUT_MS <= 0) return;
+    const timeoutMs = promptIdleTimeoutMs();
+    if (!bPromptInFlight || timeoutMs <= 0) return;
     clearPromptIdleTimer();
     promptIdleTimer = setTimeout(() => {
       bPromptIdleTimedOut = true;
-      logger.warn({ logTag, novaSessionId, timeoutMs: PROMPT_IDLE_TIMEOUT_MS }, 'prompt idle timeout');
+      logger.warn({ logTag, novaSessionId, timeoutMs }, 'prompt idle timeout');
       killProc();
-    }, PROMPT_IDLE_TIMEOUT_MS);
+    }, timeoutMs);
   };
 
   const handleEvent: AcpEventHandler = (line) => {
@@ -824,7 +872,8 @@ export async function runAcpSubprocessPrompt(
     params.cursorExtensions,
     () => sessionIdForCancel,
     onRequestPermission,
-    onAskQuestion
+    onAskQuestion,
+    () => (bPromptInFlight ? handleEvent : undefined)
   );
 
   const killProc = () => {
@@ -996,7 +1045,7 @@ export async function runAcpSubprocessPrompt(
         if (bPromptIdleTimedOut) {
           return {
             acpSessionId: resolvedSessionId,
-            error: `Agent produced no output for ${Math.round(PROMPT_IDLE_TIMEOUT_MS / 1000)}s and was stopped.`,
+            error: `Agent produced no output for ${Math.round(promptIdleTimeoutMs() / 1000)}s and was stopped.`,
             resolvedModeId,
             resolvedModelId,
           };
@@ -1018,7 +1067,7 @@ export async function runAcpSubprocessPrompt(
     if (bPromptIdleTimedOut) {
       return {
         acpSessionId: sessionIdForCancel ?? '',
-        error: `Agent produced no output for ${Math.round(PROMPT_IDLE_TIMEOUT_MS / 1000)}s and was stopped.`,
+        error: `Agent produced no output for ${Math.round(promptIdleTimeoutMs() / 1000)}s and was stopped.`,
       };
     }
     // Preserve the ACP session id resolved this turn (session/new or session/load):
