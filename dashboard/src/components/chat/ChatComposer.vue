@@ -23,6 +23,9 @@ import {
 import AgentModelPicker from '@/components/AgentModelPicker.vue';
 import UiSelectMenu, { type SelectMenuOption } from '@/components/ui/UiSelectMenu.vue';
 
+// lib
+import { isSendOnEnter } from '@/lib/sendOnEnter';
+
 // types
 import type {
   AgentConfigOption,
@@ -158,7 +161,10 @@ const bPromptUseCompactMultiline = computed(
 const promptPlaceholder = computed(() => {
   if (props.bIsStreaming) return 'Type your next message…';
   if (props.bMdUp) {
-    return 'Type a message… (Enter to send, Ctrl+Enter for newline)';
+    if (isSendOnEnter()) {
+      return 'Type a message… (Enter to send, Ctrl+Enter for newline)';
+    }
+    return 'Type a message… (Ctrl+Enter to send, Enter for newline)';
   }
   return 'Type a message…';
 });
@@ -219,8 +225,13 @@ function onKeydown(e: KeyboardEvent): void {
   if (e.isComposing) {
     return;
   }
-  // Ctrl/Cmd+Enter and Shift+Enter insert a newline (textarea default).
-  if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) {
+  if (e.shiftKey || e.altKey) {
+    return;
+  }
+  const bModifier = e.ctrlKey || e.metaKey;
+  // Enter-to-send: Ctrl/Cmd+Enter inserts a newline (textarea default).
+  // Ctrl+Enter-to-send: plain Enter inserts a newline.
+  if (isSendOnEnter() ? bModifier : !bModifier) {
     return;
   }
   e.preventDefault();

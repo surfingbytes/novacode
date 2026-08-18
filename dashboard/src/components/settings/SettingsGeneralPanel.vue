@@ -29,6 +29,7 @@ import {
   requestPermission,
   syncPushSubscription
 } from '@/lib/notifications';
+import { isSendOnEnter, setSendOnEnter } from '@/lib/sendOnEnter';
 import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 
 // types
@@ -54,6 +55,8 @@ const bSavingTheme = ref<boolean>(false);
 
 const bNotifications = ref<boolean>(isNotificationsEnabled());
 const notifPermission = ref<NotificationPermission | 'unsupported'>(getPermissionState());
+
+const bSendOnEnter = ref<boolean>(isSendOnEnter());
 
 const bClaudeAutoContinue = ref<boolean>(false);
 const bSavingClaudeAutoContinue = ref<boolean>(false);
@@ -260,6 +263,11 @@ const onUtilityModelChange = async (value: string): Promise<void> => {
   await saveUtilitySettings();
 };
 
+const toggleSendOnEnter = (): void => {
+  bSendOnEnter.value = !bSendOnEnter.value;
+  setSendOnEnter(bSendOnEnter.value);
+};
+
 const toggleClaudeAutoContinue = async (): Promise<void> => {
   bClaudeAutoContinue.value = !bClaudeAutoContinue.value;
   bSavingClaudeAutoContinue.value = true;
@@ -327,8 +335,29 @@ onMounted((): void => {
 
 <template>
   <div role="tabpanel">
+        <!-- Chat -->
+        <div class="settings-section-label nc-eyebrow">Chat</div>
+        <div class="settings-pref-list">
+          <div class="settings-pref-row">
+            <div class="settings-pref-row__text">
+              <div class="settings-pref-row__title">Send with Enter</div>
+              <div class="settings-pref-row__desc">
+                Enter sends the message; Ctrl+Enter inserts a newline. Turn off to send with Ctrl+Enter instead — useful on phone keyboards. Saved on this device only.
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              :aria-checked="bSendOnEnter"
+              class="nc-toggle"
+              :class="bSendOnEnter ? 'on' : ''"
+              @click="toggleSendOnEnter"
+            ><span class="nc-toggle-knob" /></button>
+          </div>
+        </div>
+
         <!-- Appearance -->
-        <div class="settings-section-label nc-eyebrow">Appearance</div>
+        <div class="settings-section-label nc-eyebrow" style="margin-top: 36px;">Appearance</div>
         <div class="settings-pref-list">
           <div class="settings-pref-row">
             <div class="settings-pref-row__text">

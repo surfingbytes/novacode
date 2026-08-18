@@ -47,6 +47,7 @@ function mountComposer(overrides: Record<string, unknown> = {}) {
 
 describe('ChatComposer send controls', () => {
   beforeEach(() => {
+    localStorage.clear();
     document.body.innerHTML = '<div id="app"></div>';
     setActivePinia(createPinia());
     Object.defineProperty(window, 'matchMedia', {
@@ -87,6 +88,22 @@ describe('ChatComposer send controls', () => {
     expect(onSend).not.toHaveBeenCalled();
 
     await textarea.trigger('keydown.enter', { key: 'Enter' });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend).toHaveBeenCalledWith({ text: 'hello', imagePaths: [] });
+  });
+
+  it('sends on Ctrl+Enter and inserts a newline on Enter when send-on-enter is off', async () => {
+    localStorage.setItem('nova:chat:sendOnEnter', '0');
+    const onSend = vi.fn();
+    const wrapper = mountComposer({ promptText: 'hello', onSend });
+    await nextTick();
+    const textarea = wrapper.get('textarea');
+    await textarea.setValue('hello');
+
+    await textarea.trigger('keydown.enter', { key: 'Enter' });
+    expect(onSend).not.toHaveBeenCalled();
+
+    await textarea.trigger('keydown.enter', { ctrlKey: true, key: 'Enter' });
     expect(onSend).toHaveBeenCalledTimes(1);
     expect(onSend).toHaveBeenCalledWith({ text: 'hello', imagePaths: [] });
   });
