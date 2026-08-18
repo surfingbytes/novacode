@@ -726,8 +726,8 @@ export function createChatStreamParser(hooks: ChatStreamParserHooks = {}) {
       return;
     }
 
-    // Server-side notice: previous context could not be resumed (session/load failed).
-    if (event.type === 'session_reset_notice') {
+    // Server-side notices (context reset, skipped MCP, …).
+    if (event.type === 'session_reset_notice' || event.type === 'mcp_unavailable_notice') {
       const text = typeof event.text === 'string' ? event.text.trim() : '';
       if (text) items.push({ kind: 'notice', text });
       return;

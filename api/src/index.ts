@@ -10,7 +10,7 @@ import { existsSync } from 'node:fs';
 
 // classes
 import { registerAuth } from './classes/auth';
-import { assertJwtSecret, config, writeGlobalGitConfig } from './classes/config';
+import { assertJwtSecret, clearAgentMcpAutoloadFiles, config, writeGlobalGitConfig } from './classes/config';
 import { db } from './classes/database';
 import { sessionManager } from './classes/sessionManager';
 import { workspaceTerminalManager } from './classes/workspaceTerminalManager';
@@ -37,6 +37,7 @@ import { ensureVapidKeys } from './classes/push';
 import { ensureSshKey } from './classes/sshKey';
 import { logger } from './classes/logger';
 import { resolveCorsOrigin } from './classes/corsOrigin';
+import { applyReachableMcpAutoload } from './classes/mcpServersForAcp';
 import { signalStartupReady } from './classes/startupStatus';
 
 const startTime = Date.now();
@@ -59,6 +60,11 @@ async function main(): Promise<void> {
   assertJwtSecret();
   ensureVapidKeys();
   ensureSshKey(config.configDir);
+  try {
+    clearAgentMcpAutoloadFiles(config.configDir);
+  } catch (err) {
+    logger.warn({ err }, 'Failed to clear agent MCP autoload files');
+  }
 
   const trustProxy =
     process.env['TRUST_PROXY'] === '1' || process.env['TRUST_PROXY'] === 'true';
@@ -200,6 +206,21 @@ async function main(): Promise<void> {
   }
   signalStartupReady();
   fastify.log.info(`Server listening on port ${config.port}`);
+
+  void applyReachableMcpAutoload(config.configDir)
+    .then((autoload) => {
+      if (autoload.skipped.length > 0) {
+        fastify.log.warn(
+          { skipped: autoload.skipped, enabled: autoload.enabled },
+          'Some MCP servers are unreachable and were not loaded'
+        );
+      } else if (autoload.enabled.length > 0) {
+        fastify.log.info({ enabled: autoload.enabled }, 'MCP servers loaded for agents');
+      }
+    })
+    .catch((err) => {
+      fastify.log.warn({ err }, 'MCP autoload probe failed');
+    });
 
   // recover stale orchestrator runs from previous process
   try {

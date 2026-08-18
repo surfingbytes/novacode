@@ -16,6 +16,7 @@ import type {
   ClientContext,
   ContentBlock,
   LoadSessionResponse,
+  McpServer,
   NewSessionResponse,
   RequestPermissionRequest,
   RequestPermissionResponse,
@@ -27,6 +28,7 @@ import { config } from './config';
 import { applySessionMode, applySessionModel, applySessionConfig, findConfigOptionByCategory } from './acpSessionHelpers';
 import type { AcpSessionResponse } from './acpSessionHelpers';
 import { logger, truncateLogText } from './logger';
+import { mcpUnavailableNoticeEventLine } from './mcpServersForAcp';
 
 export type AcpEventHandler = (line: string) => void;
 export type AcpPermissionHandler = (
@@ -128,6 +130,11 @@ export interface AcpSubprocessRunParams {
    * must embed the session id). Only applied on prompt turns.
    */
   transformPrompt?: (promptText: string, acpSessionId: string) => string;
+  /**
+   * MCP servers already filtered to reachable ones. Defaults to none — callers
+   * that want MCP must probe first. A down server must never be passed here.
+   */
+  mcpServers?: McpServer[];
 }
 
 export interface AcpSubprocessRunResult {
@@ -939,43 +946,70 @@ export async function runAcpSubprocessPrompt(
       let sessionResponse: AcpSessionResponse;
       let resolvedModeId: string | undefined;
       let resolvedModelId: string | undefined;
+      const mcpServers = params.mcpServers ?? [];
 
-      if (!acpSessionId) {
+      const newSession = async (servers: McpServer[]): Promise<NewSessionResponse> => {
         phase('session:new:start');
         const created = (await ctx.request(methods.agent.session.new, {
           cwd,
-          mcpServers: [],
+          mcpServers: servers,
         })) as NewSessionResponse;
-        sessionResponse = created;
-        resolvedSessionId = created.sessionId;
         phase('session:new:done');
-      } else {
+        return created;
+      };
+
+      const loadOrCreateSession = async (servers: McpServer[]): Promise<{
+        sessionId: string;
+        response: AcpSessionResponse;
+      }> => {
+        if (!acpSessionId) {
+          const created = await newSession(servers);
+          return { sessionId: created.sessionId, response: created };
+        }
         activeHandlers.set(acpSessionId, () => {});
         try {
           phase('session:load:start');
-          sessionResponse = (await ctx.request(methods.agent.session.load, {
+          const loaded = (await ctx.request(methods.agent.session.load, {
             sessionId: acpSessionId,
             cwd,
-            mcpServers: [],
+            mcpServers: servers,
           })) as LoadSessionResponse;
-          resolvedSessionId = acpSessionId;
           phase('session:load:done');
+          return { sessionId: acpSessionId, response: loaded };
         } catch (err) {
           logger.warn({ logTag, novaSessionId, err }, 'loadSession failed, starting fresh session');
-          // Surface the silent context reset to the user (persisted via onEvent).
           handleEvent(sessionResetNoticeEventLine());
           activeHandlers.delete(acpSessionId);
-          phase('session:new:start');
-          const created = (await ctx.request(methods.agent.session.new, {
-            cwd,
-            mcpServers: [],
-          })) as NewSessionResponse;
-          sessionResponse = created;
-          resolvedSessionId = created.sessionId;
-          phase('session:new:done');
+          const created = await newSession(servers);
+          return { sessionId: created.sessionId, response: created };
+        } finally {
+          activeHandlers.delete(acpSessionId);
         }
-        activeHandlers.delete(acpSessionId);
+      };
+
+      let opened: { sessionId: string; response: AcpSessionResponse };
+      try {
+        opened = await loadOrCreateSession(mcpServers);
+      } catch (err) {
+        if (mcpServers.length === 0) {
+          throw err;
+        }
+        logger.warn(
+          { logTag, novaSessionId, err, mcpCount: mcpServers.length },
+          'ACP session failed with MCP servers; retrying without them'
+        );
+        const notice = mcpUnavailableNoticeEventLine(
+          mcpServers.map((server) => ({
+            name: server.name,
+            error: 'agent rejected MCP during session setup'
+          }))
+        );
+        if (notice) handleEvent(notice);
+        opened = await loadOrCreateSession([]);
       }
+
+      sessionResponse = opened.response;
+      resolvedSessionId = opened.sessionId;
 
       sessionIdForCancel = resolvedSessionId;
 

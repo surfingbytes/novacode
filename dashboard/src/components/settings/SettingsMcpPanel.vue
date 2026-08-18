@@ -10,7 +10,7 @@ import ModalHeader from '@/components/ModalHeader.vue';
 import { settingsApi } from '@/classes/api';
 
 // types
-import type { McpClientServer, McpConnectivityCheckResult } from '@/@types/index';
+import type { McpClientServer, McpConnectivityCheckResult, McpAutoloadStatus } from '@/@types/index';
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const mcpClients = ref<Record<string, McpClientServer>>({});
@@ -31,6 +31,13 @@ const mcpClientFormError = ref<string>('');
 const bCheckingMcpConnectivity = ref<boolean>(false);
 const mcpConnectivityResults = ref<Record<string, McpConnectivityCheckResult> | null>(null);
 const mcpConnectivityError = ref<string>('');
+const mcpAutoload = ref<McpAutoloadStatus | null>(null);
+
+const applyAutoload = (autoload?: McpAutoloadStatus): void => {
+  if (autoload) {
+    mcpAutoload.value = autoload;
+  }
+};
 
 // -------------------------------------------------- Methods --------------------------------------------------
 const loadMcpClients = async (): Promise<void> => {
@@ -38,6 +45,7 @@ const loadMcpClients = async (): Promise<void> => {
   try {
     const response = await settingsApi.getMcpClients();
     mcpClients.value = response.data.servers;
+    applyAutoload(response.data.autoload);
   } catch {
     mcpClients.value = {};
   } finally {
@@ -151,6 +159,7 @@ const saveMcpClient = async (): Promise<void> => {
   try {
     const response = await settingsApi.saveMcpClients(updated);
     mcpClients.value = response.data.servers;
+    applyAutoload(response.data.autoload);
     bShowMcpClientModal.value = false;
   } catch {
     mcpClientFormError.value = 'Failed to save.';
@@ -166,6 +175,7 @@ const deleteMcpClient = async (name: string): Promise<void> => {
   try {
     const response = await settingsApi.saveMcpClients(updated);
     mcpClients.value = response.data.servers;
+    applyAutoload(response.data.autoload);
   } catch {
     // ignore
   } finally {
@@ -183,6 +193,8 @@ const runMcpConnectivityCheck = async (): Promise<void> => {
   try {
     const response = await settingsApi.checkMcpClients();
     mcpConnectivityResults.value = response.data.results;
+    const autoloadResponse = await settingsApi.getMcpClients();
+    applyAutoload(autoloadResponse.data.autoload);
   } catch {
     mcpConnectivityError.value = 'Connectivity check failed.';
   } finally {
@@ -202,22 +214,13 @@ onMounted((): void => {
           <div class="settings-section-label nc-eyebrow">MCP client servers</div>
           <p class="settings-section-desc">
             Register <strong class="text-text-primary font-medium">external</strong> MCP servers (stdio or HTTP) for
-            Cursor and Claude Code. The API writes your config volume (<code
-              class="bg-fg/[0.06] border border-fg/[0.08] px-1.5 py-0.5 rounded text-text-primary font-mono text-[11px]"
-              >CONFIG_DIR</code
-            >): Cursor reads
+            Cursor and Claude Code. Config is stored as
             <code
               class="bg-fg/[0.06] border border-fg/[0.08] px-1.5 py-0.5 rounded text-text-primary font-mono text-[11px]"
-              >.cursor/mcp.json</code>
-            ; Claude merges
-            <code
-              class="bg-fg/[0.06] border border-fg/[0.08] px-1.5 py-0.5 rounded text-text-primary font-mono text-[11px]"
-              >mcpServers</code>
-            into
-            <code
-              class="bg-fg/[0.06] border border-fg/[0.08] px-1.5 py-0.5 rounded text-text-primary font-mono text-[11px]"
-              >.claude.json</code>
-            (applies to all workspaces using this server).
+              >mcp-clients.json</code
+            >.
+            After Nova Code starts, reachable servers are loaded for agents; unreachable ones are
+            skipped with a warning so they cannot crash the app.
           </p>
 
           <div class="bg-fg/[0.02] border border-fg/[0.07] rounded-xl p-5">
@@ -252,8 +255,29 @@ onMounted((): void => {
             </div>
             <p class="text-xs text-text-muted mb-4">
               Dry-run: command (stdio) servers are spawned briefly on the host; HTTP servers are
-              requested with GET. Fix failures here before agents load MCP mid-session.
+              requested with GET. Test connectivity also updates which servers agents will load.
             </p>
+            <p
+              v-if="mcpAutoload?.status === 'pending'"
+              class="text-xs text-text-muted mb-3"
+            >
+              Checking MCP servers in the background…
+            </p>
+            <div
+              v-else-if="mcpAutoload && mcpAutoload.skipped.length > 0"
+              class="mb-4 rounded-lg border border-destructive/25 bg-destructive/8 px-3 py-2.5 text-sm text-destructive"
+            >
+              <p class="font-medium mb-1">Some MCP servers are not reachable and were ignored.</p>
+              <ul class="space-y-0.5 text-xs">
+                <li v-for="skipped in mcpAutoload.skipped" :key="skipped.name">
+                  <span class="font-medium">{{ skipped.name }}</span>
+                  <span class="text-destructive/80"> — {{ skipped.error }}</span>
+                </li>
+              </ul>
+              <p class="text-xs text-text-muted mt-2">
+                Agents will start without them. Use Test connectivity after the server is running.
+              </p>
+            </div>
             <p v-if="mcpConnectivityError" class="text-xs text-destructive mb-3">
               {{ mcpConnectivityError }}
             </p>
@@ -308,6 +332,12 @@ onMounted((): void => {
                             : 'HTTP'
                           : 'stdio'
                       }}
+                    </span>
+                    <span
+                      v-if="mcpAutoload?.skipped.some((skipped) => skipped.name === name)"
+                      class="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded border bg-destructive/10 text-destructive border-destructive/20"
+                    >
+                      ignored
                     </span>
                   </div>
                   <p class="text-xs text-text-muted font-mono mt-0.5 truncate">

@@ -107,14 +107,14 @@ function checkStdio(configDir: string, cfg: McpClientServerConfig): Promise<McpC
   });
 }
 
-async function checkHttp(cfg: McpClientServerConfig): Promise<McpCheckResult> {
+async function checkHttp(cfg: McpClientServerConfig, timeoutMs: number): Promise<McpCheckResult> {
   const url = cfg.url?.trim();
   if (!url) {
     return { ok: false, kind: 'http', error: 'Missing URL' };
   }
 
   const ac = new AbortController();
-  const timeoutHandle = setTimeout(() => ac.abort(), HTTP_TIMEOUT_MS);
+  const timeoutHandle = setTimeout(() => ac.abort(), timeoutMs);
   try {
     const headers = new Headers();
     for (const [k, v] of Object.entries(cfg.headers ?? {})) {
@@ -130,7 +130,8 @@ async function checkHttp(cfg: McpClientServerConfig): Promise<McpCheckResult> {
     return { ok: true, kind: 'http', detail: `HTTP ${response.status}` };
   } catch (e) {
     clearTimeout(timeoutHandle);
-    const msg = e instanceof Error ? e.message : String(e);
+    const aborted = e instanceof Error && e.name === 'AbortError';
+    const msg = aborted ? `Timed out after ${timeoutMs}ms` : e instanceof Error ? e.message : String(e);
     return { ok: false, kind: 'http', error: msg };
   }
 }
@@ -139,30 +140,42 @@ function isHttpLike(cfg: McpClientServerConfig): boolean {
   return !!(cfg.url && !cfg.command);
 }
 
+export interface CheckMcpClientsOptions {
+  /** HTTP GET abort timeout. Defaults to 10s (Settings dry-run). */
+  httpTimeoutMs?: number;
+}
+
 /**
  * Dry-run connectivity checks for MCP client entries (stdio: spawn probe; HTTP: GET URL).
- * Runs in parallel across servers.
+ * Runs in parallel across servers. Never throws — unreachable servers return `{ ok: false }`.
  */
 export async function checkMcpClients(
   configDir: string,
-  servers?: Record<string, McpClientServerConfig>
+  servers?: Record<string, McpClientServerConfig>,
+  options?: CheckMcpClientsOptions
 ): Promise<Record<string, McpCheckResult>> {
   const map = servers ?? readMcpClients(configDir);
   const entries = Object.entries(map);
   const out: Record<string, McpCheckResult> = {};
+  const httpTimeoutMs = options?.httpTimeoutMs ?? HTTP_TIMEOUT_MS;
 
   await Promise.all(
     entries.map(async ([name, cfg]) => {
-      if (isHttpLike(cfg)) {
-        out[name] = await checkHttp(cfg);
-      } else if (cfg.command?.trim()) {
-        out[name] = await checkStdio(configDir, cfg);
-      } else {
-        out[name] = {
-          ok: false,
-          kind: 'stdio',
-          error: 'Invalid entry: set either command (stdio) or url (HTTP)'
-        };
+      try {
+        if (isHttpLike(cfg)) {
+          out[name] = await checkHttp(cfg, httpTimeoutMs);
+        } else if (cfg.command?.trim()) {
+          out[name] = await checkStdio(configDir, cfg);
+        } else {
+          out[name] = {
+            ok: false,
+            kind: 'stdio',
+            error: 'Invalid entry: set either command (stdio) or url (HTTP)'
+          };
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        out[name] = { ok: false, kind: isHttpLike(cfg) ? 'http' : 'stdio', error: msg };
       }
     })
   );

@@ -18,6 +18,11 @@ import {
   writeMcpClients
 } from '../classes/config';
 import { checkMcpClients } from '../classes/mcpConnectivityCheck';
+import {
+  applyMcpAutoloadFromChecks,
+  applyReachableMcpAutoload,
+  getMcpAutoloadStatus
+} from '../classes/mcpServersForAcp';
 import { getCursorModels } from '../classes/cursorModels';
 import { getOpenCodeModels, clearOpenCodeModelsCache } from '../classes/openCodeModels';
 import { getAgentModels } from '../classes/agentModels';
@@ -608,8 +613,21 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     headers: Type.Optional(Type.Record(Type.String(), Type.String()))
   });
 
+  const McpAutoloadStatusSchema = Type.Object({
+    status: Type.Union([Type.Literal('pending'), Type.Literal('ready')]),
+    enabled: Type.Array(Type.String()),
+    skipped: Type.Array(
+      Type.Object({
+        name: Type.String(),
+        error: Type.String()
+      })
+    ),
+    probedAt: Type.Union([Type.Number(), Type.Null()])
+  });
+
   const McpClientsResponseSchema = Type.Object({
-    servers: Type.Record(Type.String(), McpClientServerSchema)
+    servers: Type.Record(Type.String(), McpClientServerSchema),
+    autoload: McpAutoloadStatusSchema
   });
 
   fastifyInstance.get(
@@ -620,7 +638,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async () => {
       const servers = readMcpClients(config.configDir);
-      return { servers };
+      return { servers, autoload: getMcpAutoloadStatus() };
     }
   );
 
@@ -639,7 +657,8 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     async (request) => {
       const { servers } = request.body as { servers: Record<string, McpClientServerConfig> };
       writeMcpClients(config.configDir, servers);
-      return { servers };
+      const autoload = await applyReachableMcpAutoload(config.configDir);
+      return { servers, autoload };
     }
   );
 
@@ -669,6 +688,9 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     async (request) => {
       const body = request.body as { servers?: Record<string, McpClientServerConfig> };
       const results = await checkMcpClients(config.configDir, body.servers);
+      if (!body.servers) {
+        applyMcpAutoloadFromChecks(config.configDir, readMcpClients(config.configDir), results);
+      }
       return { results };
     }
   );

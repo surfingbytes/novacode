@@ -445,6 +445,19 @@ export interface McpConnectivityCheckResult {
   detail?: string;
 }
 
+export interface McpSkippedServer {
+  name: string;
+  error: string;
+}
+
+/** Last MCP autoload probe (startup, save, or Test connectivity). */
+export interface McpAutoloadStatus {
+  status: 'pending' | 'ready';
+  enabled: string[];
+  skipped: McpSkippedServer[];
+  probedAt: number | null;
+}
+
 export type OpenCodeProviderAdapter = 'openai-compatible' | 'openai' | 'custom';
 
 export interface OpenCodeProviderModel {

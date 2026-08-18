@@ -135,7 +135,7 @@ Optional features include **scheduled automations**, **role templates**, and **b
 - **UI**: **Theme** (including **auto theme** and separate dark/light theme presets), **model selection** (e.g. auto vs specific Cursor models).
 - **Agent capabilities**: Endpoints report whether **Claude**, **Cursor**, **Mistral Vibe**, **OpenCode**, and **Codex** are usable (CLI/ACP probes plus stored credentials where required).
 - **Vibe (Mistral)**: Stored API key in `.vibe/.env` under config dir when configured; surfaced as `mistralVibeAvailable` with the `vibe-acp` probe.
-- **MCP client config**: External MCP servers (stdio or HTTP) for Cursor / Claude; persisted as `mcp-clients.json` and synced to `.cursor/mcp.json` and `mcpServers` in `.claude.json` (read/write via settings API). **`POST /api/settings/mcp-clients/check`** runs a dry-run (stdio spawn probe, HTTP GET) and returns per-server results.
+- **MCP client config**: External MCP servers (stdio or HTTP) for Cursor / Claude; persisted as `mcp-clients.json`. After the API is listening, a background probe restores reachable servers into `.cursor/mcp.json` and Claude `mcpServers` (same as before). Unreachable servers are skipped with a warning in **Settings → MCP** so they cannot crash startup or agent spawn. **`POST /api/settings/mcp-clients/check`** runs a dry-run and updates autoload from the results.
 - **Claude token**: Optional stored token for Claude authentication.
 - **Cursor login**: Flows that spawn a PTY for `cursor-agent` login and persist auth under `config`.
 

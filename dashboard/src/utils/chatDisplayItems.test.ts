@@ -501,6 +501,23 @@ describe('session_reset_notice events', () => {
   });
 });
 
+describe('mcp_unavailable_notice events', () => {
+  it('produces a notice display item with the notice text', () => {
+    const parser = createChatStreamParser();
+    const items: DisplayItem[] = [];
+    parser.processEventLine(
+      JSON.stringify({
+        type: 'mcp_unavailable_notice',
+        text: 'MCP server joplin is not reachable and was skipped.'
+      }),
+      items
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('notice');
+    expect(items[0].text).toBe('MCP server joplin is not reachable and was skipped.');
+  });
+});
+
 // ---------------------------------- Legacy cursor-style ----------------------------------
 
 describe('legacy cursor-style events', () => {

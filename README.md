@@ -62,7 +62,7 @@ Nova Code was originally created by [Jonah Fintz](https://github.com/JonahFintzD
 | **Usage** | Token/cost snapshots from ACP `usage_update` events are stored per turn and shown in chat plus a workspace total. |
 | **Web Push** | Browser notifications when sessions finish; the body previews the last assistant text or tool result (title still names workspace/session). Notifications include a **Reply** action that opens the PWA directly to that session. VAPID keys are created automatically in the config volume. |
 | **Health endpoint** | `GET /api/health` — unauthenticated, ready for Docker `HEALTHCHECK` and uptime monitors. Compose and the image probe this path; Postgres is not published to the host. During container start a progress page binds the port immediately so a reverse proxy does not sit on 502. |
-| **MCP connectivity check** | In **Settings → MCP**, **Test connectivity** dry-runs each registered MCP server (stdio spawn, HTTP GET) on the host before agents use them. |
+| **MCP connectivity check** | After boot, Nova Code probes registered MCP servers and loads only reachable ones for agents. Unreachable servers are ignored with a warning in **Settings → MCP**. **Test connectivity** re-runs that probe. |
 
 ---
 

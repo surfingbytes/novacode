@@ -28,7 +28,7 @@ const MOCK_SESSION_ID = 'mock-acp-session-1';
 interface MockLogMessage {
   id?: unknown;
   method?: string;
-  params?: { sessionId?: string };
+  params?: { sessionId?: string; mcpServers?: unknown[] };
 }
 
 const tempDirs: string[] = [];
@@ -109,6 +109,35 @@ describe('runAcpSubprocessPrompt', () => {
     const methods = readMockLog(logPath).map((m) => m.method);
     expect(methods).toContain('session/new');
     expect(methods).not.toContain('session/load');
+  });
+
+  it('retries session/new without MCP when the agent rejects MCP servers', async () => {
+    const { workDir, logPath } = setupMock('fail-new-if-mcp');
+    const events: string[] = [];
+
+    const result = await runAcpSubprocessPrompt(
+      {
+        command: process.execPath,
+        args: [MOCK_AGENT_PATH],
+        cwd: workDir,
+        novaSessionId: 'nova-mcp-retry',
+        acpSessionId: null,
+        promptText: 'hello',
+        logTag: 'testAcp',
+        mcpServers: [
+          { type: 'http', name: 'joplin', url: 'http://joplin-mcp:3000/mcp', headers: [] }
+        ]
+      },
+      (line) => events.push(line)
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.acpSessionId).toBe(MOCK_SESSION_ID);
+    const newCalls = readMockLog(logPath).filter((m) => m.method === 'session/new');
+    expect(newCalls).toHaveLength(2);
+    expect(newCalls[0]?.params?.mcpServers).toHaveLength(1);
+    expect(newCalls[1]?.params?.mcpServers).toEqual([]);
+    expect(events.some((line) => line.includes('mcp_unavailable_notice'))).toBe(true);
   });
 
   it('resumes an existing ACP session via session/load on follow-up turns', async () => {

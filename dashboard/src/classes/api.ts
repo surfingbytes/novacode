@@ -12,6 +12,7 @@ import type {
   AppSettings,
   McpClientServer,
   McpConnectivityCheckResult,
+  McpAutoloadStatus,
   CreateWorkspacePayload,
   UpdateWorkspacePayload,
   Session,
@@ -205,6 +206,7 @@ export function apiErrorMessage(error: unknown, fallback: string): string {
 
 interface McpClientsResponse {
   servers: Record<string, McpClientServer>;
+  autoload: McpAutoloadStatus;
 }
 
 interface McpClientsCheckResponse {

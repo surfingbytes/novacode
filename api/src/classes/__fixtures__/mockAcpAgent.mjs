@@ -7,6 +7,7 @@
  *             'hang-until-cancel'    — session/prompt responds only after session/cancel
  *             'ignore-cancel'        — session/prompt never responds (forces hard kill)
  *             'fail-load'            — session/load responds with a JSON-RPC error
+ *             'fail-new-if-mcp'      — session/new errors when mcpServers is non-empty
  *             'prompt-permission'    — session/prompt asks the client for tool permission first
  *             'prompt-ask-question'  — session/prompt asks via cursor/ask_question first
  *             'prompt-update-todos'  — session/prompt sends cursor/update_todos first
@@ -127,7 +128,15 @@ rl.on('line', (line) => {
       });
       break;
     case 'session/new':
-      send({ jsonrpc: '2.0', id: msg.id, result: { sessionId: SESSION_ID } });
+      if (mode === 'fail-new-if-mcp' && Array.isArray(msg.params?.mcpServers) && msg.params.mcpServers.length > 0) {
+        send({
+          jsonrpc: '2.0',
+          id: msg.id,
+          error: { code: -32000, message: 'mcp failed' },
+        });
+      } else {
+        send({ jsonrpc: '2.0', id: msg.id, result: { sessionId: SESSION_ID } });
+      }
       break;
     case 'session/load':
       if (mode === 'fail-load') {

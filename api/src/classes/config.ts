@@ -310,24 +310,36 @@ function normalizeMcpServersForAgents(
 }
 
 /**
- * Persist MCP client servers for all workspaces: canonical JSON plus files agents read.
- * - Cursor: /config/.cursor/mcp.json (CURSOR_HOME is /config)
- * - Claude Code: merge mcpServers into /config/.claude.json (user scope, all projects)
+ * Write Cursor/Claude autoload files. Pass `{}` to keep agents from connecting
+ * to MCP (used until a probe proves servers are reachable).
+ */
+export function writeAgentMcpAutoloadFiles(
+  configDir: string,
+  servers: Record<string, McpClientServerConfig>
+): void {
+  const normalized = normalizeMcpServersForAgents(servers);
+  const payload = JSON.stringify({ mcpServers: normalized }, null, 2) + '\n';
+  const cursorDir = join(configDir, '.cursor');
+  if (!existsSync(cursorDir)) mkdirSync(cursorDir, { recursive: true });
+  writeFileSync(join(cursorDir, 'mcp.json'), payload, 'utf8');
+  mergeMcpServersIntoClaudeJson(configDir, normalized);
+}
+
+/** Clear autoload so a down MCP cannot crash Cursor/Claude on spawn. */
+export function clearAgentMcpAutoloadFiles(configDir: string): void {
+  writeAgentMcpAutoloadFiles(configDir, {});
+}
+
+/**
+ * Persist canonical MCP client config. Autoload files are cleared until a
+ * probe writes back only reachable servers.
  */
 export function writeMcpClients(
   configDir: string,
   servers: Record<string, McpClientServerConfig>
 ): void {
   writeFileSync(join(configDir, MCP_CLIENTS_FILE), JSON.stringify(servers, null, 2), 'utf8');
-
-  const normalized = normalizeMcpServersForAgents(servers);
-  const payload = JSON.stringify({ mcpServers: normalized }, null, 2) + '\n';
-
-  const cursorDir = join(configDir, '.cursor');
-  if (!existsSync(cursorDir)) mkdirSync(cursorDir, { recursive: true });
-  writeFileSync(join(cursorDir, 'mcp.json'), payload, 'utf8');
-
-  mergeMcpServersIntoClaudeJson(configDir, normalized);
+  clearAgentMcpAutoloadFiles(configDir);
 }
 
 function mergeMcpServersIntoClaudeJson(

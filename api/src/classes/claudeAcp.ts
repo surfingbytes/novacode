@@ -176,7 +176,6 @@ export async function runClaudeAcp(
       sessionResponse = await agent.resumeSession({ sessionId: acpSessionId, cwd, mcpServers: [] });
       resolvedSessionId = acpSessionId;
     } catch {
-      // Surface the silent context reset to the user (persisted via onEvent).
       onEvent(sessionResetNoticeEventLine());
       const created = await agent.newSession({ cwd, mcpServers: [] });
       sessionResponse = created;
