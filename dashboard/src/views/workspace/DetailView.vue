@@ -52,6 +52,9 @@ const orchLongPressTimer = ref<ReturnType<typeof setTimeout> | null>(null);
 const workspaceId = computed((): string => route.params.id as string);
 const workspace = computed(() => store.workspaces.find((w) => w.id === workspaceId.value));
 const isFilesRoute = computed(() => route.name === 'workspace-files');
+const isPaneRoute = computed(
+  () => route.name === 'workspace-files' || route.name === 'workspace-git'
+);
 
 // -------------------------------------------------- Watchers --------------------------------------------------
 
@@ -272,7 +275,7 @@ onBeforeUnmount(() => {
       v-else-if="workspace"
       :workspace="workspace"
       :class="[
-        isFilesRoute ? 'flex-1 min-h-0' : '',
+        isPaneRoute ? 'flex-1 min-h-0' : '',
         // Reserve space for the fixed mobile tab navigation.
         'pb-[calc(3rem+env(safe-area-inset-bottom,0px)+1rem)] md:pb-0'
       ]"

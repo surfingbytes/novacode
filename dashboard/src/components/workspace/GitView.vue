@@ -866,7 +866,7 @@ onUnmounted((): void => {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 overflow-hidden bg-bg">
+  <div class="flex h-full min-h-0 flex-1 overflow-hidden bg-bg">
     <GitChangesList
       v-model:selected-git-repo="selectedGitRepo"
       v-model:commit-message="commitMessage"

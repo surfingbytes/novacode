@@ -836,7 +836,7 @@ watch(
       @archive-orchestrator="toggleArchiveOrchestrator"
       @delete="showDeleteModal"
     />
-    <div v-else-if="viewMode === 'list'" ref="listViewRef" class="list-view">
+    <div v-else-if="viewMode === 'list'" ref="listViewRef" class="list-view shrink-0">
       <SessionListRows
         :items="combinedItems"
         :workspace-id="workspaceId"
