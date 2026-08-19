@@ -11,7 +11,7 @@ import { globalRulesApi } from '@/classes/api';
 // types
 import type { Workspace } from '@/@types/index';
 
-const props = defineProps<{
+defineProps<{
   workspace: Workspace;
 }>();
 
