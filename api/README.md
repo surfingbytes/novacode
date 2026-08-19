@@ -4,7 +4,7 @@ JSON under `/api`. The dashboard signs in with an **httpOnly session cookie** (7
 
 ## Role templates
 
-Reusable Markdown snippets for new workspace rule files.
+Reusable Markdown snippets for new workspace or global rule files.
 
 - `GET /api/role-templates` — list
 - `POST /api/role-templates` — create `{ name, description?, content }`
@@ -14,7 +14,17 @@ Reusable Markdown snippets for new workspace rule files.
 
 Each template has `id`, `name`, optional `description`, Markdown `content`, and ISO `createdAt` / `updatedAt`.
 
-In the **Rules** UI, pick a template when creating a new workspace rule file so shared boilerplate is not retyped. Templates are **not** copied onto sessions.
+In the **Rules** UI (workspace or **Settings → Rules**), pick a template when creating a new rule file so shared boilerplate is not retyped. Templates are **not** copied onto sessions.
+
+## Global rules
+
+Markdown files under `/config/global-rules`, injected into every agent prompt (before workspace rules).
+
+- `GET /api/global-rules` — list `{ filename, label }`
+- `GET /api/global-rules/:filename` — `{ filename, content }`
+- `PUT /api/global-rules/:filename` — `{ content }` (creates the directory on first write)
+- `DELETE /api/global-rules/:filename`
+- `PATCH /api/global-rules/:filename` — `{ newFilename }`
 
 ## API keys
 

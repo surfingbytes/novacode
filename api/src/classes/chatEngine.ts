@@ -1,8 +1,7 @@
 // node_modules
 import { randomUUID } from 'node:crypto';
 import { extname, join } from 'node:path';
-import { readdir, readFile, stat } from 'node:fs/promises';
-import type { Dirent } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import type {
   RequestPermissionRequest,
   RequestPermissionResponse,
@@ -11,7 +10,8 @@ import type {
 // classes
 import { db } from './database';
 import { config } from './config';
-import { isWorkspaceRuleHiddenFromUi } from './workspaceRules';
+import { getGlobalRulesDir } from './globalRules';
+import { buildAgentRulesPrefix } from './ruleFiles';
 import { runClaudeAcp, cancelClaudeAcp } from './claudeAcp';
 import { runVibeAcp, cancelVibeAcp } from './vibeAcp';
 import { runCursorAcp, cancelCursorAcp } from './cursorAcp';
@@ -529,53 +529,10 @@ function parseClaudeRateLimitError(rawError: string): { resetAtIso?: string; res
 }
 
 async function buildWorkspaceRulesPrefix(workspacePath: string): Promise<string> {
-  const rulesDir = join(workspacePath, '.cursor', 'rules');
-  let entries: Dirent[];
-  try {
-    entries = await readdir(rulesDir, { withFileTypes: true });
-  } catch {
-    return '';
-  }
-
-  const ruleFiles: string[] = [];
-  for (const entry of entries) {
-    if (entry.isDirectory()) continue;
-    let include = entry.isFile();
-    if (entry.isSymbolicLink()) {
-      try {
-        const st = await stat(join(rulesDir, entry.name));
-        include = st.isFile();
-      } catch {
-        include = false;
-      }
-    }
-    if (!include) continue;
-    if (isWorkspaceRuleHiddenFromUi(entry.name)) continue;
-    ruleFiles.push(entry.name);
-  }
-  ruleFiles.sort();
-  if (ruleFiles.length === 0) return '';
-
-  const sections: string[] = [];
-  for (const filename of ruleFiles) {
-    try {
-      const content = await readFile(join(rulesDir, filename), 'utf8');
-      const trimmed = content.trim();
-      if (!trimmed) continue;
-      sections.push(`--- ${filename} ---\n${trimmed}`);
-    } catch {
-      // ignore unreadable single files
-    }
-  }
-
-  if (sections.length === 0) return '';
-
-  return [
-    'Workspace rules (from .cursor/rules) apply to this task.',
-    'Follow them as high-priority instructions when generating your response.',
-    '',
-    sections.join('\n\n'),
-  ].join('\n');
+  return buildAgentRulesPrefix({
+    globalRulesDir: getGlobalRulesDir(),
+    workspacePath,
+  });
 }
 
 /**

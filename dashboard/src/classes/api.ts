@@ -957,3 +957,28 @@ export const workspaceRulesApi = {
       { newFilename }
     )
 };
+
+export const globalRulesApi = {
+  list: (): ReturnType<typeof http.get<WorkspaceRuleFileSummary[]>> =>
+    http.get<WorkspaceRuleFileSummary[]>('/global-rules'),
+
+  read: (filename: string): ReturnType<typeof http.get<WorkspaceRuleFileContent>> =>
+    http.get<WorkspaceRuleFileContent>(`/global-rules/${encodeURIComponent(filename)}`),
+
+  update: (
+    filename: string,
+    content: string
+  ): ReturnType<typeof http.put<{ filename: string }>> =>
+    http.put<{ filename: string }>(`/global-rules/${encodeURIComponent(filename)}`, { content }),
+
+  remove: (filename: string): ReturnType<typeof http.delete<{ filename: string }>> =>
+    http.delete<{ filename: string }>(`/global-rules/${encodeURIComponent(filename)}`),
+
+  rename: (
+    filename: string,
+    newFilename: string
+  ): ReturnType<typeof http.patch<{ filename: string }>> =>
+    http.patch<{ filename: string }>(`/global-rules/${encodeURIComponent(filename)}`, {
+      newFilename
+    })
+};

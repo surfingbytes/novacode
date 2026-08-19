@@ -74,7 +74,11 @@ const SETTINGS_SEARCH_TERMS: string[] = [
   'mcp server',
   'mcp servers',
   'model context protocol',
-  'connectivity'
+  'connectivity',
+  'rules',
+  'global rules',
+  'shared rules',
+  'templates'
 ];
 
 interface PaletteCommand {
@@ -137,6 +141,11 @@ const paletteCommands = computed<PaletteCommand[]>(() => {
       id: 'settings',
       name: 'Go to Settings',
       keywords: ['settings', 'preferences', 'config']
+    },
+    {
+      id: 'global-rules',
+      name: 'Settings → Rules',
+      keywords: ['rules', 'global rules', 'shared rules']
     },
     {
       id: 'account',
@@ -373,6 +382,9 @@ function runPaletteCommand(commandId: string): void {
       break;
     case 'settings':
       void router.push('/settings');
+      break;
+    case 'global-rules':
+      void router.push({ name: 'settings', query: { tab: 'rules' } });
       break;
     case 'account':
       void router.push('/account');

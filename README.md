@@ -57,6 +57,7 @@ Nova Code was originally created by [Jonah Fintz](https://github.com/JonahFintzD
 | **Git** | Per-workspace Git status, diffs, and multi-repo discovery — right in the UI. |
 | **File browser** | Browse, create, rename, and delete files and folders inside a workspace. Dotfiles are hidden by default; use the eye toggle to show them. |
 | **Workspace rules** | Markdown rule files injected into every agent prompt for that workspace. |
+| **Global rules** | Shared Markdown rule files (Settings → Rules) injected into every workspace. Workspace rules win on conflict. |
 | **Role templates** | Reusable instruction snippets for bootstrapping new rule files. |
 | **REST API** | JSON API under `/api`. The dashboard uses an httpOnly session cookie; scripts should use a hashed **API key** from **Account → API keys** (`Authorization: Bearer nck_…`). |
 | **Usage** | Token/cost snapshots from ACP `usage_update` events are stored per turn and shown in chat plus a workspace total. |

@@ -18,7 +18,7 @@ import EntityDetailHeader from '@/components/ui/EntityDetailHeader.vue';
 import BottomTabBar from '@/components/ui/BottomTabBar.vue';
 
 // classes
-import { sessionsApi, settingsApi, workspaceRulesApi, buildSessionTerminalWsUrl } from '@/classes/api';
+import { sessionsApi, settingsApi, workspaceRulesApi, globalRulesApi, buildSessionTerminalWsUrl } from '@/classes/api';
 import { readFilesOpenPath, writeFilesOpenPath } from '@/lib/filesOpenPath';
 import { renderMermaidDiagrams } from '@/lib/mermaid';
 import { clearSessionPrompt, persistSessionPrompt, readSessionPrompt } from '@/lib/pendingSessionPrompt';
@@ -191,6 +191,7 @@ type SessionTab = 'chat' | 'terminal' | 'files' | 'git' | 'plan';
 const activeTab = ref<SessionTab>('chat');
 const filesOpenPath = ref<string | null>(readFilesOpenPath(props.workspaceId));
 const rulesCount = ref(0);
+const globalRulesCount = ref(0);
 
 let mermaidRenderTimer: ReturnType<typeof setTimeout> | null = null;
 let fetchSessionSeq = 0;
@@ -525,10 +526,20 @@ const sessionCostLabel = computed(() => {
   );
 });
 const rulesSubtitleLabel = computed(() => {
-  if (rulesCount.value <= 0) {
-    return null;
+  const parts: string[] = [];
+  if (rulesCount.value > 0) {
+    parts.push(`${rulesCount.value} workspace rule${rulesCount.value === 1 ? '' : 's'}`);
   }
-  return `${rulesCount.value} rule${rulesCount.value === 1 ? '' : 's'}`;
+  if (globalRulesCount.value > 0) {
+    parts.push(`${globalRulesCount.value} global rule${globalRulesCount.value === 1 ? '' : 's'}`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : null;
+});
+const rulesSubtitleTo = computed(() => {
+  if (rulesCount.value > 0) {
+    return { name: 'workspace-rules' as const, params: { id: props.workspaceId } };
+  }
+  return { name: 'settings' as const, query: { tab: 'rules' } };
 });
 
 function tabFromQuery(raw: unknown): SessionTab | null {
@@ -603,6 +614,12 @@ async function loadRulesCount(): Promise<void> {
     rulesCount.value = Array.isArray(data) ? data.length : 0;
   } catch {
     rulesCount.value = 0;
+  }
+  try {
+    const { data } = await globalRulesApi.list();
+    globalRulesCount.value = Array.isArray(data) ? data.length : 0;
+  } catch {
+    globalRulesCount.value = 0;
   }
 }
 const sessionTerminalWsUrl = computed(() =>
@@ -988,7 +1005,7 @@ onUnmounted(() => {
         </template>
         <RouterLink
           v-if="rulesSubtitleLabel"
-          :to="{ name: 'workspace-rules', params: { id: workspaceId } }"
+          :to="rulesSubtitleTo"
           class="md:hidden inline-flex items-center gap-1 min-w-0 hover:text-text-primary"
         >
           <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>
@@ -998,14 +1015,24 @@ onUnmounted(() => {
     </EntityDetailHeader>
 
     <div
-      v-if="rulesCount > 0 && activeTab === 'chat'"
-      class="hidden md:block px-4 md:px-6 py-1.5 border-b border-fg/10 shrink-0"
+      v-if="(rulesCount > 0 || globalRulesCount > 0) && activeTab === 'chat'"
+      class="hidden md:block px-4 md:px-6 py-1.5 border-b border-fg/10 shrink-0 text-[11px] text-text-muted"
     >
+      <span>Using </span>
       <RouterLink
+        v-if="rulesCount > 0"
         :to="{ name: 'workspace-rules', params: { id: workspaceId } }"
-        class="text-[11px] text-text-muted hover:text-text-primary"
+        class="hover:text-text-primary"
       >
-        Using {{ rulesCount }} workspace rule{{ rulesCount === 1 ? '' : 's' }}
+        {{ rulesCount }} workspace rule{{ rulesCount === 1 ? '' : 's' }}
+      </RouterLink>
+      <span v-if="rulesCount > 0 && globalRulesCount > 0"> · </span>
+      <RouterLink
+        v-if="globalRulesCount > 0"
+        :to="{ name: 'settings', query: { tab: 'rules' } }"
+        class="hover:text-text-primary"
+      >
+        {{ globalRulesCount }} global rule{{ globalRulesCount === 1 ? '' : 's' }}
       </RouterLink>
     </div>
 

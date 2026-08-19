@@ -27,6 +27,7 @@ import { settingsRoutes } from './routes/settings';
 import { sessionsRoutes } from './routes/sessions';
 import { roleTemplateRoutes } from './routes/roleTemplates';
 import { workspaceRuleRoutes } from './routes/workspaceRules';
+import { globalRuleRoutes } from './routes/globalRules';
 import { orchestratorRoutes } from './routes/orchestrator';
 import { automationRoutes } from './routes/automations';
 import { startAutomationScheduler, stopAutomationScheduler } from './classes/automationScheduler';
@@ -135,6 +136,7 @@ async function main(): Promise<void> {
   await fastify.register(sessionsRoutes);
   await fastify.register(roleTemplateRoutes);
   await fastify.register(workspaceRuleRoutes);
+  await fastify.register(globalRuleRoutes);
   await fastify.register(orchestratorRoutes);
   await fastify.register(automationRoutes);
   await fastify.register(imageRoutes);

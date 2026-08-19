@@ -67,7 +67,7 @@ Optional features include **scheduled automations**, **role templates**, and **b
 - **Subprocess ACP agents** (`cursorAcp.ts`, `vibeAcp.ts`, `openCodeAcp.ts`, `codexAcp.ts`): Use `acpSubprocessRunner.ts` (`ClientSideConnection` + `ndJsonStream` from `@agentclientprotocol/sdk`) to talk to a per-prompt ACP subprocess over stdio. They emit the same `SessionNotification` shape as Claude — the frontend handles all agents identically. History replay events from `session/load` are discarded so only the current turn's events reach the dashboard.
 - **Agent availability**: `claudeAvailable` requires the ACP package and a stored OAuth token. `mistralVibeAvailable` requires both `vibe-acp --version` succeeding and a Mistral API key in `VIBE_HOME/.env`. OpenCode and Codex report `openCodeAvailable` / `codexAvailable` from their respective probes.
 - **Todo lists**: ACP `tool_call`s carrying `rawInput.todos`/`rawOutput.todos` (opencode's `todowrite` sends a structured object; Claude's `TodoWrite` likewise; vibe's `todo` tool sends JSON *strings* — both carriers are unwrapped) and Cursor's legacy `updateTodosToolCall` are parsed into normalized `todos` display items (`TODO_STATUS_*` statuses). The message stream keeps a compact one-line `Todos: done/total` trace; the live list itself is shown in a collapsible **Tasks** panel in the chat tab — a strip above the composer on mobile, a closable right-side column on desktop — derived from the latest todos item, so it works for live runs and history replay. Panel expand/close state persists in localStorage.
-- **Workspace rules injection**: When building prompts, the server prepends content from **workspace rule files** (see §7) for all agents.
+- **Workspace and global rules injection**: When building prompts, the server prepends **global rule files** then **workspace rule files** (see §7) for all agents. Workspace rules take precedence when they conflict.
 
 ---
 
@@ -79,10 +79,11 @@ Optional features include **scheduled automations**, **role templates**, and **b
 
 ---
 
-## 7. Workspace rules (files)
+## 7. Workspace and global rules (files)
 
-- **CRUD** for rule **files** under a workspace-specific rules directory (see `workspaceRules` class): list, read, write, delete, rename.
-- Rules are **injected into chat** context via a prefix built from those files (see `buildWorkspaceRulesPrefix` in `chatEngine`).
+- **Workspace CRUD** for rule **files** under `{workspace}/.cursor/rules` (see `workspaceRules` class): list, read, write, delete, rename.
+- **Global CRUD** for rule **files** under `/config/global-rules` (see `globalRules` class) via `/api/global-rules`. Edited in **Settings → Rules**. A missing directory lists as empty; the first write creates it.
+- Rules are **injected into chat** context via a prefix built from those files (see `buildAgentRulesPrefix` in `ruleFiles.ts`): global files first, then workspace files. Workspace rules win on conflict. Hidden filename `global-agent-defaults.mdc` is skipped.
 
 ---
 
@@ -125,12 +126,13 @@ Optional features include **scheduled automations**, **role templates**, and **b
 ## 11. Role templates
 
 - Global **templates** (name, description, content); create, update, delete, list via `/api/role-templates`.
-- In the **Rules** UI, templates can be used as a starting point when **creating a new workspace rule file** (so shared boilerplate does not need to be retyped).
+- In the **Rules** UI (workspace or **Settings → Rules**), templates can be used as a starting point when **creating a new rule file** (so shared boilerplate does not need to be retyped).
 
 ---
 
 ## 12. Settings (user and app)
 
+- **Rules**: Global Markdown rule files under `/config/global-rules`, injected into every agent prompt.
 - **Git**: Global default `gitUserName` / `gitUserEmail` written to `/config/.gitconfig` (with `safe.directory = *`).
 - **UI**: **Theme** (including **auto theme** and separate dark/light theme presets), **model selection** (e.g. auto vs specific Cursor models).
 - **Agent capabilities**: Endpoints report whether **Claude**, **Cursor**, **Mistral Vibe**, **OpenCode**, and **Codex** are usable (CLI/ACP probes plus stored credentials where required).
@@ -165,7 +167,7 @@ Optional features include **scheduled automations**, **role templates**, and **b
 
 ## 16. Dashboard (Vue)
 
-- **Views**: Home (workspace list), workspace detail (sessions list, **Files**, **Git**, **Rules**), **Session** (chat), **Orchestrator**, **Automations**, **Role templates**, **Settings**, **Account**, **Login**, **Setup** (wizard: Profile → AI Agents [Cursor, Claude, Vibe, OpenCode, Codex] → Git → Finalize).
+- **Views**: Home (workspace list), workspace detail (sessions list, **Files**, **Git**, **Rules**), **Session** (chat), **Orchestrator**, **Automations**, **Settings** (including **Rules** and **Templates**), **Account**, **Login**, **Setup** (wizard: Profile → AI Agents [Cursor, Claude, Vibe, OpenCode, Codex] → Git → Finalize).
 - **Session snapshot cache**: The session view persists the last known chat messages + session detail (incl. plan documents) per session in `localStorage` (`nova:sessionCache:*`, latest 50 messages, `imageDataUrls` stripped). On mount or session switch the snapshot renders instantly (stale-while-revalidate) while REST + the chat WebSocket refresh it in parallel — the socket never waits on the session GET; the loading skeleton appears whenever there are no messages to show yet (an empty snapshot never masks in-flight history with the empty state, and empty writes never clobber a non-empty snapshot unless the emptiness is server-confirmed). A **Connecting…/Reconnecting…** pill shows whenever the chat socket isn't connected. Token validation on navigation is non-blocking so a poor connection can't delay first paint.
 - **PWA**: Service worker (`sw.ts`) and Vite PWA plugin for installable/offline-capable behavior where configured.
 - **Terminal**: **xterm.js** for terminal rendering in the session experience.
