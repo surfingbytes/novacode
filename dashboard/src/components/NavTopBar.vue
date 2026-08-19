@@ -138,6 +138,7 @@ function userInitial(): string {
   font-size: 13px;
   font-family: inherit;
   flex: 1;
+  min-width: 0;
   max-width: 520px;
   transition: border-color 0.12s;
   text-align: left;
@@ -218,13 +219,19 @@ function userInitial(): string {
   white-space: nowrap;
 }
 
-/* Full-height routes still hide the top bar below desktop; phone chrome below pane. */
+/* Full-height routes still hide the top bar below desktop; phone chrome below pane.
+   List pages (workspaces, workspace, automations, …) keep the bar and use leftover
+   space for global search — same entry point as desktop. */
 @media (max-width: 1023px) {
   .topbar.topbar--hide-mobile {
     display: none;
   }
 
   .topbar__search {
+    max-width: none;
+  }
+  .topbar__kbd,
+  .topbar__spacer {
     display: none;
   }
   .topbar__username {
