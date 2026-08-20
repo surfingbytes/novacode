@@ -63,6 +63,19 @@ function touchApiReachability(ok: boolean): void {
   }
 }
 
+/** Proxy/gateway failures and dropped connections — not application 4xx/500. */
+const GATEWAY_UNREACHABLE_STATUSES = new Set([502, 503, 504]);
+
+export function isApiUnreachableError(error: unknown): boolean {
+  if (!isAxiosError(error)) {
+    return false;
+  }
+  if (error.response === undefined) {
+    return true;
+  }
+  return GATEWAY_UNREACHABLE_STATUSES.has(error.response.status);
+}
+
 /**
  * Called when any non-auth endpoint answers 401 (expired/invalid token
  * mid-session). Registered by App.vue to log out and redirect to /login —
@@ -89,9 +102,9 @@ http.interceptors.response.use(
   },
   (error: unknown) => {
     if (isAxiosError(error)) {
-      if (error.response === undefined) {
+      if (isApiUnreachableError(error)) {
         touchApiReachability(false);
-      } else if (error.response.status === 401 && !isAuthFlowUrl(error.config?.url)) {
+      } else if (error.response?.status === 401 && !isAuthFlowUrl(error.config?.url)) {
         onUnauthorized?.();
       }
     }

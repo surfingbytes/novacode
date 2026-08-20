@@ -76,13 +76,13 @@ export const useOrchestratorsStore = defineStore('orchestrators', () => {
     if (!workspaceId || (fetchedWorkspaces.has(workspaceId) && !bForce)) {
       return;
     }
-    fetchedWorkspaces.add(workspaceId);
     try {
       const { data } = await orchestratorApi.list(workspaceId);
       orchestratorsByWorkspace.value = {
         ...orchestratorsByWorkspace.value,
         [workspaceId]: data ?? []
       };
+      fetchedWorkspaces.add(workspaceId);
     } catch {
       // leave previous data in place; the list view shows its own error state
     }

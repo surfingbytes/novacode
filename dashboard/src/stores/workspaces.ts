@@ -18,16 +18,19 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
   // -------------------------------------------------- Refs --------------------------------------------------
   const workspaces = ref<Workspace[]>([]);
   const bIsLoading = ref<boolean>(false);
+  const bWorkspacesLoadFailed = ref<boolean>(false);
 
   // Sessions (global + active workspace derived views)
   const activeWorkspaceId = ref<string | null>(null);
   const allSessions = ref<Session[]>([]);
   const bSessionsLoading = ref<boolean>(false);
+  const bSessionsLoadFailed = ref<boolean>(false);
 
   let sessionSocket: ManagedSocket | null = null;
   let sessionsInitialized = false;
   let workspacesInitialized = false;
   let workspacesInitPromise: Promise<void> | null = null;
+  let sessionsInitPromise: Promise<void> | null = null;
 
   // -------------------------------------------------- Computed --------------------------------------------------
   const activeSessions = computed<Session[]>(() => {
@@ -70,14 +73,28 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
 
   // -------------------------------------------------- Methods --------------------------------------------------
   const fetchAll = async (): Promise<void> => {
-    bIsLoading.value = true;
-    try {
-      const response = await workspaceApi.listAll();
-      workspaces.value = response.data;
-      workspacesInitialized = true;
-    } finally {
-      bIsLoading.value = false;
+    if (workspacesInitPromise) {
+      return workspacesInitPromise;
     }
+    workspacesInitPromise = (async () => {
+      bIsLoading.value = true;
+      try {
+        const response = await workspaceApi.listAll();
+        workspaces.value = response.data ?? [];
+        workspacesInitialized = true;
+        bWorkspacesLoadFailed.value = false;
+      } catch (error) {
+        console.error('Failed to fetch workspaces:', error);
+        if (!workspacesInitialized) {
+          bWorkspacesLoadFailed.value = true;
+        }
+      } finally {
+        bIsLoading.value = false;
+      }
+    })().finally(() => {
+      workspacesInitPromise = null;
+    });
+    return workspacesInitPromise;
   };
 
   /** Load workspaces once (sidebar favorites, home, etc.). Safe to call from multiple mounts. */
@@ -85,12 +102,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     if (workspacesInitialized) {
       return;
     }
-    if (!workspacesInitPromise) {
-      workspacesInitPromise = fetchAll().finally(() => {
-        workspacesInitPromise = null;
-      });
-    }
-    await workspacesInitPromise;
+    await fetchAll();
   }
 
   function upsertSession(next: Session): void {
@@ -153,9 +165,12 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     try {
       const response = await sessionsApi.listAll();
       allSessions.value = response.data ?? [];
+      bSessionsLoadFailed.value = false;
     } catch (error) {
       console.error('Failed to fetch sessions:', error);
-      allSessions.value = [];
+      if (!sessionsInitialized) {
+        bSessionsLoadFailed.value = true;
+      }
     } finally {
       bSessionsLoading.value = false;
     }
@@ -181,6 +196,8 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
 
           if (messagePayload.type === 'global-snapshot') {
             allSessions.value = messagePayload.sessions ?? [];
+            bSessionsLoadFailed.value = false;
+            sessionsInitialized = true;
           } else if (messagePayload.type === 'session-upsert') {
             if (messagePayload.session) {
               upsertSession(messagePayload.session);
@@ -211,9 +228,49 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     if (sessionsInitialized) {
       return;
     }
-    await fetchAllSessions();
+    if (sessionsInitPromise) {
+      await sessionsInitPromise;
+      return;
+    }
+    sessionsInitPromise = (async () => {
+      await fetchAllSessions();
+      connectSessionSocket();
+      if (!bSessionsLoadFailed.value) {
+        sessionsInitialized = true;
+      }
+    })().finally(() => {
+      sessionsInitPromise = null;
+    });
+    await sessionsInitPromise;
+  }
+
+  /** Refetch lists after the API comes back; does not wipe previous data on failure. */
+  async function reloadAfterReconnect(): Promise<void> {
+    await Promise.all([fetchAll(), fetchAllSessions()]);
+    // A reconnect can land while the original startup request is still in
+    // flight; joining that doomed promise would leave the failed flags set.
+    if (bWorkspacesLoadFailed.value || bSessionsLoadFailed.value) {
+      await Promise.all([
+        bWorkspacesLoadFailed.value ? fetchAll() : Promise.resolve(),
+        bSessionsLoadFailed.value ? fetchAllSessions() : Promise.resolve()
+      ]);
+    }
     connectSessionSocket();
-    sessionsInitialized = true;
+    if (!bSessionsLoadFailed.value) {
+      sessionsInitialized = true;
+    }
+  }
+
+  function reloadIfLoadFailed(): Promise<void> {
+    if (
+      workspacesInitialized &&
+      !bWorkspacesLoadFailed.value &&
+      sessionsInitialized &&
+      !bSessionsLoadFailed.value
+    ) {
+      return Promise.resolve();
+    }
+    return reloadAfterReconnect();
   }
 
   const setActiveWorkspace = async (workspaceId: string | null): Promise<void> => {
@@ -267,6 +324,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     // data
     workspaces,
     bIsLoading,
+    bWorkspacesLoadFailed,
     activeWorkspaceId,
     allSessions,
     activeSessions,
@@ -274,12 +332,15 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     favoriteWorkspaces,
     activeBusySessions,
     bSessionsLoading,
+    bSessionsLoadFailed,
     // methods
     fetchAll,
     ensureWorkspacesInitialized,
     setActiveWorkspace,
     fetchAllSessions,
     ensureSessionsInitialized,
+    reloadAfterReconnect,
+    reloadIfLoadFailed,
     markSessionRead,
     createWorkspace,
     updateWorkspace,

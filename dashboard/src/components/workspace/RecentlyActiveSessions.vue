@@ -34,7 +34,16 @@ function workspaceName(workspaceId: string): string {
 </script>
 
 <template>
-  <div v-if="recentlyActive.length > 0" class="recently-active">
+  <div
+    v-if="workspacesStore.bSessionsLoadFailed && recentlyActive.length === 0"
+    class="recently-active"
+  >
+    <div class="recently-active__header">
+      <span class="nc-eyebrow">// recently active</span>
+    </div>
+    <p class="recently-active__error">Couldn't load recent sessions. They'll show up once the API is reachable.</p>
+  </div>
+  <div v-else-if="recentlyActive.length > 0" class="recently-active">
     <div class="recently-active__header">
       <span class="nc-eyebrow">// recently active</span>
       <span class="recently-active__sort nc-mono">sorted: last used</span>
@@ -91,6 +100,13 @@ function workspaceName(workspaceId: string): string {
   margin-left: auto;
   font-size: 11.5px;
   color: var(--fg-subtle);
+}
+
+.recently-active__error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--fg-subtle);
+  line-height: 1.5;
 }
 
 .recently-active__list {

@@ -374,9 +374,9 @@ const fetchFirstStartStatus = async (): Promise<void> => {
 
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 onMounted((): void => {
-  store.fetchAll();
-  store.ensureSessionsInitialized();
-  fetchFirstStartStatus();
+  void store.fetchAll();
+  void store.ensureSessionsInitialized();
+  void fetchFirstStartStatus();
 });
 </script>
 
@@ -404,8 +404,24 @@ onMounted((): void => {
 
     <!-- Loading -->
     <Transition name="fade" mode="out-in">
-      <div v-if="store.bIsLoading" key="loading">
+      <div v-if="store.bIsLoading && store.workspaces.length === 0" key="loading">
         <ListPageSkeleton variant="workspaces" :count="6" label="Loading workspaces" />
+      </div>
+
+      <!-- Load failed: do not pretend there are no workspaces -->
+      <div
+        v-else-if="store.bWorkspacesLoadFailed && store.workspaces.length === 0"
+        key="error"
+        class="ws-state"
+      >
+        <div class="ws-empty-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22.61 16.95A5 5 0 0018 10h-1.26a8 8 0 00-7.05-6M5 5a8 8 0 004 15h9a5 5 0 001.7-.3M1 1l22 22"/></svg>
+        </div>
+        <p class="ws-state-title">Couldn't load workspaces</p>
+        <p class="ws-state-text">The API didn't respond in time. Check that the server is running, then try again.</p>
+        <button class="ws-retry-btn" type="button" @click="store.reloadAfterReconnect()">
+          Try again
+        </button>
       </div>
 
       <!-- Empty state -->
@@ -670,6 +686,28 @@ onMounted((): void => {
 }
 .ws-add-btn:hover {
   opacity: 0.88;
+}
+
+.ws-retry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  margin-top: 6px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.1s, border-color 0.1s;
+}
+.ws-retry-btn:hover {
+  background: var(--bg-hover);
 }
 
 /* ── loading / empty states ──────────────────────────────── */

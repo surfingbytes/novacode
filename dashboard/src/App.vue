@@ -12,6 +12,7 @@ import AppToasts from '@/components/AppToasts.vue';
 import { useApiHealthStore } from '@/stores/apiHealth';
 import { useAuthStore } from '@/stores/auth';
 import { useToastStore } from '@/stores/toasts';
+import { useWorkspacesStore } from '@/stores/workspaces';
 
 // classes
 import router from '@/classes/router';
@@ -24,6 +25,7 @@ import { isNotificationsEnabled, syncPushSubscription } from '@/lib/notification
 const auth = useAuthStore();
 const apiHealth = useApiHealthStore();
 const toastStore = useToastStore();
+const workspacesStore = useWorkspacesStore();
 const route = useRoute();
 
 // -------------------------------------------------- Refs --------------------------------------------------
@@ -81,14 +83,27 @@ function onDocumentVisibilityChange(): void {
   setupVisibilityCheck();
   if (document.visibilityState === 'visible') {
     void apiHealth.ping();
+    if (auth.bSignedIn) {
+      void workspacesStore.reloadIfLoadFailed();
+    }
+  }
+}
+
+function onWindowOnline(): void {
+  void apiHealth.ping();
+  if (auth.bSignedIn) {
+    void workspacesStore.reloadIfLoadFailed();
   }
 }
 
 // -------------------------------------------------- Watchers --------------------------------------------------
 watch(
   () => apiHealth.bApiReachable,
-  () => {
+  (reachable, wasReachable) => {
     scheduleHealthPolling();
+    if (reachable && wasReachable === false && auth.bSignedIn) {
+      void workspacesStore.reloadAfterReconnect();
+    }
   }
 );
 
@@ -114,6 +129,7 @@ onMounted(async (): Promise<void> => {
   void apiHealth.ping();
   scheduleHealthPolling();
   document.addEventListener('visibilitychange', onDocumentVisibilityChange);
+  window.addEventListener('online', onWindowOnline);
   if (auth.bSignedIn && !auth.bValidated) {
     await auth.validate();
   }
@@ -131,6 +147,7 @@ onMounted(async (): Promise<void> => {
 
 onUnmounted((): void => {
   document.removeEventListener('visibilitychange', onDocumentVisibilityChange);
+  window.removeEventListener('online', onWindowOnline);
   if (healthPollId !== null) {
     clearInterval(healthPollId);
     healthPollId = null;
