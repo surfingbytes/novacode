@@ -92,7 +92,7 @@ function isAuthFlowUrl(url: string | undefined): boolean {
   if (!url) {
     return false;
   }
-  return url.includes('/auth/login') || url.includes('/auth/setup') || url.includes('/auth/validate') || url.includes('/auth/logout');
+  return url.includes('/auth/login') || url.includes('/auth/setup') || url.includes('/auth/validate') || url.includes('/auth/logout') || url.includes('/auth/login-options') || url.includes('/auth/needs-setup') || url.includes('/auth/oidc/');
 }
 
 http.interceptors.response.use(
@@ -113,9 +113,19 @@ http.interceptors.response.use(
 );
 
 // ---------------------------------- Auth ----------------------------------
+export type AuthLoginOptions = {
+  needsSetup: boolean;
+  localLogin: boolean;
+  oidcEnabled: boolean;
+  oidcDisplayName: string;
+};
+
 export const authApi = {
   needsSetup: (): ReturnType<typeof http.get<{ needsSetup: boolean }>> =>
     http.get<{ needsSetup: boolean }>('/auth/needs-setup'),
+
+  loginOptions: (): ReturnType<typeof http.get<AuthLoginOptions>> =>
+    http.get<AuthLoginOptions>('/auth/login-options'),
 
   setup: (username: string, password: string): ReturnType<typeof http.post<{ token: string }>> =>
     http.post<{ token: string }>('/auth/setup', { username, password }),

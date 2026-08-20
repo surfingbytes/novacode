@@ -17,8 +17,9 @@ Optional features include **scheduled automations**, **role templates**, and **b
 
 ## 2. Authentication and accounts
 
-- **First-run setup**: If no user exists, the app exposes a setup flow (`/api/auth/setup`) to create the initial account (username + password).
-- **Login**: Password-based login sets an **httpOnly session cookie** (7-day JWT, sliding refresh on `/api/auth/validate`). The JSON body still includes `token` for scripts; the dashboard does not keep it in `localStorage`.
+- **First-run setup**: If no user exists, the app exposes a setup flow (`/api/auth/setup`) to create the initial account (username + password). OIDC and `AUTH_LOCAL_LOGIN` are ignored until that account exists.
+- **Login**: Password-based login sets an **httpOnly session cookie** (7-day JWT, sliding refresh on `/api/auth/validate`). The JSON body still includes `token` for scripts; the dashboard does not keep it in `localStorage`. `GET /api/auth/login-options` tells the login page whether to show the password form, an OIDC button, or auto-redirect to the IdP.
+- **OIDC / SSO**: When `OIDC_ISSUER`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET` are set, `GET /api/auth/oidc/start` begins an authorization-code + PKCE flow using the issuer discovery document. `GET /api/auth/oidc/callback` verifies the `id_token` and signs the same session cookie for the existing local user (not a new account). `AUTH_LOCAL_LOGIN=false` hides password login; with OIDC configured the login page redirects straight to the IdP.
 - **Account**: Password change, username change, and **API keys** (`GET`/`POST`/`DELETE /api/auth/api-tokens`). Keys are stored as SHA-256 hashes; the plaintext `nck_…` token is returned only on create. Send it as `Authorization: Bearer` (or the WebSocket `bearer.<token>` subprotocol). `POST /api/auth/logout` clears the session cookie.
 - **REST auth**: Session cookie, JWT Bearer, **or** an API key. There is no separate unscoped “service account”.
 - **Claude token setup**: `POST /api/agent-auth/claude/login` spawns a `claude setup-token` PTY session; the terminal overlay auto-detects the token and saves it via `POST /api/agent-auth/claude/token`. `GET /api/agent-auth/claude/status` and `DELETE /api/agent-auth/claude/logout` complete the flow.

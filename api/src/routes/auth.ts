@@ -1,5 +1,5 @@
 // node_modules
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { Type } from '@sinclair/typebox';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 
@@ -19,6 +19,56 @@ import {
 import { db } from '../classes/database';
 import { clearVibeApiKey, config } from '../classes/config';
 import { generateApiToken, MAX_API_TOKENS_PER_USER } from '../classes/apiTokens';
+import { logger } from '../classes/logger';
+import {
+  beginOidcAuthorization,
+  completeOidcAuthorization,
+  clearOidcPendingCookieHeader,
+  isLocalLoginEnabled,
+  oidcLoginPageUrl,
+  oidcPendingCookieHeader,
+  publicRequestOrigin,
+  readOidcPending,
+  readOidcSettings,
+  resolveLoginOptions,
+  resolveOidcAppOrigin,
+  resolveOidcCallbackUri,
+  sanitizeAppRedirect,
+  signOidcPending
+} from '../classes/oidc';
+import { isSecureRequest, sessionCookieHeader } from '../classes/sessionCookie';
+
+function requestOrigin(request: FastifyRequest): string {
+  return publicRequestOrigin({
+    headers: request.headers as Record<string, unknown>,
+    protocol: request.protocol,
+    hostname: request.hostname
+  });
+}
+
+function requestSecure(request: FastifyRequest): boolean {
+  return isSecureRequest(request.headers as Record<string, unknown>, request.protocol);
+}
+
+function requestCookieHeader(request: FastifyRequest): string | undefined {
+  const header = request.headers.cookie;
+  return typeof header === 'string' ? header : undefined;
+}
+
+function setCookies(reply: FastifyReply, cookies: string[]): void {
+  if (cookies.length === 1) {
+    reply.header('Set-Cookie', cookies[0]);
+    return;
+  }
+  reply.header('Set-Cookie', cookies);
+}
+
+const LoginOptionsSchema = Type.Object({
+  needsSetup: Type.Boolean(),
+  localLogin: Type.Boolean(),
+  oidcEnabled: Type.Boolean(),
+  oidcDisplayName: Type.String()
+});
 
 export async function authRoutes(fastify: FastifyInstance): Promise<void> {
   const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
@@ -34,6 +84,20 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     async () => {
       const hasUser = await db.hasAnyUser();
       return { needsSetup: !hasUser };
+    }
+  );
+
+  // GET /api/auth/login-options — which sign-in methods the login page should show
+  fastifyInstance.get(
+    '/api/auth/login-options',
+    {
+      schema: {
+        response: { 200: LoginOptionsSchema }
+      }
+    },
+    async () => {
+      const needsSetup = !(await db.hasAnyUser());
+      return resolveLoginOptions({ needsSetup });
     }
   );
 
@@ -82,11 +146,15 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         }),
         response: {
           200: Type.Object({ token: Type.String() }),
-          401: Type.Object({ error: Type.String() })
+          401: Type.Object({ error: Type.String() }),
+          403: Type.Object({ error: Type.String() })
         }
       }
     },
     async (request, reply) => {
+      if (!isLocalLoginEnabled()) {
+        return reply.code(403).send({ error: 'Password login is disabled' });
+      }
       const { username, password } = request.body;
       const user = await checkCredentials(username, password);
       if (!user) {
@@ -111,6 +179,109 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       clearSessionCookie(request, reply);
       return reply.code(204).send(null);
+    }
+  );
+
+  // GET /api/auth/oidc/start — redirect to the identity provider
+  fastifyInstance.get(
+    '/api/auth/oidc/start',
+    {
+      config: {
+        rateLimit: { max: 10, timeWindow: '1 minute' }
+      },
+      schema: {
+        querystring: Type.Object({
+          redirect: Type.Optional(Type.String())
+        })
+      }
+    },
+    async (request, reply) => {
+      const origin = requestOrigin(request);
+      const appRedirect = sanitizeAppRedirect(request.query.redirect);
+      const settings = readOidcSettings();
+      if (!settings) {
+        return reply.redirect(oidcLoginPageUrl(origin, { error: 'oidc_config' }));
+      }
+      const callbackUri = resolveOidcCallbackUri(settings, origin);
+      const appOrigin = resolveOidcAppOrigin(settings, callbackUri);
+      if (!(await db.hasAnyUser())) {
+        return reply.redirect(`${appOrigin}/setup`);
+      }
+      try {
+        const { authorizationUrl, pending } = await beginOidcAuthorization(settings, {
+          appRedirect,
+          callbackUri
+        });
+        setCookies(reply, [
+          oidcPendingCookieHeader(signOidcPending(pending), { secure: requestSecure(request) })
+        ]);
+        return reply.redirect(authorizationUrl);
+      } catch (err) {
+        logger.warn({ err }, 'OIDC discovery or authorization start failed');
+        return reply.redirect(
+          oidcLoginPageUrl(appOrigin, { error: 'oidc_config', redirect: appRedirect })
+        );
+      }
+    }
+  );
+
+  // GET /api/auth/oidc/callback — identity provider returns here
+  fastifyInstance.get(
+    '/api/auth/oidc/callback',
+    {
+      config: {
+        rateLimit: { max: 10, timeWindow: '1 minute' }
+      },
+      schema: {
+        querystring: Type.Object(
+          {
+            code: Type.Optional(Type.String()),
+            state: Type.Optional(Type.String()),
+            error: Type.Optional(Type.String()),
+            error_description: Type.Optional(Type.String())
+          },
+          { additionalProperties: true }
+        )
+      }
+    },
+    async (request, reply) => {
+      const origin = requestOrigin(request);
+      const secure = requestSecure(request);
+      const settings = readOidcSettings();
+      const pending = readOidcPending(requestCookieHeader(request));
+      const clearPending = clearOidcPendingCookieHeader(secure);
+
+      const fail = (appOrigin: string, error: string, appRedirect = '/'): FastifyReply => {
+        setCookies(reply, [clearPending]);
+        return reply.redirect(oidcLoginPageUrl(appOrigin, { error, redirect: appRedirect }));
+      };
+
+      if (!settings || !pending) {
+        return fail(origin, 'oidc');
+      }
+
+      const appOrigin = resolveOidcAppOrigin(settings, pending.redirectUri);
+      const callbackUrl = new URL(pending.redirectUri);
+      const incoming = new URL(request.raw.url ?? request.url, origin);
+      callbackUrl.search = incoming.search;
+
+      const result = await completeOidcAuthorization(settings, pending, callbackUrl);
+      if (!result.ok) {
+        logger.warn({ error: result.error }, 'OIDC callback failed');
+        return fail(appOrigin, result.error, pending.redirect);
+      }
+
+      const user = await db.getFirstUser();
+      if (!user) {
+        setCookies(reply, [clearPending]);
+        return reply.redirect(`${appOrigin}/setup`);
+      }
+
+      const token = await signToken(user.username, user.id);
+      setCookies(reply, [sessionCookieHeader(token, { secure }), clearPending]);
+      return reply.redirect(
+        oidcLoginPageUrl(appOrigin, { from: 'oidc', redirect: pending.redirect })
+      );
     }
   );
 

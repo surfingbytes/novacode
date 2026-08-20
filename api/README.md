@@ -2,6 +2,8 @@
 
 JSON under `/api`. The dashboard signs in with an **httpOnly session cookie** (7-day JWT, refreshed on `/api/auth/validate`). Scripts should use a hashed **API key** from **Account → API keys** as `Authorization: Bearer`.
 
+Optional **OIDC** (`OIDC_ISSUER` + client id/secret) adds SSO next to password login. Restrict who can open the app in the identity provider (Authentik application assignment, Authelia access rules, and so on) — Nova Code still maps a successful login to the single local owner account.
+
 ## Role templates
 
 Reusable Markdown snippets for new workspace or global rule files.

@@ -40,6 +40,7 @@ import { logger } from './classes/logger';
 import { resolveCorsOrigin } from './classes/corsOrigin';
 import { applyReachableMcpAutoload } from './classes/mcpServersForAcp';
 import { signalStartupReady } from './classes/startupStatus';
+import { isLocalLoginEnabled, readOidcSettings } from './classes/oidc';
 
 const startTime = Date.now();
 
@@ -208,6 +209,15 @@ async function main(): Promise<void> {
   }
   signalStartupReady();
   fastify.log.info(`Server listening on port ${config.port}`);
+  const oidcSettings = readOidcSettings();
+  if (oidcSettings) {
+    fastify.log.info(
+      { issuer: oidcSettings.issuer, localLogin: isLocalLoginEnabled() },
+      'OIDC login enabled'
+    );
+  } else if (!isLocalLoginEnabled()) {
+    fastify.log.warn('AUTH_LOCAL_LOGIN is disabled but OIDC is not configured');
+  }
 
   void applyReachableMcpAutoload(config.configDir)
     .then((autoload) => {

@@ -166,9 +166,21 @@ Copy `.env.example` to `.env` and edit the values below.
 | `OPENCODE_ACP_COMMAND` | *(optional)* OpenCode ACP command (default: `opencode`) |
 | `CODEX_ACP_COMMAND` | *(optional)* Codex ACP adapter (default: `codex-acp`) |
 | `TRUST_PROXY` | Set to `true` when behind a reverse proxy so login rate limits use `X-Forwarded-For` and session cookies can be marked Secure |
+| `AUTH_LOCAL_LOGIN` | `true` (default) shows username/password on the login screen. `false` hides it. First-run setup always creates a local account regardless. |
+| `OIDC_ISSUER` | OpenID issuer URL. Together with `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`, enables SSO. Endpoints are loaded from `{issuer}/.well-known/openid-configuration`. |
+| `OIDC_CLIENT_ID` | OIDC confidential client id |
+| `OIDC_CLIENT_SECRET` | OIDC confidential client secret |
+| `OIDC_DISPLAY_NAME` | Login button label (default: `SSO`) |
+| `OIDC_REDIRECT_URI` | Callback URL registered at the IdP (default: `https://<host>/api/auth/oidc/callback`) |
+| `OIDC_APP_URL` | Public dashboard origin if it differs from the API (optional) |
+| `OIDC_SCOPES` | Space-separated scopes (default: `openid profile email`) |
 | `CORS_ORIGIN` | Comma-separated browser origins allowed to call the API. Unset: same-origin only in production, any origin in dev. `*` reflects the request Origin |
 | `NOVACODE_CHOWN_CONFIG` | Set to `1` to force a recursive `chown` of `/config` on every start (normally skipped when the volume is already owned by `UID`) |
 | `NOVACODE_VERIFY_CURSOR_AGENT` | Set to `1` to run `cursor-agent --version` during container start (slow; skipped by default) |
+
+**Login methods.** With no OIDC vars, the login screen is username/password only. Set the three `OIDC_*` credentials to show a **Sign in with …** button next to the form. Set `AUTH_LOCAL_LOGIN=false` as well to skip the form and send the browser straight to the identity provider. First-run setup always creates a local account; OIDC starts working after that.
+
+In Authentik (or any OIDC provider), create a confidential application and register the redirect URI `https://<your-host>/api/auth/oidc/callback`. Copy the issuer, client id, and client secret. Restrict who can use the application in the IdP — Nova Code maps every successful SSO login to the single owner account. Set `TRUST_PROXY=true` when Nova Code sits behind a reverse proxy.
 
 ---
 

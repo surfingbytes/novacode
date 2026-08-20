@@ -14,8 +14,19 @@ const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
 
+// -------------------------------------------------- Constants --------------------------------------------------
+const OIDC_ERROR_MESSAGES: Record<string, string> = {
+  oidc: 'Sign-in with SSO failed. Try again.',
+  oidc_denied: 'Sign-in was cancelled.',
+  oidc_config: 'SSO is not available right now.'
+};
+
 // -------------------------------------------------- Refs --------------------------------------------------
 const bSetupLoading = ref<boolean>(true);
+const bLocalLogin = ref<boolean>(true);
+const bOidcEnabled = ref<boolean>(false);
+const oidcDisplayName = ref<string>('SSO');
+const bOidcRedirecting = ref<boolean>(false);
 
 const username = ref<string>('');
 const password = ref<string>('');
@@ -23,6 +34,14 @@ const bLoading = ref<boolean>(false);
 const error = ref<string>('');
 
 // -------------------------------------------------- Computed --------------------------------------------------
+const redirectTarget = computed((): string => {
+  const redirect = route.query.redirect;
+  if (typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//')) {
+    return redirect;
+  }
+  return '/';
+});
+
 const submitDisabled = computed((): boolean => {
   if (!username.value || !password.value) {
     return true;
@@ -30,7 +49,45 @@ const submitDisabled = computed((): boolean => {
   return false;
 });
 
+const queryError = computed((): string => {
+  const code = route.query.error;
+  if (typeof code !== 'string' || !code) {
+    return '';
+  }
+  return OIDC_ERROR_MESSAGES[code] ?? OIDC_ERROR_MESSAGES.oidc;
+});
+
+const bShowPasswordForm = computed((): boolean => bLocalLogin.value && !bOidcRedirecting.value);
+
+const bShowOidcButton = computed(
+  (): boolean => bOidcEnabled.value && !bOidcRedirecting.value
+);
+
+const bNoLoginMethod = computed(
+  (): boolean => !bSetupLoading.value && !bLocalLogin.value && !bOidcEnabled.value
+);
+
 // -------------------------------------------------- Methods --------------------------------------------------
+function oidcStartHref(): string {
+  const apiBase = String(import.meta.env.VITE_API_URL || `${location.origin}/api`).replace(
+    /\/?$/,
+    '/'
+  );
+  const url = new URL('auth/oidc/start', apiBase);
+  if (redirectTarget.value !== '/') {
+    url.searchParams.set('redirect', redirectTarget.value);
+  }
+  return url.toString();
+}
+
+const startOidc = (): void => {
+  window.location.assign(oidcStartHref());
+};
+
+const goAfterSignIn = async (): Promise<void> => {
+  await router.push(redirectTarget.value);
+};
+
 const submit = async (): Promise<void> => {
   if (submitDisabled.value) {
     return;
@@ -41,10 +98,7 @@ const submit = async (): Promise<void> => {
   const success = await auth.login(username.value, password.value);
   bLoading.value = false;
   if (success) {
-    // Return to the deep link the user was headed to before the auth detour.
-    const redirect = route.query.redirect;
-    const target = typeof redirect === 'string' && redirect.startsWith('/') ? redirect : '/';
-    await router.push(target);
+    await goAfterSignIn();
   } else {
     error.value = 'Invalid username or password';
     password.value = '';
@@ -54,11 +108,32 @@ const submit = async (): Promise<void> => {
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 onMounted(async (): Promise<void> => {
   try {
-    const response = await authApi.needsSetup();
-
+    const response = await authApi.loginOptions();
     if (response.data.needsSetup) {
       await router.push('/setup');
+      return;
     }
+    bLocalLogin.value = response.data.localLogin;
+    bOidcEnabled.value = response.data.oidcEnabled;
+    oidcDisplayName.value = response.data.oidcDisplayName;
+
+    const signedIn = await auth.validate();
+    if (signedIn) {
+      await goAfterSignIn();
+      return;
+    }
+
+    if (queryError.value) {
+      error.value = queryError.value;
+    } else if (route.query.from === 'oidc') {
+      error.value = OIDC_ERROR_MESSAGES.oidc;
+    } else if (response.data.oidcEnabled && !response.data.localLogin) {
+      bOidcRedirecting.value = true;
+      startOidc();
+      return;
+    }
+  } catch {
+    error.value = 'Unable to reach the server. Try again.';
   } finally {
     bSetupLoading.value = false;
   }
@@ -115,59 +190,87 @@ onMounted(async (): Promise<void> => {
           <!-- Welcome text -->
           <h1 class="text-xl font-semibold text-center mb-2">Welcome to Nova Code</h1>
           <p class="text-sm text-text-muted text-center mb-8">
-            {{ 'Sign in to continue' }}
+            {{ bOidcRedirecting ? `Redirecting to ${oidcDisplayName}…` : 'Sign in to continue' }}
           </p>
 
-          <div v-if="bSetupLoading" class="flex justify-center py-8">
+          <div v-if="bSetupLoading || bOidcRedirecting" class="flex justify-center py-8">
             <div
               class="w-8 h-8 border-2 border-surface border-t-primary rounded-full animate-spin"
             ></div>
           </div>
 
-          <form v-else @submit.prevent="submit" class="space-y-4">
-            <div class="field" :class="{ 'has-error': error }">
-              <label class="block text-sm font-medium text-text-primary mb-1.5">Username</label>
-              <div class="input-wrap is-error">
-                <input
-                  v-model="username"
-                  type="text"
-                  autocomplete="username"
-                  placeholder="Enter your username"
-                  autofocus
-                />
-                <span class="icon">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                </span>
+          <p v-else-if="bNoLoginMethod" class="message is-error">
+            No sign-in method is configured. Enable password login or OIDC.
+          </p>
+
+          <div v-else class="space-y-4">
+            <form v-if="bShowPasswordForm" @submit.prevent="submit" class="space-y-4">
+              <div class="field" :class="{ 'has-error': error }">
+                <label class="block text-sm font-medium text-text-primary mb-1.5">Username</label>
+                <div class="input-wrap is-error">
+                  <input
+                    v-model="username"
+                    type="text"
+                    autocomplete="username"
+                    placeholder="Enter your username"
+                    autofocus
+                  />
+                  <span class="icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                  </span>
+                </div>
               </div>
-            </div>
-            <div class="field" :class="{ 'has-error': error }">
-              <label class="block text-sm font-medium text-text-primary mb-1.5">Password</label>
-              <div class="input-wrap">
-                <input
-                  v-model="password"
-                  type="password"
-                  autocomplete="current-password"
-                  placeholder="••••••••"
-                />
-                <span class="icon">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-                </span>
+              <div class="field" :class="{ 'has-error': error }">
+                <label class="block text-sm font-medium text-text-primary mb-1.5">Password</label>
+                <div class="input-wrap">
+                  <input
+                    v-model="password"
+                    type="password"
+                    autocomplete="current-password"
+                    placeholder="••••••••"
+                  />
+                  <span class="icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                  </span>
+                </div>
               </div>
+
+              <p v-if="error" class="message is-error">
+                {{ error }}
+              </p>
+
+              <button
+                type="submit"
+                :disabled="submitDisabled || bLoading"
+                class="button is-primary w-full items-center justify-center mt-2"
+              >
+                <div v-if="bLoading" class="loading-spinner"></div>
+                <span> Sign In </span>
+              </button>
+            </form>
+
+            <div
+              v-if="bShowPasswordForm && bShowOidcButton"
+              class="flex items-center gap-3 text-xs text-text-muted uppercase tracking-wider"
+            >
+              <span class="h-px flex-1 bg-border"></span>
+              <span>or</span>
+              <span class="h-px flex-1 bg-border"></span>
             </div>
 
-            <p v-if="error" class="message is-error">
+            <p v-if="error && !bShowPasswordForm" class="message is-error">
               {{ error }}
             </p>
 
             <button
-              type="submit"
-              :disabled="submitDisabled || bLoading"
-              class="button is-primary w-full items-center justify-center mt-2"
+              v-if="bShowOidcButton"
+              type="button"
+              class="button w-full items-center justify-center"
+              @click="startOidc"
             >
-              <div v-if="bLoading" class="loading-spinner"></div>
-              <span> Sign In </span>
+              Sign in with {{ oidcDisplayName }}
             </button>
-          </form>
+          </div>
         </div>
       </Transition>
     </div>
