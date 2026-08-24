@@ -4,6 +4,7 @@
 
 // classes
 import { config } from './config';
+import type { AgentErrorDetail } from './agentError';
 import {
   cancelAcpSubprocess,
   runAcpSubprocessPrompt,
@@ -29,6 +30,7 @@ export interface RunCodexAcpResult {
   acpSessionId: string;
   stopReason?: string;
   error?: string;
+  errorDetail?: AgentErrorDetail;
   resolvedModeId?: string;
   resolvedModelId?: string;
 }

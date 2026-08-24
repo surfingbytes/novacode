@@ -27,6 +27,7 @@ import type {
 import { config } from './config';
 import { applySessionMode, applySessionModel, applySessionConfig, findConfigOptionByCategory } from './acpSessionHelpers';
 import type { AcpSessionResponse } from './acpSessionHelpers';
+import { extractAgentErrorDetail, type AgentErrorDetail } from './agentError';
 import { logger, truncateLogText } from './logger';
 import { mcpUnavailableNoticeEventLine } from './mcpServersForAcp';
 
@@ -141,6 +142,8 @@ export interface AcpSubprocessRunResult {
   acpSessionId: string;
   stopReason?: string;
   error?: string;
+  /** Structured ACP/JSON-RPC fields preserved before the error is stringified. */
+  errorDetail?: AgentErrorDetail;
   /** Resolved mode after session create/load when DB had sentinel `default`. */
   resolvedModeId?: string;
   resolvedModelId?: string;
@@ -830,7 +833,8 @@ export async function runAcpSubprocessPrompt(
     proc = spawn(command, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], env });
     phase('spawned');
   } catch (err) {
-    return { acpSessionId: acpSessionId ?? '', error: String(err) };
+    const errorDetail = extractAgentErrorDetail(err);
+    return { acpSessionId: acpSessionId ?? '', error: errorDetail.message, errorDetail };
   }
 
   proc.stderr?.on('data', (chunk: Buffer) => {
@@ -1084,7 +1088,14 @@ export async function runAcpSubprocessPrompt(
             resolvedModelId,
           };
         }
-        return { acpSessionId: resolvedSessionId, error: String(err), resolvedModeId, resolvedModelId };
+        const errorDetail = extractAgentErrorDetail(err);
+        return {
+          acpSessionId: resolvedSessionId,
+          error: errorDetail.message,
+          errorDetail,
+          resolvedModeId,
+          resolvedModelId,
+        };
       } finally {
         bPromptInFlight = false;
         clearPromptIdleTimer();
@@ -1108,7 +1119,8 @@ export async function runAcpSubprocessPrompt(
     // when a cancel kills the subprocess mid-prompt, connectWith rejects even though
     // the id is known — returning '' here would drop it, and the next prompt would
     // start a fresh agent conversation that cannot see this turn's messages.
-    return { acpSessionId: sessionIdForCancel ?? '', error: String(err) };
+    const errorDetail = extractAgentErrorDetail(err);
+    return { acpSessionId: sessionIdForCancel ?? '', error: errorDetail.message, errorDetail };
   } finally {
     clearPromptIdleTimer();
     activeRuns.delete(novaSessionId);

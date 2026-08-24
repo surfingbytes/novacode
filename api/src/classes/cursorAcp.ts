@@ -10,6 +10,7 @@
 
 // classes
 import { config } from './config';
+import type { AgentErrorDetail } from './agentError';
 import {
   cancelAcpSubprocess,
   closeAcpSubprocessSession,
@@ -37,6 +38,7 @@ export interface RunCursorAcpResult {
   acpSessionId: string;
   stopReason?: string;
   error?: string;
+  errorDetail?: AgentErrorDetail;
   resolvedModeId?: string;
   resolvedModelId?: string;
 }

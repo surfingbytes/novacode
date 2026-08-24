@@ -202,7 +202,7 @@ export interface ChatWsServerMessage {
   messages?: ChatMessage[];
   data?: string;
   message?: string;
-  code?: 'auth_required' | 'timeout' | 'unknown';
+  code?: 'auth_required' | 'rate_limited' | 'timeout' | 'unknown';
   streaming?: boolean;
   hasMore?: boolean;
   queue?: ChatQueueItem[];

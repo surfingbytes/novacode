@@ -29,7 +29,7 @@ import type {
 import { computeLastListPreview } from './chatPreview';
 import { extractStreamNotificationPreview } from './chatStreamPreviewFromEvents';
 import { broadcastSessionListUpsert } from './sessionListBroadcast';
-import { classifyAgentError, type AgentErrorCode } from './agentError';
+import { classifyAgentError, type AgentErrorCode, type AgentErrorDetail } from './agentError';
 import {
   buildLinkedPlanContextPrefix,
   extractLinkedPlanContextFromConfig,
@@ -746,7 +746,12 @@ export async function dispatchPrompt(
   void (async () => {
     logger.info({ agentType, sessionId, acpSessionId: currentAcpSessionId }, 'dispatching to agent via ACP');
 
-    let result: { acpSessionId: string; stopReason?: string; error?: string };
+    let result: {
+      acpSessionId: string;
+      stopReason?: string;
+      error?: string;
+      errorDetail?: AgentErrorDetail;
+    };
 
     if (agentType === 'mistral-vibe') {
       result = await runVibeAcp(
@@ -834,7 +839,8 @@ export async function dispatchPrompt(
       const parsedClaudeLimit = agentType === 'claude' ? parseClaudeRateLimitError(result.error) : null;
       const classifiedError = classifyAgentError(result.error, {
         agentLabel: agentType === 'cursor-agent' ? 'Cursor' : 'Agent',
-        fallbackMessage: 'Agent run failed'
+        fallbackMessage: 'Agent run failed',
+        detail: result.errorDetail,
       });
       const resetAtIso = parsedClaudeLimit?.resetAtIso ?? null;
       const resetAtReadable = parsedClaudeLimit?.resetAtReadable;

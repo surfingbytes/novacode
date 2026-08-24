@@ -17,6 +17,8 @@ import type {
 // classes
 import { applySessionMode, applySessionModel, applySessionConfig } from './acpSessionHelpers';
 import type { AcpSessionResponse } from './acpSessionHelpers';
+import { extractAgentErrorDetail } from './agentError';
+import type { AgentErrorDetail } from './agentError';
 import { buildPromptContent, sessionResetNoticeEventLine } from './acpSubprocessRunner';
 import type { AcpPermissionHandler, AcpPromptAttachment, SessionConfigSyncHandler } from './acpSubprocessRunner';
 
@@ -149,6 +151,7 @@ export interface RunClaudeAcpResult {
   acpSessionId: string;
   stopReason?: string;
   error?: string;
+  errorDetail?: AgentErrorDetail;
 }
 
 export async function runClaudeAcp(
@@ -212,7 +215,8 @@ export async function runClaudeAcp(
     });
     return { acpSessionId: resolvedSessionId, stopReason: resp.stopReason };
   } catch (err) {
-    return { acpSessionId: resolvedSessionId, error: String(err) };
+    const errorDetail = extractAgentErrorDetail(err);
+    return { acpSessionId: resolvedSessionId, error: errorDetail.message, errorDetail };
   } finally {
     activeHandlers.delete(resolvedSessionId);
     activeConfigSyncHandlers.delete(resolvedSessionId);

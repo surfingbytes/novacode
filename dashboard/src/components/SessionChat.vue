@@ -636,7 +636,12 @@ const sessionTabs = computed(() => [
 
 const chatErrorActionLabel = computed(() => {
   if (chatErrorCode.value === 'auth_required') return 'Open Settings';
-  if (chatErrorCode.value === 'timeout' && chatSocket.lastPromptRequest.value) return 'Try again';
+  if (
+    (chatErrorCode.value === 'timeout' || chatErrorCode.value === 'rate_limited') &&
+    chatSocket.lastPromptRequest.value
+  ) {
+    return 'Try again';
+  }
   return '';
 });
 
@@ -666,7 +671,7 @@ function handleChatErrorAction(): void {
     router.push({ name: 'settings' });
     return;
   }
-  if (chatErrorCode.value === 'timeout') {
+  if (chatErrorCode.value === 'timeout' || chatErrorCode.value === 'rate_limited') {
     chatSocket.retryLastPrompt(modelSelection.value);
   }
 }

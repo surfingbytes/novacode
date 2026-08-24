@@ -212,7 +212,7 @@ export interface CursorModelOption {
   label: string;
 }
 
-export type AgentErrorCode = 'auth_required' | 'timeout' | 'unknown';
+export type AgentErrorCode = 'auth_required' | 'rate_limited' | 'timeout' | 'unknown';
 export type CursorAuthStatus = 'authenticated' | 'unauthenticated' | 'timeout' | 'error';
 
 export function apiErrorMessage(error: unknown, fallback: string): string {
