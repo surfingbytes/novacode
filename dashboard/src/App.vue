@@ -8,6 +8,9 @@ import ApiOfflineBanner from '@/components/ApiOfflineBanner.vue';
 import AppLayout from '@/components/AppLayout.vue';
 import AppToasts from '@/components/AppToasts.vue';
 
+// composables
+import { useTabStatus } from '@/composables/useTabStatus';
+
 // stores
 import { useApiHealthStore } from '@/stores/apiHealth';
 import { useAuthStore } from '@/stores/auth';
@@ -27,6 +30,9 @@ const apiHealth = useApiHealthStore();
 const toastStore = useToastStore();
 const workspacesStore = useWorkspacesStore();
 const route = useRoute();
+
+// -------------------------------------------------- Composables --------------------------------------------------
+useTabStatus();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 let healthPollId: ReturnType<typeof setInterval> | null = null;
