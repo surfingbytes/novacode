@@ -132,6 +132,14 @@ export interface AcpSubprocessRunParams {
    */
   transformPrompt?: (promptText: string, acpSessionId: string) => string;
   /**
+   * Lazy rules-prefix builder. Invoked only when a FRESH ACP session was
+   * created (first turn, or fallback after a failed session/load) — on resumed
+   * sessions the rules are already in the conversation history, so re-sending
+   * them would duplicate tokens on every turn. Lazy so resumed turns never
+   * hit the disk for rules at all.
+   */
+  getRulesPrefix?: () => Promise<string>;
+  /**
    * MCP servers already filtered to reachable ones. Defaults to none — callers
    * that want MCP must probe first. A down server must never be passed here.
    */
@@ -965,10 +973,12 @@ export async function runAcpSubprocessPrompt(
       const loadOrCreateSession = async (servers: McpServer[]): Promise<{
         sessionId: string;
         response: AcpSessionResponse;
+        /** True when a brand-new conversation was created (rules must be injected). */
+        isFresh: boolean;
       }> => {
         if (!acpSessionId) {
           const created = await newSession(servers);
-          return { sessionId: created.sessionId, response: created };
+          return { sessionId: created.sessionId, response: created, isFresh: true };
         }
         activeHandlers.set(acpSessionId, () => {});
         try {
@@ -979,19 +989,19 @@ export async function runAcpSubprocessPrompt(
             mcpServers: servers,
           })) as LoadSessionResponse;
           phase('session:load:done');
-          return { sessionId: acpSessionId, response: loaded };
+          return { sessionId: acpSessionId, response: loaded, isFresh: false };
         } catch (err) {
           logger.warn({ logTag, novaSessionId, err }, 'loadSession failed, starting fresh session');
           handleEvent(sessionResetNoticeEventLine());
           activeHandlers.delete(acpSessionId);
           const created = await newSession(servers);
-          return { sessionId: created.sessionId, response: created };
+          return { sessionId: created.sessionId, response: created, isFresh: true };
         } finally {
           activeHandlers.delete(acpSessionId);
         }
       };
 
-      let opened: { sessionId: string; response: AcpSessionResponse };
+      let opened: { sessionId: string; response: AcpSessionResponse; isFresh: boolean };
       try {
         opened = await loadOrCreateSession(mcpServers);
       } catch (err) {
@@ -1063,9 +1073,20 @@ export async function runAcpSubprocessPrompt(
       activeHandlers.set(resolvedSessionId, handleEvent);
       try {
         phase('session:prompt:start');
+        let basePromptText = promptText;
+        if (opened.isFresh && params.getRulesPrefix) {
+          try {
+            const rulesPrefix = await params.getRulesPrefix();
+            if (rulesPrefix.trim()) {
+              basePromptText = `${rulesPrefix}\n\n---\n\nUser request:\n${promptText}`;
+            }
+          } catch (err) {
+            logger.warn({ logTag, novaSessionId, err }, 'Failed to build rules prefix; prompting without rules');
+          }
+        }
         const finalPromptText = params.transformPrompt
-          ? params.transformPrompt(promptText, resolvedSessionId)
-          : promptText;
+          ? params.transformPrompt(basePromptText, resolvedSessionId)
+          : basePromptText;
         bPromptInFlight = true;
         armPromptIdleTimer();
         const resp = (await ctx.request(methods.agent.session.prompt, {

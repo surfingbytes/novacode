@@ -28,7 +28,11 @@ const MOCK_SESSION_ID = 'mock-acp-session-1';
 interface MockLogMessage {
   id?: unknown;
   method?: string;
-  params?: { sessionId?: string; mcpServers?: unknown[] };
+  params?: {
+    sessionId?: string;
+    mcpServers?: unknown[];
+    prompt?: Array<{ type: string; text?: string }>;
+  };
 }
 
 const tempDirs: string[] = [];
@@ -152,6 +156,82 @@ describe('runAcpSubprocessPrompt', () => {
       log.some((m) => m.method === 'session/load' && m.params?.sessionId === 'existing-session-42')
     ).toBe(true);
     expect(log.some((m) => m.method === 'session/new')).toBe(false);
+  });
+
+  it('injects the rules prefix only when a fresh ACP session is created', async () => {
+    const { workDir, logPath } = setupMock('prompt-ok');
+    let builds = 0;
+
+    const result = await runAcpSubprocessPrompt({
+      command: process.execPath,
+      args: [MOCK_AGENT_PATH],
+      cwd: workDir,
+      novaSessionId: 'nova-rules-fresh',
+      acpSessionId: null,
+      promptText: 'hello',
+      logTag: 'testAcp',
+      getRulesPrefix: async () => {
+        builds += 1;
+        return 'GLOBAL RULES HERE';
+      },
+    },
+    () => {});
+
+    expect(result.error).toBeUndefined();
+    expect(builds).toBe(1);
+    const prompt = readMockLog(logPath).find((m) => m.method === 'session/prompt');
+    expect(prompt?.params?.prompt?.[0]?.text).toBe('GLOBAL RULES HERE\n\n---\n\nUser request:\nhello');
+  });
+
+  it('skips the rules prefix on resumed sessions (rules already in history)', async () => {
+    const { workDir, logPath } = setupMock('prompt-ok');
+    let builds = 0;
+
+    const result = await runAcpSubprocessPrompt({
+      command: process.execPath,
+      args: [MOCK_AGENT_PATH],
+      cwd: workDir,
+      novaSessionId: 'nova-rules-resumed',
+      acpSessionId: 'existing-session-42',
+      promptText: 'hello',
+      logTag: 'testAcp',
+      getRulesPrefix: async () => {
+        builds += 1;
+        return 'GLOBAL RULES HERE';
+      },
+    },
+    () => {});
+
+    expect(result.error).toBeUndefined();
+    expect(result.acpSessionId).toBe('existing-session-42');
+    expect(builds).toBe(0);
+    const prompt = readMockLog(logPath).find((m) => m.method === 'session/prompt');
+    expect(prompt?.params?.prompt?.[0]?.text).toBe('hello');
+  });
+
+  it('injects the rules prefix when session/load fails and a fresh session is created', async () => {
+    const { workDir, logPath } = setupMock('fail-load');
+    let builds = 0;
+
+    const result = await runAcpSubprocessPrompt({
+      command: process.execPath,
+      args: [MOCK_AGENT_PATH],
+      cwd: workDir,
+      novaSessionId: 'nova-rules-load-fails',
+      acpSessionId: 'stale-session-id',
+      promptText: 'hello',
+      logTag: 'testAcp',
+      getRulesPrefix: async () => {
+        builds += 1;
+        return 'GLOBAL RULES HERE';
+      },
+    },
+    () => {});
+
+    expect(result.error).toBeUndefined();
+    expect(builds).toBe(1);
+    const prompt = readMockLog(logPath).find((m) => m.method === 'session/prompt');
+    expect(prompt?.params?.prompt?.[0]?.text).toBe('GLOBAL RULES HERE\n\n---\n\nUser request:\nhello');
   });
 
   it('keeps the new ACP session id when the first turn is cancelled mid-prompt', async () => {

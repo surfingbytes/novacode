@@ -3,6 +3,9 @@ import { readdir, readFile, writeFile, mkdir, unlink, rename, stat } from 'node:
 import { existsSync } from 'node:fs';
 import { join, normalize, resolve } from 'node:path';
 
+// classes
+import { logger } from './logger';
+
 export interface RuleFileSummary {
   filename: string;
   label: string | null;
@@ -306,26 +309,67 @@ export interface RuleFileSection {
   content: string;
 }
 
+/**
+ * Per-file injection cap (~2.5k tokens) so one oversized rule file cannot bloat
+ * every prompt it is injected into.
+ */
+const MAX_RULE_FILE_CHARS = 10_000;
+const TRUNCATED_MARKER = '\n\n[... truncated: rule file exceeds 10,000 characters]';
+
+/**
+ * Sections cache keyed by rules dir, invalidated by a signature of file
+ * name+mtime+size — avoids re-reading every rule file on each prompt turn.
+ */
+const ruleSectionsCache = new Map<string, { signature: string; sections: RuleFileSection[] }>();
+
+async function rulesDirSignature(rulesDir: string, files: RuleFileSummary[]): Promise<string> {
+  const parts: string[] = [];
+  for (const file of files) {
+    try {
+      const st = await stat(join(rulesDir, file.filename));
+      parts.push(`${file.filename}:${st.mtimeMs}:${st.size}`);
+    } catch {
+      parts.push(`${file.filename}:gone`);
+    }
+  }
+  return parts.join('|');
+}
+
 /** Read injectable rule sections from a directory. Missing dirs and unreadable files are skipped. */
 export async function readRuleSections(rulesDir: string): Promise<RuleFileSection[]> {
   const listed = await listRuleFiles(rulesDir, { missingDir: 'empty' });
   if (!listed.ok || listed.value.length === 0) {
+    ruleSectionsCache.delete(rulesDir);
     return [];
+  }
+
+  const signature = await rulesDirSignature(rulesDir, listed.value);
+  const cached = ruleSectionsCache.get(rulesDir);
+  if (cached && cached.signature === signature) {
+    return cached.sections;
   }
 
   const sections: RuleFileSection[] = [];
   for (const file of listed.value) {
     try {
       const content = await readFile(join(rulesDir, file.filename), 'utf8');
-      const trimmed = content.trim();
+      let trimmed = content.trim();
       if (!trimmed) {
         continue;
+      }
+      if (trimmed.length > MAX_RULE_FILE_CHARS) {
+        logger.warn(
+          { rulesDir, filename: file.filename, chars: trimmed.length },
+          'Rule file exceeds injection cap; truncating'
+        );
+        trimmed = trimmed.slice(0, MAX_RULE_FILE_CHARS) + TRUNCATED_MARKER;
       }
       sections.push({ filename: file.filename, content: trimmed });
     } catch {
       // ignore unreadable single files
     }
   }
+  ruleSectionsCache.set(rulesDir, { signature, sections });
   return sections;
 }
 
@@ -344,8 +388,7 @@ export async function buildAgentRulesPrefix(opts: {
   if (globalSections.length > 0) {
     blocks.push(
       [
-        'Global rules apply to this task across every workspace.',
-        'Follow them as high-priority instructions when generating your response.',
+        'Global rules apply to this task across every workspace as high-priority instructions.',
         '',
         formatRuleSections(globalSections)
       ].join('\n')
@@ -353,12 +396,9 @@ export async function buildAgentRulesPrefix(opts: {
   }
 
   if (workspaceSections.length > 0) {
-    const lines = [
-      'Workspace rules (from .cursor/rules) apply to this task.',
-      'Follow them as high-priority instructions when generating your response.'
-    ];
+    const lines = ['Workspace rules (from .cursor/rules) apply to this task as high-priority instructions.'];
     if (globalSections.length > 0) {
-      lines.push('When they conflict with global rules, workspace rules take precedence.');
+      lines.push('They override global rules on conflict.');
     }
     lines.push('', formatRuleSections(workspaceSections));
     blocks.push(lines.join('\n'));

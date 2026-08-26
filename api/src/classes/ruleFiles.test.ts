@@ -148,12 +148,12 @@ describe('buildAgentRulesPrefix', () => {
       globalRulesDir: join(root, 'global'),
       workspacePath: join(root, 'ws')
     });
-    expect(prefix).toContain('Workspace rules (from .cursor/rules) apply to this task.');
+    expect(prefix).toContain('Workspace rules (from .cursor/rules) apply to this task as high-priority instructions.');
     expect(prefix).toContain('--- project.mdc ---\nUse bun.');
     expect(prefix).not.toContain('global-agent-defaults');
     expect(prefix).not.toContain('empty.mdc');
     expect(prefix).not.toContain('Global rules apply');
-    expect(prefix).not.toContain('workspace rules take precedence');
+    expect(prefix).not.toContain('override global rules');
   });
 
   it('includes only global rules when the workspace has none', async () => {
@@ -165,7 +165,7 @@ describe('buildAgentRulesPrefix', () => {
       globalRulesDir: globalDir,
       workspacePath: join(root, 'ws')
     });
-    expect(prefix).toContain('Global rules apply to this task across every workspace.');
+    expect(prefix).toContain('Global rules apply to this task across every workspace as high-priority instructions.');
     expect(prefix).toContain('--- house.mdc ---\nAlways use jq.');
     expect(prefix).not.toContain('Workspace rules');
   });
@@ -187,8 +187,43 @@ describe('buildAgentRulesPrefix', () => {
     const workspaceAt = prefix.indexOf('Workspace rules (from .cursor/rules)');
     expect(globalAt).toBeGreaterThanOrEqual(0);
     expect(workspaceAt).toBeGreaterThan(globalAt);
-    expect(prefix).toContain('When they conflict with global rules, workspace rules take precedence.');
+    expect(prefix).toContain('They override global rules on conflict.');
     expect(prefix).toContain('--- house.mdc ---\nPrefer Python.');
     expect(prefix).toContain('--- project.mdc ---\nPrefer TypeScript.');
+  });
+
+  it('truncates rule files that exceed the injection cap', async () => {
+    const globalDir = join(root, 'global');
+    mkdirSync(globalDir, { recursive: true });
+    writeFileSync(join(globalDir, 'huge.mdc'), 'x'.repeat(20_000));
+
+    const prefix = await buildAgentRulesPrefix({
+      globalRulesDir: globalDir,
+      workspacePath: join(root, 'ws')
+    });
+    expect(prefix).toContain('[... truncated: rule file exceeds 10,000 characters]');
+    expect(prefix.length).toBeLessThan(11_000);
+  });
+
+  it('picks up rule file edits despite the sections cache', async () => {
+    const globalDir = join(root, 'global');
+    mkdirSync(globalDir, { recursive: true });
+    const file = join(globalDir, 'house.mdc');
+    writeFileSync(file, 'Version one.');
+
+    const first = await buildAgentRulesPrefix({
+      globalRulesDir: globalDir,
+      workspacePath: join(root, 'ws')
+    });
+    expect(first).toContain('Version one.');
+
+    // Rewrite with different size+mtime — the cache must not serve stale content.
+    writeFileSync(file, 'Version two — rewritten with more text.');
+    const second = await buildAgentRulesPrefix({
+      globalRulesDir: globalDir,
+      workspacePath: join(root, 'ws')
+    });
+    expect(second).toContain('Version two — rewritten with more text.');
+    expect(second).not.toContain('Version one.');
   });
 });

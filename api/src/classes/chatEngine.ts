@@ -640,17 +640,17 @@ export async function dispatchPrompt(
 
   const assistantEvents: string[] = [];
 
-  // Resolve workspace rules prefix
-  const rulesPrefix = await buildWorkspaceRulesPrefix(workspacePath);
+  // Rules are NOT prepended here: they are injected by the ACP runner only when
+  // a fresh ACP session is created (first turn or fallback after a failed
+  // resume). On resumed sessions the rules are already in the conversation
+  // history — re-sending them every turn would duplicate tokens. Lazy callback
+  // so resumed turns never touch the disk for rules.
+  const getRulesPrefix = () => buildWorkspaceRulesPrefix(workspacePath);
   const linkedPlanPrefix = currentMessages.length === 1
     ? await buildLinkedPlanContextPrefix(linkedPlanContext)
     : '';
-  const contextPrefixes = [
-    rulesPrefix,
-    linkedPlanPrefix,
-  ].filter((section) => section.trim());
-  const agentPrompt = contextPrefixes.length > 0
-    ? `${contextPrefixes.join('\n\n---\n\n')}\n\n---\n\nUser request:\n${effectiveText}`
+  const agentPrompt = linkedPlanPrefix.trim()
+    ? `${linkedPlanPrefix}\n\n---\n\nUser request:\n${effectiveText}`
     : effectiveText;
 
   // Get Claude OAuth token (only needed for claude agent type)
@@ -755,7 +755,7 @@ export async function dispatchPrompt(
 
     if (agentType === 'mistral-vibe') {
       result = await runVibeAcp(
-        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt, attachments, mode: sessionMode },
+        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt, attachments, mode: sessionMode, getRulesPrefix },
         onEvent,
         sessionId,
         onConfigSync,
@@ -771,6 +771,7 @@ export async function dispatchPrompt(
           model,
           mode: sessionMode,
           configJson: sessionConfig,
+          getRulesPrefix,
         },
         onEvent,
         sessionId,
@@ -788,6 +789,7 @@ export async function dispatchPrompt(
           model,
           mode: sessionMode,
           configJson: sessionConfig,
+          getRulesPrefix,
         },
         onEvent,
         sessionId,
@@ -804,6 +806,7 @@ export async function dispatchPrompt(
           model,
           mode: sessionMode,
           configJson: sessionConfig,
+          getRulesPrefix,
         },
         onEvent,
         sessionId,
@@ -821,6 +824,7 @@ export async function dispatchPrompt(
           model,
           mode: sessionMode,
           configJson: sessionConfig,
+          getRulesPrefix,
           onSessionId: (id) => {
             currentAcpSessionId = id;
             // Stop pressed during session startup (before the ACP session id was

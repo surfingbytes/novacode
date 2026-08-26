@@ -22,6 +22,8 @@ export interface RunVibeAcpParams {
   promptText: string;
   attachments?: AcpPromptAttachment[];
   mode?: string;
+  /** Lazy rules-prefix builder, invoked only when a fresh ACP session is created. */
+  getRulesPrefix?: () => Promise<string>;
 }
 
 export interface RunVibeAcpResult {
@@ -48,6 +50,7 @@ export async function runVibeAcp(
       promptText: params.promptText,
       attachments: params.attachments,
       mode: params.mode,
+      getRulesPrefix: params.getRulesPrefix,
       logTag: 'vibeAcp',
     },
     onEvent,

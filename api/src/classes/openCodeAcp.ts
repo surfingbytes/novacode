@@ -25,6 +25,8 @@ export interface RunOpenCodeAcpParams {
   model?: string;
   mode?: string;
   configJson?: Record<string, string>;
+  /** Lazy rules-prefix builder, invoked only when a fresh ACP session is created. */
+  getRulesPrefix?: () => Promise<string>;
 }
 
 export interface RunOpenCodeAcpResult {
@@ -54,6 +56,7 @@ export async function runOpenCodeAcp(
       model: params.model,
       mode: params.mode,
       configJson: params.configJson,
+      getRulesPrefix: params.getRulesPrefix,
       // OpenCode's built-in plan-file workflow is TUI-only; over ACP the plan
       // agent needs explicit instructions (embedding the ACP session id) so the
       // plan lands where getPlanDocumentsSource('open-code') looks for it.

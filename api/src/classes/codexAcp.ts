@@ -24,6 +24,8 @@ export interface RunCodexAcpParams {
   model?: string;
   mode?: string;
   configJson?: Record<string, string>;
+  /** Lazy rules-prefix builder, invoked only when a fresh ACP session is created. */
+  getRulesPrefix?: () => Promise<string>;
 }
 
 export interface RunCodexAcpResult {
@@ -54,6 +56,7 @@ export async function runCodexAcp(
       model: params.model,
       mode: params.mode,
       configJson: params.configJson,
+      getRulesPrefix: params.getRulesPrefix,
       logTag: 'codexAcp',
     },
     onEvent,

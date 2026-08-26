@@ -19,6 +19,7 @@ import { applySessionMode, applySessionModel, applySessionConfig } from './acpSe
 import type { AcpSessionResponse } from './acpSessionHelpers';
 import { extractAgentErrorDetail } from './agentError';
 import type { AgentErrorDetail } from './agentError';
+import { logger } from './logger';
 import { buildPromptContent, sessionResetNoticeEventLine } from './acpSubprocessRunner';
 import type { AcpPermissionHandler, AcpPromptAttachment, SessionConfigSyncHandler } from './acpSubprocessRunner';
 
@@ -142,6 +143,12 @@ export interface RunClaudeAcpParams {
   model?: string;
   mode?: string;
   configJson?: Record<string, string>;
+  /**
+   * Lazy rules-prefix builder, invoked only when a FRESH ACP session was
+   * created — on resumed sessions the rules are already in history, so
+   * re-sending them would duplicate tokens on every turn.
+   */
+  getRulesPrefix?: () => Promise<string>;
   /** Called with the resolved session ID before the prompt starts — used to keep cancel state in sync. */
   onSessionId?: (id: string) => void;
 }
@@ -169,11 +176,14 @@ export async function runClaudeAcp(
   const agent = await getSharedAgent();
   let resolvedSessionId: string;
   let sessionResponse: AcpSessionResponse;
+  /** True when a brand-new conversation was created (rules must be injected). */
+  let isFreshSession = false;
 
   if (!acpSessionId) {
     const created = await agent.newSession({ cwd, mcpServers: [] });
     sessionResponse = created;
     resolvedSessionId = created.sessionId;
+    isFreshSession = true;
   } else {
     try {
       sessionResponse = await agent.resumeSession({ sessionId: acpSessionId, cwd, mcpServers: [] });
@@ -183,6 +193,7 @@ export async function runClaudeAcp(
       const created = await agent.newSession({ cwd, mcpServers: [] });
       sessionResponse = created;
       resolvedSessionId = created.sessionId;
+      isFreshSession = true;
     }
   }
 
@@ -209,9 +220,20 @@ export async function runClaudeAcp(
   if (onConfigSync) activeConfigSyncHandlers.set(resolvedSessionId, onConfigSync);
   if (onRequestPermission) activePermissionHandlers.set(resolvedSessionId, onRequestPermission);
   try {
+    let finalPromptText = promptText;
+    if (isFreshSession && params.getRulesPrefix) {
+      try {
+        const rulesPrefix = await params.getRulesPrefix();
+        if (rulesPrefix.trim()) {
+          finalPromptText = `${rulesPrefix}\n\n---\n\nUser request:\n${promptText}`;
+        }
+      } catch (err) {
+        logger.warn({ err, sessionId: resolvedSessionId }, 'Failed to build rules prefix; prompting without rules');
+      }
+    }
     const resp = await agent.prompt({
       sessionId: resolvedSessionId,
-      prompt: buildPromptContent(promptText, params.attachments),
+      prompt: buildPromptContent(finalPromptText, params.attachments),
     });
     return { acpSessionId: resolvedSessionId, stopReason: resp.stopReason };
   } catch (err) {
