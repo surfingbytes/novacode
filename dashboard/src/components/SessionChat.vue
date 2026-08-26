@@ -1051,139 +1051,141 @@ onUnmounted(() => {
     <!-- Tab content -->
     <div class="flex-1 overflow-hidden flex flex-col min-h-0">
       <!-- Chat -->
-      <div
-        v-show="activeTab === 'chat'"
-        class="flex-1 overflow-hidden flex min-h-0"
-        :class="bWidePane ? 'flex-row' : 'flex-col'"
-      >
-        <div class="flex-1 min-w-0 flex flex-col min-h-0">
-          <ChatMessageList
-            ref="chatListRef"
-            :b-loading="bLoading"
-            :b-history-loaded="bHistoryLoaded"
-            :display-messages="displayMessages"
-            :streaming-display-items="streamingDisplayItems"
-            :pending-approvals="pendingApprovals"
-            :pending-questions="pendingQuestions"
-            :streaming-thinking-text="streamingThinkingText"
-            :streaming-usage="streamingUsage"
-            :usage-turns="usageTurns"
-            :b-is-streaming="bIsStreaming"
-            :b-has-more="bHasMore"
-            :b-loading-more="bLoadingMore"
-            :chat-error="chatError"
-            :chat-error-action-label="chatErrorActionLabel"
-            :hide-thinking-output="hideThinkingOutput"
-            :hide-tool-calls="hideToolCalls"
-            :expanded-tool-output-ids="expandedToolOutputIds"
-            :agent-type="session?.agentType"
-            :user-name="auth.username"
-            :viewport-height="viewportHeight"
-            @load-older="chatSocket.loadOlderMessages"
-            @toggle-tool-output="toggleToolOutput"
-            @open-plan="planDocs.openPlan"
-            @open-file="openWorkspaceFile"
-            @lightbox="(src) => (lightboxSrc = src)"
-            @chat-error-action="handleChatErrorAction"
-            @approval-response="chatSocket.sendApprovalResponse"
-            @question-response="chatSocket.sendQuestionResponse"
-          />
+      <div v-show="activeTab === 'chat'" class="flex-1 overflow-hidden flex flex-col min-h-0">
+        <!-- Top region: message list (+ wide: right todo panel ending above the composer) -->
+        <div
+          class="flex-1 overflow-hidden flex min-h-0"
+          :class="bWidePane ? 'flex-row' : 'flex-col'"
+        >
+          <div class="flex-1 min-w-0 flex flex-col min-h-0">
+            <ChatMessageList
+              ref="chatListRef"
+              :b-loading="bLoading"
+              :b-history-loaded="bHistoryLoaded"
+              :display-messages="displayMessages"
+              :streaming-display-items="streamingDisplayItems"
+              :pending-approvals="pendingApprovals"
+              :pending-questions="pendingQuestions"
+              :streaming-thinking-text="streamingThinkingText"
+              :streaming-usage="streamingUsage"
+              :usage-turns="usageTurns"
+              :b-is-streaming="bIsStreaming"
+              :b-has-more="bHasMore"
+              :b-loading-more="bLoadingMore"
+              :chat-error="chatError"
+              :chat-error-action-label="chatErrorActionLabel"
+              :hide-thinking-output="hideThinkingOutput"
+              :hide-tool-calls="hideToolCalls"
+              :expanded-tool-output-ids="expandedToolOutputIds"
+              :agent-type="session?.agentType"
+              :user-name="auth.username"
+              :viewport-height="viewportHeight"
+              @load-older="chatSocket.loadOlderMessages"
+              @toggle-tool-output="toggleToolOutput"
+              @open-plan="planDocs.openPlan"
+              @open-file="openWorkspaceFile"
+              @lightbox="(src) => (lightboxSrc = src)"
+              @chat-error-action="handleChatErrorAction"
+              @approval-response="chatSocket.sendApprovalResponse"
+              @question-response="chatSocket.sendQuestionResponse"
+            />
 
-          <!-- Todo panel (narrow: strip above the composer) -->
+            <!-- Todo panel (narrow: strip above the composer) -->
+            <ChatTodoPanel
+              v-if="bAnyTodos && !bWidePane"
+              layout="strip"
+              :todo-items="todoItems"
+              :done-count="todoDoneCount"
+              :b-running="bTodosRunning && bIsStreaming"
+              :panel-state="todoPanelState"
+              @toggle="toggleTodoPanelState"
+            />
+          </div>
+
+          <!-- Todo panel (wide: right column, ends above the composer) -->
           <ChatTodoPanel
-            v-if="bAnyTodos && !bWidePane"
-            layout="strip"
+            v-if="bAnyTodos && !bTodoPanelClosed && bWidePane"
+            layout="panel"
+            class="flex w-80 xl:w-96 shrink-0"
             :todo-items="todoItems"
             :done-count="todoDoneCount"
             :b-running="bTodosRunning && bIsStreaming"
             :panel-state="todoPanelState"
-            @toggle="toggleTodoPanelState"
-          />
-
-          <!-- Connection indicator (initial connect and reconnects) -->
-          <div v-if="!bWsConnected" class="flex justify-center py-1.5 shrink-0">
-            <span class="text-xs text-text-muted flex items-center gap-1.5">
-              <span
-                class="w-3 h-3 border border-text-muted/40 border-t-text-muted rounded-full animate-spin inline-block"
-              ></span>
-              {{ bWsReconnecting ? 'Reconnecting…' : 'Connecting…' }}
-            </span>
-          </div>
-
-          <!-- Wide: reopen chip when the todo panel is closed -->
-          <div
-            v-if="bAnyTodos && bTodoPanelClosed && bWidePane"
-            class="flex justify-end px-4 pb-1 shrink-0"
-          >
-            <button
-              type="button"
-              class="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-fg/15 bg-fg/[0.02] text-xs text-text-muted hover:text-text-primary transition-colors"
-              @click="openTodoPanel"
-            >
-              <span class="select-none" v-html="todoChecklistSvg" />
-              Tasks {{ todoDoneCount }}/{{ todoItems.length }}
-            </button>
-          </div>
-
-          <ChatComposer
-            ref="composerRef"
-            v-model:prompt-text="promptText"
-            v-model:pending-images="pendingImages"
-            :b-is-streaming="bIsStreaming"
-            :b-ws-connected="bWsConnected"
-            :queued-prompts="queuedPrompts"
-            :mode-options="modeOptions"
-            :display-session-mode="displaySessionMode"
-            :selected-mode-label="selectedModeOption.label"
-            :selected-mode-icon="selectedModeIconName"
-            :b-modes-loading="bModesLoading"
-            :b-saving-session-mode="bSavingSessionMode"
-            :agent-type="session?.agentType"
-            :model-selection="modelSelection"
-            :model-options="modelOptions"
-            :thinking-options="thinkingOptions"
-            :thinking-value="thinkingOptions ? sessionConfig[thinkingOptions.configId] : null"
-            :b-models-loading="bModelsLoading"
-            :b-saving-model-selection="bSavingModelSelection"
-            :b-selected-model-missing="bSelectedModelMissing"
-            :agent-config-options="agentConfigOptions"
-            :agent-config-display-value="agentConfigDisplayValue"
-            :b-config-loading="bConfigLoading"
-            :b-saving-session-config="bSavingSessionConfig"
-            :hide-thinking-output="hideThinkingOutput"
-            :hide-tool-calls="hideToolCalls"
-            :approval-policy="approvalPolicy"
-            :b-saving-approval-policy="bSavingApprovalPolicy"
-            :b-md-up="bChatInputMdUp"
-            :b-uploading-image="bUploadingImage"
-            @send="onComposerSend"
-            @cancel="chatSocket.cancelPrompt"
-            @push-queue="chatSocket.pushQueuedPrompt"
-            @delete-queue="chatSocket.deleteQueuedPrompt"
-            @edit-queue="chatSocket.editQueuedPrompt"
-            @select-mode="onSessionModeChange"
-            @config-change="onAgentConfigChange"
-            @model-update="onSharedModelPickerUpdate"
-            @thinking-update="onSharedThinkingPickerUpdate"
-            @hide-thinking-toggle="onHideThinkingToggle"
-            @hide-tool-calls-toggle="onHideToolCallsToggle"
-            @approval-policy-change="onApprovalPolicyChange"
-            @lightbox="(src) => (lightboxSrc = src)"
-            @upload-files="onUploadFiles"
+            b-closable
+            @close="closeTodoPanel"
           />
         </div>
 
-        <!-- Todo panel (wide: right column) -->
-        <ChatTodoPanel
-          v-if="bAnyTodos && !bTodoPanelClosed && bWidePane"
-          layout="panel"
-          class="flex w-80 xl:w-96 shrink-0"
-          :todo-items="todoItems"
-          :done-count="todoDoneCount"
-          :b-running="bTodosRunning && bIsStreaming"
-          :panel-state="todoPanelState"
-          b-closable
-          @close="closeTodoPanel"
+        <!-- Connection indicator (initial connect and reconnects) -->
+        <div v-if="!bWsConnected" class="flex justify-center py-1.5 shrink-0">
+          <span class="text-xs text-text-muted flex items-center gap-1.5">
+            <span
+              class="w-3 h-3 border border-text-muted/40 border-t-text-muted rounded-full animate-spin inline-block"
+            ></span>
+            {{ bWsReconnecting ? 'Reconnecting…' : 'Connecting…' }}
+          </span>
+        </div>
+
+        <!-- Wide: reopen chip when the todo panel is closed -->
+        <div
+          v-if="bAnyTodos && bTodoPanelClosed && bWidePane"
+          class="flex justify-end px-4 pb-1 shrink-0"
+        >
+          <button
+            type="button"
+            class="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-fg/15 bg-fg/[0.02] text-xs text-text-muted hover:text-text-primary transition-colors"
+            @click="openTodoPanel"
+          >
+            <span class="select-none" v-html="todoChecklistSvg" />
+            Tasks {{ todoDoneCount }}/{{ todoItems.length }}
+          </button>
+        </div>
+
+        <ChatComposer
+          ref="composerRef"
+          v-model:prompt-text="promptText"
+          v-model:pending-images="pendingImages"
+          :b-is-streaming="bIsStreaming"
+          :b-ws-connected="bWsConnected"
+          :queued-prompts="queuedPrompts"
+          :mode-options="modeOptions"
+          :display-session-mode="displaySessionMode"
+          :selected-mode-label="selectedModeOption.label"
+          :selected-mode-icon="selectedModeIconName"
+          :b-modes-loading="bModesLoading"
+          :b-saving-session-mode="bSavingSessionMode"
+          :agent-type="session?.agentType"
+          :model-selection="modelSelection"
+          :model-options="modelOptions"
+          :thinking-options="thinkingOptions"
+          :thinking-value="thinkingOptions ? sessionConfig[thinkingOptions.configId] : null"
+          :b-models-loading="bModelsLoading"
+          :b-saving-model-selection="bSavingModelSelection"
+          :b-selected-model-missing="bSelectedModelMissing"
+          :agent-config-options="agentConfigOptions"
+          :agent-config-display-value="agentConfigDisplayValue"
+          :b-config-loading="bConfigLoading"
+          :b-saving-session-config="bSavingSessionConfig"
+          :hide-thinking-output="hideThinkingOutput"
+          :hide-tool-calls="hideToolCalls"
+          :approval-policy="approvalPolicy"
+          :b-saving-approval-policy="bSavingApprovalPolicy"
+          :b-md-up="bChatInputMdUp"
+          :b-uploading-image="bUploadingImage"
+          @send="onComposerSend"
+          @cancel="chatSocket.cancelPrompt"
+          @push-queue="chatSocket.pushQueuedPrompt"
+          @delete-queue="chatSocket.deleteQueuedPrompt"
+          @edit-queue="chatSocket.editQueuedPrompt"
+          @select-mode="onSessionModeChange"
+          @config-change="onAgentConfigChange"
+          @model-update="onSharedModelPickerUpdate"
+          @thinking-update="onSharedThinkingPickerUpdate"
+          @hide-thinking-toggle="onHideThinkingToggle"
+          @hide-tool-calls-toggle="onHideToolCallsToggle"
+          @approval-policy-change="onApprovalPolicyChange"
+          @lightbox="(src) => (lightboxSrc = src)"
+          @upload-files="onUploadFiles"
         />
       </div>
 

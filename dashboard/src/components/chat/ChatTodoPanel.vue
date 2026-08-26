@@ -6,7 +6,7 @@
  *  - 'strip': narrow viewports — collapsible strip pinned above the composer;
  *    tapping the header toggles bi-state: collapsed ↔ full list
  *  - 'panel': wide viewports (foldable / tablet+, >= PANE_LAYOUT_MIN_WIDTH) —
- *    right-side column of the chat tab, always expanded; closable (bClosable)
+ *    right-side column above the composer, always expanded; closable (bClosable)
  */
 
 // node_modules
