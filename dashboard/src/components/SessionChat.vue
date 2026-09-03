@@ -18,7 +18,7 @@ import EntityDetailHeader from '@/components/ui/EntityDetailHeader.vue';
 import BottomTabBar from '@/components/ui/BottomTabBar.vue';
 
 // classes
-import { sessionsApi, settingsApi, workspaceRulesApi, globalRulesApi, buildSessionTerminalWsUrl } from '@/classes/api';
+import { sessionsApi, settingsApi, workspaceRulesApi, globalRulesApi, buildSessionTerminalWsUrl, apiErrorMessage } from '@/classes/api';
 import { readFilesOpenPath, writeFilesOpenPath } from '@/lib/filesOpenPath';
 import { renderMermaidDiagrams } from '@/lib/mermaid';
 import { clearSessionPrompt, persistSessionPrompt, readSessionPrompt } from '@/lib/pendingSessionPrompt';
@@ -473,8 +473,8 @@ function uploadAttachmentFile(file: File): void {
         serverPath: data.path,
         isImage
       });
-    } catch {
-      chatSocket.setChatError('Failed to upload file');
+    } catch (error) {
+      chatSocket.setChatError(apiErrorMessage(error, 'Failed to upload file'));
     } finally {
       bUploadingImage.value = false;
     }

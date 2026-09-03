@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import {
   buildAgentRulesPrefix,
   deleteRuleFile,
+  hasAlwaysApplyFrontmatter,
+  isCursorNativeRule,
   isRuleFileHiddenFromUi,
   listRuleFiles,
   readRuleFile,
@@ -118,6 +120,27 @@ describe('rule file CRUD', () => {
   });
 });
 
+describe('hasAlwaysApplyFrontmatter / isCursorNativeRule', () => {
+  it('detects alwaysApply: true only inside a leading frontmatter block', () => {
+    expect(hasAlwaysApplyFrontmatter('---\ndescription: x\nalwaysApply: true\n---\nBody')).toBe(true);
+    expect(hasAlwaysApplyFrontmatter('---\nalwaysApply: false\n---\nBody')).toBe(false);
+    expect(hasAlwaysApplyFrontmatter('---\nalwaysApply: yes\n---\nBody')).toBe(false);
+    expect(hasAlwaysApplyFrontmatter('No frontmatter at all')).toBe(false);
+    // Mentioned in the body but not in frontmatter — not auto-applied by cursor.
+    expect(hasAlwaysApplyFrontmatter('# Rules\n\nalwaysApply: true')).toBe(false);
+    expect(hasAlwaysApplyFrontmatter('---\nalwaysApply: true\n---\n')).toBe(true);
+  });
+
+  it('treats only .mdc files as cursor-native (cursor globs *.mdc only)', () => {
+    const body = '---\nalwaysApply: true\n---\nBody';
+    expect(isCursorNativeRule({ filename: 'core.mdc', content: body })).toBe(true);
+    expect(isCursorNativeRule({ filename: 'CORE.MDC', content: body })).toBe(true);
+    expect(isCursorNativeRule({ filename: 'style.md', content: body })).toBe(false);
+    expect(isCursorNativeRule({ filename: 'notes.txt', content: body })).toBe(false);
+    expect(isCursorNativeRule({ filename: 'core.mdc', content: 'plain body' })).toBe(false);
+  });
+});
+
 describe('buildAgentRulesPrefix', () => {
   let root: string;
 
@@ -190,6 +213,33 @@ describe('buildAgentRulesPrefix', () => {
     expect(prefix).toContain('They override global rules on conflict.');
     expect(prefix).toContain('--- house.mdc ---\nPrefer Python.');
     expect(prefix).toContain('--- project.mdc ---\nPrefer TypeScript.');
+  });
+
+  it('drops cursor-native workspace rules but keeps the rest when asked', async () => {
+    const globalDir = join(root, 'global');
+    mkdirSync(globalDir, { recursive: true });
+    writeFileSync(join(globalDir, 'house.mdc'), '---\nalwaysApply: true\n---\nAlways use jq.');
+
+    const wsRules = join(root, 'ws', '.cursor', 'rules');
+    mkdirSync(wsRules, { recursive: true });
+    writeFileSync(join(wsRules, 'core.mdc'), '---\ndescription: x\nalwaysApply: true\n---\nUse bun.');
+    writeFileSync(join(wsRules, 'databases.mdc'), '# Workspace rules\nRead-only prod DB.');
+    writeFileSync(join(wsRules, 'notes.md'), '---\nalwaysApply: true\n---\nMarkdown note.');
+
+    const prefix = await buildAgentRulesPrefix({
+      globalRulesDir: globalDir,
+      workspacePath: join(root, 'ws'),
+      excludeCursorNativeWorkspaceRules: true
+    });
+    // cursor-native workspace rule dropped (cursor loads it itself)…
+    expect(prefix).not.toContain('Use bun.');
+    expect(prefix).not.toContain('--- core.mdc ---');
+    // …but non-alwaysApply and non-.mdc workspace rules are still injected…
+    expect(prefix).toContain('--- databases.mdc ---\n# Workspace rules\nRead-only prod DB.');
+    expect(prefix).toContain('--- notes.md ---');
+    // …and global rules are never filtered (cursor never scans the global dir).
+    expect(prefix).toContain('--- house.mdc ---');
+    expect(prefix).toContain('Always use jq.');
   });
 
   it('truncates rule files that exceed the injection cap', async () => {

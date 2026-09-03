@@ -34,6 +34,7 @@ const MIME_TO_EXT: Record<string, string> = {
   'application/yaml': '.yaml',
   'text/yaml': '.yaml',
   'application/x-yaml': '.yaml',
+  'message/rfc822': '.eml',
 };
 
 const EXT_TO_CONTENT_TYPE: Record<string, string> = {
@@ -69,6 +70,7 @@ const EXT_TO_CONTENT_TYPE: Record<string, string> = {
   '.toml': 'text/plain',
   '.ini': 'text/plain',
   '.env': 'text/plain',
+  '.eml': 'message/rfc822',
 };
 
 const ALLOWED_EXTENSIONS = new Set(Object.keys(EXT_TO_CONTENT_TYPE));

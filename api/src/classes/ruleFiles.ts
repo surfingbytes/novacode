@@ -377,12 +377,44 @@ function formatRuleSections(sections: RuleFileSection[]): string {
   return sections.map((section) => `--- ${section.filename} ---\n${section.content}`).join('\n\n');
 }
 
+/**
+ * True when the content starts with a YAML frontmatter block containing
+ * `alwaysApply: true` — cursor-agent auto-applies such .mdc rules natively
+ * (recursively from the workspace/git root), so injecting them would
+ * double-deliver the content. Rules without it (e.g. agent-requested) are
+ * NOT loaded by cursor and must still be injected.
+ */
+export function hasAlwaysApplyFrontmatter(content: string): boolean {
+  const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!frontmatter) {
+    return false;
+  }
+  return /^alwaysApply\s*:\s*true\s*$/m.test(frontmatter[1] ?? '');
+}
+
+/**
+ * True for rule sections cursor-agent applies natively: .mdc files (cursor's
+ * rules glob only matches .mdc) with `alwaysApply: true` frontmatter.
+ */
+export function isCursorNativeRule(section: RuleFileSection): boolean {
+  return section.filename.toLowerCase().endsWith('.mdc') && hasAlwaysApplyFrontmatter(section.content);
+}
+
 export async function buildAgentRulesPrefix(opts: {
   globalRulesDir: string;
   workspacePath: string;
+  /**
+   * Drop workspace rules cursor-agent applies natively (.mdc with
+   * `alwaysApply: true`) — it auto-loads them from the workspace/git root,
+   * so injecting them too would double-deliver the content.
+   */
+  excludeCursorNativeWorkspaceRules?: boolean;
 }): Promise<string> {
   const globalSections = await readRuleSections(opts.globalRulesDir);
-  const workspaceSections = await readRuleSections(join(opts.workspacePath, '.cursor', 'rules'));
+  let workspaceSections = await readRuleSections(join(opts.workspacePath, '.cursor', 'rules'));
+  if (opts.excludeCursorNativeWorkspaceRules) {
+    workspaceSections = workspaceSections.filter((section) => !isCursorNativeRule(section));
+  }
   const blocks: string[] = [];
 
   if (globalSections.length > 0) {

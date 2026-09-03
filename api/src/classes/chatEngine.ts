@@ -528,10 +528,14 @@ function parseClaudeRateLimitError(rawError: string): { resetAtIso?: string; res
   return { resetAtIso: resetDateUtc.toISOString(), resetAtReadable };
 }
 
-async function buildWorkspaceRulesPrefix(workspacePath: string): Promise<string> {
+async function buildWorkspaceRulesPrefix(workspacePath: string, agentType: AgentType): Promise<string> {
   return buildAgentRulesPrefix({
     globalRulesDir: getGlobalRulesDir(),
     workspacePath,
+    // cursor-agent natively auto-applies .mdc rules with `alwaysApply: true`
+    // from the workspace/git root — those must not be double-delivered.
+    // Rules without that frontmatter are NOT loaded by cursor and are still injected.
+    excludeCursorNativeWorkspaceRules: agentType === 'cursor-agent',
   });
 }
 
@@ -645,7 +649,7 @@ export async function dispatchPrompt(
   // resume). On resumed sessions the rules are already in the conversation
   // history — re-sending them every turn would duplicate tokens. Lazy callback
   // so resumed turns never touch the disk for rules.
-  const getRulesPrefix = () => buildWorkspaceRulesPrefix(workspacePath);
+  const getRulesPrefix = () => buildWorkspaceRulesPrefix(workspacePath, agentType);
   const linkedPlanPrefix = currentMessages.length === 1
     ? await buildLinkedPlanContextPrefix(linkedPlanContext)
     : '';
