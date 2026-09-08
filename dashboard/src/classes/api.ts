@@ -240,6 +240,13 @@ interface OpenCodeProvidersResponse {
   providers: OpenCodeProvider[];
 }
 
+interface AgentRuntimeSettings {
+  /** Effective idle timeout (ms) — env var beats the saved value when set. */
+  promptIdleTimeoutMs: number;
+  defaultPromptIdleTimeoutMs: number;
+  envOverride: boolean;
+}
+
 export const settingsApi = {
   get: (): ReturnType<typeof http.get<AppSettings>> => http.get<AppSettings>('/settings'),
   update: (payload: Partial<AppSettings>): ReturnType<typeof http.put<AppSettings>> =>
@@ -303,6 +310,14 @@ export const settingsApi = {
       openCodeAvailable: boolean;
       codexAvailable: boolean;
     }>('/settings/agent-capabilities'),
+
+  getAgentRuntime: (): ReturnType<typeof http.get<AgentRuntimeSettings>> =>
+    http.get<AgentRuntimeSettings>('/settings/agent-runtime'),
+
+  updateAgentRuntime: (
+    payload: Pick<AgentRuntimeSettings, 'promptIdleTimeoutMs'>
+  ): ReturnType<typeof http.put<AgentRuntimeSettings>> =>
+    http.put<AgentRuntimeSettings>('/settings/agent-runtime', payload),
 
   getVibeApiKeyStatus: (): ReturnType<typeof http.get<{ configured: boolean }>> =>
     http.get<{ configured: boolean }>('/settings/vibe-api-key'),

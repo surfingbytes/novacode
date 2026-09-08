@@ -58,6 +58,11 @@ const notifPermission = ref<NotificationPermission | 'unsupported'>(getPermissio
 
 const bSendOnEnter = ref<boolean>(isSendOnEnter());
 
+const idleTimeoutMinutes = ref<number>(5);
+const bIdleTimeoutEnvOverride = ref<boolean>(false);
+const bSavingIdleTimeout = ref<boolean>(false);
+const bIdleTimeoutError = ref<boolean>(false);
+
 const bClaudeAutoContinue = ref<boolean>(false);
 const bSavingClaudeAutoContinue = ref<boolean>(false);
 
@@ -268,6 +273,26 @@ const toggleSendOnEnter = (): void => {
   setSendOnEnter(bSendOnEnter.value);
 };
 
+const saveIdleTimeout = async (): Promise<void> => {
+  const minutes = Number(idleTimeoutMinutes.value);
+  if (!Number.isFinite(minutes) || minutes < 0 || minutes > 60) {
+    bIdleTimeoutError.value = true;
+    return;
+  }
+  bIdleTimeoutError.value = false;
+  bSavingIdleTimeout.value = true;
+  try {
+    const { data } = await settingsApi.updateAgentRuntime({
+      promptIdleTimeoutMs: Math.round(minutes * 60_000)
+    });
+    idleTimeoutMinutes.value = data.promptIdleTimeoutMs / 60_000;
+  } catch {
+    bIdleTimeoutError.value = true;
+  } finally {
+    bSavingIdleTimeout.value = false;
+  }
+};
+
 const toggleClaudeAutoContinue = async (): Promise<void> => {
   bClaudeAutoContinue.value = !bClaudeAutoContinue.value;
   bSavingClaudeAutoContinue.value = true;
@@ -301,6 +326,13 @@ const loadSettings = async (): Promise<void> => {
     }
     if (typeof response.data.claudeAutoContinue === 'boolean') {
       bClaudeAutoContinue.value = response.data.claudeAutoContinue;
+    }
+    try {
+      const runtime = await settingsApi.getAgentRuntime();
+      idleTimeoutMinutes.value = runtime.data.promptIdleTimeoutMs / 60_000;
+      bIdleTimeoutEnvOverride.value = runtime.data.envOverride;
+    } catch {
+      // keep defaults
     }
     try {
       const caps = await settingsApi.getAgentCapabilities();
@@ -354,6 +386,39 @@ onMounted((): void => {
               @click="toggleSendOnEnter"
             ><span class="nc-toggle-knob" /></button>
           </div>
+          <div class="settings-pref-row">
+            <div class="settings-pref-row__text">
+              <div class="settings-pref-row__title">Agent response timeout</div>
+              <div class="settings-pref-row__desc">
+                Stop an agent run when it produces no output for this many minutes. 0 disables the watchdog.
+                <span v-if="bIdleTimeoutEnvOverride" class="settings-pref-row__warn">
+                  Overridden by the ACP_PROMPT_IDLE_TIMEOUT_MS environment variable — restart without it to edit here.
+                </span>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <input
+                v-model="idleTimeoutMinutes"
+                type="number"
+                min="0"
+                max="60"
+                step="1"
+                :disabled="bIdleTimeoutEnvOverride || bSavingIdleTimeout"
+                aria-label="Agent response timeout in minutes"
+                class="w-20 bg-fg/[0.05] border border-fg/[0.1] rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all disabled:opacity-50"
+                @keydown.enter="saveIdleTimeout"
+              />
+              <button
+                type="button"
+                class="bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-3 py-2 rounded-lg transition-all"
+                :disabled="bIdleTimeoutEnvOverride || bSavingIdleTimeout"
+                @click="saveIdleTimeout"
+              >Save</button>
+            </div>
+          </div>
+          <p v-if="bIdleTimeoutError" class="text-xs text-destructive mt-2">
+            Enter a whole number of minutes between 0 and 60.
+          </p>
         </div>
 
         <!-- Appearance -->

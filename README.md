@@ -161,6 +161,7 @@ Copy `.env.example` to `.env` and edit the values below.
 | Variable | Description |
 |----------|-------------|
 | `AGENT_ENV_*` | Any env var prefixed with `AGENT_ENV_` is forwarded to spawned agents with the prefix stripped |
+| `ACP_PROMPT_IDLE_TIMEOUT_MS` | How long (ms) an agent prompt may produce no output before the run is stopped (default: `300000` — 5 minutes). Also editable in Settings → General ("Agent response timeout"); the env var wins when set |
 | `VIBE_COMMAND` | *(optional)* Executable for Mistral Vibe (default: `vibe` on `PATH`) |
 | `VIBE_ACP_COMMAND` | *(optional)* Vibe ACP server binary (default: `vibe-acp`) |
 | `OPENCODE_ACP_COMMAND` | *(optional)* OpenCode ACP command (default: `opencode`) |

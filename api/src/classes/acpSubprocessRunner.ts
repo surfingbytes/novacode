@@ -24,7 +24,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 
 // classes
-import { config } from './config';
+import { config, resolvePromptIdleTimeoutMs } from './config';
 import { applySessionMode, applySessionModel, applySessionConfig, findConfigOptionByCategory } from './acpSessionHelpers';
 import type { AcpSessionResponse } from './acpSessionHelpers';
 import { extractAgentErrorDetail, type AgentErrorDetail } from './agentError';
@@ -168,17 +168,14 @@ const configSyncHandlers = new Map<string, SessionConfigSyncHandler>();
 
 /** Grace period for the agent to honour session/cancel before the subprocess is killed. */
 const CANCEL_GRACE_MS = 3_000;
-const DEFAULT_PROMPT_IDLE_TIMEOUT_MS = 120_000;
-
 function promptIdleTimeoutMs(): number {
-  const raw = Number.parseInt(process.env['ACP_PROMPT_IDLE_TIMEOUT_MS'] ?? '', 10);
-  return Number.isFinite(raw) ? raw : DEFAULT_PROMPT_IDLE_TIMEOUT_MS;
+  return resolvePromptIdleTimeoutMs(config.configDir);
 }
 
 /**
  * Subagents emit `session/update` (and Cursor `cursor/task`) with their own ACP
  * session id on the same connection. Those must still reach the in-flight prompt
- * handler — otherwise the parent looks idle and the 2-minute timeout kills it.
+ * handler — otherwise the parent looks idle and the idle timeout kills it.
  */
 function resolveEventHandler(
   sessionId: string | null | undefined,

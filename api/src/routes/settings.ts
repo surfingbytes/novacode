@@ -15,7 +15,11 @@ import {
   isVibeCliAvailable,
   isCodexAcpAvailable,
   readMcpClients,
-  writeMcpClients
+  writeMcpClients,
+  DEFAULT_PROMPT_IDLE_TIMEOUT_MS,
+  readAgentRuntimeSettings,
+  resolvePromptIdleTimeoutMs,
+  writeAgentRuntimeSettings
 } from '../classes/config';
 import { checkMcpClients } from '../classes/mcpConnectivityCheck';
 import {
@@ -501,6 +505,52 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.status(400).send({ error: 'Unsupported agent type' });
       }
       return getAgentConfigOptions(agentType);
+    }
+  );
+
+  // -------------------------------------------------- Agent runtime --------------------------------------------------
+  const AgentRuntimeSchema = Type.Object({
+    /** Effective idle timeout (ms) — env var beats the saved value when set. */
+    promptIdleTimeoutMs: Type.Integer(),
+    defaultPromptIdleTimeoutMs: Type.Integer(),
+    envOverride: Type.Boolean()
+  });
+
+  const agentRuntimeResponse = () => ({
+    promptIdleTimeoutMs: resolvePromptIdleTimeoutMs(config.configDir),
+    defaultPromptIdleTimeoutMs: DEFAULT_PROMPT_IDLE_TIMEOUT_MS,
+    envOverride: Number.isFinite(Number.parseInt(process.env['ACP_PROMPT_IDLE_TIMEOUT_MS'] ?? '', 10))
+  });
+
+  // GET /api/settings/agent-runtime - server-wide agent runtime knobs
+  fastifyInstance.get(
+    '/api/settings/agent-runtime',
+    {
+      preHandler: jwtPreHandler,
+      schema: { response: { 200: AgentRuntimeSchema } }
+    },
+    async () => agentRuntimeResponse()
+  );
+
+  // PUT /api/settings/agent-runtime - persist server-wide agent runtime knobs
+  fastifyInstance.put(
+    '/api/settings/agent-runtime',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        body: Type.Object({
+          // 0 disables the watchdog; cap at 60 minutes
+          promptIdleTimeoutMs: Type.Integer({ minimum: 0, maximum: 3_600_000 })
+        }),
+        response: { 200: AgentRuntimeSchema }
+      }
+    },
+    async (request) => {
+      writeAgentRuntimeSettings(config.configDir, {
+        ...readAgentRuntimeSettings(config.configDir),
+        promptIdleTimeoutMs: request.body.promptIdleTimeoutMs
+      });
+      return agentRuntimeResponse();
     }
   );
 

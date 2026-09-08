@@ -268,6 +268,43 @@ export function isOpenCodeAcpAvailable(configDir: string): boolean {
   }
 }
 
+// ── Agent runtime settings (editable from the dashboard) ────────────────────
+
+export interface AgentRuntimeSettings {
+  /** Idle timeout (ms) for a prompt that produces no output before the run is stopped; 0 disables. */
+  promptIdleTimeoutMs?: number;
+}
+
+/** Default idle timeout for an agent prompt that produces no output (5 minutes). */
+export const DEFAULT_PROMPT_IDLE_TIMEOUT_MS = 300_000;
+
+const AGENT_RUNTIME_FILE = 'agent-runtime.json';
+
+export function readAgentRuntimeSettings(configDir: string): AgentRuntimeSettings {
+  const filePath = join(configDir, AGENT_RUNTIME_FILE);
+  if (!existsSync(filePath)) return {};
+  try {
+    const raw = readFileSync(filePath, 'utf8');
+    const data: unknown = JSON.parse(raw);
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return {};
+    const ms = (data as Record<string, unknown>).promptIdleTimeoutMs;
+    return typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 ? { promptIdleTimeoutMs: ms } : {};
+  } catch {
+    return {};
+  }
+}
+
+export function writeAgentRuntimeSettings(configDir: string, settings: AgentRuntimeSettings): void {
+  writeFileSync(join(configDir, AGENT_RUNTIME_FILE), JSON.stringify(settings, null, 2) + '\n', 'utf8');
+}
+
+/** Effective prompt idle timeout: ACP_PROMPT_IDLE_TIMEOUT_MS env > settings file > default. */
+export function resolvePromptIdleTimeoutMs(configDir: string): number {
+  const raw = Number.parseInt(process.env['ACP_PROMPT_IDLE_TIMEOUT_MS'] ?? '', 10);
+  if (Number.isFinite(raw)) return raw;
+  return readAgentRuntimeSettings(configDir).promptIdleTimeoutMs ?? DEFAULT_PROMPT_IDLE_TIMEOUT_MS;
+}
+
 // ── MCP client configuration (sync to Cursor & Claude) ──────────────────────
 
 export interface McpClientServerConfig {
