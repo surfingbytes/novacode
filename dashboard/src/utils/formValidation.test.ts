@@ -30,9 +30,14 @@ describe('workspacePathError', () => {
     expect(workspacePathError('/projects/my-repo')).toBeUndefined();
   });
 
-  it('rejects walking above /data-root', () => {
-    expect(workspacePathError('../secret')).toBe('Path must stay inside /data-root');
-    expect(workspacePathError('ok/../../outside')).toBe('Path must stay inside /data-root');
+  it('rejects walking above the workspace root', () => {
+    expect(workspacePathError('../secret')).toBe('Path must stay inside the workspace root');
+    expect(workspacePathError('ok/../../outside')).toBe('Path must stay inside the workspace root');
+  });
+
+  it('accepts browse-root itself as .', () => {
+    expect(workspacePathError('.')).toBeUndefined();
+    expect(workspacePathError('/')).toBeUndefined();
   });
 
   it('allows .. that stays inside the root', () => {

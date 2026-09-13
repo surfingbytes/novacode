@@ -80,6 +80,7 @@ type AppSettings = {
   utilityModelSelection: string;
   sshPublicKey: string;
   sshPrivateKey: string;
+  workspaceBrowseRoot: string;
 };
 
 const AppSettingsSchema = Type.Object({
@@ -95,7 +96,9 @@ const AppSettingsSchema = Type.Object({
   /** SSH public key (e.g. register on GitHub/GitLab) — persisted under config volume `.ssh/` */
   sshPublicKey: Type.String(),
   /** Private key for the same pair — treat as a secret */
-  sshPrivateKey: Type.String()
+  sshPrivateKey: Type.String(),
+  /** Absolute browse root for workspaces (WORKSPACE_BROWSE_ROOT) */
+  workspaceBrowseRoot: Type.String()
 });
 
 export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
@@ -116,7 +119,8 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       utilityAgentType: user?.utilityAgentType && isAgentType(user.utilityAgentType) ? user.utilityAgentType : null,
       utilityModelSelection: user?.utilityModelSelection ?? '',
       sshPublicKey: ssh.sshPublicKey,
-      sshPrivateKey: ssh.sshPrivateKey
+      sshPrivateKey: ssh.sshPrivateKey,
+      workspaceBrowseRoot: config.workspaceBrowseRoot
     };
   };
 

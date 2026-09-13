@@ -426,6 +426,8 @@ export interface AppSettings {
   sshPublicKey: string;
   /** Same keypair’s private key — secret; stored on server config volume */
   sshPrivateKey: string;
+  /** Absolute workspace browse root inside the container (env WORKSPACE_BROWSE_ROOT). */
+  workspaceBrowseRoot: string;
 }
 
 export interface McpClientServer {

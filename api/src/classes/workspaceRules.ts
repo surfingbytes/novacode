@@ -1,9 +1,9 @@
 // node_modules
-import { resolve, normalize } from 'node:path';
+import { resolve } from 'node:path';
 
 // classes
 import { db } from './database';
-import { config } from './config';
+import { isPathUnderBrowseRoot, resolveWorkspaceAbsolutePath } from './workspacePaths';
 import {
   deleteRuleFile,
   isRuleFileHiddenFromUi,
@@ -31,10 +31,6 @@ export type WorkspaceRuleResult<T> =
 
 export const isWorkspaceRuleHiddenFromUi = isRuleFileHiddenFromUi;
 
-function workspaceRoot(): string {
-  return resolve(config.workspaceBrowseRoot);
-}
-
 async function getWorkspaceRulesDir(workspaceId: string): Promise<WorkspaceRuleResult<string>> {
   const workspace = await db.getWorkspace(workspaceId);
   if (!workspace) {
@@ -42,12 +38,8 @@ async function getWorkspaceRulesDir(workspaceId: string): Promise<WorkspaceRuleR
   }
 
   // workspace.path is stored relative to config.workspaceBrowseRoot (validated on create/update)
-  const workspaceRel = workspace.path.replace(/^\//, '');
-  const basePath = resolve(workspaceRoot(), workspaceRel || '.');
-
-  const baseNorm = normalize(basePath).replace(/\\/g, '/');
-  const rootNorm = normalize(workspaceRoot()).replace(/\\/g, '/').replace(/\/?$/, '');
-  if (baseNorm !== rootNorm && !baseNorm.startsWith(rootNorm + '/')) {
+  const basePath = resolveWorkspaceAbsolutePath(workspace.path);
+  if (!isPathUnderBrowseRoot(basePath)) {
     return {
       ok: false,
       code: 'INVALID_WORKSPACE_PATH',

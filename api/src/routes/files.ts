@@ -9,10 +9,8 @@ import { existsSync } from 'node:fs';
 // classes
 import { jwtPreHandler } from '../classes/auth';
 import { db } from '../classes/database';
-import { config } from '../classes/config';
 import { isDotEntry, resolveInsideWorkspace } from '../classes/workspaceFs';
-
-const workspaceRoot = () => resolve(config.workspaceBrowseRoot);
+import { resolveWorkspaceAbsolutePath } from '../classes/workspacePaths';
 
 async function workspaceBase(
   workspaceId: string
@@ -21,8 +19,7 @@ async function workspaceBase(
   if (!workspace) {
     return { error: 'Workspace not found', status: 404 };
   }
-  const workspaceRel = workspace.path.replace(/^\//, '');
-  return { basePath: resolve(workspaceRoot(), workspaceRel || '.') };
+  return { basePath: resolveWorkspaceAbsolutePath(workspace.path) };
 }
 
 export async function fileRoutes(fastify: FastifyInstance): Promise<void> {

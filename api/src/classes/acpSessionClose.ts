@@ -2,15 +2,13 @@
  * Best-effort ACP session teardown when a Nova session is deleted.
  */
 
-// node_modules
-import { join } from 'node:path';
-
 // classes
 import { db } from './database';
 import { closeCursorAcpSession } from './cursorAcp';
 import { closeCodexAcpSession } from './codexAcp';
 import { closeOpenCodeAcpSession } from './openCodeAcp';
 import { closeVibeAcpSession } from './vibeAcp';
+import { resolveWorkspaceAbsolutePath } from './workspacePaths';
 
 // types
 import type { AgentType } from '../@types/index';
@@ -41,7 +39,7 @@ export async function closeAcpSessionForNovaSession(novaSessionId: string): Prom
   const workspace = await db.getWorkspace(session.workspaceId);
   if (!workspace) return;
 
-  const workspacePath = join('/data-root', workspace.path);
+  const workspacePath = resolveWorkspaceAbsolutePath(workspace.path);
   const agentType = (session.agentType as AgentType | null) ?? 'cursor-agent';
   await closeAcpSessionForAgent(agentType, session.sessionId, workspacePath);
 }

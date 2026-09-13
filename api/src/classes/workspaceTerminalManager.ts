@@ -1,10 +1,10 @@
 // node_modules
 import { existsSync } from 'node:fs';
-import { normalize, resolve } from 'node:path';
 
 // classes
 import { config } from './config';
 import { PtyProcess } from './ptyProcess';
+import { isPathUnderBrowseRoot, resolveWorkspaceAbsolutePath } from './workspacePaths';
 
 // types
 import type { SessionStatus } from '../@types/index';
@@ -23,25 +23,14 @@ interface LiveWorkspaceTerminal {
   statusSubscribers: Set<(status: SessionStatus) => void>;
 }
 
-function normalizeWithSlash(path: string): string {
-  return normalize(path).replace(/\\/g, '/');
-}
-
 function resolveWorkspaceCwd(workspace: WorkspaceTerminalWorkspace): string {
-  const rootPath = resolve(config.workspaceBrowseRoot);
-  const rootNorm = normalizeWithSlash(rootPath).replace(/\/?$/, '/');
-  const workspaceRel = workspace.path.replace(/^\//, '');
-  const cwd = resolve(rootPath, workspaceRel || '.');
-  const cwdNorm = normalizeWithSlash(cwd);
-  const isUnderRoot = cwdNorm === rootNorm.slice(0, -1) || (cwdNorm + '/').startsWith(rootNorm);
-
-  if (!isUnderRoot) {
+  const cwd = resolveWorkspaceAbsolutePath(workspace.path);
+  if (!isPathUnderBrowseRoot(cwd)) {
     throw new Error('Workspace path is outside the allowed root');
   }
   if (!existsSync(cwd)) {
     throw new Error('Workspace path does not exist');
   }
-
   return cwd;
 }
 

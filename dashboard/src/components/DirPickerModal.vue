@@ -21,6 +21,7 @@ const emit = defineEmits<{
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const currentPath = ref<string>('/');
+const browseRoot = ref<string>('/data-root');
 const entries = ref<{ name: string; path: string; isDirectory: boolean }[]>([]);
 const bIsLoading = ref<boolean>(false);
 const error = ref<string>('');
@@ -30,8 +31,30 @@ const newFolderError = ref<string>('');
 const bIsCreatingFolder = ref<boolean>(false);
 const newFolderInputRef = ref<HTMLInputElement | null>(null);
 
+function toAbsoluteBrowsePath(path: string): string {
+  const root = browseRoot.value.replace(/\/+$/, '') || '/data-root';
+  if (!path || path === '/') {
+    return root;
+  }
+  if (path === root || path.startsWith(root + '/')) {
+    return path;
+  }
+  const relative = path.startsWith('/') ? path : '/' + path;
+  return root + relative;
+}
+
+function toRelativeBrowsePath(absolutePath: string): string {
+  const root = browseRoot.value.replace(/\/+$/, '') || '/data-root';
+  if (absolutePath === root) {
+    return '/';
+  }
+  if (absolutePath.startsWith(root + '/')) {
+    return absolutePath.slice(root.length) || '/';
+  }
+  return absolutePath;
+}
+
 // -------------------------------------------------- Computed --------------------------------------------------
-// potential computed properties here
 const entriesWithParent = computed(() => {
   if (!currentPath.value || currentPath.value === '/') {
     return entries.value;
@@ -44,9 +67,12 @@ const load = async (path: string): Promise<void> => {
   bIsLoading.value = true;
   error.value = '';
   try {
-    const fullPath = path.startsWith('/data-root') ? path : '/data-root' + path;
+    const fullPath = toAbsoluteBrowsePath(path);
     const response = await workspaceApi.browse(fullPath);
-    currentPath.value = response.data.path.replace('/data-root', '');
+    if (response.data.root) {
+      browseRoot.value = response.data.root;
+    }
+    currentPath.value = toRelativeBrowsePath(response.data.path);
     entries.value = response.data.entries;
   } catch (err: unknown) {
     const msg =
@@ -74,7 +100,10 @@ const goUp = (): void => {
 };
 
 const selectCurrent = (): void => {
-  emit('select', currentPath.value);
+  // Selecting browse root stores `.` (workspace = entire browse root)
+  const selected =
+    !currentPath.value || currentPath.value === '/' ? '.' : currentPath.value.replace(/^\//, '');
+  emit('select', selected);
   emit('update:modelValue', false);
 };
 
@@ -110,9 +139,7 @@ const createFolder = async (): Promise<void> => {
   bIsCreatingFolder.value = true;
   newFolderError.value = '';
   try {
-    const fullPath = currentPath.value.startsWith('/data-root')
-      ? currentPath.value
-      : '/data-root' + currentPath.value;
+    const fullPath = toAbsoluteBrowsePath(currentPath.value);
     await workspaceApi.createFolder(fullPath, name);
     cancelNewFolder();
     await load(currentPath.value);
@@ -135,7 +162,7 @@ watch(
       newFolderName.value = '';
       newFolderError.value = '';
       const start = typeof initial === 'string' && initial.trim() ? initial.trim() : '';
-      load(start);
+      load(start === '.' ? '/' : start);
     }
   }
 );

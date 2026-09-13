@@ -9,6 +9,7 @@ import { config } from './config';
 import { createSessionWithAgent } from './sessionService';
 import { dispatchPromptAndWait } from './chatEngine';
 import { sendPushToAll } from './push';
+import { resolveWorkspaceAbsolutePath } from './workspacePaths';
 
 // types
 import type { AgentType, ChatMessage } from '../@types/index';
@@ -55,8 +56,7 @@ function extractAssistantText(messages: ChatMessage[] | undefined): string {
 async function getGitStatus(
   workspacePath: string
 ): Promise<Array<{ status: string; file: string }>> {
-  const rel = workspacePath.replace(/^\//, '');
-  const baseCwd = config.workspaceBrowseRoot + '/' + (rel || '.');
+  const baseCwd = resolveWorkspaceAbsolutePath(workspacePath);
   const skipDirs = new Set(['.git', 'node_modules', '.next', 'dist', 'build', '.cache']);
   const files: Array<{ status: string; file: string }> = [];
 

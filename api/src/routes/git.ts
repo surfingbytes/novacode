@@ -20,6 +20,7 @@ import {
   runOneShotAgentText
 } from '../classes/oneShotAgentText';
 import { parseGitLog } from '../classes/gitLog';
+import { resolveWorkspaceAbsolutePath } from '../classes/workspacePaths';
 
 const execFileAsync = promisify(execFile);
 const COMMIT_MESSAGE_DIFF_MAX_CHARS = 60_000;
@@ -171,8 +172,7 @@ async function resolveWorkspaceGitContext(
   const workspace = await db.getWorkspace(workspaceId);
   if (!workspace) return null;
 
-  const workspaceRel = workspace.path.replace(/^\//, '');
-  const baseCwd = config.workspaceBrowseRoot + '/' + (workspaceRel || '.');
+  const baseCwd = resolveWorkspaceAbsolutePath(workspace.path);
   const repoPaths = await discoverGitRepos(baseCwd);
 
   if (repoPaths.length === 0) throw new Error('No Git repositories found');
@@ -346,8 +346,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
       if (!workspace) return reply.code(404).send({ error: 'Workspace not found' });
 
       try {
-        const workspaceRel = workspace.path.replace(/^\//, '');
-        const baseCwd = config.workspaceBrowseRoot + '/' + (workspaceRel || '.');
+        const baseCwd = resolveWorkspaceAbsolutePath(workspace.path);
         const repoPaths = await discoverGitRepos(baseCwd);
         const repos = await Promise.all(repoPaths.map((repo) => getRepoStatus(baseCwd, repo)));
         const files = repos.flatMap((repo) => repo.files);

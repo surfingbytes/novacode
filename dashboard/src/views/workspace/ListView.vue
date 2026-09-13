@@ -55,6 +55,7 @@ const bShowNewSessionModal = ref<boolean>(false);
 const newSessionWorkspace = ref<Workspace | undefined>(undefined);
 const bSubmittingSession = ref<boolean>(false);
 const createSessionError = ref<string | null>(null);
+const workspaceBrowseRoot = ref<string>('/data-root');
 
 const bCtxMenuOpen = ref<boolean>(false);
 const ctxMenuX = ref(0);
@@ -98,6 +99,15 @@ const existingTags = computed((): string[] => {
   });
   return [...set].sort((a, b) => a.localeCompare(b));
 });
+
+/** Display path: `.` (browse root) shows as the absolute root. */
+function formatWorkspacePath(path: string): string {
+  const trimmed = path.trim();
+  if (!trimmed || trimmed === '.' || trimmed === '/') {
+    return workspaceBrowseRoot.value;
+  }
+  return trimmed.replace(/^\//, '');
+}
 
 function buildGroupedList(
   workspaces: Workspace[]
@@ -361,6 +371,9 @@ const fetchFirstStartStatus = async (): Promise<void> => {
     const name = settingsResult.value.data.gitUserName?.trim() ?? '';
     const email = settingsResult.value.data.gitUserEmail?.trim() ?? '';
     bHasGitCredentials.value = name.length > 0 && email.length > 0;
+    if (settingsResult.value.data.workspaceBrowseRoot) {
+      workspaceBrowseRoot.value = settingsResult.value.data.workspaceBrowseRoot;
+    }
   }
   if (agentCapsResult.status === 'fulfilled') {
     cursorAvailable.value = agentCapsResult.value.data.cursorAvailable;
@@ -389,7 +402,7 @@ onMounted((): void => {
         <h1 class="ws-title">Workspaces</h1>
         <p class="ws-subtitle">
           Pick a project to start a session, browse files, or manage git. Paths are under
-          <code class="ws-path-pill nc-mono">/data-root</code>.
+          <code class="ws-path-pill nc-mono">{{ workspaceBrowseRoot }}</code>.
         </p>
       </div>
       <button
@@ -461,7 +474,7 @@ onMounted((): void => {
                 </div>
                 <div class="ws-card__info">
                   <div class="ws-card__name">{{ workspace.name }}</div>
-                  <div class="ws-card__path nc-mono">{{ workspace.path }}</div>
+                  <div class="ws-card__path nc-mono">{{ formatWorkspacePath(workspace.path) }}</div>
                 </div>
                 <!-- Busy indicator -->
                 <span v-if="workspaceHasBusySession(workspace.id)" class="nc-status-dot busy" />
@@ -555,7 +568,7 @@ onMounted((): void => {
                       </div>
                       <div class="ws-card__info">
                         <div class="ws-card__name">{{ workspace.name }}</div>
-                        <div class="ws-card__path nc-mono">{{ workspace.path }}</div>
+                        <div class="ws-card__path nc-mono">{{ formatWorkspacePath(workspace.path) }}</div>
                       </div>
                       <div class="ws-card__actions">
                         <button class="ws-icon-btn" title="Unarchive" :disabled="archivingId === workspace.id" @click.prevent.stop="handleArchiveWorkspace(workspace, false)">

@@ -8,8 +8,8 @@ export function requiredTrimmed(value: string, label: string): string | undefine
 }
 
 /**
- * Workspace paths are stored relative to `/data-root`. Reject empty values and
- * `..` segments that would walk above that root.
+ * Workspace paths are stored relative to the browse root. Reject empty values and
+ * `..` segments that would walk above that root. `.` means the browse root itself.
  */
 export function workspacePathError(path: string): string | undefined {
   const trimmed = path.trim();
@@ -18,6 +18,9 @@ export function workspacePathError(path: string): string | undefined {
   }
   if (trimmed.includes('\0')) {
     return 'Path contains invalid characters';
+  }
+  if (trimmed === '.' || trimmed === '/') {
+    return undefined;
   }
   const relative = trimmed.replace(/^\/+/, '');
   let depth = 0;
@@ -28,7 +31,7 @@ export function workspacePathError(path: string): string | undefined {
     if (part === '..') {
       depth -= 1;
       if (depth < 0) {
-        return 'Path must stay inside /data-root';
+        return 'Path must stay inside the workspace root';
       }
       continue;
     }

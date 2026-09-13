@@ -228,7 +228,7 @@ Set **`VIBE_HOME`** (or **`AGENT_ENV_VIBE_HOME`**) if you use a non-default Vibe
 
 ## Volume mounts
 
-The API resolves workspace paths relative to `/data-root` inside the container.
+The API resolves workspace paths relative to **`WORKSPACE_BROWSE_ROOT`** inside the container (default `/data-root`). A workspace whose path is `.` is the browse root itself.
 
 The stock `docker-compose.yml` maps one host tree to `/data-root` and keeps app state on the host:
 
@@ -237,7 +237,18 @@ The stock `docker-compose.yml` maps one host tree to `/data-root` and keeps app 
 
 Put repositories under `~/.novacode/data` on the host (for example `~/.novacode/data/acme-app`), then create a workspace in the app with path `acme-app`.
 
-If you prefer several host locations instead of one tree, add more lines under `novacode.volumes`, for example:
+To use a different in-container root (for example mount host `/opt` at `/opt` and set `WORKSPACE_BROWSE_ROOT=/opt`), also set a one-shot rewrite so existing workspace rows and agent project caches follow the new absolute paths:
+
+```yaml
+environment:
+  - WORKSPACE_BROWSE_ROOT=/opt
+  - WORKSPACE_ABS_PREFIX_REWRITE=/data-root/opt:/opt
+volumes:
+  - ~/.novacode/config:/config
+  - /opt:/opt
+```
+
+If you prefer several host locations under the default root, add more lines under `novacode.volumes`, for example:
 
 ```yaml
 volumes:

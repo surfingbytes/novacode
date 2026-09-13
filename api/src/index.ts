@@ -14,6 +14,7 @@ import { assertJwtSecret, clearAgentMcpAutoloadFiles, config, writeGlobalGitConf
 import { db } from './classes/database';
 import { sessionManager } from './classes/sessionManager';
 import { workspaceTerminalManager } from './classes/workspaceTerminalManager';
+import { runWorkspacePathMigrations } from './classes/workspacePathMigration';
 
 // routes
 import { authRoutes } from './routes/auth';
@@ -245,6 +246,13 @@ async function main(): Promise<void> {
     }
   } catch (err) {
     fastify.log.error({ err }, 'Failed to mark stale orchestrator runs as failed');
+  }
+
+  // browse-root / abs-prefix path migration (workspace rows + agent project caches)
+  try {
+    await runWorkspacePathMigrations(config.configDir);
+  } catch (err) {
+    fastify.log.error({ err }, 'Failed to run workspace path migrations');
   }
 
   // write global .gitconfig with safe.directory and optional user identity

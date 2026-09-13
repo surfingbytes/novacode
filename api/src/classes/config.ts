@@ -78,8 +78,11 @@ export const config = {
     const mb = parseInt(optional('UPLOAD_BODY_LIMIT_MB', '512'), 10);
     return (Number.isFinite(mb) && mb > 0 ? mb : 512) * 1024 * 1024;
   },
-  /** Root directory on the host; workspace paths are relative to this. */
-  workspaceBrowseRoot: '/data-root',
+  /**
+   * Root directory for workspaces inside the container. Paths in the DB are
+   * relative to this. Override with WORKSPACE_BROWSE_ROOT (default `/data-root`).
+   */
+  workspaceBrowseRoot: optional('WORKSPACE_BROWSE_ROOT', '/data-root') || '/data-root',
 
   // env vars forwarded to spawned agent processes
   agentEnv: (gitOverrides?: { name?: string; email?: string }) => {
@@ -150,19 +153,106 @@ export const config = {
 
 // --------------------------------------------- Functions ---------------------------------------------
 
-// write (or overwrite) configDir/.gitconfig with safe.directory = * and optional global user identity
+// write (or update) configDir/.gitconfig with safe.directory = * and optional global user identity.
+// Preserves other sections (e.g. includeIf) so custom git config survives restarts.
 export function writeGlobalGitConfig(
   configDir: string,
   name: string | null,
   email: string | null
 ): void {
-  let content = '[safe]\n\tdirectory = *\n';
-  if (name || email) {
-    content += '[user]\n';
-    if (name) content += `\tname = ${name}\n`;
-    if (email) content += `\temail = ${email}\n`;
+  const filePath = join(configDir, '.gitconfig');
+  let existing = '';
+  if (existsSync(filePath)) {
+    try {
+      existing = readFileSync(filePath, 'utf8');
+    } catch {
+      existing = '';
+    }
   }
-  writeFileSync(join(configDir, '.gitconfig'), content, 'utf8');
+
+  const lines = existing.split(/\r?\n/);
+  const out: string[] = [];
+  let section: string | null = null;
+  let sawSafe = false;
+  let sawUser = false;
+  let wroteSafeDirectory = false;
+  let wroteUserName = false;
+  let wroteUserEmail = false;
+
+  const flushUserTrailing = (): void => {
+    if (section !== 'user') return;
+    if (name && !wroteUserName) out.push(`\tname = ${name}`);
+    if (email && !wroteUserEmail) out.push(`\temail = ${email}`);
+  };
+
+  for (const line of lines) {
+    const sectionMatch = line.match(/^\[([^\]]+)\]\s*$/);
+    if (sectionMatch) {
+      flushUserTrailing();
+      section = sectionMatch[1]!.trim().toLowerCase();
+      if (section === 'safe') sawSafe = true;
+      if (section === 'user') sawUser = true;
+      out.push(line);
+      continue;
+    }
+
+    if (section === 'safe') {
+      if (/^\s*directory\s*=/.test(line)) {
+        if (!wroteSafeDirectory) {
+          out.push('\tdirectory = *');
+          wroteSafeDirectory = true;
+        }
+        continue;
+      }
+    }
+
+    if (section === 'user') {
+      if (/^\s*name\s*=/.test(line)) {
+        if (name) {
+          if (!wroteUserName) {
+            out.push(`\tname = ${name}`);
+            wroteUserName = true;
+          }
+          continue;
+        }
+      }
+      if (/^\s*email\s*=/.test(line)) {
+        if (email) {
+          if (!wroteUserEmail) {
+            out.push(`\temail = ${email}`);
+            wroteUserEmail = true;
+          }
+          continue;
+        }
+      }
+    }
+
+    // Drop trailing empty lines; we'll normalize at the end
+    out.push(line);
+  }
+  flushUserTrailing();
+
+  if (!sawSafe) {
+    out.unshift('[safe]', '\tdirectory = *');
+  } else if (!wroteSafeDirectory) {
+    // [safe] existed but had no directory — insert after the section header
+    const idx = out.findIndex((l) => /^\[safe\]\s*$/i.test(l));
+    if (idx >= 0) out.splice(idx + 1, 0, '\tdirectory = *');
+  }
+
+  if ((name || email) && !sawUser) {
+    out.push('[user]');
+    if (name) out.push(`\tname = ${name}`);
+    if (email) out.push(`\temail = ${email}`);
+  }
+
+  const content =
+    out
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .replace(/^\n+/, '')
+      .replace(/\n*$/, '\n');
+  writeFileSync(filePath, content, 'utf8');
 }
 
 const VIBE_ENV_DIR = '.vibe';

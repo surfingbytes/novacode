@@ -1,6 +1,6 @@
 // node_modules
 import { randomUUID } from 'node:crypto';
-import { extname, join } from 'node:path';
+import { extname } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import type {
   RequestPermissionRequest,
@@ -12,6 +12,7 @@ import { db } from './database';
 import { config } from './config';
 import { getGlobalRulesDir } from './globalRules';
 import { buildAgentRulesPrefix } from './ruleFiles';
+import { isPathUnderBrowseRoot, resolveWorkspaceAbsolutePath } from './workspacePaths';
 import { runClaudeAcp, cancelClaudeAcp } from './claudeAcp';
 import { runVibeAcp, cancelVibeAcp } from './vibeAcp';
 import { runCursorAcp, cancelCursorAcp } from './cursorAcp';
@@ -637,8 +638,8 @@ export async function dispatchPrompt(
 
   const { attachments, textPaths } = await resolvePromptAttachments(imagePaths);
   const effectiveText = textPaths.length > 0 ? `${text}\n\n${textPaths.join('\n')}` : text;
-  const workspacePath = join('/data-root', workspace.path);
-  if (!workspacePath.startsWith('/data-root/') && workspacePath !== '/data-root') {
+  const workspacePath = resolveWorkspaceAbsolutePath(workspace.path);
+  if (!isPathUnderBrowseRoot(workspacePath)) {
     return { error: 'Invalid workspace path' };
   }
 

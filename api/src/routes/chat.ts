@@ -5,10 +5,10 @@ import type { WebSocket } from 'ws';
 // classes
 import { rejectUnauthorizedWebSocket } from '../classes/auth';
 import { db } from '../classes/database';
-import { config } from '../classes/config';
 import { WS_ROUTE_RATE_LIMIT } from '../classes/rateLimits';
 import { broadcastSessionListUpsert } from '../classes/sessionListBroadcast';
 import { markSessionRead } from '../classes/sessionUnread';
+import { resolveWorkspaceAbsolutePath } from '../classes/workspacePaths';
 import {
   buildSessionTitlePrompt,
   buildSessionTitlePromptFromAssistant,
@@ -205,8 +205,7 @@ async function generateAndApplySessionTitle(
       current.agentType,
       workspace.defaultAgentType
     );
-    const workspaceRel = workspace.path.replace(/^\//, '');
-    const cwd = `${config.workspaceBrowseRoot}/${workspaceRel || '.'}`;
+    const cwd = resolveWorkspaceAbsolutePath(workspace.path);
     const model = resolveOneShotModel(user?.utilityModelSelection, agentType);
     const raw = await runOneShotAgentText({
       agentType,

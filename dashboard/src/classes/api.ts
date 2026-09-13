@@ -171,8 +171,10 @@ export interface BrowseEntry {
 export const workspaceApi = {
   list: (): ReturnType<typeof http.get<Workspace[]>> => http.get<Workspace[]>('/workspaces'),
 
-  browse: (path: string): ReturnType<typeof http.get<{ path: string; entries: BrowseEntry[] }>> =>
-    http.get<{ path: string; entries: BrowseEntry[] }>('/workspaces/browse', {
+  browse: (
+    path: string
+  ): ReturnType<typeof http.get<{ path: string; root: string; entries: BrowseEntry[] }>> =>
+    http.get<{ path: string; root: string; entries: BrowseEntry[] }>('/workspaces/browse', {
       params: { path: path || undefined }
     }),
 

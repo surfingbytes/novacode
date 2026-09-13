@@ -10,6 +10,8 @@ import { existsSync } from 'node:fs';
 import { jwtPreHandler } from '../classes/auth';
 import { db, FavoriteLimitError } from '../classes/database';
 import { config } from '../classes/config';
+import { migrateCachesForWorkspacePathChange } from '../classes/workspacePathMigration';
+import { normalizeWorkspaceRelativePath } from '../classes/workspacePaths';
 
 const WorkspaceSchema = Type.Object({
   id: Type.String(),
@@ -63,7 +65,7 @@ function validateAndNormalizeWorkspacePath(path: string): string {
   if (!trimmed) {
     throw new Error('Workspace path is required');
   }
-  const pathRelativeToRoot = trimmed.replace(/^\//, '');
+  const pathRelativeToRoot = normalizeWorkspaceRelativePath(trimmed);
   const resolved = resolve(rootPath, pathRelativeToRoot);
   const resolvedNorm = normalize(resolved).replace(/\\/g, '/');
   const rootNormNoTrailing = rootNorm.replace(/\/$/, '');
@@ -72,7 +74,7 @@ function validateAndNormalizeWorkspacePath(path: string): string {
   if (!isUnder) {
     throw new Error('Workspace path must be inside the allowed root');
   }
-  return pathRelativeToRoot.replace(/\/$/, '') || '.';
+  return pathRelativeToRoot;
 }
 
 /** Normalize workspace for API response: ensure tags is string[] | null (no empty strings). */
@@ -118,6 +120,7 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
         response: {
           200: Type.Object({
             path: Type.String(),
+            root: Type.String(),
             entries: Type.Array(BrowseEntrySchema)
           }),
           400: Type.Object({ error: Type.String() })
@@ -140,7 +143,7 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
             path: resolve(safePath, d.name),
             isDirectory: true
           }));
-        return { path: safePath, entries: dirs };
+        return { path: safePath, root: rootPath, entries: dirs };
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to list directory';
         return reply.code(400).send({ error: message });
@@ -321,12 +324,20 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
         isFavorite?: boolean;
       };
       let pathPatch: string | undefined;
+      let previousPath: string | undefined;
       if (body.path !== undefined) {
         try {
           pathPatch = validateAndNormalizeWorkspacePath(body.path);
         } catch (err) {
           return reply.code(400).send({ error: (err as Error).message });
         }
+      }
+      if (pathPatch !== undefined) {
+        const existing = await db.getWorkspace(request.params.id);
+        if (!existing) {
+          return reply.code(404).send({ error: 'Workspace not found' });
+        }
+        previousPath = existing.path;
       }
       let updated;
       try {
@@ -349,6 +360,13 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
         throw err;
       }
       if (!updated) return reply.code(404).send({ error: 'Workspace not found' });
+      if (previousPath !== undefined && pathPatch !== undefined && previousPath !== pathPatch) {
+        try {
+          migrateCachesForWorkspacePathChange(config.configDir, previousPath, pathPatch);
+        } catch (err) {
+          request.log.warn({ err, previousPath, pathPatch }, 'Failed to migrate agent project caches');
+        }
+      }
       return normalizeWorkspaceResponse(updated);
     }
   );
