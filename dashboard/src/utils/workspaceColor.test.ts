@@ -2,7 +2,11 @@
 import { describe, it, expect } from 'vitest';
 
 // utils
-import { sessionStatusDotStyle, workspaceColor } from '@/utils/workspaceColor';
+import {
+  sessionStatusDotStyle,
+  sessionUnreadDoneStyle,
+  workspaceColor
+} from '@/utils/workspaceColor';
 
 describe('workspaceColor', () => {
   it('returns the workspace color when set', () => {
@@ -34,5 +38,19 @@ describe('sessionStatusDotStyle', () => {
 
   it('falls back to the accent token for colorless workspaces', () => {
     expect(sessionStatusDotStyle(null, true).background).toBe('var(--accent)');
+  });
+});
+
+describe('sessionUnreadDoneStyle', () => {
+  it('tints the done badge with the workspace color', () => {
+    expect(sessionUnreadDoneStyle({ color: '#ff8800' })).toEqual({
+      color: '#ff8800',
+      borderColor: 'color-mix(in oklab, #ff8800 40%, transparent)',
+      background: 'color-mix(in oklab, #ff8800 14%, transparent)'
+    });
+  });
+
+  it('falls back to the accent token for colorless workspaces', () => {
+    expect(sessionUnreadDoneStyle(null).color).toBe('var(--accent)');
   });
 });

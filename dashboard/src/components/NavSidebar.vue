@@ -9,7 +9,11 @@ import { apiErrorMessage, sessionsApi } from '@/classes/api';
 import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
 import { PANE_LAYOUT_MIN_WIDTH } from '@/constants/layout';
 import { agentTypeShortLabel } from '@/utils/agentTypeMeta';
-import { sessionStatusDotStyle, workspaceColor } from '@/utils/workspaceColor';
+import {
+  sessionStatusDotStyle,
+  sessionUnreadDoneStyle,
+  workspaceColor
+} from '@/utils/workspaceColor';
 import { isSessionUnread } from '@/utils/sessionUnread';
 import type { AgentType, ApprovalPolicy, Workspace } from '@/@types/index';
 
@@ -375,6 +379,7 @@ onBeforeUnmount(() => {
           stroke-linecap="round"
           stroke-linejoin="round"
           aria-hidden="true"
+          :style="{ color: workspaceColor(workspaceById(session.workspaceId)) }"
         >
           <path d="M5 12l5 5L20 7" />
         </svg>
@@ -393,6 +398,7 @@ onBeforeUnmount(() => {
                 v-if="isSessionUnread(session) && !session.busy"
                 class="sidebar__session-done"
                 title="Finished — unread"
+                :style="sessionUnreadDoneStyle(workspaceById(session.workspaceId))"
               >
                 Done
               </span>
@@ -781,16 +787,13 @@ onBeforeUnmount(() => {
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--accent);
-  border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent);
-  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  border: 1px solid transparent;
   border-radius: 999px;
   padding: 1px 6px;
   line-height: 1.35;
 }
 
 .sidebar__session-done-icon {
-  color: var(--accent);
   flex-shrink: 0;
 }
 

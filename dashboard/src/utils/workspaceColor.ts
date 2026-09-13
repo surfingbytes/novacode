@@ -33,3 +33,18 @@ export function sessionStatusDotStyle(
   }
   return { background: `color-mix(in oklab, ${color} 35%, transparent)` };
 }
+
+/**
+ * Finished/unread "Done" pill tinted with the workspace color (not accent).
+ * Matches the collapsed sidebar checkmark so both states share identity color.
+ */
+export function sessionUnreadDoneStyle(
+  workspace: WorkspaceColorSource
+): Record<string, string> {
+  const color = workspaceColor(workspace);
+  return {
+    color,
+    borderColor: `color-mix(in oklab, ${color} 40%, transparent)`,
+    background: `color-mix(in oklab, ${color} 14%, transparent)`
+  };
+}
