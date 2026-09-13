@@ -22,6 +22,8 @@ async function ensureMermaid(): Promise<MermaidApi> {
     mermaidApi.initialize({
       startOnLoad: false,
       securityLevel: 'strict',
+      // Mermaid 12 defaults to ELK; keep dagre so existing diagrams look the same.
+      layout: 'dagre',
       theme: theme === 'dark' ? 'dark' : 'default',
       fontFamily: 'inherit'
     });
