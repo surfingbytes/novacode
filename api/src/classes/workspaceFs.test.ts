@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { DEFAULT_WORKSPACE_BROWSE_ROOT } from '@novacode/shared';
+
 import {
   isDotEntry,
   joinWorkspaceRelative,
@@ -18,12 +20,12 @@ describe('isDotEntry', () => {
 });
 
 describe('resolveInsideWorkspace', () => {
-  const root = '/data-root/acme';
+  const root = `${DEFAULT_WORKSPACE_BROWSE_ROOT}/acme`;
 
   it('resolves a nested file', () => {
     const resolved = resolveInsideWorkspace(root, 'src/.env');
     expect(resolved).toEqual({
-      absolutePath: '/data-root/acme/src/.env',
+      absolutePath: `${root}/src/.env`,
       relativePath: 'src/.env'
     });
   });
@@ -35,7 +37,7 @@ describe('resolveInsideWorkspace', () => {
 
   it('allows the workspace root', () => {
     expect(resolveInsideWorkspace(root, '')).toEqual({
-      absolutePath: '/data-root/acme',
+      absolutePath: root,
       relativePath: ''
     });
   });

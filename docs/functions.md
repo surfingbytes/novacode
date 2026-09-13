@@ -30,7 +30,7 @@ Optional features include **scheduled automations**, **role templates**, and **b
 ## 3. Workspaces
 
 - **Create / list / update / delete** workspaces. Each workspace has:
-  - A **display name** and a **path** relative to the host root `/data-root` (where repos are mounted).
+  - A **display name** and a **path** relative to **`WORKSPACE_BROWSE_ROOT`** (where repos are mounted; stock default `/data-root`).
   - Optional **group** label, **color**, **sort order**, **tags** (JSON array), **default agent type** (`cursor-agent`, `claude`, `mistral-vibe`, `open-code`, or `codex`), **archived** flag.
   - Optional **per-workspace Git identity** (`gitUserName` / `gitUserEmail`) for commits and Git operations.
 - **Browse directories**: API to list directories under the allowed root when picking a workspace path (`/api/workspaces/browse`).

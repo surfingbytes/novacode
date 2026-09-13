@@ -8,6 +8,7 @@ import { config } from './config';
 import { db } from './database';
 import { logger } from './logger';
 import { relativizeToBrowseRoot, resolveWorkspaceAbsolutePath } from './workspacePaths';
+import { DEFAULT_WORKSPACE_BROWSE_ROOT } from '@novacode/shared';
 
 const STATE_FILE = 'workspace-browse-root.json';
 
@@ -80,8 +81,10 @@ export async function runWorkspacePathMigrations(configDir: string = config.conf
     for (const ws of workspaces) {
       const rel = ws.path.replace(/^\//, '') || '.';
       // Prefer reconstructing the pre-migration absolute path from the previous browse root
-      // (or /data-root when unknown), then map via the prefix rewrite.
-      const inferredOldRoot = previousRoot ? resolve(previousRoot) : resolve('/data-root');
+      // (or the stock default when unknown), then map via the prefix rewrite.
+      const inferredOldRoot = previousRoot
+        ? resolve(previousRoot)
+        : resolve(DEFAULT_WORKSPACE_BROWSE_ROOT);
       const oldAbs = resolve(inferredOldRoot, rel === '.' ? '.' : rel);
       const oldNorm = normalizePrefix(oldAbs);
       if (oldNorm !== oldPrefix && !oldNorm.startsWith(oldPrefix + '/')) {

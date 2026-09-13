@@ -11,12 +11,15 @@ const props = withDefaults(
     labelledby?: string;
     /** extra classes for the panel sizing, e.g. 'max-w-sm' */
     panelClass?: string;
+    /** extra classes for the full-screen overlay (e.g. higher z-index for nested modals) */
+    overlayClass?: string;
     closeOnBackdrop?: boolean;
     closeOnEsc?: boolean;
   }>(),
   {
     labelledby: undefined,
     panelClass: 'max-w-md',
+    overlayClass: '',
     closeOnBackdrop: true,
     closeOnEsc: true
   }
@@ -183,7 +186,8 @@ onBeforeUnmount((): void => {
     <Transition name="modal-fade">
       <div
         v-if="modelValue"
-        class="fixed inset-0 z-50 flex items-center justify-center p-4"
+        class="fixed inset-0 flex items-center justify-center p-4"
+        :class="overlayClass || 'z-50'"
         role="dialog"
         aria-modal="true"
         :aria-labelledby="labelledby"

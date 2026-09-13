@@ -106,7 +106,8 @@ export function migrateAgentProjectCaches(
 
 /**
  * Rewrite all agent cache dirs whose slug is under `oldPrefix` to `newPrefix`.
- * E.g. oldPrefix=/data-root/opt, newPrefix=/opt renames `data-root-opt-src-foo` → `opt-src-foo`.
+ * E.g. oldPrefix=`${DEFAULT_WORKSPACE_BROWSE_ROOT}/opt`, newPrefix=/opt
+ * renames the matching dashed/cursor project cache dirs.
  */
 export function migrateAgentProjectCachesByPrefix(
   configDir: string,

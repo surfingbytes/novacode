@@ -36,7 +36,7 @@ function workspaceFixture(overrides: Partial<Workspace> = {}): Workspace {
   return {
     id: 'ws-1',
     name: 'Nova',
-    path: '/data-root/opt/src/novacode',
+    path: 'src/github/novacode',
     createdAt: '2026-01-01T00:00:00.000Z',
     archived: false,
     isFavorite: false,

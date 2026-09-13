@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { sshEnvForGit } from './sshKey';
+import { DEFAULT_WORKSPACE_BROWSE_ROOT } from '@novacode/shared';
 
 // --------------------------------------------- Config ---------------------------------------------
 
@@ -12,6 +13,8 @@ function optional(name: string, fallback = ''): string {
 }
 
 const EXAMPLE_JWT_SECRET = 'change_this_to_a_long_random_string';
+
+export { DEFAULT_WORKSPACE_BROWSE_ROOT };
 
 /** Fail process startup when JWT_SECRET is missing or still the example placeholder. */
 export function assertJwtSecret(): void {
@@ -80,9 +83,10 @@ export const config = {
   },
   /**
    * Root directory for workspaces inside the container. Paths in the DB are
-   * relative to this. Override with WORKSPACE_BROWSE_ROOT (default `/data-root`).
+   * relative to this. Override with WORKSPACE_BROWSE_ROOT.
    */
-  workspaceBrowseRoot: optional('WORKSPACE_BROWSE_ROOT', '/data-root') || '/data-root',
+  workspaceBrowseRoot:
+    optional('WORKSPACE_BROWSE_ROOT', DEFAULT_WORKSPACE_BROWSE_ROOT) || DEFAULT_WORKSPACE_BROWSE_ROOT,
 
   // env vars forwarded to spawned agent processes
   agentEnv: (gitOverrides?: { name?: string; email?: string }) => {

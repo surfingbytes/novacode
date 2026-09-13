@@ -138,11 +138,21 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
         const dirs = entries
           .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
           .sort((a, b) => a.name.localeCompare(b.name))
-          .map((d) => ({
-            name: d.name,
-            path: resolve(safePath, d.name),
-            isDirectory: true
-          }));
+          .map((d) => {
+            const absolute = resolve(safePath, d.name);
+            const relative =
+              absolute === rootPath
+                ? '.'
+                : absolute.startsWith(rootPath + '/')
+                  ? absolute.slice(rootPath.length + 1)
+                  : d.name;
+            return {
+              name: d.name,
+              // Relative to browse root so clients never re-prefix a stale absolute root
+              path: relative,
+              isDirectory: true as const
+            };
+          });
         return { path: safePath, root: rootPath, entries: dirs };
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to list directory';

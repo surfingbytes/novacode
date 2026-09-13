@@ -34,6 +34,8 @@ const props = defineProps<{
   /** Whether OpenCode can be used (CLI on PATH and ACP server available). */
   codexAvailable?: boolean;
   openCodeAvailable?: boolean;
+  /** Absolute workspace browse root from settings (for the folder picker). */
+  browseRoot?: string;
 }>();
 
 const emit = defineEmits<{
@@ -422,7 +424,7 @@ watch(AGENT_OPTIONS, (options) => {
                 <input
                   v-model="form.path"
                   type="text"
-                  placeholder="/my-project"
+                  placeholder="my-project"
                   :aria-invalid="Boolean(errors.path)"
                   aria-describedby="workspace-path-error"
                   @blur="touch('path')"
@@ -517,7 +519,12 @@ watch(AGENT_OPTIONS, (options) => {
           </div>
   </BaseModal>
 
-  <DirPickerModal v-model="bShowDirPicker" :initial-path="form.path" @select="onDirPicked" />
+  <DirPickerModal
+    v-model="bShowDirPicker"
+    :initial-path="form.path"
+    :browse-root="browseRoot"
+    @select="onDirPicked"
+  />
 </template>
 
 <style scoped>

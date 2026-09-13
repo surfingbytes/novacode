@@ -9,10 +9,19 @@ import ModalHeader from '@/components/ModalHeader.vue';
 // classes
 import { workspaceApi } from '@/classes/api';
 
+// utils
+import {
+  toApiBrowsePath,
+  toDisplayBrowsePath,
+  toWorkspacePathFromDisplay
+} from '@/utils/dirPickerPaths';
+
 // -------------------------------------------------- Props --------------------------------------------------
 const props = defineProps<{
   modelValue: boolean;
   initialPath?: string;
+  /** Absolute workspace browse root from settings (for the folder picker). */
+  browseRoot?: string;
 }>();
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void;
@@ -21,7 +30,8 @@ const emit = defineEmits<{
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const currentPath = ref<string>('/');
-const browseRoot = ref<string>('/data-root');
+/** Absolute browse root from the API (or props hint). Empty until first successful browse. */
+const browseRoot = ref<string>('');
 const entries = ref<{ name: string; path: string; isDirectory: boolean }[]>([]);
 const bIsLoading = ref<boolean>(false);
 const error = ref<string>('');
@@ -30,29 +40,6 @@ const newFolderName = ref<string>('');
 const newFolderError = ref<string>('');
 const bIsCreatingFolder = ref<boolean>(false);
 const newFolderInputRef = ref<HTMLInputElement | null>(null);
-
-function toAbsoluteBrowsePath(path: string): string {
-  const root = browseRoot.value.replace(/\/+$/, '') || '/data-root';
-  if (!path || path === '/') {
-    return root;
-  }
-  if (path === root || path.startsWith(root + '/')) {
-    return path;
-  }
-  const relative = path.startsWith('/') ? path : '/' + path;
-  return root + relative;
-}
-
-function toRelativeBrowsePath(absolutePath: string): string {
-  const root = browseRoot.value.replace(/\/+$/, '') || '/data-root';
-  if (absolutePath === root) {
-    return '/';
-  }
-  if (absolutePath.startsWith(root + '/')) {
-    return absolutePath.slice(root.length) || '/';
-  }
-  return absolutePath;
-}
 
 // -------------------------------------------------- Computed --------------------------------------------------
 const entriesWithParent = computed(() => {
@@ -67,13 +54,21 @@ const load = async (path: string): Promise<void> => {
   bIsLoading.value = true;
   error.value = '';
   try {
-    const fullPath = toAbsoluteBrowsePath(path);
-    const response = await workspaceApi.browse(fullPath);
+    if (!browseRoot.value && props.browseRoot) {
+      browseRoot.value = props.browseRoot;
+    }
+    const apiPath = toApiBrowsePath(path, browseRoot.value);
+    const response = await workspaceApi.browse(apiPath);
     if (response.data.root) {
       browseRoot.value = response.data.root;
     }
-    currentPath.value = toRelativeBrowsePath(response.data.path);
-    entries.value = response.data.entries;
+    const root = browseRoot.value;
+    currentPath.value = toDisplayBrowsePath(response.data.path, root);
+    // Keep entry paths as UI-relative so further navigation never re-prefixes a wrong absolute root
+    entries.value = response.data.entries.map((entry) => ({
+      ...entry,
+      path: toDisplayBrowsePath(entry.path, root)
+    }));
   } catch (err: unknown) {
     const msg =
       (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
@@ -100,10 +95,7 @@ const goUp = (): void => {
 };
 
 const selectCurrent = (): void => {
-  // Selecting browse root stores `.` (workspace = entire browse root)
-  const selected =
-    !currentPath.value || currentPath.value === '/' ? '.' : currentPath.value.replace(/^\//, '');
-  emit('select', selected);
+  emit('select', toWorkspacePathFromDisplay(currentPath.value));
   emit('update:modelValue', false);
 };
 
@@ -139,8 +131,8 @@ const createFolder = async (): Promise<void> => {
   bIsCreatingFolder.value = true;
   newFolderError.value = '';
   try {
-    const fullPath = toAbsoluteBrowsePath(currentPath.value);
-    await workspaceApi.createFolder(fullPath, name);
+    const parentApiPath = toApiBrowsePath(currentPath.value, browseRoot.value) || '.';
+    await workspaceApi.createFolder(parentApiPath, name);
     cancelNewFolder();
     await load(currentPath.value);
   } catch (err: unknown) {
@@ -155,12 +147,15 @@ const createFolder = async (): Promise<void> => {
 
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 watch(
-  () => [props.modelValue, props.initialPath] as const,
-  ([open, initial]) => {
+  () => [props.modelValue, props.initialPath, props.browseRoot] as const,
+  ([open, initial, rootHint]) => {
     if (open) {
       bShowNewFolder.value = false;
       newFolderName.value = '';
       newFolderError.value = '';
+      if (typeof rootHint === 'string' && rootHint.trim()) {
+        browseRoot.value = rootHint.trim();
+      }
       const start = typeof initial === 'string' && initial.trim() ? initial.trim() : '';
       load(start === '.' ? '/' : start);
     }
@@ -173,6 +168,7 @@ watch(
     :model-value="modelValue"
     labelledby="dir-picker-modal-title"
     panel-class="max-w-xl"
+    overlay-class="z-[60]"
     @update:model-value="close"
   >
     <!-- Header -->
@@ -203,6 +199,9 @@ watch(
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
                 </button>
               </div>
+              <p v-if="browseRoot" class="hint">
+                Under <code class="nc-mono">{{ browseRoot }}</code>
+              </p>
             </div>
             <hr />
 

@@ -3,9 +3,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { ancestorDirectoryPaths, toWorkspaceRelativePath } from '@/utils/workspaceFilePath';
+import { DEFAULT_WORKSPACE_BROWSE_ROOT } from '@/@types/index';
 
 describe('toWorkspaceRelativePath', () => {
-  const workspace = '/data-root/opt/src/novacode';
+  const workspace = `${DEFAULT_WORKSPACE_BROWSE_ROOT}/opt/src/novacode`;
 
   it('strips the workspace root from an absolute path', () => {
     expect(toWorkspaceRelativePath(`${workspace}/api/src/index.ts`, workspace)).toBe(

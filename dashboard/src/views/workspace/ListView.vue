@@ -22,7 +22,7 @@ import { agentAuthApi, apiErrorMessage, sessionsApi, settingsApi } from '@/class
 
 // types
 import type { AgentType, ApprovalPolicy, Workspace } from '@/@types/index';
-import { MAX_FAVORITE_WORKSPACES } from '@/@types/index';
+import { DEFAULT_WORKSPACE_BROWSE_ROOT, MAX_FAVORITE_WORKSPACES } from '@/@types/index';
 
 // -------------------------------------------------- Store --------------------------------------------------
 const store = useWorkspacesStore();
@@ -55,7 +55,7 @@ const bShowNewSessionModal = ref<boolean>(false);
 const newSessionWorkspace = ref<Workspace | undefined>(undefined);
 const bSubmittingSession = ref<boolean>(false);
 const createSessionError = ref<string | null>(null);
-const workspaceBrowseRoot = ref<string>('/data-root');
+const workspaceBrowseRoot = ref<string>(DEFAULT_WORKSPACE_BROWSE_ROOT);
 
 const bCtxMenuOpen = ref<boolean>(false);
 const ctxMenuX = ref(0);
@@ -104,7 +104,7 @@ const existingTags = computed((): string[] => {
 function formatWorkspacePath(path: string): string {
   const trimmed = path.trim();
   if (!trimmed || trimmed === '.' || trimmed === '/') {
-    return workspaceBrowseRoot.value;
+    return workspaceBrowseRoot.value || DEFAULT_WORKSPACE_BROWSE_ROOT;
   }
   return trimmed.replace(/^\//, '');
 }
@@ -602,6 +602,7 @@ onMounted((): void => {
     :mistral-vibe-available="mistralVibeAvailable"
     :open-code-available="openCodeAvailable"
     :codex-available="codexAvailable"
+    :browse-root="workspaceBrowseRoot"
     @create-group="handleCreateGroup"
     @save="handleSaveWorkspace"
   />

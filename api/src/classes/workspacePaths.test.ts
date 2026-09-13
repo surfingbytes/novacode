@@ -31,9 +31,12 @@ describe('workspacePaths', () => {
     expect(isPathUnderBrowseRoot('/etc')).toBe(false);
   });
 
-  it('defaults browse root to /data-root', async () => {
+  it('defaults browse root when WORKSPACE_BROWSE_ROOT is unset', async () => {
     delete process.env['WORKSPACE_BROWSE_ROOT'];
+    const { DEFAULT_WORKSPACE_BROWSE_ROOT } = await import('./config');
     const { resolveWorkspaceAbsolutePath } = await import('./workspacePaths');
-    expect(resolveWorkspaceAbsolutePath('opt/src/foo')).toBe('/data-root/opt/src/foo');
+    expect(resolveWorkspaceAbsolutePath('opt/src/foo')).toBe(
+      `${DEFAULT_WORKSPACE_BROWSE_ROOT}/opt/src/foo`
+    );
   });
 });

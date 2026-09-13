@@ -15,6 +15,7 @@ import {
   indexSeenVibeIdsFromEvents,
   type DisplayItem
 } from '@/utils/chatDisplayItems';
+import { DEFAULT_WORKSPACE_BROWSE_ROOT } from '@/@types/index';
 
 // ---------------------------------- ACP native ----------------------------------
 
@@ -712,13 +713,14 @@ describe('notificationPreviewFromStreamingItems', () => {
 
 describe('filePathFromToolItem', () => {
   it('prefers locations over the summary', () => {
+    const abs = `${DEFAULT_WORKSPACE_BROWSE_ROOT}/opt/src/novacode/api/src/index.ts`;
     expect(
       filePathFromToolItem({
         kind: 'tool',
         toolSummary: 'other.ts',
-        locations: [{ path: '/data-root/opt/src/novacode/api/src/index.ts' }]
+        locations: [{ path: abs }]
       })
-    ).toBe('/data-root/opt/src/novacode/api/src/index.ts');
+    ).toBe(abs);
   });
 
   it('uses a path-like summary when there are no locations', () => {
