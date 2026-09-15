@@ -858,7 +858,88 @@ export async function runAcpSubprocessPrompt(
   let bPromptInFlight = false;
   let bPromptIdleTimedOut = false;
   let promptIdleTimer: ReturnType<typeof setTimeout> | null = null;
+  const backgroundTaskIds = new Set<string>();
+  let resolveBackgroundTasksSettled: (() => void) | null = null;
   const stream = ndJsonStream(nodeWritableToWeb(proc.stdin!), nodeReadableToWeb(proc.stdout!));
+
+  const settleBackgroundTaskWait = (): void => {
+    if (backgroundTaskIds.size !== 0 || !resolveBackgroundTasksSettled) return;
+    const resolve = resolveBackgroundTasksSettled;
+    resolveBackgroundTasksSettled = null;
+    resolve();
+  };
+
+  const waitForBackgroundTasks = (): Promise<void> => {
+    if (backgroundTaskIds.size === 0) return Promise.resolve();
+    return new Promise((resolve) => {
+      resolveBackgroundTasksSettled = resolve;
+    });
+  };
+
+  /**
+   * Cursor reports a task tool call as completed once a background subagent has
+   * been launched (`rawOutput.isBackground: true`). The actual completion comes
+   * later as `cursor/task`, potentially after the parent prompt has returned.
+   */
+  const trackBackgroundTaskEvent = (line: string): void => {
+    let event: Record<string, unknown>;
+    try {
+      event = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+
+    if (event.type === 'cursor_task') {
+      const toolCallId = typeof event.toolCallId === 'string' ? event.toolCallId : null;
+      if (!toolCallId) return;
+      const status = typeof event.status === 'string' ? event.status.toLowerCase() : 'completed';
+      if (status === 'in_progress' || status === 'pending' || status === 'running') {
+        backgroundTaskIds.add(toolCallId);
+      } else {
+        backgroundTaskIds.delete(toolCallId);
+        settleBackgroundTaskWait();
+      }
+      return;
+    }
+
+    const update =
+      event.update && typeof event.update === 'object' && !Array.isArray(event.update)
+        ? (event.update as Record<string, unknown>)
+        : null;
+    const toolCallId = typeof update?.toolCallId === 'string' ? update.toolCallId : null;
+    if (!update || !toolCallId) return;
+
+    if (update.sessionUpdate === 'tool_call') {
+      const rawInput =
+        update.rawInput && typeof update.rawInput === 'object' && !Array.isArray(update.rawInput)
+          ? (update.rawInput as Record<string, unknown>)
+          : null;
+      const isTask =
+        rawInput?._toolName === 'task' ||
+        typeof rawInput?.agent_type === 'string' ||
+        typeof rawInput?.subagent_type === 'string';
+      const status = typeof update.status === 'string' ? update.status.toLowerCase() : '';
+      if (isTask && status !== 'completed' && status !== 'failed') {
+        backgroundTaskIds.add(toolCallId);
+      }
+      return;
+    }
+
+    if (update.sessionUpdate === 'tool_call_update' && backgroundTaskIds.has(toolCallId)) {
+      const rawOutput =
+        update.rawOutput && typeof update.rawOutput === 'object' && !Array.isArray(update.rawOutput)
+          ? (update.rawOutput as Record<string, unknown>)
+          : null;
+      const status = typeof update.status === 'string' ? update.status.toLowerCase() : '';
+      if (rawOutput?.isBackground === true) {
+        return;
+      }
+      if (status === 'completed' || status === 'failed') {
+        backgroundTaskIds.delete(toolCallId);
+        settleBackgroundTaskWait();
+      }
+    }
+  };
 
   const clearPromptIdleTimer = (): void => {
     if (promptIdleTimer !== null) {
@@ -874,11 +955,14 @@ export async function runAcpSubprocessPrompt(
     promptIdleTimer = setTimeout(() => {
       bPromptIdleTimedOut = true;
       logger.warn({ logTag, novaSessionId, timeoutMs }, 'prompt idle timeout');
+      backgroundTaskIds.clear();
+      settleBackgroundTaskWait();
       killProc();
     }, timeoutMs);
   };
 
   const handleEvent: AcpEventHandler = (line) => {
+    trackBackgroundTaskEvent(line);
     onEvent(line);
     armPromptIdleTimer();
   };
@@ -909,6 +993,8 @@ export async function runAcpSubprocessPrompt(
 
   const cancelRun = () => {
     void (async () => {
+      backgroundTaskIds.clear();
+      settleBackgroundTaskWait();
       if (ctxRef && sessionIdForCancel) {
         try {
           await ctxRef.notify(methods.agent.session.cancel, { sessionId: sessionIdForCancel });
@@ -1091,6 +1177,22 @@ export async function runAcpSubprocessPrompt(
           prompt: buildPromptContent(finalPromptText, params.attachments),
         })) as { stopReason?: string };
         phase('session:prompt:done');
+        if (backgroundTaskIds.size > 0) {
+          logger.debug(
+            { logTag, novaSessionId, backgroundTaskCount: backgroundTaskIds.size },
+            'parent prompt finished; waiting for background subagents'
+          );
+          await waitForBackgroundTasks();
+          if (bPromptIdleTimedOut) {
+            return {
+              acpSessionId: resolvedSessionId,
+              error: `Agent produced no output for ${Math.round(promptIdleTimeoutMs() / 1000)}s and was stopped.`,
+              resolvedModeId,
+              resolvedModelId,
+            };
+          }
+          phase('background-tasks:done');
+        }
         return {
           acpSessionId: resolvedSessionId,
           stopReason: resp.stopReason,

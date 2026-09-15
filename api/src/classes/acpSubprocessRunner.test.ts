@@ -480,6 +480,43 @@ describe('runAcpSubprocessPrompt', () => {
     expect(result.stopReason).toBe('end_turn');
     expect(events.filter((event) => event.type === 'cursor_task').length).toBeGreaterThanOrEqual(8);
   }, 10_000);
+
+  it('stays active after the parent turn until a background subagent completes', async () => {
+    process.env.ACP_PROMPT_IDLE_TIMEOUT_MS = '1000';
+    const { workDir } = setupMock('prompt-background-task');
+    const events: Array<Record<string, unknown>> = [];
+    const startedAt = Date.now();
+
+    const result = await runMock(
+      'nova-background-task',
+      null,
+      workDir,
+      (line) => {
+        try {
+          events.push(JSON.parse(line) as Record<string, unknown>);
+        } catch {
+          // ignore non-json
+        }
+      },
+      undefined,
+      undefined,
+      true
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.stopReason).toBe('end_turn');
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(175);
+    expect(
+      events.some(
+        (event) =>
+          event.type === 'cursor_task' &&
+          event.toolCallId === 'mock-background-task-1'
+      )
+    ).toBe(true);
+    expect(
+      events.some((event) => event.sessionId === 'mock-background-child-session')
+    ).toBe(true);
+  }, 10_000);
 });
 
 describe('mergeCursorTodos', () => {

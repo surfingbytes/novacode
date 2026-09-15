@@ -14,6 +14,7 @@
  *             'prompt-silent-hang'   — session/prompt never responds and emits no updates
  *             'prompt-subagent-session-updates' — hangs while emitting session/update on a child session id
  *             'prompt-cursor-task'   — hangs while emitting cursor/task notifications
+ *             'prompt-background-task' — parent returns before cursor/task completion
  *   MOCK_LOG  — path; every incoming message is appended as one JSON line.
  */
 
@@ -253,6 +254,62 @@ rl.on('line', (line) => {
             },
           });
         });
+      } else if (mode === 'prompt-background-task') {
+        const toolCallId = 'mock-background-task-1';
+        send({
+          jsonrpc: '2.0',
+          method: 'session/update',
+          params: {
+            sessionId: msg.params?.sessionId ?? SESSION_ID,
+            update: {
+              sessionUpdate: 'tool_call',
+              toolCallId,
+              title: 'Task: Long research',
+              kind: 'other',
+              status: 'in_progress',
+              rawInput: { _toolName: 'task' },
+            },
+          },
+        });
+        send({
+          jsonrpc: '2.0',
+          method: 'session/update',
+          params: {
+            sessionId: msg.params?.sessionId ?? SESSION_ID,
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId,
+              status: 'completed',
+              rawOutput: { isBackground: true },
+            },
+          },
+        });
+        send({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } });
+        activityTimer = setTimeout(() => {
+          send({
+            jsonrpc: '2.0',
+            method: 'session/update',
+            params: {
+              sessionId: 'mock-background-child-session',
+              update: {
+                sessionUpdate: 'agent_message_chunk',
+                content: { type: 'text', text: 'Background research finished.' },
+              },
+            },
+          });
+          send({
+            jsonrpc: '2.0',
+            method: 'cursor/task',
+            params: {
+              toolCallId,
+              description: 'Long research',
+              prompt: 'Research the codebase.',
+              subagentType: 'explore',
+              durationMs: 200,
+            },
+          });
+          activityTimer = null;
+        }, 200);
       } else {
         send({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } });
       }
