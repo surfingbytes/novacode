@@ -664,7 +664,8 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     args: Type.Optional(Type.Array(Type.String())),
     env: Type.Optional(Type.Record(Type.String(), Type.String())),
     url: Type.Optional(Type.String()),
-    headers: Type.Optional(Type.Record(Type.String(), Type.String()))
+    headers: Type.Optional(Type.Record(Type.String(), Type.String())),
+    enabled: Type.Optional(Type.Boolean())
   });
 
   const McpAutoloadStatusSchema = Type.Object({

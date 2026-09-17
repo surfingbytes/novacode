@@ -437,6 +437,8 @@ export interface McpClientServer {
   env?: Record<string, string>;
   url?: string;
   headers?: Record<string, string>;
+  /** When false, kept in Settings but not loaded for agents. Default true. */
+  enabled?: boolean;
 }
 
 /** Result of Settings → MCP “Test connectivity” dry-run */

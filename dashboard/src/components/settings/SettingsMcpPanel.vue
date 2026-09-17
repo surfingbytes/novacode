@@ -5,12 +5,15 @@ import { ref, onMounted } from 'vue';
 // components
 import BaseModal from '@/components/BaseModal.vue';
 import ModalHeader from '@/components/ModalHeader.vue';
+import UiToggle from '@/components/ui/UiToggle.vue';
 
 // classes
 import { settingsApi } from '@/classes/api';
 
 // types
 import type { McpClientServer, McpConnectivityCheckResult, McpAutoloadStatus } from '@/@types/index';
+
+const isMcpEnabled = (server: McpClientServer): boolean => server.enabled !== false;
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const mcpClients = ref<Record<string, McpClientServer>>({});
@@ -99,7 +102,11 @@ const saveMcpClient = async (): Promise<void> => {
     return;
   }
 
-  const server: McpClientServer = {};
+  const previous =
+    mcpClientEditName.value != null ? mcpClients.value[mcpClientEditName.value] : undefined;
+  const server: McpClientServer = {
+    enabled: previous ? isMcpEnabled(previous) : true
+  };
   if (form.type === 'command') {
     if (!form.command.trim()) {
       mcpClientFormError.value = 'Command is required.';
@@ -171,6 +178,27 @@ const saveMcpClient = async (): Promise<void> => {
 const deleteMcpClient = async (name: string): Promise<void> => {
   const updated = { ...mcpClients.value };
   delete updated[name];
+  bSavingMcpClients.value = true;
+  try {
+    const response = await settingsApi.saveMcpClients(updated);
+    mcpClients.value = response.data.servers;
+    applyAutoload(response.data.autoload);
+  } catch {
+    // ignore
+  } finally {
+    bSavingMcpClients.value = false;
+  }
+};
+
+const toggleMcpClientEnabled = async (name: string, enabled: boolean): Promise<void> => {
+  const server = mcpClients.value[name];
+  if (!server || isMcpEnabled(server) === enabled) {
+    return;
+  }
+  const updated = {
+    ...mcpClients.value,
+    [name]: { ...server, enabled }
+  };
   bSavingMcpClients.value = true;
   try {
     const response = await settingsApi.saveMcpClients(updated);
@@ -313,6 +341,7 @@ onMounted((): void => {
                 v-for="(server, name) in mcpClients"
                 :key="name"
                 class="flex items-center justify-between gap-4 py-3 border-b border-fg/[0.06] last:border-0"
+                :class="{ 'opacity-55': !isMcpEnabled(server) }"
               >
                 <div class="min-w-0">
                   <div class="flex items-center gap-2">
@@ -334,7 +363,13 @@ onMounted((): void => {
                       }}
                     </span>
                     <span
-                      v-if="mcpAutoload?.skipped.some((skipped) => skipped.name === name)"
+                      v-if="!isMcpEnabled(server)"
+                      class="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded border bg-fg/[0.06] text-text-muted border-fg/[0.1]"
+                    >
+                      disabled
+                    </span>
+                    <span
+                      v-else-if="mcpAutoload?.skipped.some((skipped) => skipped.name === name)"
                       class="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded border bg-destructive/10 text-destructive border-destructive/20"
                     >
                       ignored
@@ -348,7 +383,13 @@ onMounted((): void => {
                     }}
                   </p>
                 </div>
-                <div class="flex items-center gap-1 flex-shrink-0">
+                <div class="flex items-center gap-2 flex-shrink-0">
+                  <UiToggle
+                    :model-value="isMcpEnabled(server)"
+                    :disabled="bSavingMcpClients"
+                    :aria-label="isMcpEnabled(server) ? `Disable ${name}` : `Enable ${name}`"
+                    @update:model-value="toggleMcpClientEnabled(name as string, $event)"
+                  />
                   <button
                     class="text-xs text-text-muted hover:text-text-primary hover:bg-fg/[0.08] px-2.5 py-1.5 rounded-lg transition-colors"
                     @click="openEditMcpClient(name as string)"

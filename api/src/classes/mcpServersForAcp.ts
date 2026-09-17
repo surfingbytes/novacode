@@ -3,6 +3,7 @@ import type { McpServer } from '@agentclientprotocol/sdk';
 
 // classes
 import {
+  isMcpClientEnabled,
   readMcpClients,
   writeAgentMcpAutoloadFiles,
   type McpClientServerConfig
@@ -75,6 +76,10 @@ export function partitionMcpClients(
   const skipped: SkippedMcpServer[] = [];
 
   for (const [name, cfg] of Object.entries(clients)) {
+    // User-disabled: omit from autoload without treating as connectivity failure.
+    if (!isMcpClientEnabled(cfg)) {
+      continue;
+    }
     const check = checks[name];
     if (!check?.ok) {
       skipped.push({
@@ -87,6 +92,19 @@ export function partitionMcpClients(
   }
 
   return { enabled, skipped };
+}
+
+/** Servers that should be probed / considered for agent autoload. */
+export function filterEnabledMcpClients(
+  clients: Record<string, McpClientServerConfig>
+): Record<string, McpClientServerConfig> {
+  const out: Record<string, McpClientServerConfig> = {};
+  for (const [name, cfg] of Object.entries(clients)) {
+    if (isMcpClientEnabled(cfg)) {
+      out[name] = cfg;
+    }
+  }
+  return out;
 }
 
 /** Write only reachable servers into Cursor/Claude autoload files and record status. */
@@ -126,12 +144,13 @@ export async function applyReachableMcpAutoload(configDir: string): Promise<McpA
   };
   try {
     const clients = readMcpClients(configDir);
-    if (Object.keys(clients).length === 0) {
+    const toProbe = filterEnabledMcpClients(clients);
+    if (Object.keys(toProbe).length === 0) {
       writeAgentMcpAutoloadFiles(configDir, {});
       autoloadStatus = { status: 'ready', enabled: [], skipped: [], probedAt: Date.now() };
       return autoloadStatus;
     }
-    const checks = await checkMcpClients(configDir, clients, {
+    const checks = await checkMcpClients(configDir, toProbe, {
       httpTimeoutMs: AUTOLOAD_HTTP_TIMEOUT_MS
     });
     return applyMcpAutoloadFromChecks(configDir, clients, checks);

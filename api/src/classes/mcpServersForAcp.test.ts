@@ -87,6 +87,20 @@ describe('partitionMcpClients', () => {
     expect(result.enabled).toEqual({});
     expect(result.skipped.map((s) => s.name)).toEqual(['joplin', 'files']);
   });
+  it('omits user-disabled servers without listing them as skipped', () => {
+    const result = partitionMcpClients(
+      {
+        joplin: { type: 'http', url: 'http://joplin-mcp:3000/mcp', enabled: false },
+        files: { command: 'npx', args: ['-y', 'files'] }
+      },
+      {
+        joplin: { ok: true, kind: 'http', detail: 'HTTP 200' },
+        files: { ok: true, kind: 'stdio', detail: 'Process started' }
+      }
+    );
+    expect(Object.keys(result.enabled)).toEqual(['files']);
+    expect(result.skipped).toEqual([]);
+  });
 });
 
 describe('mcpUnavailableNoticeText', () => {
@@ -161,5 +175,17 @@ describe('writeAgentMcpAutoloadFiles', () => {
       mcpServers: Record<string, { type?: string }>;
     };
     expect(cursorMcp.mcpServers.joplin?.type).toBe('http');
+  });
+
+  it('strips Nova enabled flag from agent configs', () => {
+    const configDir = tempConfigDir();
+    writeAgentMcpAutoloadFiles(configDir, {
+      joplin: { url: 'http://joplin-mcp:3000/mcp', enabled: true }
+    });
+    const cursorMcp = JSON.parse(readFileSync(join(configDir, '.cursor', 'mcp.json'), 'utf8')) as {
+      mcpServers: Record<string, { enabled?: boolean; url?: string }>;
+    };
+    expect(cursorMcp.mcpServers.joplin?.url).toBe('http://joplin-mcp:3000/mcp');
+    expect(cursorMcp.mcpServers.joplin?.enabled).toBeUndefined();
   });
 });

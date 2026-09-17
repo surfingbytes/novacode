@@ -408,7 +408,14 @@ export interface McpClientServerConfig {
   env?: Record<string, string>;
   url?: string;
   headers?: Record<string, string>;
+  /** When false, kept in mcp-clients.json but not loaded for agents. Default true. */
+  enabled?: boolean;
   [key: string]: unknown;
+}
+
+/** Missing/undefined `enabled` means on (backward compatible). */
+export function isMcpClientEnabled(cfg: McpClientServerConfig): boolean {
+  return cfg.enabled !== false;
 }
 
 const MCP_CLIENTS_FILE = 'mcp-clients.json';
@@ -432,6 +439,8 @@ function normalizeMcpServersForAgents(
   const out: Record<string, McpClientServerConfig> = {};
   for (const [name, s] of Object.entries(servers)) {
     const copy: McpClientServerConfig = { ...s };
+    // Nova-only flag — do not pass through to Cursor/Claude MCP configs.
+    delete copy.enabled;
     if (copy.url && !copy.command && copy.type === undefined) {
       copy.type = 'http';
     }
