@@ -644,7 +644,8 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       const vibeKeyOk = getVibeApiKeyStatus(config.configDir).configured;
       const vibeCliOk = isVibeCliAvailable(config.configDir);
       const openCodeAvailable = openCodeAuthenticated();
-      const codexAvailable = isCodexAcpAvailable(config.configDir);
+      // Codex needs both the ACP binary (shipped in the image) and a stored API key
+      const codexAvailable = isCodexAcpAvailable(config.configDir) && codexAuthenticated();
       return {
         cursorAvailable,
         cursorStatus: cursorAuth.status,
