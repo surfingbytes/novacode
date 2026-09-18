@@ -7,6 +7,7 @@ import 'md-editor-v3/lib/style.css';
 
 // classes
 import { filesApi } from '@/classes/api';
+import { buildHtmlPreviewDocument } from '@/lib/htmlPreview';
 import { readFilesOpenPath, writeFilesOpenPath } from '@/lib/filesOpenPath';
 import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 import { DEFAULT_THEME_ID, resolveStoredThemeId, themes } from '@/lib/themes';
@@ -63,6 +64,9 @@ const fileContent = ref<string>('');
 const fileEncoding = ref<'utf8' | 'base64'>('utf8');
 const imageObjectUrl = ref<string | null>(null);
 const htmlPreviewObjectUrl = ref<string | null>(null);
+/** All blob URLs created for the current HTML preview (document + assets). */
+const htmlPreviewObjectUrls = ref<string[]>([]);
+let htmlPreviewBuildId = 0;
 const bListLoading = ref<boolean>(false);
 const loadingPath = ref<string | null>(null);
 const bReadLoading = ref<boolean>(false);
@@ -714,17 +718,53 @@ watch([fileContent, fileEncoding, selectedPath], () => {
   }
 });
 
-// Sandboxed HTML preview: blob URL + allow-scripts without allow-same-origin
-// so mockup JS can run but cannot touch the app origin / token storage.
+// Sandboxed HTML preview: rewrite relative assets to blob URLs, then load the
+// document blob in an iframe with allow-scripts (no allow-same-origin) so
+// mockup JS can run without touching the app origin / token storage.
+function revokeHtmlPreviewUrls(): void {
+  for (const url of htmlPreviewObjectUrls.value) {
+    URL.revokeObjectURL(url);
+  }
+  htmlPreviewObjectUrls.value = [];
+  htmlPreviewObjectUrl.value = null;
+}
+
 watch([fileContent, fileEncoding, selectedPath, bHtmlPreview], () => {
-  if (htmlPreviewObjectUrl.value) {
-    URL.revokeObjectURL(htmlPreviewObjectUrl.value);
-    htmlPreviewObjectUrl.value = null;
+  const buildId = ++htmlPreviewBuildId;
+  revokeHtmlPreviewUrls();
+  if (!bHtmlPreview.value || fileEncoding.value !== 'utf8' || fileContent.value === '') {
+    return;
   }
-  if (bHtmlPreview.value && fileEncoding.value === 'utf8' && fileContent.value !== '') {
-    const blob = new Blob([fileContent.value], { type: 'text/html;charset=utf-8' });
-    htmlPreviewObjectUrl.value = URL.createObjectURL(blob);
+  const htmlPath = selectedPath.value;
+  if (!htmlPath) {
+    return;
   }
+  const html = fileContent.value;
+  const workspaceId = props.workspaceId;
+  void (async () => {
+    try {
+      const result = await buildHtmlPreviewDocument(html, htmlPath, async (path) => {
+        try {
+          const response = await filesApi.read(workspaceId, path);
+          return { content: response.data.content, encoding: response.data.encoding };
+        } catch {
+          return null;
+        }
+      });
+      if (buildId !== htmlPreviewBuildId) {
+        for (const url of result.objectUrls) {
+          URL.revokeObjectURL(url);
+        }
+        return;
+      }
+      htmlPreviewObjectUrls.value = result.objectUrls;
+      htmlPreviewObjectUrl.value = result.documentUrl;
+    } catch {
+      if (buildId === htmlPreviewBuildId) {
+        revokeHtmlPreviewUrls();
+      }
+    }
+  })();
 });
 
 watch(
@@ -770,10 +810,8 @@ onUnmounted((): void => {
     URL.revokeObjectURL(imageObjectUrl.value);
     imageObjectUrl.value = null;
   }
-  if (htmlPreviewObjectUrl.value) {
-    URL.revokeObjectURL(htmlPreviewObjectUrl.value);
-    htmlPreviewObjectUrl.value = null;
-  }
+  htmlPreviewBuildId += 1;
+  revokeHtmlPreviewUrls();
 });
 </script>
 

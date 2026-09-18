@@ -83,14 +83,15 @@ async function main(): Promise<void> {
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'", "'unsafe-eval'", 'blob:'],
-        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-        fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'blob:'],
+        fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:', 'blob:'],
         imgSrc: ["'self'", 'data:', 'blob:'],
         mediaSrc: ["'self'", 'blob:'],
         connectSrc: ["'self'", 'https://fonts.googleapis.com', 'https://fonts.gstatic.com'],
         workerSrc: ["'self'", 'blob:'],
         childSrc: ["'self'", 'blob:'],
-        frameSrc: ["'none'"],
+        // blob: needed for workspace HTML file preview (sandboxed iframe).
+        frameSrc: ['blob:'],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
         formAction: ["'self'"]
