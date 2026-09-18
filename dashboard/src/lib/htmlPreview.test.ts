@@ -73,7 +73,7 @@ describe('resolvePreviewAssetPath', () => {
 });
 
 describe('buildHtmlPreviewDocument', () => {
-  it('rewrites relative stylesheet and script tags to blob URLs', async () => {
+  it('inlines relative stylesheet and script into the document', async () => {
     const fetchAsset: FetchPreviewAsset = vi.fn(async (path) => {
       if (path === 'mockups/brand-marks.css') {
         return { content: 'body{color:red}', encoding: 'utf8' as const };
@@ -87,6 +87,7 @@ describe('buildHtmlPreviewDocument', () => {
     const html = `<!doctype html><html><head>
 <link href="brand-marks.css" rel="stylesheet">
 </head><body>
+<div id="sheet"></div>
 <script src="brand-marks.js"></script>
 <script>document.body.dataset.ready="1"</script>
 </body></html>`;
@@ -103,11 +104,11 @@ describe('buildHtmlPreviewDocument', () => {
         .find((part): part is Blob => part instanceof Blob && part.type.includes('text/html'));
       expect(htmlBlob).toBeTruthy();
       const docHtml = await htmlBlob!.text();
-      expect(docHtml).toMatch(/href="blob:[^"]+"/);
-      expect(docHtml).toMatch(/src="blob:[^"]+"/);
-      // Inline script moved to a blob src (no remaining inline body).
-      expect(docHtml).not.toContain('document.body.dataset.ready');
-      expect(result.objectUrls.length).toBeGreaterThanOrEqual(3);
+      expect(docHtml).toContain('body{color:red}');
+      expect(docHtml).toContain('window.__ok=1');
+      expect(docHtml).toContain('document.body.dataset.ready');
+      expect(docHtml).not.toContain('brand-marks.css');
+      expect(docHtml).not.toContain('brand-marks.js');
       expect(result.documentUrl).toMatch(/^blob:/);
     } finally {
       for (const url of result.objectUrls) {
@@ -116,9 +117,8 @@ describe('buildHtmlPreviewDocument', () => {
     }
   });
 
-  it('rewrites CSS url() against the stylesheet path', async () => {
-    const objectUrls: string[] = [];
-    const blobCache = new Map<string, string>();
+  it('rewrites CSS url() to data URIs against the stylesheet path', async () => {
+    const dataUriCache = new Map<string, string>();
     const fetchAsset: FetchPreviewAsset = vi.fn(async (path) => {
       if (path === 'mockups/assets/bg.png') {
         return { content: 'aaaa', encoding: 'base64' as const };
@@ -130,16 +130,9 @@ describe('buildHtmlPreviewDocument', () => {
       'body{background:url(./assets/bg.png)}',
       'mockups/app.css',
       fetchAsset,
-      objectUrls,
-      blobCache
+      dataUriCache
     );
-    try {
-      expect(fetchAsset).toHaveBeenCalledWith('mockups/assets/bg.png');
-      expect(rewritten).toMatch(/url\("blob:[^"]+"\)/);
-    } finally {
-      for (const url of objectUrls) {
-        URL.revokeObjectURL(url);
-      }
-    }
+    expect(fetchAsset).toHaveBeenCalledWith('mockups/assets/bg.png');
+    expect(rewritten).toMatch(/url\("data:image\/png;base64,aaaa"\)/);
   });
 });

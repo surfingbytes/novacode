@@ -82,11 +82,11 @@ async function main(): Promise<void> {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-eval'", 'blob:'],
-        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'blob:'],
+        scriptSrc: ["'self'", "'unsafe-eval'", 'blob:', "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'blob:', 'data:'],
         fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:', 'blob:'],
         imgSrc: ["'self'", 'data:', 'blob:'],
-        mediaSrc: ["'self'", 'blob:'],
+        mediaSrc: ["'self'", 'blob:', 'data:'],
         connectSrc: ["'self'", 'https://fonts.googleapis.com', 'https://fonts.gstatic.com'],
         workerSrc: ["'self'", 'blob:'],
         childSrc: ["'self'", 'blob:'],

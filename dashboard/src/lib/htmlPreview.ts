@@ -1,10 +1,10 @@
 /**
- * Build a sandboxed HTML preview document whose relative asset URLs resolve.
+ * Build a sandboxed HTML preview whose relative assets resolve.
  *
- * Blob URLs have no directory base, so sibling CSS/JS/images break. This
- * fetches those workspace files, rewrites references to blob: URLs (and turns
- * inline scripts into blob scripts so inherited CSP without unsafe-inline
- * still allows them), then returns a document blob URL.
+ * The preview iframe uses sandbox="allow-scripts" without allow-same-origin
+ * (opaque origin). Sibling blob: URLs created by the parent are not loadable
+ * from that document, so CSS/JS must be inlined and binary assets become
+ * data: URIs — one self-contained HTML blob.
  */
 
 export type PreviewAsset = {
@@ -108,29 +108,32 @@ function mimeForAssetPath(path: string): string {
   return ASSET_MIME[extensionOf(path)] ?? 'application/octet-stream';
 }
 
-function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
-  const binaryString = atob(base64);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let index = 0; index < binaryString.length; index++) {
-    bytes[index] = binaryString.charCodeAt(index);
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let index = 0; index < bytes.length; index++) {
+    binary += String.fromCharCode(bytes[index]!);
   }
-  return bytes;
+  return btoa(binary);
 }
 
-function assetToBlobParts(asset: PreviewAsset): BlobPart {
+function utf8ToBase64(text: string): string {
+  return bytesToBase64(new TextEncoder().encode(text));
+}
+
+function assetToDataUri(asset: PreviewAsset, mime: string): string {
   if (asset.encoding === 'base64') {
-    return base64ToBytes(asset.content);
+    return `data:${mime};base64,${asset.content}`;
   }
-  return asset.content;
+  // data: URLs need base64 (or percent-encoding); base64 is safer for CSS/binary-ish text.
+  return `data:${mime};base64,${utf8ToBase64(asset.content)}`;
 }
 
-/** Rewrite url(...) and @import in CSS, resolving against the CSS file path. */
+/** Rewrite url(...) and @import in CSS; binary/text refs become data: URIs. */
 export async function rewriteCssUrls(
   cssText: string,
   cssPath: string,
   fetchAsset: FetchPreviewAsset,
-  objectUrls: string[],
-  blobCache: Map<string, string>,
+  dataUriCache: Map<string, string>,
   depth = 0
 ): Promise<string> {
   if (depth > MAX_CSS_IMPORT_DEPTH) {
@@ -139,7 +142,6 @@ export async function rewriteCssUrls(
 
   let rewritten = cssText;
 
-  // @import "…" / @import url(…) — fetch and inline so nested urls resolve.
   const importPattern =
     /@import\s+(?:url\(\s*(['"]?)([^'")]+)\1\s*\)|(['"])([^'"]+)\3)\s*;?/gi;
   const imports: { full: string; ref: string }[] = [];
@@ -162,8 +164,7 @@ export async function rewriteCssUrls(
       asset.content,
       resolved,
       fetchAsset,
-      objectUrls,
-      blobCache,
+      dataUriCache,
       depth + 1
     );
     rewritten = rewritten.replace(item.full, nested);
@@ -178,36 +179,33 @@ export async function rewriteCssUrls(
     }
   }
   for (const ref of urlRefs) {
-    const blobUrl = await ensureAssetBlobUrl(
+    const dataUri = await ensureDataUri(
       resolvePreviewAssetPath(cssPath, ref),
       fetchAsset,
-      objectUrls,
-      blobCache
+      dataUriCache
     );
-    if (!blobUrl) {
+    if (!dataUri) {
       continue;
     }
     const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     rewritten = rewritten.replace(
       new RegExp(`url\\(\\s*(['"]?)${escaped}\\1\\s*\\)`, 'gi'),
-      `url("${blobUrl}")`
+      `url("${dataUri}")`
     );
   }
 
   return rewritten;
 }
 
-async function ensureAssetBlobUrl(
+async function ensureDataUri(
   workspacePath: string | null,
   fetchAsset: FetchPreviewAsset,
-  objectUrls: string[],
-  blobCache: Map<string, string>,
-  overrideMime?: string
+  dataUriCache: Map<string, string>
 ): Promise<string | null> {
   if (!workspacePath) {
     return null;
   }
-  const cached = blobCache.get(workspacePath);
+  const cached = dataUriCache.get(workspacePath);
   if (cached) {
     return cached;
   }
@@ -215,22 +213,24 @@ async function ensureAssetBlobUrl(
   if (!asset) {
     return null;
   }
-  let parts: BlobPart = assetToBlobParts(asset);
-  const mime = overrideMime ?? mimeForAssetPath(workspacePath);
-  if (extensionOf(workspacePath) === 'css' && asset.encoding === 'utf8') {
-    const rewrittenCss = await rewriteCssUrls(
-      asset.content,
-      workspacePath,
-      fetchAsset,
-      objectUrls,
-      blobCache
-    );
-    parts = rewrittenCss;
+  const mime = mimeForAssetPath(workspacePath).split(';')[0] ?? 'application/octet-stream';
+  const dataUri = assetToDataUri(asset, mime);
+  dataUriCache.set(workspacePath, dataUri);
+  return dataUri;
+}
+
+async function loadTextAsset(
+  workspacePath: string | null,
+  fetchAsset: FetchPreviewAsset
+): Promise<string | null> {
+  if (!workspacePath) {
+    return null;
   }
-  const blobUrl = URL.createObjectURL(new Blob([parts], { type: mime }));
-  objectUrls.push(blobUrl);
-  blobCache.set(workspacePath, blobUrl);
-  return blobUrl;
+  const asset = await fetchAsset(workspacePath);
+  if (!asset || asset.encoding !== 'utf8') {
+    return null;
+  }
+  return asset.content;
 }
 
 function rewriteSrcsetValue(
@@ -243,14 +243,14 @@ function rewriteSrcsetValue(
       const space = entry.search(/\s/);
       const url = space >= 0 ? entry.slice(0, space) : entry;
       const descriptor = space >= 0 ? entry.slice(space) : '';
-      const blobUrl = await replaceUrl(url);
-      return blobUrl ? `${blobUrl}${descriptor}` : entry;
+      const dataUri = await replaceUrl(url);
+      return dataUri ? `${dataUri}${descriptor}` : entry;
     })
   ).then((parts) => parts.join(', '));
 }
 
 /**
- * Rewrite relative asset references in HTML and return a blob: document URL.
+ * Inline relative CSS/JS and data-URI binary refs, then return a document blob URL.
  * Caller must revoke every entry in `objectUrls` when done.
  */
 export async function buildHtmlPreviewDocument(
@@ -259,55 +259,63 @@ export async function buildHtmlPreviewDocument(
   fetchAsset: FetchPreviewAsset
 ): Promise<HtmlPreviewBuildResult> {
   const objectUrls: string[] = [];
-  const blobCache = new Map<string, string>();
+  const dataUriCache = new Map<string, string>();
   const doc = new DOMParser().parseFromString(html, 'text/html');
 
   const replaceRef = (ref: string): Promise<string | null> =>
-    ensureAssetBlobUrl(resolvePreviewAssetPath(htmlPath, ref), fetchAsset, objectUrls, blobCache);
+    ensureDataUri(resolvePreviewAssetPath(htmlPath, ref), fetchAsset, dataUriCache);
 
-  // Stylesheets (and icons): link[href]
+  // Stylesheets → <style>…</style> (opaque iframe cannot load sibling blob: URLs)
   for (const link of Array.from(doc.querySelectorAll('link[href]'))) {
     const rel = (link.getAttribute('rel') ?? '').toLowerCase();
     const href = link.getAttribute('href');
-    if (!href) {
+    if (!href || !rel.split(/\s+/).includes('stylesheet')) {
       continue;
     }
-    const isStylesheet = rel.split(/\s+/).includes('stylesheet');
-    const isIcon = rel.includes('icon');
-    if (!isStylesheet && !isIcon) {
+    if (shouldLeavePreviewUrl(href)) {
       continue;
     }
-    const blobUrl = await replaceRef(href);
-    if (blobUrl) {
-      link.setAttribute('href', blobUrl);
+    const cssPath = resolvePreviewAssetPath(htmlPath, href);
+    const cssText = await loadTextAsset(cssPath, fetchAsset);
+    if (cssText == null || !cssPath) {
+      continue;
+    }
+    const rewritten = await rewriteCssUrls(cssText, cssPath, fetchAsset, dataUriCache);
+    const style = doc.createElement('style');
+    style.textContent = rewritten;
+    link.replaceWith(style);
+  }
+
+  // Icons and other link[href] resources → data:
+  for (const link of Array.from(doc.querySelectorAll('link[href]'))) {
+    const rel = (link.getAttribute('rel') ?? '').toLowerCase();
+    const href = link.getAttribute('href');
+    if (!href || !rel.includes('icon')) {
+      continue;
+    }
+    const dataUri = await replaceRef(href);
+    if (dataUri) {
+      link.setAttribute('href', dataUri);
     }
   }
 
-  // Scripts with src
+  // External scripts → inline <script> (keeps order; no sibling blob fetch)
   for (const script of Array.from(doc.querySelectorAll('script[src]'))) {
     const src = script.getAttribute('src');
-    if (!src) {
+    if (!src || shouldLeavePreviewUrl(src)) {
       continue;
     }
-    const blobUrl = await replaceRef(src);
-    if (blobUrl) {
-      script.setAttribute('src', blobUrl);
+    const jsPath = resolvePreviewAssetPath(htmlPath, src);
+    const jsText = await loadTextAsset(jsPath, fetchAsset);
+    if (jsText == null) {
+      continue;
     }
+    script.removeAttribute('src');
+    // Prevent premature script end if source contains a literal </script>.
+    script.textContent = jsText.replace(/<\/script/gi, '<\\/script');
   }
 
-  // Inline scripts → blob src (inherited app CSP blocks unsafe-inline scripts)
-  for (const script of Array.from(doc.querySelectorAll('script:not([src])'))) {
-    const text = script.textContent ?? '';
-    if (!text.trim()) {
-      continue;
-    }
-    const blobUrl = URL.createObjectURL(
-      new Blob([text], { type: 'text/javascript;charset=utf-8' })
-    );
-    objectUrls.push(blobUrl);
-    script.textContent = '';
-    script.setAttribute('src', blobUrl);
-  }
+  // Leave existing inline scripts as-is (requires script-src 'unsafe-inline' on the app CSP).
 
   // Inline style blocks with relative url(...)
   for (const style of Array.from(doc.querySelectorAll('style'))) {
@@ -315,13 +323,7 @@ export async function buildHtmlPreviewDocument(
     if (!text.trim()) {
       continue;
     }
-    style.textContent = await rewriteCssUrls(
-      text,
-      htmlPath,
-      fetchAsset,
-      objectUrls,
-      blobCache
-    );
+    style.textContent = await rewriteCssUrls(text, htmlPath, fetchAsset, dataUriCache);
   }
 
   const mediaSelectors = [
@@ -345,9 +347,9 @@ export async function buildHtmlPreviewDocument(
       if (!value) {
         continue;
       }
-      const blobUrl = await replaceRef(value);
-      if (blobUrl) {
-        node.setAttribute(attr, blobUrl);
+      const dataUri = await replaceRef(value);
+      if (dataUri) {
+        node.setAttribute(attr, dataUri);
       }
     }
   }
@@ -360,7 +362,6 @@ export async function buildHtmlPreviewDocument(
     node.setAttribute('srcset', await rewriteSrcsetValue(srcset, replaceRef));
   }
 
-  // Serialize: prefer full html when present.
   const serialized =
     doc.documentElement?.outerHTML != null
       ? `<!DOCTYPE html>${doc.documentElement.outerHTML}`
