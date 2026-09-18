@@ -23,6 +23,7 @@ import { subtasksFromStoredJson } from '@/utils/orchestratorPayload';
 import { relativeTimeShort } from '@/utils/relativeTime';
 import { formatSessionSidebarPreview, previewFromMessageJson } from '@/utils/sessionListPreview';
 import { isSessionUnread } from '@/utils/sessionUnread';
+import { sessionBusyLabel, sessionBusyTitle } from '@/utils/sessionBusyLabel';
 import { tagColorClass as categoryColorClass } from '@/utils/tagColors';
 
 // classes
@@ -526,11 +527,12 @@ watch(
               <span
                 v-if="item.session.busy"
                 class="inline-flex items-center gap-1.5 text-[11px] text-primary shrink-0 self-center"
+                :title="sessionBusyTitle(item.session)"
               >
                 <span
                   class="w-3 h-3 border-2 border-primary/40 border-t-primary rounded-full animate-spin"
                 />
-                Busy
+                {{ sessionBusyLabel(item.session) }}
               </span>
               <span
                 v-else-if="isSessionUnread(item.session)"

@@ -374,6 +374,16 @@ watch(
   }
 );
 
+const liveBusySubagents = computed(() => {
+  const fromStore = workspacesStore.allSessions.find(
+    (storeSession) => storeSession.id === props.sessionId
+  )?.busySubagents;
+  if (fromStore && fromStore.total > 0) {
+    return fromStore;
+  }
+  return null;
+});
+
 // -------------------------------------------------- Display items --------------------------------------------------
 interface DisplayChatMessage {
   msg: ChatMessage;
@@ -1139,6 +1149,18 @@ onUnmounted(() => {
             <span class="select-none" v-html="todoChecklistSvg" />
             Tasks {{ todoDoneCount }}/{{ todoItems.length }}
           </button>
+        </div>
+
+        <div
+          v-if="bIsStreaming && liveBusySubagents"
+          class="flex items-center gap-2 px-4 pb-1 text-xs text-text-muted shrink-0"
+          role="status"
+          aria-live="polite"
+        >
+          <span
+            class="w-3 h-3 border-2 border-primary/40 border-t-primary rounded-full animate-spin shrink-0"
+          />
+          Subagents {{ liveBusySubagents.running }}/{{ liveBusySubagents.total }} still running
         </div>
 
         <ChatComposer

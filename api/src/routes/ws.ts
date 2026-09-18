@@ -7,7 +7,7 @@ import { rejectUnauthorizedWebSocket } from '../classes/auth';
 import { sessionManager } from '../classes/sessionManager';
 import { db } from '../classes/database';
 import { normalizeSessionForApi } from '../classes/sessionNormalize';
-import { getActiveSessionIds, hasChatSessionViewers } from './chat';
+import { getActiveSessionIds, getActiveBusySubagents, hasChatSessionViewers } from './chat';
 import { subscribeBusy } from '../classes/chatEngine';
 import { markSessionFinishedUnread } from '../classes/sessionUnread';
 import { registerSessionListBroadcaster } from '../classes/sessionListBroadcast';
@@ -82,9 +82,20 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
   const globalAny = globalThis as any;
   if (!globalAny.__busyHookInstalled) {
     globalAny.__busyHookInstalled = true;
-    subscribeBusy((sessionId, workspaceId, busy) => {
-      broadcastWorkspace(workspaceId, { type: 'busy-changed', id: sessionId, busy });
-      broadcastGlobalSessions({ type: 'busy-changed', id: sessionId, busy, workspaceId });
+    subscribeBusy((sessionId, workspaceId, busy, subagents) => {
+      broadcastWorkspace(workspaceId, {
+        type: 'busy-changed',
+        id: sessionId,
+        busy,
+        busySubagents: busy ? subagents ?? null : null,
+      });
+      broadcastGlobalSessions({
+        type: 'busy-changed',
+        id: sessionId,
+        busy,
+        busySubagents: busy ? subagents ?? null : null,
+        workspaceId,
+      });
       if (!busy) {
         void markSessionFinishedUnread(sessionId, hasChatSessionViewers(sessionId));
       }
@@ -248,7 +259,11 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
       );
       const allSessions = byWorkspace
         .flatMap(([active, archived]) => [...active, ...archived])
-        .map((s) => ({ ...normalizeSessionForApi(s), busy: busyIds.has(s.id) }));
+        .map((s) => ({
+          ...normalizeSessionForApi(s),
+          busy: busyIds.has(s.id),
+          busySubagents: getActiveBusySubagents(s.id),
+        }));
       await db.enrichSessionListPreviews(allSessions);
       sendJson(socket, { type: 'global-snapshot', sessions: allSessions });
 
@@ -289,7 +304,14 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
         db.listSessionsByWorkspace(workspaceId, { archived: true })
       ]);
       const enrich = (rows: { tags?: unknown }[]) =>
-        rows.map((s) => ({ ...normalizeSessionForApi(s), busy: busyIds.has((s as { id: string }).id) }));
+        rows.map((s) => {
+          const id = (s as { id: string }).id;
+          return {
+            ...normalizeSessionForApi(s),
+            busy: busyIds.has(id),
+            busySubagents: getActiveBusySubagents(id),
+          };
+        });
       sendJson(socket, { type: 'snapshot', active: enrich(active), archived: enrich(archived) });
 
       socket.on('close', () => {

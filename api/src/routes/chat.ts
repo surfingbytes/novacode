@@ -20,6 +20,7 @@ import {
 } from '../classes/oneShotAgentText';
 import {
   getActiveSessionIds as _getActiveSessionIds,
+  getActiveBusySubagents as _getActiveBusySubagents,
   getActiveRun,
   cancelRun,
   dispatchPrompt,
@@ -41,6 +42,10 @@ import type {
 
 export function getActiveSessionIds(): Set<string> {
   return _getActiveSessionIds();
+}
+
+export function getActiveBusySubagents(sessionId: string): { running: number; total: number } | null {
+  return _getActiveBusySubagents(sessionId);
 }
 
 export { cancelRun };

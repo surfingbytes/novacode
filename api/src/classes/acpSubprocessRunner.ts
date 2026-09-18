@@ -466,6 +466,53 @@ function extractCursorPlanPayload(params: unknown): CursorPlanPayload {
   };
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function recordHasTrue(obj: Record<string, unknown> | null, keys: string[]): boolean {
+  if (!obj) return false;
+  for (const key of keys) {
+    if (obj[key] === true) return true;
+  }
+  return false;
+}
+
+/**
+ * Cursor ACP often emits Task tool_calls with empty `rawInput: {}`. Prefer title
+ * (`Task: …`) and background flags over rawInput field names.
+ */
+export function isAcpTaskToolCall(update: Record<string, unknown>): boolean {
+  const rawInput = asRecord(update.rawInput);
+  if (
+    rawInput?._toolName === 'task' ||
+    rawInput?.toolName === 'task' ||
+    rawInput?.name === 'task' ||
+    typeof rawInput?.agent_type === 'string' ||
+    typeof rawInput?.agentType === 'string' ||
+    typeof rawInput?.subagent_type === 'string' ||
+    typeof rawInput?.subagentType === 'string' ||
+    recordHasTrue(rawInput, ['run_in_background', 'runInBackground', 'is_background', 'isBackground'])
+  ) {
+    return true;
+  }
+  const title = typeof update.title === 'string' ? update.title.trim() : '';
+  return /^task\b/i.test(title);
+}
+
+export function isAcpTaskBackgroundLaunch(update: Record<string, unknown>): boolean {
+  return (
+    recordHasTrue(asRecord(update.rawOutput), ['isBackground', 'is_background']) ||
+    recordHasTrue(asRecord(update.rawInput), [
+      'run_in_background',
+      'runInBackground',
+      'is_background',
+      'isBackground',
+    ])
+  );
+}
+
 function emitCursorTaskActivity(
   params: unknown,
   getSessionId: () => string | null,
@@ -859,7 +906,11 @@ export async function runAcpSubprocessPrompt(
   let bPromptIdleTimedOut = false;
   let promptIdleTimer: ReturnType<typeof setTimeout> | null = null;
   const backgroundTaskIds = new Set<string>();
+  /** All Task toolCallIds seen this turn (for total count in the UI). */
+  const backgroundTaskIdsSeen = new Set<string>();
   let resolveBackgroundTasksSettled: (() => void) | null = null;
+  let lastEmittedBackgroundRunning = -1;
+  let lastEmittedBackgroundTotal = -1;
   const stream = ndJsonStream(nodeWritableToWeb(proc.stdin!), nodeReadableToWeb(proc.stdout!));
 
   const settleBackgroundTaskWait = (): void => {
@@ -876,10 +927,38 @@ export async function runAcpSubprocessPrompt(
     });
   };
 
+  const emitBackgroundTasksProgress = (): void => {
+    const running = backgroundTaskIds.size;
+    const total = backgroundTaskIdsSeen.size;
+    if (running === lastEmittedBackgroundRunning && total === lastEmittedBackgroundTotal) {
+      return;
+    }
+    lastEmittedBackgroundRunning = running;
+    lastEmittedBackgroundTotal = total;
+    if (total === 0) return;
+    onEvent(JSON.stringify({ type: 'background_tasks', running, total }));
+  };
+
+  const markBackgroundTaskRunning = (toolCallId: string): void => {
+    backgroundTaskIds.add(toolCallId);
+    backgroundTaskIdsSeen.add(toolCallId);
+    emitBackgroundTasksProgress();
+  };
+
+  const markBackgroundTaskFinished = (toolCallId: string): void => {
+    if (!backgroundTaskIds.has(toolCallId) && !backgroundTaskIdsSeen.has(toolCallId)) {
+      return;
+    }
+    backgroundTaskIdsSeen.add(toolCallId);
+    backgroundTaskIds.delete(toolCallId);
+    emitBackgroundTasksProgress();
+    settleBackgroundTaskWait();
+  };
+
   /**
-   * Cursor reports a task tool call as completed once a background subagent has
-   * been launched (`rawOutput.isBackground: true`). The actual completion comes
-   * later as `cursor/task`, potentially after the parent prompt has returned.
+   * Cursor often finishes the parent turn while Task subagents are still running.
+   * ACP may omit rawInput (empty `{}`) and mark the tool_call completed at launch
+   * when `isBackground` — real completion arrives later as `cursor/task`.
    */
   const trackBackgroundTaskEvent = (line: string): void => {
     let event: Record<string, unknown>;
@@ -892,13 +971,14 @@ export async function runAcpSubprocessPrompt(
     if (event.type === 'cursor_task') {
       const toolCallId = typeof event.toolCallId === 'string' ? event.toolCallId : null;
       if (!toolCallId) return;
-      const status = typeof event.status === 'string' ? event.status.toLowerCase() : 'completed';
+      const status = typeof event.status === 'string' ? event.status.toLowerCase() : '';
       if (status === 'in_progress' || status === 'pending' || status === 'running') {
-        backgroundTaskIds.add(toolCallId);
-      } else {
-        backgroundTaskIds.delete(toolCallId);
-        settleBackgroundTaskWait();
+        markBackgroundTaskRunning(toolCallId);
+        return;
       }
+      // Docs: cursor/task notifies subagent completion. Missing status = complete.
+      // Explicit running statuses above keep the parent busy; everything else settles.
+      markBackgroundTaskFinished(toolCallId);
       return;
     }
 
@@ -909,36 +989,23 @@ export async function runAcpSubprocessPrompt(
     const toolCallId = typeof update?.toolCallId === 'string' ? update.toolCallId : null;
     if (!update || !toolCallId) return;
 
-    if (update.sessionUpdate === 'tool_call') {
-      const rawInput =
-        update.rawInput && typeof update.rawInput === 'object' && !Array.isArray(update.rawInput)
-          ? (update.rawInput as Record<string, unknown>)
-          : null;
-      const isTask =
-        rawInput?._toolName === 'task' ||
-        typeof rawInput?.agent_type === 'string' ||
-        typeof rawInput?.subagent_type === 'string';
-      const status = typeof update.status === 'string' ? update.status.toLowerCase() : '';
-      if (isTask && status !== 'completed' && status !== 'failed') {
-        backgroundTaskIds.add(toolCallId);
-      }
+    if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') {
       return;
     }
 
-    if (update.sessionUpdate === 'tool_call_update' && backgroundTaskIds.has(toolCallId)) {
-      const rawOutput =
-        update.rawOutput && typeof update.rawOutput === 'object' && !Array.isArray(update.rawOutput)
-          ? (update.rawOutput as Record<string, unknown>)
-          : null;
-      const status = typeof update.status === 'string' ? update.status.toLowerCase() : '';
-      if (rawOutput?.isBackground === true) {
-        return;
-      }
-      if (status === 'completed' || status === 'failed') {
-        backgroundTaskIds.delete(toolCallId);
-        settleBackgroundTaskWait();
-      }
+    const knownTask = backgroundTaskIds.has(toolCallId) || backgroundTaskIdsSeen.has(toolCallId);
+    if (!knownTask && !isAcpTaskToolCall(update) && !isAcpTaskBackgroundLaunch(update)) {
+      return;
     }
+
+    const status = typeof update.status === 'string' ? update.status.toLowerCase() : '';
+    if (status === 'failed' || status === 'cancelled' || status === 'canceled') {
+      markBackgroundTaskFinished(toolCallId);
+      return;
+    }
+
+    // Keep Task tool calls outstanding through "completed" (launch) until cursor/task.
+    markBackgroundTaskRunning(toolCallId);
   };
 
   const clearPromptIdleTimer = (): void => {

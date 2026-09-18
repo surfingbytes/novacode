@@ -15,6 +15,7 @@
  *             'prompt-subagent-session-updates' — hangs while emitting session/update on a child session id
  *             'prompt-cursor-task'   — hangs while emitting cursor/task notifications
  *             'prompt-background-task' — parent returns before cursor/task completion
+ *             'prompt-background-task-empty-raw' — Task title only (empty rawInput/rawOutput), then cursor/task
  *   MOCK_LOG  — path; every incoming message is appended as one JSON line.
  */
 
@@ -254,8 +255,9 @@ rl.on('line', (line) => {
             },
           });
         });
-      } else if (mode === 'prompt-background-task') {
+      } else if (mode === 'prompt-background-task' || mode === 'prompt-background-task-empty-raw') {
         const toolCallId = 'mock-background-task-1';
+        const emptyRaw = mode === 'prompt-background-task-empty-raw';
         send({
           jsonrpc: '2.0',
           method: 'session/update',
@@ -267,7 +269,7 @@ rl.on('line', (line) => {
               title: 'Task: Long research',
               kind: 'other',
               status: 'in_progress',
-              rawInput: { _toolName: 'task' },
+              rawInput: emptyRaw ? {} : { _toolName: 'task' },
             },
           },
         });
@@ -280,7 +282,7 @@ rl.on('line', (line) => {
               sessionUpdate: 'tool_call_update',
               toolCallId,
               status: 'completed',
-              rawOutput: { isBackground: true },
+              rawOutput: emptyRaw ? {} : { isBackground: true },
             },
           },
         });

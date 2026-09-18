@@ -516,7 +516,67 @@ describe('runAcpSubprocessPrompt', () => {
     expect(
       events.some((event) => event.sessionId === 'mock-background-child-session')
     ).toBe(true);
+    expect(
+      events.some(
+        (event) => event.type === 'background_tasks' && event.running === 1 && event.total === 1
+      )
+    ).toBe(true);
   }, 10_000);
+
+  it('tracks background Task tools even when Cursor omits rawInput/rawOutput', async () => {
+    process.env.ACP_PROMPT_IDLE_TIMEOUT_MS = '1000';
+    const { workDir } = setupMock('prompt-background-task-empty-raw');
+    const events: Array<Record<string, unknown>> = [];
+    const startedAt = Date.now();
+
+    const result = await runMock(
+      'nova-background-empty-raw',
+      null,
+      workDir,
+      (line) => {
+        try {
+          events.push(JSON.parse(line) as Record<string, unknown>);
+        } catch {
+          // ignore non-json
+        }
+      },
+      undefined,
+      undefined,
+      true
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.stopReason).toBe('end_turn');
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(175);
+    expect(
+      events.some(
+        (event) => event.type === 'background_tasks' && event.running === 1 && event.total === 1
+      )
+    ).toBe(true);
+    expect(
+      events.some(
+        (event) => event.type === 'background_tasks' && event.running === 0 && event.total === 1
+      )
+    ).toBe(true);
+  }, 10_000);
+});
+
+describe('isAcpTaskToolCall', () => {
+  it('detects Task tools by title when rawInput is empty', async () => {
+    const { isAcpTaskToolCall } = await import('./acpSubprocessRunner');
+    expect(
+      isAcpTaskToolCall({
+        title: 'Task: Explore auth',
+        rawInput: {},
+      })
+    ).toBe(true);
+    expect(
+      isAcpTaskToolCall({
+        title: 'Reading file',
+        rawInput: {},
+      })
+    ).toBe(false);
+  });
 });
 
 describe('mergeCursorTodos', () => {

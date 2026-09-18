@@ -12,7 +12,7 @@ import { normalizeApprovalPolicy } from '../classes/approvalPolicy';
 import { setActiveRunApprovalPolicy } from '../classes/chatEngine';
 import { getPlanDocumentsSource } from '../classes/planDocumentSources';
 import { workspaceTerminalManager } from '../classes/workspaceTerminalManager';
-import { getActiveSessionIds, cancelRun } from './chat';
+import { getActiveSessionIds, getActiveBusySubagents, cancelRun } from './chat';
 import { deleteSessionImages } from './images';
 import {
   broadcastWorkspaceSessionDeleted,
@@ -75,6 +75,7 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       .map((session) => ({
         ...normalizeSessionForApi(session),
         busy: activeSessionIds.has(session.id),
+        busySubagents: getActiveBusySubagents(session.id),
       }));
     await db.enrichSessionListPreviews(allSessions);
     return reply.send(allSessions);
@@ -145,6 +146,7 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       const enriched = sessions.map((session) => ({
         ...normalizeSessionForApi(session),
         busy: activeSessionIds.has(session.id),
+        busySubagents: getActiveBusySubagents(session.id),
       }));
       await db.enrichSessionListPreviews(enriched);
       return reply.send(enriched);

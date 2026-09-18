@@ -148,10 +148,20 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     }
   }
 
-  function setSessionBusy(sessionId: string, busy: boolean): void {
+  function setSessionBusy(
+    sessionId: string,
+    busy: boolean,
+    busySubagents?: Session['busySubagents']
+  ): void {
     const previous = allSessions.value.find((session) => session.id === sessionId);
     allSessions.value = allSessions.value.map((session) =>
-      session.id === sessionId ? { ...session, busy } : session
+      session.id === sessionId
+        ? {
+            ...session,
+            busy,
+            busySubagents: busy ? (busySubagents ?? session.busySubagents ?? null) : null,
+          }
+        : session
     );
     // If this device is viewing the chat (e.g. files tab, no chat WS), persist
     // read so the server's "finished unread" write does not stick on other devices.
@@ -188,7 +198,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
             | { type: 'global-snapshot'; sessions: Session[] }
             | { type: 'session-upsert'; session: Session }
             | { type: 'session-deleted'; id: string; workspaceId?: string }
-            | { type: 'busy-changed'; id: string; busy: boolean }
+            | { type: 'busy-changed'; id: string; busy: boolean; busySubagents?: Session['busySubagents'] }
             | { type: 'orchestrator-upsert'; orchestrator: Orchestrator }
             | { type: 'refresh' }
             | { type: 'server-shutdown' }
@@ -207,7 +217,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
               removeSession(messagePayload.id);
             }
           } else if (messagePayload.type === 'busy-changed') {
-            setSessionBusy(messagePayload.id, messagePayload.busy);
+            setSessionBusy(messagePayload.id, messagePayload.busy, messagePayload.busySubagents);
           } else if (messagePayload.type === 'orchestrator-upsert') {
             if (messagePayload.orchestrator) {
               useOrchestratorsStore().upsertOrchestrator(messagePayload.orchestrator);

@@ -8,6 +8,7 @@ import { agentTypeLabel } from '@/utils/agentTypeMeta';
 import { tagColorClass } from '@/utils/tagColors';
 import { AGENT_TYPE_TAG_COLOR } from '@/components/workspace/agentTypeTagColor';
 import { isSessionUnread } from '@/utils/sessionUnread';
+import { sessionBusyLabel, sessionBusyTitle } from '@/utils/sessionBusyLabel';
 
 // types
 import type { Session } from '@/@types/index';
@@ -94,10 +95,10 @@ const rootClass = computed(() => {
           <span
             v-if="session.busy"
             class="busy-badge text-[11px] px-2 py-0.5 rounded-full inline-flex items-center gap-1"
-            title="Session is running"
+            :title="sessionBusyTitle(session)"
           >
             <span class="busy-spinner"></span>
-            Busy
+            {{ sessionBusyLabel(session) }}
           </span>
           <span
             v-else-if="bUnread"
@@ -242,10 +243,10 @@ const rootClass = computed(() => {
             <span
               v-if="session.busy"
               class="busy-badge text-[11px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 shrink-0"
-              title="Session is running"
+              :title="sessionBusyTitle(session)"
             >
               <span class="busy-spinner"></span>
-              Busy
+              {{ sessionBusyLabel(session) }}
             </span>
             <span
               v-else-if="bUnread"
@@ -306,10 +307,10 @@ const rootClass = computed(() => {
           <span
             v-if="session.busy"
             class="busy-badge text-[11px] px-2 py-0.5 rounded-full inline-flex items-center gap-1 shrink-0"
-            title="Session is running"
+            :title="sessionBusyTitle(session)"
           >
             <span class="busy-spinner"></span>
-            Busy
+            {{ sessionBusyLabel(session) }}
           </span>
           <span
             v-else-if="bUnread"

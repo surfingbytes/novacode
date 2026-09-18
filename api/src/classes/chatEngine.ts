@@ -60,6 +60,8 @@ export interface ActiveRun {
   pendingQuestions: Map<string, PendingQuestion>;
   approvalPolicy: ApprovalPolicy;
   lastUsage: SessionUsageSnapshot | null;
+  /** Outstanding Task/subagent counts while the run is busy. */
+  backgroundTasks: { running: number; total: number } | null;
 }
 
 export interface ChatSubscriber {
@@ -83,15 +85,23 @@ interface PendingQuestion {
   resolve: (response: AcpAskQuestionResponse) => void;
 }
 
+export type BusySubagents = { running: number; total: number };
+
 // --------------------------------------------- State ---------------------------------------------
 
 const activeRuns = new Map<string, ActiveRun>();
-const busySubscribers = new Set<(sessionId: string, workspaceId: string, busy: boolean) => void>();
+const busySubscribers = new Set<
+  (sessionId: string, workspaceId: string, busy: boolean, subagents?: BusySubagents | null) => void
+>();
 
 // --------------------------------------------- Functions ---------------------------------------------
 
 export function getActiveSessionIds(): Set<string> {
   return new Set(activeRuns.keys());
+}
+
+export function getActiveBusySubagents(sessionId: string): BusySubagents | null {
+  return activeRuns.get(sessionId)?.backgroundTasks ?? null;
 }
 
 export function getActiveRun(sessionId: string): ActiveRun | undefined {
@@ -103,24 +113,52 @@ export function isSessionBusy(sessionId: string): boolean {
 }
 
 export function subscribeBusy(
-  handler: (sessionId: string, workspaceId: string, busy: boolean) => void
+  handler: (
+    sessionId: string,
+    workspaceId: string,
+    busy: boolean,
+    subagents?: BusySubagents | null
+  ) => void
 ): void {
   busySubscribers.add(handler);
 }
 
 export function unsubscribeBusy(
-  handler: (sessionId: string, workspaceId: string, busy: boolean) => void
+  handler: (
+    sessionId: string,
+    workspaceId: string,
+    busy: boolean,
+    subagents?: BusySubagents | null
+  ) => void
 ): void {
   busySubscribers.delete(handler);
 }
 
-function emitBusy(sessionId: string, workspaceId: string, busy: boolean): void {
+function emitBusy(
+  sessionId: string,
+  workspaceId: string,
+  busy: boolean,
+  subagents?: BusySubagents | null
+): void {
   for (const h of busySubscribers) {
     try {
-      h(sessionId, workspaceId, busy);
+      h(sessionId, workspaceId, busy, subagents ?? null);
     } catch {
       // ignore subscriber errors
     }
+  }
+}
+
+function parseBackgroundTasksLine(line: string): BusySubagents | null {
+  try {
+    const event = JSON.parse(line) as { type?: string; running?: unknown; total?: unknown };
+    if (event.type !== 'background_tasks') return null;
+    const running = typeof event.running === 'number' && event.running >= 0 ? event.running : null;
+    const total = typeof event.total === 'number' && event.total >= 0 ? event.total : null;
+    if (running === null || total === null) return null;
+    return { running, total };
+  } catch {
+    return null;
   }
 }
 
@@ -689,9 +727,10 @@ export async function dispatchPrompt(
     pendingQuestions: new Map(),
     approvalPolicy: normalizeApprovalPolicy(session.approvalPolicy),
     lastUsage: null,
+    backgroundTasks: null,
   };
   activeRuns.set(sessionId, run);
-  emitBusy(sessionId, session.workspaceId, true);
+  emitBusy(sessionId, session.workspaceId, true, null);
 
   const broadcast = (fn: (sub: ChatSubscriber) => void): void => {
     for (const sub of run.subscribers) fn(sub);
@@ -701,6 +740,11 @@ export async function dispatchPrompt(
     const usage = parseUsageUpdateLine(line);
     if (usage) {
       run.lastUsage = usage;
+    }
+    const backgroundTasks = parseBackgroundTasksLine(line);
+    if (backgroundTasks) {
+      run.backgroundTasks = backgroundTasks.total > 0 ? backgroundTasks : null;
+      emitBusy(sessionId, session.workspaceId, true, run.backgroundTasks);
     }
     assistantEvents.push(line);
     run.bufferedLines.push(line);
@@ -937,7 +981,7 @@ export async function dispatchPrompt(
     cancelPendingApprovals(run);
     cancelPendingQuestions(run);
     activeRuns.delete(sessionId);
-    emitBusy(sessionId, session.workspaceId, false);
+    emitBusy(sessionId, session.workspaceId, false, null);
     broadcast((sub) => sub.onDone(currentMessages));
   })();
 

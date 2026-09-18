@@ -274,6 +274,8 @@ export interface Session {
   updatedAt: string;
   archived: boolean;
   busy?: boolean;
+  /** Outstanding Task/subagent counts while `busy` (running of total launched this turn). */
+  busySubagents?: { running: number; total: number } | null;
   /** True when a run finished while no client was viewing this session. Omitted on older API responses. */
   unread?: boolean;
 }
