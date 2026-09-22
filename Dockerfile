@@ -1,37 +1,49 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 1: Install all workspace dependencies (npm workspaces at repo root)
+# Stage 1: Install workspace dependencies from manifests only.
+# Source is copied later so app edits do not rerun npm ci.
+# --ignore-scripts skips the root postinstall (it needs source + Prisma schema).
+# node-pty's install script is rebuilt explicitly so its native binary is present.
 # ─────────────────────────────────────────────────────────────────────────────
 FROM node:24 AS deps
 
 WORKDIR /app
 COPY package.json package-lock.json ./
-# shared/ is copied in full: the root postinstall builds it (dist/)
-COPY shared/ shared/
+COPY shared/package.json shared/
 COPY api/package.json api/
-# prisma schema/config are needed by the root postinstall (prisma generate)
-COPY api/prisma api/prisma
-COPY api/prisma.config.ts api/
 COPY dashboard/package.json dashboard/
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --ignore-scripts --no-audit --no-fund \
+    && npm rebuild node-pty
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 2: Build the Vue dashboard
+# Stage 2: Build shared (dashboard and API both depend on its dist/)
+# ─────────────────────────────────────────────────────────────────────────────
+FROM deps AS shared-build
+
+COPY shared/ shared/
+RUN npm run build -w @novacode/shared
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stage 3: Build the Vue dashboard
 # ─────────────────────────────────────────────────────────────────────────────
 FROM deps AS dashboard-builder
 
+COPY --from=shared-build /app/shared ./shared
 COPY dashboard/ dashboard/
 RUN npm run build -w novacode-dashboard
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 3: Build the Fastify API
+# Stage 4: Build the Fastify API (prisma generate && tsc)
 # ─────────────────────────────────────────────────────────────────────────────
 FROM deps AS api-builder
 
+COPY --from=shared-build /app/shared ./shared
 COPY api/ api/
-RUN npm run build -w novacode-api
+RUN --mount=type=cache,target=/root/.cache/prisma \
+    npm run build -w novacode-api
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 4: Runtime image
+# Stage 5: Runtime image
 # ─────────────────────────────────────────────────────────────────────────────
 FROM node:24
 
@@ -76,8 +88,10 @@ WORKDIR /app
 
 # Copy compiled API
 COPY --from=api-builder /app/api/build ./build
-# Hoisted workspace node_modules (includes @novacode/shared symlink → /app/shared)
-COPY --from=deps /app/node_modules ./node_modules
+# Hoisted workspace node_modules from the API build so Prisma engines
+# downloaded during `prisma generate` are included. @novacode/shared
+# symlinks to /app/shared.
+COPY --from=api-builder /app/node_modules ./node_modules
 COPY --from=api-builder /app/shared ./shared
 COPY --from=api-builder /app/api/package.json ./package.json
 
