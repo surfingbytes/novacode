@@ -21,7 +21,7 @@ export const BASIC_CURSOR_MODEL_PRESETS = [
   { label: 'Fable 5', thinking: 'High', modelNames: ['Claude Fable 5'] },
   { label: 'Sonnet 5', thinking: 'High', modelNames: ['Claude Sonnet 5'] },
   { label: 'GPT 5.6', thinking: 'Medium', modelNames: ['GPT 5.6 Sol'] },
-  { label: 'Grok 4.6', thinking: 'Medium', modelNames: ['Cursor Grok 4.6'] }
+  { label: 'Grok 4.7', thinking: 'Medium', modelNames: ['Grok 4.7'] }
 ] as const;
 
 export type CursorModelPreset = (typeof BASIC_CURSOR_MODEL_PRESETS)[number];
