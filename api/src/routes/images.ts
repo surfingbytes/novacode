@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { join, extname, basename } from 'node:path';
 import { existsSync } from 'node:fs';
+import convertHeic from 'heic-convert';
 
 // classes
 import { jwtPreHandler, authenticateToken, extractRequestToken } from '../classes/auth';
@@ -13,11 +14,24 @@ import { config } from '../classes/config';
 
 const IMAGE_DIR = join(config.configDir, 'prompt-images');
 
+/** HEIC/HEIF are accepted on upload then converted to JPEG for agents + browsers. */
+const HEIC_EXTENSIONS = new Set(['.heic', '.heif']);
+const HEIC_MIME_TYPES = new Set([
+  'image/heic',
+  'image/heif',
+  'image/heic-sequence',
+  'image/heif-sequence',
+]);
+
 const MIME_TO_EXT: Record<string, string> = {
   'image/png': '.png',
   'image/jpeg': '.jpg',
   'image/gif': '.gif',
   'image/webp': '.webp',
+  'image/heic': '.heic',
+  'image/heif': '.heif',
+  'image/heic-sequence': '.heic',
+  'image/heif-sequence': '.heif',
   'video/mp4': '.mp4',
   'text/plain': '.txt',
   'text/markdown': '.md',
@@ -46,6 +60,8 @@ const EXT_TO_CONTENT_TYPE: Record<string, string> = {
   '.jpeg': 'image/jpeg',
   '.gif': 'image/gif',
   '.webp': 'image/webp',
+  '.heic': 'image/heic',
+  '.heif': 'image/heif',
   '.mp4': 'video/mp4',
   '.txt': 'text/plain',
   '.md': 'text/markdown',
@@ -121,6 +137,19 @@ function allocateUniqueFilename(dir: string, desired: string): string {
   return `${stem}-${n}${ext}`;
 }
 
+function isHeicUpload(mimeType: string, ext: string): boolean {
+  return HEIC_MIME_TYPES.has(mimeType) || HEIC_EXTENSIONS.has(ext);
+}
+
+async function heicBufferToJpeg(buf: Buffer): Promise<Buffer> {
+  const output = await convertHeic({
+    buffer: buf,
+    format: 'JPEG',
+    quality: 0.92,
+  });
+  return Buffer.from(new Uint8Array(output));
+}
+
 // --------------------------------------------- Helpers ---------------------------------------------
 
 export async function deleteSessionImages(sessionId: string): Promise<void> {
@@ -151,7 +180,7 @@ export async function imageRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: 'Session not found' });
       }
 
-      const ext = resolveExtension(body.mimeType, body.filename);
+      let ext = resolveExtension(body.mimeType, body.filename);
       if (!ext) {
         return reply.status(400).send({ error: 'Unsupported file type' });
       }
@@ -164,8 +193,18 @@ export async function imageRoutes(fastify: FastifyInstance): Promise<void> {
 
       await mkdir(dir, { recursive: true });
 
+      const raw = Buffer.from(body.data, 'base64');
+      let buf: Buffer = raw;
+      if (isHeicUpload(body.mimeType, ext)) {
+        try {
+          buf = await heicBufferToJpeg(raw);
+          ext = '.jpg';
+        } catch {
+          return reply.status(400).send({ error: 'Failed to convert HEIC image' });
+        }
+      }
+
       const filename = allocateUniqueFilename(dir, buildAttachmentFilename(body.filename, ext));
-      const buf = Buffer.from(body.data, 'base64');
       const filePath = join(dir, filename);
       await writeFile(filePath, buf);
 

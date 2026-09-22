@@ -471,15 +471,23 @@ function uploadAttachmentFile(file: File): void {
   reader.onload = async (ev) => {
     const dataUrl = ev.target?.result as string;
     const base64 = dataUrl.split(',')[1];
-    const isImage = file.type.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(file.name);
+    const canPreviewLocally =
+      /^(image\/(png|jpeg|gif|webp))$/i.test(file.type) ||
+      /\.(png|jpe?g|gif|webp)$/i.test(file.name);
     bUploadingImage.value = true;
     try {
       const mimeType = file.type || 'application/octet-stream';
       const { data } = await sessionsApi.uploadImage(props.sessionId, base64, mimeType, file.name);
+      // Server may convert HEIC→JPEG; trust the stored filename for previewability.
+      const isImage = /\.(png|jpe?g|gif|webp)$/i.test(data.filename);
       pendingImages.value.push({
         filename: data.filename,
         displayName: file.name,
-        dataUrl: isImage ? dataUrl : '',
+        dataUrl: isImage
+          ? canPreviewLocally
+            ? dataUrl
+            : sessionsApi.imageUrl(props.sessionId, data.filename)
+          : '',
         serverPath: data.path,
         isImage
       });

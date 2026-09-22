@@ -30,6 +30,8 @@ const ASSET_MIME: Record<string, string> = {
   jpeg: 'image/jpeg',
   gif: 'image/gif',
   webp: 'image/webp',
+  heic: 'image/heic',
+  heif: 'image/heif',
   bmp: 'image/bmp',
   ico: 'image/x-icon',
   avif: 'image/avif',
