@@ -165,6 +165,18 @@ async function ensureBranchName(cwd: string, branch: string): Promise<void> {
   await execFileAsync('git', ['check-ref-format', '--branch', branch], { cwd });
 }
 
+/** Prefer origin; otherwise the first configured remote. */
+async function resolvePushRemote(cwd: string): Promise<string> {
+  const remotesRaw = await maybeGitOutput(cwd, ['remote'], '');
+  const remotes = remotesRaw
+    .split('\n')
+    .map((r) => r.trim())
+    .filter(Boolean);
+  if (remotes.length === 0) throw new Error('No git remotes configured');
+  if (remotes.includes('origin')) return 'origin';
+  return remotes[0];
+}
+
 async function resolveWorkspaceGitContext(
   workspaceId: string,
   repo = ''
@@ -904,7 +916,18 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         );
         if (!context) return reply.code(404).send({ error: 'Workspace not found' });
 
-        const { stdout, stderr } = await execFileAsync('git', ['push'], {
+        const { currentBranch, upstreamBranch, detached } = await getBranchMeta(context.cwd);
+        if (detached) throw new Error('Cannot push in detached HEAD state');
+
+        const pushArgs = ['push'];
+        if (!upstreamBranch) {
+          const remote = await resolvePushRemote(context.cwd);
+          ensureSafeGitArg(remote, 'remote');
+          await ensureBranchName(context.cwd, currentBranch);
+          pushArgs.push('-u', remote, currentBranch);
+        }
+
+        const { stdout, stderr } = await execFileAsync('git', pushArgs, {
           cwd: context.cwd,
           env: gitEnv(context.workspace),
           timeout: 30_000
