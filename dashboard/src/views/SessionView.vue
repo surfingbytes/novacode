@@ -143,6 +143,7 @@ async function createSession(payload: {
 function openNewSessionModal(): void {
   pendingPlanHandoff.value = null;
   createSessionError.value = null;
+  ensureAgentCapabilitiesLoaded();
   showNewSessionModal.value = true;
 }
 
@@ -155,6 +156,7 @@ function handleStartPlanSession(payload: {
   defaultSessionMode?: string;
 }): void {
   pendingPlanHandoff.value = payload;
+  ensureAgentCapabilitiesLoaded();
   showNewSessionModal.value = true;
 }
 

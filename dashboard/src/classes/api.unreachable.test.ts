@@ -28,6 +28,12 @@ describe('isApiUnreachableError', () => {
     expect(isApiUnreachableError(axiosErrorWithStatus(504))).toBe(true);
   });
 
+  it('does not treat canceled requests as the API being down', () => {
+    const canceled = new AxiosError('canceled', 'ERR_CANCELED');
+    canceled.name = 'CanceledError';
+    expect(isApiUnreachableError(canceled)).toBe(false);
+  });
+
   it('does not treat application errors as the API being down', () => {
     expect(isApiUnreachableError(axiosErrorWithStatus(401))).toBe(false);
     expect(isApiUnreachableError(axiosErrorWithStatus(404))).toBe(false);

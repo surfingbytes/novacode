@@ -17,6 +17,9 @@ import type { ContextMenuItem } from '@/components/ContextMenu.vue';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { useToastStore } from '@/stores/toasts';
 
+// composables
+import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
+
 // classes
 import { agentAuthApi, apiErrorMessage, sessionsApi, settingsApi } from '@/classes/api';
 
@@ -28,6 +31,14 @@ import { DEFAULT_WORKSPACE_BROWSE_ROOT, MAX_FAVORITE_WORKSPACES } from '@/@types
 const store = useWorkspacesStore();
 const toastStore = useToastStore();
 const router = useRouter();
+const {
+  claudeAvailable,
+  cursorAvailable,
+  mistralVibeAvailable,
+  openCodeAvailable,
+  codexAvailable,
+  ensureLoaded: ensureAgentCapabilitiesLoaded
+} = useAgentCapabilities();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const bShowWorkspaceModal = ref<boolean>(false);
@@ -43,11 +54,6 @@ const bCursorAuthenticated = ref<boolean>(false);
 const bClaudeAuthenticated = ref<boolean>(false);
 const bVibeConfigured = ref<boolean>(false);
 const bHasGitCredentials = ref<boolean>(false);
-const cursorAvailable = ref<boolean>(false);
-const claudeAvailable = ref<boolean>(false);
-const mistralVibeAvailable = ref<boolean>(false);
-const openCodeAvailable = ref<boolean>(false);
-const codexAvailable = ref<boolean>(false);
 const newGroupNames = ref<string[]>([]);
 const bShowWorkspaceDeleteModal = ref<boolean>(false);
 const deletingWorkspace = ref<Workspace | undefined>(undefined);
@@ -197,6 +203,7 @@ const openEditWorkspace = (workspace: Workspace): void => {
 const openNewSession = (workspace: Workspace): void => {
   newSessionWorkspace.value = workspace;
   createSessionError.value = null;
+  ensureAgentCapabilitiesLoaded();
   bShowNewSessionModal.value = true;
 };
 
@@ -351,12 +358,12 @@ function onWorkspaceContextPick(key: string): void {
 }
 
 const fetchFirstStartStatus = async (): Promise<void> => {
-  const [cursorResult, claudeResult, vibeResult, settingsResult, agentCapsResult] = await Promise.allSettled([
+  ensureAgentCapabilitiesLoaded();
+  const [cursorResult, claudeResult, vibeResult, settingsResult] = await Promise.allSettled([
     agentAuthApi.cursorStatus(),
     agentAuthApi.claudeStatus(),
     settingsApi.getVibeApiKeyStatus(),
-    settingsApi.get(),
-    settingsApi.getAgentCapabilities()
+    settingsApi.get()
   ]);
   if (cursorResult.status === 'fulfilled') {
     bCursorAuthenticated.value = cursorResult.value.data.authenticated;
@@ -374,13 +381,6 @@ const fetchFirstStartStatus = async (): Promise<void> => {
     if (settingsResult.value.data.workspaceBrowseRoot) {
       workspaceBrowseRoot.value = settingsResult.value.data.workspaceBrowseRoot;
     }
-  }
-  if (agentCapsResult.status === 'fulfilled') {
-    cursorAvailable.value = agentCapsResult.value.data.cursorAvailable;
-    claudeAvailable.value = agentCapsResult.value.data.claudeAvailable;
-    mistralVibeAvailable.value = agentCapsResult.value.data.mistralVibeAvailable;
-    openCodeAvailable.value = agentCapsResult.value.data.openCodeAvailable;
-    codexAvailable.value = agentCapsResult.value.data.codexAvailable;
   }
   bFirstStartCheckDone.value = true;
 };

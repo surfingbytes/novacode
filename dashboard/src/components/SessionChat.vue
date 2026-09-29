@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // node_modules
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
 // components
 import FilesView from '@/components/workspace/FilesComponent.vue';
@@ -46,6 +47,7 @@ import { useTodoList } from '@/composables/useTodoList';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { useToastStore } from '@/stores/toasts';
 import { useAuthStore } from '@/stores/auth';
+import { useApiHealthStore } from '@/stores/apiHealth';
 
 // types
 import type {
@@ -87,6 +89,8 @@ const router = useRouter();
 const route = useRoute();
 const workspacesStore = useWorkspacesStore();
 const toastStore = useToastStore();
+const apiHealth = useApiHealthStore();
+const { bApiReachable } = storeToRefs(apiHealth);
 const auth = useAuthStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
@@ -949,6 +953,13 @@ watch(
     }
   }
 );
+
+// Retry session metadata when the API comes back after a transient outage.
+watch(bApiReachable, (reachable, wasReachable) => {
+  if (reachable && wasReachable === false && (error.value || !session.value)) {
+    void fetchSession();
+  }
+});
 
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 onMounted(async () => {

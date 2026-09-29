@@ -148,6 +148,7 @@ function favoriteInitial(workspace: Workspace): string {
 function openFavoriteNewSession(workspace: Workspace): void {
   newSessionWorkspace.value = workspace;
   createSessionError.value = null;
+  ensureAgentCapabilitiesLoaded();
   bShowNewSessionModal.value = true;
   handleClose();
 }

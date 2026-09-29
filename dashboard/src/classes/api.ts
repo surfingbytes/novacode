@@ -70,10 +70,30 @@ export function isApiUnreachableError(error: unknown): boolean {
   if (!isAxiosError(error)) {
     return false;
   }
+  // Navigation/unmount aborts are not an outage.
+  if (error.code === 'ERR_CANCELED' || error.name === 'CanceledError') {
+    return false;
+  }
   if (error.response === undefined) {
     return true;
   }
   return GATEWAY_UNREACHABLE_STATUSES.has(error.response.status);
+}
+
+/** Confirm outages via /health so one slow request does not flash the banner. */
+let unreachableConfirmInFlight = false;
+
+function confirmApiUnreachable(): void {
+  const pinia = getActivePinia();
+  if (!pinia || unreachableConfirmInFlight) {
+    return;
+  }
+  unreachableConfirmInFlight = true;
+  void useApiHealthStore(pinia)
+    .ping()
+    .finally(() => {
+      unreachableConfirmInFlight = false;
+    });
 }
 
 /**
@@ -103,7 +123,8 @@ http.interceptors.response.use(
   (error: unknown) => {
     if (isAxiosError(error)) {
       if (isApiUnreachableError(error)) {
-        touchApiReachability(false);
+        // Do not flip the banner from a single timed-out call — confirm with /health.
+        confirmApiUnreachable();
       } else if (error.response?.status === 401 && !isAuthFlowUrl(error.config?.url)) {
         onUnauthorized?.();
       }

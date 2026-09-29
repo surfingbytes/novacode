@@ -311,11 +311,41 @@ export function isClaudeAvailable(_configDir: string): boolean {
   }
 }
 
-/** True when the vibe-acp ACP server binary is on PATH and exits cleanly for --version. */
-export function isVibeCliAvailable(configDir: string): boolean {
+/**
+ * spawnSync CLI probes block the Node event loop. Cache results so hot paths
+ * like GET /settings/agent-capabilities cannot freeze the whole API for
+ * multiple seconds on every dashboard open.
+ */
+const CLI_PROBE_TTL_MS = 60_000;
+type CliProbeCache = { ok: boolean; at: number };
+let vibeCliCache: CliProbeCache | null = null;
+let cursorCliCache: CliProbeCache | null = null;
+let openCodeCliCache: CliProbeCache | null = null;
+let codexCliCache: CliProbeCache | null = null;
+
+function readCliCache(cache: CliProbeCache | null): boolean | undefined {
+  if (cache && Date.now() - cache.at < CLI_PROBE_TTL_MS) {
+    return cache.ok;
+  }
+  return undefined;
+}
+
+/** Clears CLI --version probe caches (tests / after installing an agent). */
+export function clearCliAvailabilityCaches(): void {
+  vibeCliCache = null;
+  cursorCliCache = null;
+  openCodeCliCache = null;
+  codexCliCache = null;
+}
+
+function probeCliVersion(command: string, configDir: string): boolean {
+  // Absolute paths: skip a blocking spawn when the binary is clearly missing.
+  if (command.startsWith('/') && !existsSync(command)) {
+    return false;
+  }
   try {
     const env = { ...process.env, ...config.agentEnv() };
-    const result = spawnSync(config.vibeAcpCommand, ['--version'], {
+    const result = spawnSync(command, ['--version'], {
       encoding: 'utf8',
       timeout: 5000,
       cwd: configDir,
@@ -326,40 +356,39 @@ export function isVibeCliAvailable(configDir: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** True when the vibe-acp ACP server binary is on PATH and exits cleanly for --version. */
+export function isVibeCliAvailable(configDir: string): boolean {
+  const cached = readCliCache(vibeCliCache);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const ok = probeCliVersion(config.vibeAcpCommand, configDir);
+  vibeCliCache = { ok, at: Date.now() };
+  return ok;
 }
 
 /** True when the Cursor CLI binary is on PATH and exits cleanly for --version. */
 export function isCursorAcpAvailable(configDir: string): boolean {
-  try {
-    const env = { ...process.env, ...config.agentEnv() };
-    const result = spawnSync(config.cursorCommand, ['--version'], {
-      encoding: 'utf8',
-      timeout: 5000,
-      cwd: configDir,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    return result.status === 0;
-  } catch {
-    return false;
+  const cached = readCliCache(cursorCliCache);
+  if (cached !== undefined) {
+    return cached;
   }
+  const ok = probeCliVersion(config.cursorCommand, configDir);
+  cursorCliCache = { ok, at: Date.now() };
+  return ok;
 }
 
 /** True when the open-code-acp ACP server binary is on PATH and exits cleanly for --version. */
 export function isOpenCodeAcpAvailable(configDir: string): boolean {
-  try {
-    const env = { ...process.env, ...config.agentEnv() };
-    const result = spawnSync(config.openCodeAcpCommand, ['--version'], {
-      encoding: 'utf8',
-      timeout: 5000,
-      cwd: configDir,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    return result.status === 0;
-  } catch {
-    return false;
+  const cached = readCliCache(openCodeCliCache);
+  if (cached !== undefined) {
+    return cached;
   }
+  const ok = probeCliVersion(config.openCodeAcpCommand, configDir);
+  openCodeCliCache = { ok, at: Date.now() };
+  return ok;
 }
 
 // ── Agent runtime settings (editable from the dashboard) ────────────────────
@@ -549,13 +578,11 @@ export function markClaudeOnboardingComplete(configDir: string): void {
 
 
 export function isCodexAcpAvailable(configDir: string): boolean {
-  try {
-    const env = { ...process.env, ...config.agentEnv() };
-    const result = spawnSync(config.codexAcpCommand, ['--version'], {
-      encoding: 'utf8', timeout: 5000, cwd: configDir, env, stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    return result.status === 0;
-  } catch {
-    return false;
+  const cached = readCliCache(codexCliCache);
+  if (cached !== undefined) {
+    return cached;
   }
+  const ok = probeCliVersion(config.codexAcpCommand, configDir);
+  codexCliCache = { ok, at: Date.now() };
+  return ok;
 }

@@ -27,11 +27,24 @@ const OPENCODE_AUTH_FILE = '.local/share/opencode/auth.json';
 const OPENCODE_LEGACY_AUTH_FILE = '.opencode/auth.json';
 const CODEX_AUTH_FILE = '.codex/auth.json';
 
+/** spawnSync(`cursor status`) blocks the event loop — cache so status/capabilities stay cheap. */
+const CURSOR_AUTH_TTL_MS = 30_000;
+let cursorAuthCache: { result: CursorAuthCheck; at: number } | null = null;
+
+export const clearCursorAuthCache = (): void => {
+  cursorAuthCache = null;
+};
+
 export const checkCursorAuth = (): CursorAuthCheck => {
   const authPath = join(config.configDir, CURSOR_AUTH_FILE);
 
   if (existsSync(authPath)) {
-    return { authenticated: true, status: 'authenticated' };
+    const authenticated: CursorAuthCheck = { authenticated: true, status: 'authenticated' };
+    cursorAuthCache = { result: authenticated, at: Date.now() };
+    return authenticated;
+  }
+  if (cursorAuthCache && Date.now() - cursorAuthCache.at < CURSOR_AUTH_TTL_MS) {
+    return cursorAuthCache.result;
   }
   const env = config.agentEnv();
   const result = spawnSync(config.cursorCommand, ['status'], {
@@ -44,25 +57,28 @@ export const checkCursorAuth = (): CursorAuthCheck => {
   const out = [result.stdout, result.stderr].filter(Boolean).join('\n');
   const combinedError = [result.error, out].filter(Boolean).join('\n');
 
-  if (result.error && isTimeoutError(result.error)) return cursorAuthTimeoutCheck();
-  if (isTimeoutError(combinedError)) return cursorAuthTimeoutCheck();
-  if (isAuthRequiredError(out)) {
-    return {
+  let check: CursorAuthCheck;
+  if (result.error && isTimeoutError(result.error)) {
+    check = cursorAuthTimeoutCheck();
+  } else if (isTimeoutError(combinedError)) {
+    check = cursorAuthTimeoutCheck();
+  } else if (isAuthRequiredError(out)) {
+    check = {
       authenticated: false,
       status: 'unauthenticated',
       message: 'Cursor CLI is not authenticated. Log in to Cursor, then try again.'
     };
+  } else if (result.error) {
+    check = cursorAuthErrorCheck(result.error.message);
+  } else if (result.status !== 0) {
+    check = cursorAuthErrorCheck(out.trim() || `Cursor status exited with code ${result.status}`);
+  } else if (out.trim() === '') {
+    check = cursorAuthErrorCheck('Cursor status returned no output.');
+  } else {
+    check = { authenticated: true, status: 'authenticated' };
   }
-  if (result.error) {
-    return cursorAuthErrorCheck(result.error.message);
-  }
-  if (result.status !== 0) {
-    return cursorAuthErrorCheck(out.trim() || `Cursor status exited with code ${result.status}`);
-  }
-  if (out.trim() === '') {
-    return cursorAuthErrorCheck('Cursor status returned no output.');
-  }
-  return { authenticated: true, status: 'authenticated' };
+  cursorAuthCache = { result: check, at: Date.now() };
+  return check;
 };
 
 export const cursorAuthenticated = (): boolean => {
@@ -134,6 +150,7 @@ export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
     async (_request, reply) => {
       const authPath = join(config.configDir, CURSOR_AUTH_FILE);
       if (existsSync(authPath)) rmSync(authPath, { force: true });
+      clearCursorAuthCache();
       return reply.code(204).send(null);
     }
   );

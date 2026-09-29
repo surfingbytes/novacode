@@ -751,6 +751,7 @@ function consumeNewSessionQuery(): void {
   if (route.query.newSession !== '1') {
     return;
   }
+  ensureAgentCapabilitiesLoaded();
   bShowNewSessionModal.value = true;
   const nextQuery = { ...route.query };
   delete nextQuery.newSession;
@@ -758,6 +759,12 @@ function consumeNewSessionQuery(): void {
 }
 
 function openNewSessionFromShortcut(): void {
+  ensureAgentCapabilitiesLoaded();
+  bShowNewSessionModal.value = true;
+}
+
+function openNewSessionModal(): void {
+  ensureAgentCapabilitiesLoaded();
   bShowNewSessionModal.value = true;
 }
 
@@ -814,7 +821,7 @@ watch(
   <SessionListToolbar
     :view-mode="viewMode"
     @update:view-mode="viewMode = $event"
-    @new-session="bShowNewSessionModal = true"
+    @new-session="openNewSessionModal"
     @new-orchestrator="bShowNewOrchestratorModal = true"
   />
 

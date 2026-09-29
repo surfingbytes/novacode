@@ -9,6 +9,7 @@ import AppLayout from '@/components/AppLayout.vue';
 import AppToasts from '@/components/AppToasts.vue';
 
 // composables
+import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
 import { useTabStatus } from '@/composables/useTabStatus';
 
 // stores
@@ -30,6 +31,7 @@ const apiHealth = useApiHealthStore();
 const toastStore = useToastStore();
 const workspacesStore = useWorkspacesStore();
 const route = useRoute();
+const { reload: reloadAgentCapabilities } = useAgentCapabilities();
 
 // -------------------------------------------------- Composables --------------------------------------------------
 useTabStatus();
@@ -109,6 +111,7 @@ watch(
     scheduleHealthPolling();
     if (reachable && wasReachable === false && auth.bSignedIn) {
       void workspacesStore.reloadAfterReconnect();
+      void reloadAgentCapabilities();
     }
   }
 );
