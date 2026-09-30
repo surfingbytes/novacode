@@ -108,6 +108,9 @@ const acpClientProxy = {
   createTerminal: async (_params: CreateTerminalRequest): Promise<never> => {
     throw new Error('[claudeAcp] createTerminal not supported in embedded mode');
   },
+  // Claude ACP ≥0.84 sends `_auth/status_update` (and similar) via extNotification;
+  // unknown methods are meant to be dropped silently by clients.
+  extNotification: async (_method: string, _params: Record<string, unknown>): Promise<void> => {},
 } satisfies Partial<AgentSideConnection>;
 
 // --------------------------------------------- Claude-specific agent ---------------------------------------------

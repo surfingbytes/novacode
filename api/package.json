@@ -12,8 +12,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "^0.76.0",
-    "@agentclientprotocol/sdk": "^1.4.0",
+    "@agentclientprotocol/claude-agent-acp": "^0.84.0",
+    "@agentclientprotocol/sdk": "^1.5.1",
     "@fastify/auth": "^5.0.4",
     "@fastify/cors": "^11.3.0",
     "@fastify/helmet": "^13.1.0",

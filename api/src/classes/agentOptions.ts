@@ -434,6 +434,7 @@ const claudeClientProxy = {
   createTerminal: async (): Promise<never> => {
     throw new Error('[agentOptions] createTerminal not supported during probe');
   },
+  extNotification: async (_method: string, _params: Record<string, unknown>): Promise<void> => {},
 } satisfies Partial<AgentSideConnection>;
 
 // Keep this as a true dynamic import: the Claude ACP package is ESM-only.

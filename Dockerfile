@@ -54,7 +54,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code CLI globally so "Login to Claude" works in the app
-ARG CLAUDE_CODE_VERSION=2.1.278
+ARG CLAUDE_CODE_VERSION=2.1.285
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 
 # Ensure user-local and global bin dirs are on PATH before any CLI installs
@@ -67,12 +67,12 @@ RUN curl https://cursor.com/install -fsS | bash
 RUN curl -LsSf https://mistral.ai/vibe/install.sh | bash
 
 # Install OpenCode CLI
-ARG OPENCODE_VERSION=1.18.32
+ARG OPENCODE_VERSION=1.18.33
 RUN curl -fsSL https://opencode.ai/install | bash -s -- --version "${OPENCODE_VERSION}"
 
 # Install Codex + Codex ACP adapter
-ARG CODEX_VERSION=0.155.1
-ARG CODEX_ACP_VERSION=1.12.0
+ARG CODEX_VERSION=0.159.2
+ARG CODEX_ACP_VERSION=2.0.1
 RUN npm install -g "@openai/codex@${CODEX_VERSION}" "@agentclientprotocol/codex-acp@${CODEX_ACP_VERSION}"
 
 # Install Playwright core so agents can connect to a Playwright server
