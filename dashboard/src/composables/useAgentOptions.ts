@@ -10,7 +10,7 @@ import { computed, ref, type Ref } from 'vue';
 import { sessionsApi, settingsApi } from '@/classes/api';
 
 // utils
-import { parseConfiguredModelId } from '@/utils/agentModelPicker';
+import { resolveSavedModelOption } from '@/utils/agentModelPicker';
 
 // types
 import type {
@@ -95,8 +95,8 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
       !bModelsLoading.value &&
       !!modelSelection.value &&
       modelSelection.value !== 'auto' &&
-      !parseConfiguredModelId(modelSelection.value) &&
-      !modelOptions.value.some((option) => option.id === modelSelection.value)
+      !modelOptions.value.some((option) => option.id === modelSelection.value) &&
+      !resolveSavedModelOption(modelOptions.value, modelSelection.value)
   );
 
   // -------------------------------------------------- Methods --------------------------------------------------
@@ -144,6 +144,17 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
         };
       }
       syncAcpReportedFromOptions();
+      const savedModel = modelSelection.value;
+      if (
+        savedModel &&
+        savedModel !== 'auto' &&
+        !modelOptions.value.some((option) => option.id === savedModel)
+      ) {
+        const resolved = resolveSavedModelOption(modelOptions.value, savedModel);
+        if (resolved && resolved.id !== savedModel) {
+          void persistModelSelection(resolved.id);
+        }
+      }
     } catch {
       modelOptions.value = [
         { id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto', fast: null }

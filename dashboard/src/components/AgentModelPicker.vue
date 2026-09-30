@@ -22,7 +22,8 @@ import {
   hasHiddenModelOptions,
   resolveDefaultCursorModelOption,
   resolveDefaultModelOption,
-  resolveModelOption
+  resolveModelOption,
+  resolveSavedModelOption
 } from '@/utils/agentModelPicker';
 
 // types
@@ -56,6 +57,7 @@ const effectiveModelSelection = computed(() => props.modelValue || 'auto');
 const selectedModelOption = computed(
   () =>
     props.modelOptions.find((option) => option.id === effectiveModelSelection.value) ??
+    resolveSavedModelOption(props.modelOptions, effectiveModelSelection.value) ??
     fallbackModelOption(effectiveModelSelection.value)
 );
 const effectiveModelOptions = computed(() => {

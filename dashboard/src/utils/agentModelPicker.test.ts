@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   resolveDefaultCursorModelOption,
   resolveDefaultModelOption,
+  resolveSavedModelOption,
   type CursorModelPreset,
 } from './agentModelPicker';
 import type { AgentModelOption } from '@/@types/index';
@@ -43,6 +44,30 @@ describe('resolveDefaultModelOption', () => {
   it('prefers the smallest concrete context when Default is absent', () => {
     const options = [solOption('1M'), solOption('272K')];
     const selected = resolveDefaultModelOption(options, 'GPT 5.6 Sol');
+    expect(selected?.context).toBe('272K');
+  });
+});
+
+describe('resolveSavedModelOption', () => {
+  it('maps legacy gpt-5.6-sol-medium onto 272k medium parameterized id', () => {
+    const options = [
+      solOption('1M'),
+      solOption('272K'),
+      solOption('1M', 'High'),
+      solOption('272K', 'High'),
+      solOption('272K', 'Medium', true),
+    ];
+    const selected = resolveSavedModelOption(options, 'gpt-5.6-sol-medium');
+    expect(selected?.id).toBe(
+      'gpt-5.6-sol[context=272k,reasoning=medium,fast=false]'
+    );
+    expect(selected?.context).toBe('272K');
+  });
+
+  it('keeps fast when migrating legacy -fast variants', () => {
+    const options = [solOption('272K'), solOption('272K', 'Medium', true)];
+    const selected = resolveSavedModelOption(options, 'gpt-5.6-sol-medium-fast');
+    expect(selected?.fast).toBe(true);
     expect(selected?.context).toBe('272K');
   });
 });

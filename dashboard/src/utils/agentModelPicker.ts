@@ -457,3 +457,92 @@ export function resolveDefaultModelOption(
     bHasFastVariants && bHasSlowFastVariant ? false : null
   );
 }
+
+const LEGACY_THINKING_SUFFIX_RE =
+  /-(none|minimal|low|medium|high|xhigh|max|extra-high)$/i;
+const LEGACY_THINKING_INFIX_RE =
+  /-thinking-(none|minimal|low|medium|high|xhigh|max|extra-high)$/i;
+
+function optionBaseId(option: AgentModelOption): string {
+  return parseConfiguredModelId(option.id)?.baseId ?? option.id.split('[')[0]!.trim();
+}
+
+/**
+ * Resolve a saved model id against the current catalog.
+ * Maps legacy Cursor variant slugs (e.g. `gpt-5.6-sol-medium`) onto parameterized
+ * options (e.g. `gpt-5.6-sol[context=272k,…]`), preferring the cheapest default context.
+ */
+export function resolveSavedModelOption(
+  options: AgentModelOption[],
+  savedId: string | null | undefined
+): AgentModelOption | null {
+  const trimmed = savedId?.trim();
+  if (!trimmed || !options.length) return null;
+
+  const exact = options.find((option) => option.id === trimmed);
+  if (exact) return exact;
+
+  const configured = parseConfiguredModelId(trimmed);
+  if (configured) {
+    const parsed = fallbackModelOption(trimmed);
+    let pool = options.filter(
+      (option) =>
+        optionBaseId(option) === configured.baseId ||
+        normalizeModelName(option.model) === normalizeModelName(parsed.model)
+    );
+    if (!pool.length) return null;
+    if (parsed.fast !== null) {
+      const fastPool = pool.filter((option) => option.fast === parsed.fast);
+      if (fastPool.length) pool = fastPool;
+    }
+    if (parsed.context && normalizeModelName(parsed.context) !== 'default') {
+      const contextPool = pool.filter(
+        (option) => normalizeModelName(option.context) === normalizeModelName(parsed.context)
+      );
+      if (contextPool.length) pool = contextPool;
+    }
+    return resolveBestModelOption(pool, [parsed.thinking, 'Default', 'Medium', 'High']);
+  }
+
+  const bFast = /(?:^|-)fast$/i.test(trimmed);
+  let rest = trimmed.replace(/-fast$/i, '');
+  let thinkingHint: string | undefined;
+  const thinkingInfix = rest.match(LEGACY_THINKING_INFIX_RE);
+  if (thinkingInfix) {
+    thinkingHint = titleModelToken(thinkingInfix[1]!);
+    rest = rest.slice(0, -thinkingInfix[0].length);
+  } else {
+    const thinkingSuffix = rest.match(LEGACY_THINKING_SUFFIX_RE);
+    if (thinkingSuffix) {
+      thinkingHint = titleModelToken(thinkingSuffix[1]!);
+      rest = rest.slice(0, -thinkingSuffix[0].length);
+    }
+  }
+
+  let pool = options.filter((option) => optionBaseId(option) === rest);
+  if (!pool.length) {
+    const parsed = fallbackModelOption(trimmed);
+    pool = options.filter(
+      (option) => normalizeModelName(option.model) === normalizeModelName(parsed.model)
+    );
+    if (!thinkingHint && parsed.thinking !== 'Default') {
+      thinkingHint = parsed.thinking;
+    }
+  }
+  if (!pool.length) return null;
+
+  if (bFast) {
+    const fastPool = pool.filter((option) => option.fast === true);
+    if (fastPool.length) pool = fastPool;
+  } else {
+    const slowPool = pool.filter((option) => option.fast === false || option.fast === null);
+    if (slowPool.length) pool = slowPool;
+  }
+
+  return resolveBestModelOption(pool, [
+    thinkingHint,
+    'Medium',
+    'Default',
+    'High'
+  ].filter((value): value is string => Boolean(value)));
+}
