@@ -17,7 +17,7 @@ export const CURSOR_CURRENT_VALUE_PREFIX = 'current:';
 export const BASIC_CURSOR_MODEL_PRESETS = [
   { label: 'Auto', thinking: 'Auto', modelNames: ['Auto'] },
   { label: 'Composer 2.5', thinking: 'Fast', modelNames: ['Composer 2.5'] },
-  { label: 'Opus 5', thinking: 'High', modelNames: ['Claude Opus 5'] },
+  { label: 'Opus 5.5', thinking: 'High', modelNames: ['Claude Opus 5.5'] },
   { label: 'Fable 5', thinking: 'High', modelNames: ['Claude Fable 5'] },
   { label: 'Sonnet 5', thinking: 'High', modelNames: ['Claude Sonnet 5'] },
   { label: 'GPT 5.6', thinking: 'Medium', modelNames: ['GPT 5.6 Sol'] },
