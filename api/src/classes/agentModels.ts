@@ -11,8 +11,13 @@ import { getOpenCodeModels } from './openCodeModels';
 import type { AgentType } from '../@types/index';
 
 const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
-const THINKING_VALUES = ['minimal', 'low', 'medium', 'high', 'max', 'fast', 'none'];
-const CONTEXT_VALUES = ['32k', '64k', '128k', '200k', '256k', '1m', '2m'];
+const THINKING_VALUES = ['minimal', 'low', 'medium', 'high', 'max', 'xhigh', 'fast', 'none'];
+const CONTEXT_TOKEN_RE = /^\d+(?:\.\d+)?[km]$/i;
+
+function findContextToken(source: string): string | undefined {
+  const match = source.match(/(?:^|[\s_\-/()])(\d+(?:\.\d+)?[km])(?:$|[\s_\-/()])/i);
+  return match?.[1]?.toLowerCase();
+}
 
 export interface AgentModelOption {
   id: string;
@@ -67,7 +72,18 @@ function normalizeContext(value: string | undefined): string {
 
 function normalizeThinking(value: string | undefined): string {
   if (!value) return 'Default';
+  const lower = value.toLowerCase();
+  if (lower === 'xhigh' || lower === 'extra-high' || lower === 'extra_high') return 'Extra High';
   return titleToken(value);
+}
+
+function thinkingFromConfig(configMap: Record<string, string>): string | undefined {
+  return (
+    configMap['reasoning'] ??
+    configMap['reasoning_effort'] ??
+    configMap['effort'] ??
+    configMap['thinking']
+  );
 }
 
 function normalizeFast(value: string | undefined): boolean | null {
@@ -87,7 +103,7 @@ function extractDimensions(id: string, label: string): { model: string; thinking
   if (configured) {
     return {
       model: prettifyId(configured.baseId),
-      thinking: normalizeThinking(configured.config['reasoning'] ?? configured.config['thinking']),
+      thinking: normalizeThinking(thinkingFromConfig(configured.config)),
       context: normalizeContext(configured.config['context']),
       fast: normalizeFast(configured.config['fast'])
     };
@@ -97,14 +113,12 @@ function extractDimensions(id: string, label: string): { model: string; thinking
   const thinking = THINKING_VALUES.find((value) =>
     new RegExp(`(?:^|[\\s_\\-/])(?:thinking[\\s_\\-/]?)?${value}(?:$|[\\s_\\-/])`, 'i').test(source)
   );
-  const context = CONTEXT_VALUES.find((value) =>
-    new RegExp(`(?:^|[\\s_\\-/()])${value}(?:$|[\\s_\\-/()])`, 'i').test(source)
-  );
+  const context = findContextToken(source);
 
   const rawTokens = id.split(/[/:_\-\s]+/).filter(Boolean);
   const modelTokens = rawTokens.filter((token) => {
     const lower = token.toLowerCase();
-    return lower !== 'thinking' && !THINKING_VALUES.includes(lower) && !CONTEXT_VALUES.includes(lower);
+    return lower !== 'thinking' && !THINKING_VALUES.includes(lower) && !CONTEXT_TOKEN_RE.test(lower);
   });
   const model = modelTokens.length > 0 ? modelTokens.map(titleToken).join(' ') : label;
 

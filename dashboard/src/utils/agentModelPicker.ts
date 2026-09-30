@@ -38,9 +38,14 @@ export interface ModelPickerState {
   selectedFastValue: boolean;
 }
 
-const THINKING_ORDER = ['auto', 'default', 'none', 'minimal', 'low', 'medium', 'high', 'max'];
-const FALLBACK_THINKING_VALUES = ['minimal', 'low', 'medium', 'high', 'max', 'fast', 'none'];
-const FALLBACK_CONTEXT_VALUES = ['32k', '64k', '128k', '200k', '256k', '1m', '2m'];
+const THINKING_ORDER = ['auto', 'default', 'none', 'minimal', 'low', 'medium', 'high', 'extra high', 'max'];
+const FALLBACK_THINKING_VALUES = ['minimal', 'low', 'medium', 'high', 'max', 'xhigh', 'fast', 'none'];
+const FALLBACK_CONTEXT_TOKEN_RE = /^\d+(?:\.\d+)?[km]$/i;
+
+function findFallbackContextToken(source: string): string | undefined {
+  const match = source.match(/(?:^|[\s_\-/()])(\d+(?:\.\d+)?[km])(?:$|[\s_\-/()])/i);
+  return match?.[1]?.toLowerCase();
+}
 
 // -------------------------------------------------- Pure helpers --------------------------------------------------
 
@@ -59,6 +64,7 @@ function thinkingRank(value: string): number {
   if (lower.includes('minimal')) return THINKING_ORDER.indexOf('minimal');
   if (lower.includes('low')) return THINKING_ORDER.indexOf('low');
   if (lower.includes('medium')) return THINKING_ORDER.indexOf('medium');
+  if (lower.includes('extra')) return THINKING_ORDER.indexOf('extra high');
   if (lower.includes('high')) return THINKING_ORDER.indexOf('high');
   if (lower.includes('max')) return THINKING_ORDER.indexOf('max');
   return THINKING_ORDER.length;
@@ -125,8 +131,18 @@ function sortContextValues(values: string[]): string[] {
 function titleModelToken(token: string): string {
   const lower = token.toLowerCase();
   if (lower === 'gpt') return 'GPT';
+  if (lower === 'xhigh' || lower === 'extra-high' || lower === 'extra_high') return 'Extra High';
   if (/^\d/.test(token)) return token.toUpperCase();
   return lower.charAt(0).toUpperCase() + lower.slice(1);
+}
+
+function thinkingFromConfig(configMap: Record<string, string>): string | undefined {
+  return (
+    configMap['reasoning'] ??
+    configMap['reasoning_effort'] ??
+    configMap['effort'] ??
+    configMap['thinking']
+  );
 }
 
 function prettifyModelId(id: string): string {
@@ -175,13 +191,12 @@ export function fallbackModelOption(id: string): AgentModelOption {
 
   const configured = parseConfiguredModelId(id);
   if (configured) {
+    const thinking = thinkingFromConfig(configured.config);
     return {
       id,
       label: id,
       model: prettifyModelId(configured.baseId),
-      thinking: configured.config['reasoning'] || configured.config['thinking']
-        ? titleModelToken(configured.config['reasoning'] ?? configured.config['thinking'])
-        : 'Default',
+      thinking: thinking ? titleModelToken(thinking) : 'Default',
       context: normalizeFallbackContext(configured.config['context']),
       fast: normalizeFallbackFast(configured.config['fast'])
     };
@@ -191,16 +206,14 @@ export function fallbackModelOption(id: string): AgentModelOption {
   const thinking = FALLBACK_THINKING_VALUES.find((value) =>
     new RegExp(`(?:^|[\\s_\\-/])(?:thinking[\\s_\\-/]?)?${value}(?:$|[\\s_\\-/])`, 'i').test(source)
   );
-  const context = FALLBACK_CONTEXT_VALUES.find((value) =>
-    new RegExp(`(?:^|[\\s_\\-/()])${value}(?:$|[\\s_\\-/()])`, 'i').test(source)
-  );
+  const context = findFallbackContextToken(source);
   const modelTokens = id.split(/[/:_\-\s]+/).filter((token) => {
     const lower = token.toLowerCase();
     return (
       lower !== 'thinking' &&
       lower !== 'context' &&
       !FALLBACK_THINKING_VALUES.includes(lower) &&
-      !FALLBACK_CONTEXT_VALUES.includes(lower)
+      !FALLBACK_CONTEXT_TOKEN_RE.test(lower)
     );
   });
   const model = modelTokens.length > 0 ? modelTokens.map(titleModelToken).join(' ') : id;
@@ -427,9 +440,7 @@ export function resolveDefaultModelOption(
     )
   );
   const context = pickPreferredValue(contextValues, [
-    modelKey === 'auto' ? 'Auto' : 'Default',
-    '128K',
-    '1M'
+    modelKey === 'auto' ? 'Auto' : 'Default'
   ]);
   const bHasSlowFastVariant = matched.some(
     (option) => option.thinking === thinking && option.context === context && option.fast === false

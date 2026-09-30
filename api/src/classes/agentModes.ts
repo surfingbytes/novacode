@@ -69,10 +69,26 @@ function nodeReadableToWeb(readable: NodeJS.ReadableStream): ReadableStream<Uint
   return new ReadableStream<Uint8Array>({
     start(controller) {
       readable.on('data', (chunk: Buffer | string) => {
-        controller.enqueue(typeof chunk === 'string' ? Buffer.from(chunk) : new Uint8Array(chunk));
+        try {
+          controller.enqueue(typeof chunk === 'string' ? Buffer.from(chunk) : new Uint8Array(chunk));
+        } catch {
+          // stream already closed
+        }
       });
-      readable.on('end', () => controller.close());
-      readable.on('error', (err) => controller.error(err));
+      readable.on('end', () => {
+        try {
+          controller.close();
+        } catch {
+          // stream already closed
+        }
+      });
+      readable.on('error', () => {
+        try {
+          controller.close();
+        } catch {
+          // stream already closed
+        }
+      });
     },
   });
 }
