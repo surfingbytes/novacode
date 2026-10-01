@@ -9,6 +9,8 @@ function healthUrl(): string {
 
 export const useApiHealthStore = defineStore('apiHealth', () => {
   const bApiReachable = ref(true);
+  /** Bumped on every successful /health ping, even when the banner never flipped. */
+  const healthyPingCount = ref(0);
 
   function markUnreachable(): void {
     bApiReachable.value = false;
@@ -29,6 +31,7 @@ export const useApiHealthStore = defineStore('apiHealth', () => {
       });
       if (response.ok) {
         markReachable();
+        healthyPingCount.value++;
       } else {
         markUnreachable();
       }
@@ -41,6 +44,7 @@ export const useApiHealthStore = defineStore('apiHealth', () => {
 
   return {
     bApiReachable,
+    healthyPingCount,
     markUnreachable,
     markReachable,
     ping

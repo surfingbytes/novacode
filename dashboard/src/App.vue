@@ -107,11 +107,24 @@ function onWindowOnline(): void {
 // -------------------------------------------------- Watchers --------------------------------------------------
 watch(
   () => apiHealth.bApiReachable,
-  (reachable, wasReachable) => {
+  () => {
     scheduleHealthPolling();
-    if (reachable && wasReachable === false && auth.bSignedIn) {
+  }
+);
+
+// A failed request whose /health confirmation succeeds never flips the banner,
+// so healthy pings must also retry lists that are stuck in the failed state.
+watch(
+  () => [apiHealth.bApiReachable, apiHealth.healthyPingCount] as const,
+  ([reachable], [wasReachable]) => {
+    if (!reachable || !auth.bSignedIn) {
+      return;
+    }
+    if (wasReachable === false) {
       void workspacesStore.reloadAfterReconnect();
       void reloadAgentCapabilities();
+    } else {
+      void workspacesStore.reloadIfLoadFailed();
     }
   }
 );

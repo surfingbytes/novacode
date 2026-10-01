@@ -90,7 +90,7 @@ const route = useRoute();
 const workspacesStore = useWorkspacesStore();
 const toastStore = useToastStore();
 const apiHealth = useApiHealthStore();
-const { bApiReachable } = storeToRefs(apiHealth);
+const { bApiReachable, healthyPingCount } = storeToRefs(apiHealth);
 const auth = useAuthStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
@@ -199,6 +199,8 @@ const globalRulesCount = ref(0);
 
 let mermaidRenderTimer: ReturnType<typeof setTimeout> | null = null;
 let fetchSessionSeq = 0;
+/** Last fetch failed — set even when a cached snapshot hides the error banner. */
+let bSessionFetchFailed = false;
 /** True while a cached snapshot is on screen and the first fresh history frame is pending. */
 let bCachedHistoryOnScreen = !!initialCache;
 
@@ -797,6 +799,7 @@ async function fetchSession(): Promise<boolean> {
       return false;
     }
     session.value = response.data;
+    bSessionFetchFailed = false;
     agentOptions.applyFetchedSession(response.data);
     approvalPolicy.value = normalizeApprovalPolicy(response.data.approvalPolicy);
     void loadAgentOptions();
@@ -810,6 +813,7 @@ async function fetchSession(): Promise<boolean> {
     ) {
       return false;
     }
+    bSessionFetchFailed = true;
     if (!session.value) {
       error.value = 'Failed to load session';
     }
@@ -954,18 +958,32 @@ watch(
   }
 );
 
-// Retry session metadata when the API comes back after a transient outage.
-watch(bApiReachable, (reachable, wasReachable) => {
-  if (reachable && wasReachable === false && (error.value || !session.value)) {
+function retrySessionIfFailed(): void {
+  if (bSessionFetchFailed || error.value) {
     void fetchSession();
   }
+}
+
+// Retry session metadata when the API comes back after a transient outage. A
+// healthy ping counts too: a failed fetch does not always flip the banner.
+watch([bApiReachable, healthyPingCount], ([reachable]) => {
+  if (reachable) {
+    retrySessionIfFailed();
+  }
 });
+
+function onDocumentVisibilityChange(): void {
+  if (document.visibilityState === 'visible') {
+    retrySessionIfFailed();
+  }
+}
 
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 onMounted(async () => {
   chatInputMql = window.matchMedia('(min-width: 768px)');
   syncChatInputBreakpoint();
   chatInputMql.addEventListener('change', syncChatInputBreakpoint);
+  document.addEventListener('visibilitychange', onDocumentVisibilityChange);
 
   const savedPrompt = readSessionPrompt(props.workspaceId, props.sessionId);
   if (savedPrompt != null) promptText.value = savedPrompt;
@@ -990,6 +1008,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  document.removeEventListener('visibilitychange', onDocumentVisibilityChange);
   if (mermaidRenderTimer !== null) {
     clearTimeout(mermaidRenderTimer);
     mermaidRenderTimer = null;
@@ -1072,9 +1091,17 @@ onUnmounted(() => {
 
     <div
       v-if="error"
-      class="mx-4 md:mx-6 mt-4 border border-destructive/50 bg-destructive/10 text-destructive px-4 py-3 shrink-0"
+      class="mx-4 md:mx-6 mt-4 flex items-center justify-between gap-3 border border-destructive/50 bg-destructive/10 text-destructive px-4 py-3 shrink-0"
     >
-      {{ error }}
+      <span>{{ error }}</span>
+      <button
+        type="button"
+        class="shrink-0 rounded-md border border-destructive/50 bg-surface px-2 py-1 text-xs font-medium text-text-primary hover:bg-card disabled:opacity-50"
+        :disabled="bLoading"
+        @click="fetchSession()"
+      >
+        Retry
+      </button>
     </div>
 
     <!-- Tab content -->

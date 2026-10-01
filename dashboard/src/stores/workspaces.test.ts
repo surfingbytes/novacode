@@ -15,7 +15,8 @@ vi.mock('@/classes/api', () => ({
     listAll: vi.fn(),
     markRead: vi.fn()
   },
-  buildSessionsWsUrl: () => 'ws://localhost/api/ws/sessions'
+  buildSessionsWsUrl: () => 'ws://localhost/api/ws/sessions',
+  isApiUnreachableError: (error: unknown) => (error as { unreachable?: boolean })?.unreachable === true
 }));
 
 vi.mock('@/lib/wsClient', () => ({
@@ -79,6 +80,26 @@ describe('workspaces store bootstrap', () => {
     expect(store.workspaces).toEqual([]);
     expect(store.bWorkspacesLoadFailed).toBe(true);
     expect(store.bIsLoading).toBe(false);
+  });
+
+  it('retries a dropped-connection workspace fetch before reporting failure', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(workspaceApi.listAll)
+        .mockRejectedValueOnce(Object.assign(new Error('Network Error'), { unreachable: true }))
+        .mockResolvedValueOnce({ data: [workspaceFixture()] } as never);
+      const store = useWorkspacesStore();
+
+      const pending = store.fetchAll();
+      await vi.runAllTimersAsync();
+      await pending;
+
+      expect(workspaceApi.listAll).toHaveBeenCalledTimes(2);
+      expect(store.workspaces).toHaveLength(1);
+      expect(store.bWorkspacesLoadFailed).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps previously loaded workspaces when a later fetch fails', async () => {

@@ -3,7 +3,7 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
 // classes
-import { sessionsApi, workspaceApi, buildSessionsWsUrl } from '@/classes/api';
+import { sessionsApi, workspaceApi, buildSessionsWsUrl, isApiUnreachableError } from '@/classes/api';
 import { createManagedSocket, type ManagedSocket } from '@/lib/wsClient';
 
 // stores
@@ -13,6 +13,23 @@ import { isViewingSession } from '@/utils/sessionUnread';
 
 // types
 import type { Workspace, CreateWorkspacePayload, UpdateWorkspacePayload, Session, Orchestrator } from '@/@types/index';
+
+const LIST_RETRY_DELAYS_MS = [1000, 3000];
+
+/** Retries dropped connections / gateway errors so a wake-from-sleep blip does not stick as a load failure. */
+async function withUnreachableRetry<T>(request: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await request();
+    } catch (error) {
+      const delayMs = LIST_RETRY_DELAYS_MS[attempt];
+      if (delayMs === undefined || !isApiUnreachableError(error)) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
 
 export const useWorkspacesStore = defineStore('workspaces', () => {
   // -------------------------------------------------- Refs --------------------------------------------------
@@ -79,7 +96,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     workspacesInitPromise = (async () => {
       bIsLoading.value = true;
       try {
-        const response = await workspaceApi.listAll();
+        const response = await withUnreachableRetry(() => workspaceApi.listAll());
         workspaces.value = response.data ?? [];
         workspacesInitialized = true;
         bWorkspacesLoadFailed.value = false;
@@ -173,7 +190,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
   const fetchAllSessions = async (): Promise<void> => {
     bSessionsLoading.value = true;
     try {
-      const response = await sessionsApi.listAll();
+      const response = await withUnreachableRetry(() => sessionsApi.listAll());
       allSessions.value = response.data ?? [];
       bSessionsLoadFailed.value = false;
     } catch (error) {
