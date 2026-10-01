@@ -11,6 +11,7 @@
 // classes
 import { config } from './config';
 import type { AgentErrorDetail } from './agentError';
+import { cursorSubagentTranscriptsDir } from './cursorSubagentTranscripts';
 import {
   cancelAcpSubprocess,
   closeAcpSubprocessSession,
@@ -75,6 +76,7 @@ export async function runCursorAcp(
       logTag: 'cursorAcp',
       cursorExtensions: true,
       skipModelConfigOption: true,
+      subagentTranscriptsDir: cursorSubagentTranscriptsDir(params.cwd),
     },
     onEvent,
     onConfigSync,

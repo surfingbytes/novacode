@@ -14,12 +14,14 @@
  *             'prompt-silent-hang'   — session/prompt never responds and emits no updates
  *             'prompt-subagent-session-updates' — hangs while emitting session/update on a child session id
  *             'prompt-cursor-task'   — hangs while emitting cursor/task notifications
- *             'prompt-background-task' — parent returns before cursor/task completion
+ *             'prompt-background-task' — background Task: cursor/task at launch, completion via transcript
  *             'prompt-background-task-empty-raw' — Task title only (empty rawInput/rawOutput), then cursor/task
  *   MOCK_LOG  — path; every incoming message is appended as one JSON line.
+ *   MOCK_TRANSCRIPTS_DIR — Cursor agent-transcripts dir the background subagent writes to.
  */
 
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import readline from 'node:readline';
 
 const SESSION_ID = 'mock-acp-session-1';
@@ -255,9 +257,71 @@ rl.on('line', (line) => {
             },
           });
         });
-      } else if (mode === 'prompt-background-task' || mode === 'prompt-background-task-empty-raw') {
+      } else if (mode === 'prompt-background-task') {
+        // Mirrors real Cursor: cursor/task is sent at launch; completion only shows up
+        // as `turn_ended` in the subagent transcript under MOCK_TRANSCRIPTS_DIR.
         const toolCallId = 'mock-background-task-1';
-        const emptyRaw = mode === 'prompt-background-task-empty-raw';
+        const taskPrompt = 'Research the codebase.';
+        const sessionId = msg.params?.sessionId ?? SESSION_ID;
+        send({
+          jsonrpc: '2.0',
+          method: 'session/update',
+          params: {
+            sessionId,
+            update: {
+              sessionUpdate: 'tool_call',
+              toolCallId,
+              title: 'Task: Long research',
+              kind: 'other',
+              status: 'pending',
+              rawInput: { _toolName: 'task', prompt: taskPrompt, description: 'Long research' },
+            },
+          },
+        });
+        send({
+          jsonrpc: '2.0',
+          method: 'session/update',
+          params: {
+            sessionId,
+            update: {
+              sessionUpdate: 'tool_call_update',
+              toolCallId,
+              status: 'completed',
+              rawOutput: { durationMs: 20, isBackground: true },
+            },
+          },
+        });
+        send({
+          jsonrpc: '2.0',
+          id: 9001,
+          method: 'cursor/task',
+          params: { toolCallId, description: 'Long research', prompt: taskPrompt, durationMs: 20 },
+        });
+        send({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } });
+        const transcriptsDir = process.env.MOCK_TRANSCRIPTS_DIR;
+        const transcriptDir = join(transcriptsDir, 'mock-subagent-transcript');
+        const transcriptPath = join(transcriptDir, 'mock-subagent-transcript.jsonl');
+        setTimeout(() => {
+          mkdirSync(transcriptDir, { recursive: true });
+          appendFileSync(
+            transcriptPath,
+            JSON.stringify({
+              role: 'user',
+              message: { content: [{ type: 'text', text: `<user_query>\n${taskPrompt}\n</user_query>` }] },
+            }) + '\n'
+          );
+        }, 300);
+        setTimeout(() => {
+          appendFileSync(
+            transcriptPath,
+            JSON.stringify({ role: 'assistant', message: { content: [{ type: 'text', text: 'Done.' }] } }) +
+              '\n' +
+              JSON.stringify({ type: 'turn_ended', status: 'success' }) +
+              '\n'
+          );
+        }, 1_500);
+      } else if (mode === 'prompt-background-task-empty-raw') {
+        const toolCallId = 'mock-background-task-1';
         send({
           jsonrpc: '2.0',
           method: 'session/update',
@@ -269,7 +333,7 @@ rl.on('line', (line) => {
               title: 'Task: Long research',
               kind: 'other',
               status: 'in_progress',
-              rawInput: emptyRaw ? {} : { _toolName: 'task' },
+              rawInput: {},
             },
           },
         });
@@ -278,27 +342,11 @@ rl.on('line', (line) => {
           method: 'session/update',
           params: {
             sessionId: msg.params?.sessionId ?? SESSION_ID,
-            update: {
-              sessionUpdate: 'tool_call_update',
-              toolCallId,
-              status: 'completed',
-              rawOutput: emptyRaw ? {} : { isBackground: true },
-            },
+            update: { sessionUpdate: 'tool_call_update', toolCallId, status: 'completed', rawOutput: {} },
           },
         });
         send({ jsonrpc: '2.0', id: msg.id, result: { stopReason: 'end_turn' } });
         activityTimer = setTimeout(() => {
-          send({
-            jsonrpc: '2.0',
-            method: 'session/update',
-            params: {
-              sessionId: 'mock-background-child-session',
-              update: {
-                sessionUpdate: 'agent_message_chunk',
-                content: { type: 'text', text: 'Background research finished.' },
-              },
-            },
-          });
           send({
             jsonrpc: '2.0',
             method: 'cursor/task',

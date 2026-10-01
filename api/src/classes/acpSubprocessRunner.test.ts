@@ -50,6 +50,7 @@ function setupMock(mode: string): { workDir: string; logPath: string } {
 afterEach(() => {
   delete process.env.MOCK_MODE;
   delete process.env.MOCK_LOG;
+  delete process.env.MOCK_TRANSCRIPTS_DIR;
   delete process.env.ACP_PROMPT_IDLE_TIMEOUT_MS;
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
@@ -82,7 +83,8 @@ function runMock(
   onEvent: (line: string) => void = () => {},
   onRequestPermission?: AcpPermissionHandler,
   onAskQuestion?: AcpAskQuestionHandler,
-  cursorExtensions = false
+  cursorExtensions = false,
+  subagentTranscriptsDir?: string
 ): ReturnType<typeof runAcpSubprocessPrompt> {
   return runAcpSubprocessPrompt(
     {
@@ -94,6 +96,7 @@ function runMock(
       promptText: 'hello',
       logTag: 'testAcp',
       cursorExtensions,
+      subagentTranscriptsDir,
     },
     onEvent,
     undefined,
@@ -481,9 +484,11 @@ describe('runAcpSubprocessPrompt', () => {
     expect(events.filter((event) => event.type === 'cursor_task').length).toBeGreaterThanOrEqual(8);
   }, 10_000);
 
-  it('stays active after the parent turn until a background subagent completes', async () => {
-    process.env.ACP_PROMPT_IDLE_TIMEOUT_MS = '1000';
+  it('stays active after the launch cursor/task until the background subagent transcript ends', async () => {
+    process.env.ACP_PROMPT_IDLE_TIMEOUT_MS = '3000';
     const { workDir } = setupMock('prompt-background-task');
+    const transcriptsDir = join(workDir, 'agent-transcripts');
+    process.env.MOCK_TRANSCRIPTS_DIR = transcriptsDir;
     const events: Array<Record<string, unknown>> = [];
     const startedAt = Date.now();
 
@@ -500,27 +505,35 @@ describe('runAcpSubprocessPrompt', () => {
       },
       undefined,
       undefined,
-      true
+      true,
+      transcriptsDir
     );
 
     expect(result.error).toBeUndefined();
     expect(result.stopReason).toBe('end_turn');
-    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(175);
-    expect(
-      events.some(
-        (event) =>
-          event.type === 'cursor_task' &&
-          event.toolCallId === 'mock-background-task-1'
-      )
-    ).toBe(true);
-    expect(
-      events.some((event) => event.sessionId === 'mock-background-child-session')
-    ).toBe(true);
-    expect(
-      events.some(
-        (event) => event.type === 'background_tasks' && event.running === 1 && event.total === 1
-      )
-    ).toBe(true);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1_500);
+    const progress = events
+      .filter((event) => event.type === 'background_tasks')
+      .map((event) => `${event.running}/${event.total}`);
+    expect(progress).toEqual(['1/1', '0/1']);
+    const cursorTaskIndex = events.findIndex((event) => event.type === 'cursor_task');
+    const settledIndex = events.findIndex(
+      (event) => event.type === 'background_tasks' && event.running === 0
+    );
+    expect(cursorTaskIndex).toBeGreaterThanOrEqual(0);
+    expect(settledIndex).toBeGreaterThan(cursorTaskIndex);
+  }, 10_000);
+
+  it('settles a background Task on cursor/task when no transcripts dir is configured', async () => {
+    process.env.ACP_PROMPT_IDLE_TIMEOUT_MS = '3000';
+    const { workDir } = setupMock('prompt-background-task');
+    process.env.MOCK_TRANSCRIPTS_DIR = join(workDir, 'agent-transcripts');
+    const startedAt = Date.now();
+
+    const result = await runMock('nova-background-no-dir', null, workDir, () => {}, undefined, undefined, true);
+
+    expect(result.error).toBeUndefined();
+    expect(Date.now() - startedAt).toBeLessThan(1_500);
   }, 10_000);
 
   it('tracks background Task tools even when Cursor omits rawInput/rawOutput', async () => {

@@ -30,6 +30,7 @@ import type { AcpSessionResponse } from './acpSessionHelpers';
 import { extractAgentErrorDetail, type AgentErrorDetail } from './agentError';
 import { logger, truncateLogText } from './logger';
 import { mcpUnavailableNoticeEventLine } from './mcpServersForAcp';
+import { createSubagentTranscriptWatcher } from './cursorSubagentTranscripts';
 
 export type AcpEventHandler = (line: string) => void;
 export type AcpPermissionHandler = (
@@ -144,6 +145,11 @@ export interface AcpSubprocessRunParams {
    * that want MCP must probe first. A down server must never be passed here.
    */
   mcpServers?: McpServer[];
+  /**
+   * Cursor `agent-transcripts` dir for this cwd. Background Task subagents signal
+   * completion only there, so without it a background launch settles on `cursor/task`.
+   */
+  subagentTranscriptsDir?: string;
 }
 
 export interface AcpSubprocessRunResult {
@@ -168,6 +174,7 @@ const configSyncHandlers = new Map<string, SessionConfigSyncHandler>();
 
 /** Grace period for the agent to honour session/cancel before the subprocess is killed. */
 const CANCEL_GRACE_MS = 3_000;
+const SUBAGENT_TRANSCRIPT_POLL_MS = 1_000;
 function promptIdleTimeoutMs(): number {
   return resolvePromptIdleTimeoutMs(config.configDir);
 }
@@ -908,6 +915,16 @@ export async function runAcpSubprocessPrompt(
   const backgroundTaskIds = new Set<string>();
   /** All Task toolCallIds seen this turn (for total count in the UI). */
   const backgroundTaskIdsSeen = new Set<string>();
+  const settledTaskIds = new Set<string>();
+  const backgroundTaskLaunchIds = new Set<string>();
+  /** Task prompts of background launches still awaiting their transcript `turn_ended`. */
+  const backgroundLaunchPrompts = new Map<string, string>();
+  const taskPrompts = new Map<string, string>();
+  const transcriptWatcher = params.subagentTranscriptsDir
+    ? createSubagentTranscriptWatcher(params.subagentTranscriptsDir, Date.now())
+    : null;
+  let transcriptPollTimer: ReturnType<typeof setInterval> | null = null;
+  let bTranscriptPollBusy = false;
   let resolveBackgroundTasksSettled: (() => void) | null = null;
   let lastEmittedBackgroundRunning = -1;
   let lastEmittedBackgroundTotal = -1;
@@ -951,14 +968,50 @@ export async function runAcpSubprocessPrompt(
     }
     backgroundTaskIdsSeen.add(toolCallId);
     backgroundTaskIds.delete(toolCallId);
+    settledTaskIds.add(toolCallId);
+    backgroundLaunchPrompts.delete(toolCallId);
     emitBackgroundTasksProgress();
     settleBackgroundTaskWait();
   };
 
+  const stopTranscriptPolling = (): void => {
+    if (transcriptPollTimer !== null) {
+      clearInterval(transcriptPollTimer);
+      transcriptPollTimer = null;
+    }
+  };
+
+  const pollSubagentTranscripts = async (): Promise<void> => {
+    if (!transcriptWatcher || bTranscriptPollBusy) return;
+    if (backgroundLaunchPrompts.size === 0) {
+      stopTranscriptPolling();
+      return;
+    }
+    bTranscriptPollBusy = true;
+    try {
+      const { finished, bActivity } = await transcriptWatcher.poll(backgroundLaunchPrompts);
+      for (const toolCallId of finished) {
+        markBackgroundTaskFinished(toolCallId);
+      }
+      if (bActivity) armPromptIdleTimer();
+    } finally {
+      bTranscriptPollBusy = false;
+    }
+  };
+
+  const awaitBackgroundTranscript = (toolCallId: string, prompt: string): void => {
+    backgroundLaunchPrompts.set(toolCallId, prompt);
+    markBackgroundTaskRunning(toolCallId);
+    if (transcriptPollTimer === null) {
+      transcriptPollTimer = setInterval(() => void pollSubagentTranscripts(), SUBAGENT_TRANSCRIPT_POLL_MS);
+    }
+  };
+
   /**
    * Cursor often finishes the parent turn while Task subagents are still running.
-   * ACP may omit rawInput (empty `{}`) and mark the tool_call completed at launch
-   * when `isBackground` — real completion arrives later as `cursor/task`.
+   * ACP may omit rawInput (empty `{}`). A foreground Task's `cursor/task` arrives on
+   * completion; a background one (`isBackground`) gets `cursor/task` right at launch
+   * and its completion is only visible in the subagent transcript.
    */
   const trackBackgroundTaskEvent = (line: string): void => {
     let event: Record<string, unknown>;
@@ -971,13 +1024,19 @@ export async function runAcpSubprocessPrompt(
     if (event.type === 'cursor_task') {
       const toolCallId = typeof event.toolCallId === 'string' ? event.toolCallId : null;
       if (!toolCallId) return;
+      if (typeof event.prompt === 'string' && event.prompt.trim()) {
+        taskPrompts.set(toolCallId, event.prompt);
+      }
       const status = typeof event.status === 'string' ? event.status.toLowerCase() : '';
       if (status === 'in_progress' || status === 'pending' || status === 'running') {
         markBackgroundTaskRunning(toolCallId);
         return;
       }
-      // Docs: cursor/task notifies subagent completion. Missing status = complete.
-      // Explicit running statuses above keep the parent busy; everything else settles.
+      const prompt = taskPrompts.get(toolCallId);
+      if (transcriptWatcher && backgroundTaskLaunchIds.has(toolCallId) && prompt) {
+        awaitBackgroundTranscript(toolCallId, prompt);
+        return;
+      }
       markBackgroundTaskFinished(toolCallId);
       return;
     }
@@ -996,6 +1055,15 @@ export async function runAcpSubprocessPrompt(
     const knownTask = backgroundTaskIds.has(toolCallId) || backgroundTaskIdsSeen.has(toolCallId);
     if (!knownTask && !isAcpTaskToolCall(update) && !isAcpTaskBackgroundLaunch(update)) {
       return;
+    }
+    if (settledTaskIds.has(toolCallId)) return;
+
+    const rawInput = asRecord(update.rawInput);
+    if (typeof rawInput?.prompt === 'string' && rawInput.prompt.trim()) {
+      taskPrompts.set(toolCallId, rawInput.prompt);
+    }
+    if (isAcpTaskBackgroundLaunch(update)) {
+      backgroundTaskLaunchIds.add(toolCallId);
     }
 
     const status = typeof update.status === 'string' ? update.status.toLowerCase() : '';
@@ -1022,6 +1090,7 @@ export async function runAcpSubprocessPrompt(
     promptIdleTimer = setTimeout(() => {
       bPromptIdleTimedOut = true;
       logger.warn({ logTag, novaSessionId, timeoutMs }, 'prompt idle timeout');
+      stopTranscriptPolling();
       backgroundTaskIds.clear();
       settleBackgroundTaskWait();
       killProc();
@@ -1060,6 +1129,7 @@ export async function runAcpSubprocessPrompt(
 
   const cancelRun = () => {
     void (async () => {
+      stopTranscriptPolling();
       backgroundTaskIds.clear();
       settleBackgroundTaskWait();
       if (ctxRef && sessionIdForCancel) {
@@ -1286,6 +1356,7 @@ export async function runAcpSubprocessPrompt(
       } finally {
         bPromptInFlight = false;
         clearPromptIdleTimer();
+        stopTranscriptPolling();
         resolvePromptSettled();
         activeHandlers.delete(resolvedSessionId);
         // connectWith waits for the transport to close; close the per-turn subprocess
@@ -1310,6 +1381,7 @@ export async function runAcpSubprocessPrompt(
     return { acpSessionId: sessionIdForCancel ?? '', error: errorDetail.message, errorDetail };
   } finally {
     clearPromptIdleTimer();
+    stopTranscriptPolling();
     activeRuns.delete(novaSessionId);
     configSyncHandlers.delete(novaSessionId);
     killProc();
