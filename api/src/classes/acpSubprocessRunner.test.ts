@@ -536,6 +536,38 @@ describe('runAcpSubprocessPrompt', () => {
     expect(Date.now() - startedAt).toBeLessThan(1_500);
   }, 10_000);
 
+  it('keeps a long foreground Task alive past the idle timeout while its transcript grows', async () => {
+    process.env.ACP_PROMPT_IDLE_TIMEOUT_MS = '1500';
+    const { workDir } = setupMock('prompt-foreground-task');
+    const transcriptsDir = join(workDir, 'agent-transcripts');
+    process.env.MOCK_TRANSCRIPTS_DIR = transcriptsDir;
+    const events: Array<Record<string, unknown>> = [];
+
+    const result = await runMock(
+      'nova-foreground-task',
+      null,
+      workDir,
+      (line) => {
+        try {
+          events.push(JSON.parse(line) as Record<string, unknown>);
+        } catch {
+          // ignore non-json
+        }
+      },
+      undefined,
+      undefined,
+      true,
+      transcriptsDir
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.stopReason).toBe('end_turn');
+    const progress = events
+      .filter((event) => event.type === 'background_tasks')
+      .map((event) => `${event.running}/${event.total}`);
+    expect(progress).toEqual(['1/1', '0/1']);
+  }, 10_000);
+
   it('tracks background Task tools even when Cursor omits rawInput/rawOutput', async () => {
     process.env.ACP_PROMPT_IDLE_TIMEOUT_MS = '1000';
     const { workDir } = setupMock('prompt-background-task-empty-raw');

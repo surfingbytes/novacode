@@ -15,6 +15,7 @@
  *             'prompt-subagent-session-updates' — hangs while emitting session/update on a child session id
  *             'prompt-cursor-task'   — hangs while emitting cursor/task notifications
  *             'prompt-background-task' — background Task: cursor/task at launch, completion via transcript
+ *             'prompt-foreground-task' — foreground Task silent on ACP; only its transcript grows
  *             'prompt-background-task-empty-raw' — Task title only (empty rawInput/rawOutput), then cursor/task
  *   MOCK_LOG  — path; every incoming message is appended as one JSON line.
  *   MOCK_TRANSCRIPTS_DIR — Cursor agent-transcripts dir the background subagent writes to.
@@ -320,6 +321,55 @@ rl.on('line', (line) => {
               '\n'
           );
         }, 1_500);
+      } else if (mode === 'prompt-foreground-task') {
+        // Mirrors real Cursor: the parent prompt blocks on a foreground Task and ACP stays
+        // silent until it finishes; only the subagent transcript grows meanwhile.
+        const toolCallId = 'mock-foreground-task-1';
+        const taskPrompt = 'Review the backend.';
+        const sessionId = msg.params?.sessionId ?? SESSION_ID;
+        const promptId = msg.id;
+        const sendUpdate = (update) =>
+          send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId, update } });
+        sendUpdate({
+          sessionUpdate: 'tool_call',
+          toolCallId,
+          title: 'Task: Review backend',
+          kind: 'other',
+          status: 'pending',
+          rawInput: { _toolName: 'task', prompt: taskPrompt, description: 'Review backend' },
+        });
+        sendUpdate({ sessionUpdate: 'tool_call_update', toolCallId, status: 'in_progress' });
+        const transcriptDir = join(process.env.MOCK_TRANSCRIPTS_DIR, 'mock-foreground-transcript');
+        const transcriptPath = join(transcriptDir, 'mock-foreground-transcript.jsonl');
+        mkdirSync(transcriptDir, { recursive: true });
+        appendFileSync(
+          transcriptPath,
+          JSON.stringify({
+            role: 'user',
+            message: { content: [{ type: 'text', text: `<user_query>\n${taskPrompt}\n</user_query>` }] },
+          }) + '\n'
+        );
+        let n = 0;
+        activityTimer = setInterval(() => {
+          n += 1;
+          if (n < 18) {
+            appendFileSync(
+              transcriptPath,
+              JSON.stringify({ role: 'assistant', message: { content: [{ type: 'text', text: `step ${n}` }] } }) + '\n'
+            );
+            return;
+          }
+          clearActivityTimer();
+          appendFileSync(transcriptPath, JSON.stringify({ type: 'turn_ended', status: 'success' }) + '\n');
+          sendUpdate({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed', rawOutput: {} });
+          send({
+            jsonrpc: '2.0',
+            id: 9002,
+            method: 'cursor/task',
+            params: { toolCallId, description: 'Review backend', prompt: taskPrompt, durationMs: 3600 },
+          });
+          send({ jsonrpc: '2.0', id: promptId, result: { stopReason: 'end_turn' } });
+        }, 200);
       } else if (mode === 'prompt-background-task-empty-raw') {
         const toolCallId = 'mock-background-task-1';
         send({

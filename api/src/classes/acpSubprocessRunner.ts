@@ -917,8 +917,11 @@ export async function runAcpSubprocessPrompt(
   const backgroundTaskIdsSeen = new Set<string>();
   const settledTaskIds = new Set<string>();
   const backgroundTaskLaunchIds = new Set<string>();
-  /** Task prompts of background launches still awaiting their transcript `turn_ended`. */
-  const backgroundLaunchPrompts = new Map<string, string>();
+  /**
+   * Prompts of running Tasks whose transcripts are polled. Foreground Tasks emit nothing
+   * over ACP while they work, so transcript growth is their only liveness signal.
+   */
+  const transcriptPrompts = new Map<string, string>();
   const taskPrompts = new Map<string, string>();
   const transcriptWatcher = params.subagentTranscriptsDir
     ? createSubagentTranscriptWatcher(params.subagentTranscriptsDir, Date.now())
@@ -960,6 +963,8 @@ export async function runAcpSubprocessPrompt(
     backgroundTaskIds.add(toolCallId);
     backgroundTaskIdsSeen.add(toolCallId);
     emitBackgroundTasksProgress();
+    const prompt = taskPrompts.get(toolCallId);
+    if (prompt) watchTaskTranscript(toolCallId, prompt);
   };
 
   const markBackgroundTaskFinished = (toolCallId: string): void => {
@@ -969,7 +974,7 @@ export async function runAcpSubprocessPrompt(
     backgroundTaskIdsSeen.add(toolCallId);
     backgroundTaskIds.delete(toolCallId);
     settledTaskIds.add(toolCallId);
-    backgroundLaunchPrompts.delete(toolCallId);
+    transcriptPrompts.delete(toolCallId);
     emitBackgroundTasksProgress();
     settleBackgroundTaskWait();
   };
@@ -983,13 +988,13 @@ export async function runAcpSubprocessPrompt(
 
   const pollSubagentTranscripts = async (): Promise<void> => {
     if (!transcriptWatcher || bTranscriptPollBusy) return;
-    if (backgroundLaunchPrompts.size === 0) {
+    if (transcriptPrompts.size === 0) {
       stopTranscriptPolling();
       return;
     }
     bTranscriptPollBusy = true;
     try {
-      const { finished, bActivity } = await transcriptWatcher.poll(backgroundLaunchPrompts);
+      const { finished, bActivity } = await transcriptWatcher.poll(transcriptPrompts);
       for (const toolCallId of finished) {
         markBackgroundTaskFinished(toolCallId);
       }
@@ -999,9 +1004,9 @@ export async function runAcpSubprocessPrompt(
     }
   };
 
-  const awaitBackgroundTranscript = (toolCallId: string, prompt: string): void => {
-    backgroundLaunchPrompts.set(toolCallId, prompt);
-    markBackgroundTaskRunning(toolCallId);
+  const watchTaskTranscript = (toolCallId: string, prompt: string): void => {
+    if (!transcriptWatcher || settledTaskIds.has(toolCallId)) return;
+    transcriptPrompts.set(toolCallId, prompt);
     if (transcriptPollTimer === null) {
       transcriptPollTimer = setInterval(() => void pollSubagentTranscripts(), SUBAGENT_TRANSCRIPT_POLL_MS);
     }
@@ -1011,7 +1016,8 @@ export async function runAcpSubprocessPrompt(
    * Cursor often finishes the parent turn while Task subagents are still running.
    * ACP may omit rawInput (empty `{}`). A foreground Task's `cursor/task` arrives on
    * completion; a background one (`isBackground`) gets `cursor/task` right at launch
-   * and its completion is only visible in the subagent transcript.
+   * and its completion is only visible in the subagent transcript. Neither emits ACP
+   * events while working, so the transcript is also what keeps the idle timer alive.
    */
   const trackBackgroundTaskEvent = (line: string): void => {
     let event: Record<string, unknown>;
@@ -1023,7 +1029,7 @@ export async function runAcpSubprocessPrompt(
 
     if (event.type === 'cursor_task') {
       const toolCallId = typeof event.toolCallId === 'string' ? event.toolCallId : null;
-      if (!toolCallId) return;
+      if (!toolCallId || settledTaskIds.has(toolCallId)) return;
       if (typeof event.prompt === 'string' && event.prompt.trim()) {
         taskPrompts.set(toolCallId, event.prompt);
       }
@@ -1032,9 +1038,8 @@ export async function runAcpSubprocessPrompt(
         markBackgroundTaskRunning(toolCallId);
         return;
       }
-      const prompt = taskPrompts.get(toolCallId);
-      if (transcriptWatcher && backgroundTaskLaunchIds.has(toolCallId) && prompt) {
-        awaitBackgroundTranscript(toolCallId, prompt);
+      if (transcriptWatcher && backgroundTaskLaunchIds.has(toolCallId) && taskPrompts.has(toolCallId)) {
+        markBackgroundTaskRunning(toolCallId);
         return;
       }
       markBackgroundTaskFinished(toolCallId);
