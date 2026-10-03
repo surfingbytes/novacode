@@ -28,7 +28,7 @@ RUN chmod a+x /root \
 
 # install gosu and other base tools (ffmpeg so agents can analyse video)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl bash jq gosu openssh-client ffmpeg \
+    git curl bash jq sqlite3 gosu openssh-client ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # npm workspaces: install everything from the repo root
