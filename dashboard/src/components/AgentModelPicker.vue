@@ -1,6 +1,9 @@
 <script setup lang="ts">
 // node_modules
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
+
+// classes
+import { settingsApi } from '@/classes/api';
 
 // components
 import UiSelectMenu, { type SelectMenuOption } from '@/components/ui/UiSelectMenu.vue';
@@ -11,19 +14,26 @@ import {
   CURSOR_MODEL_VALUE_PREFIX,
   CURSOR_PRESET_VALUE_PREFIX,
   CURSOR_CURRENT_VALUE_PREFIX,
+  OPENCODE_QUICK_VALUE_PREFIX,
+  OPENCODE_CURRENT_VALUE_PREFIX,
   buildCursorPresetOptions,
   buildModelPickerState,
+  buildOpenCodeQuickOptions,
   buildVisibleModelOptions,
+  buildVisibleOpenCodeModelOptions,
   cursorModelValue,
   cursorPresetValue,
   fallbackModelOption,
   findCursorPresetByLabel,
   findCursorPresetForOption,
   hasHiddenModelOptions,
+  hasHiddenOpenCodeModelOptions,
+  openCodeCurrentValue,
   resolveDefaultCursorModelOption,
   resolveDefaultModelOption,
   resolveModelOption,
-  resolveSavedModelOption
+  resolveSavedModelOption,
+  type OpenCodeCustomModel
 } from '@/utils/agentModelPicker';
 
 // types
@@ -51,7 +61,29 @@ const emit = defineEmits<{
   'update:thinkingValue': [value: string];
 }>();
 
-const bShowAllCursorModels = ref(false);
+const bShowAllModels = ref(false);
+const openCodeCustomModels = ref<OpenCodeCustomModel[]>([]);
+let openCodeCustomModelsSeq = 0;
+
+// Custom provider models (e.g. "Kimi K3") power the open-code quick select.
+watch(
+  () => props.agentType,
+  (agentType) => {
+    const seq = ++openCodeCustomModelsSeq;
+    openCodeCustomModels.value = [];
+    if (agentType !== 'open-code') return;
+    settingsApi
+      .getOpenCodeProviders()
+      .then(({ data }) => {
+        if (seq !== openCodeCustomModelsSeq) return;
+        openCodeCustomModels.value = data.providers.flatMap((provider) =>
+          provider.models.map((model) => ({ id: `${provider.id}/${model.id}`, label: model.name }))
+        );
+      })
+      .catch(() => {});
+  },
+  { immediate: true }
+);
 
 const effectiveModelSelection = computed(() => props.modelValue || 'auto');
 const selectedModelOption = computed(
@@ -68,6 +100,12 @@ const effectiveModelOptions = computed(() => {
   return [selected, ...props.modelOptions];
 });
 const bCursorAgentSession = computed(() => props.agentType === 'cursor-agent');
+const openCodeQuickOptions = computed(() =>
+  props.agentType === 'open-code'
+    ? buildOpenCodeQuickOptions(effectiveModelOptions.value, openCodeCustomModels.value)
+    : []
+);
+const bOpenCodeQuickMode = computed(() => openCodeQuickOptions.value.length > 0);
 const bConfigBackedThinking = computed(() => (props.thinkingOptions?.options.length ?? 0) > 0);
 
 const modelPickerState = computed(() =>
@@ -110,6 +148,12 @@ const selectedFastValue = computed(() => modelPickerState.value.selectedFastValu
 const cursorPresetOptions = computed(() => buildCursorPresetOptions(effectiveModelOptions.value));
 const selectedCursorPreset = computed(() => findCursorPresetForOption(selectedModelOption.value));
 const modelSelectValue = computed(() => {
+  if (bOpenCodeQuickMode.value) {
+    const quick = openCodeQuickOptions.value.find(
+      (entry) => entry.optionId === selectedModelOption.value.id
+    );
+    return quick?.value ?? openCodeCurrentValue(selectedModelOption.value.id);
+  }
   if (!bCursorAgentSession.value) return selectedModelName.value;
 
   const preset = selectedCursorPreset.value;
@@ -118,25 +162,40 @@ const modelSelectValue = computed(() => {
   }
   return cursorModelValue(selectedModelName.value);
 });
-const visibleModelOptions = computed(() =>
-  buildVisibleModelOptions({
+const visibleModelOptions = computed(() => {
+  if (bOpenCodeQuickMode.value) {
+    return buildVisibleOpenCodeModelOptions({
+      picker: modelPickerState.value,
+      selected: selectedModelOption.value,
+      quickOptions: openCodeQuickOptions.value,
+      bShowAll: bShowAllModels.value
+    });
+  }
+  return buildVisibleModelOptions({
     bCursorAgent: bCursorAgentSession.value,
-    bShowAllCursorModels: bShowAllCursorModels.value,
+    bShowAllCursorModels: bShowAllModels.value,
     picker: modelPickerState.value,
     selected: selectedModelOption.value,
     modelSelectValue: modelSelectValue.value,
     presetOptions: cursorPresetOptions.value
-  })
-);
-const bHasHiddenModelOptions = computed(() =>
-  hasHiddenModelOptions({
+  });
+});
+const bHasHiddenModelOptions = computed(() => {
+  if (bOpenCodeQuickMode.value) {
+    return hasHiddenOpenCodeModelOptions({
+      bShowAll: bShowAllModels.value,
+      modelList: modelList.value,
+      quickOptions: openCodeQuickOptions.value
+    });
+  }
+  return hasHiddenModelOptions({
     bCursorAgent: bCursorAgentSession.value,
-    bShowAllCursorModels: bShowAllCursorModels.value,
+    bShowAllCursorModels: bShowAllModels.value,
     modelListLength: modelList.value.length,
     presetOptionsLength: cursorPresetOptions.value.length,
     options: effectiveModelOptions.value
-  })
-);
+  });
+});
 
 function emitSelection(option: AgentModelOption | null): void {
   if (option) {
@@ -146,7 +205,19 @@ function emitSelection(option: AgentModelOption | null): void {
 
 function onModelSelectChange(value: string): void {
   if (value === MORE_MODEL_OPTION_VALUE) {
-    bShowAllCursorModels.value = true;
+    bShowAllModels.value = true;
+    return;
+  }
+
+  if (bOpenCodeQuickMode.value && value.startsWith(OPENCODE_CURRENT_VALUE_PREFIX)) {
+    return;
+  }
+
+  if (bOpenCodeQuickMode.value && value.startsWith(OPENCODE_QUICK_VALUE_PREFIX)) {
+    const optionId = value.slice(OPENCODE_QUICK_VALUE_PREFIX.length);
+    const next = effectiveModelOptions.value.find((option) => option.id === optionId) ?? null;
+    if (next) bShowAllModels.value = false;
+    emitSelection(next);
     return;
   }
 
@@ -155,7 +226,7 @@ function onModelSelectChange(value: string): void {
     const next = preset
       ? resolveDefaultCursorModelOption(effectiveModelOptions.value, preset)
       : null;
-    if (next) bShowAllCursorModels.value = false;
+    if (next) bShowAllModels.value = false;
     emitSelection(next);
     return;
   }
@@ -177,7 +248,7 @@ function onModelSelectChange(value: string): void {
         selectedContextName.value,
         bFastAvailable.value ? selectedFastValue.value : null
       );
-  if (next) bShowAllCursorModels.value = false;
+  if (next) bShowAllModels.value = false;
   emitSelection(next);
 }
 

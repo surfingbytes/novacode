@@ -12,6 +12,8 @@ export const MORE_MODEL_OPTION_VALUE = '__more_models__';
 export const CURSOR_MODEL_VALUE_PREFIX = 'model:';
 export const CURSOR_PRESET_VALUE_PREFIX = 'preset:';
 export const CURSOR_CURRENT_VALUE_PREFIX = 'current:';
+export const OPENCODE_QUICK_VALUE_PREFIX = 'ocquick:';
+export const OPENCODE_CURRENT_VALUE_PREFIX = 'occurrent:';
 
 /** Quick-menu entries. `label` is what the UI shows; `modelNames` match API `option.model`. */
 export const BASIC_CURSOR_MODEL_PRESETS = [
@@ -26,6 +28,29 @@ export const BASIC_CURSOR_MODEL_PRESETS = [
 
 export type CursorModelPreset = (typeof BASIC_CURSOR_MODEL_PRESETS)[number];
 export type ModelSelectOption = { value: string; label: string };
+
+/**
+ * OpenCode quick-menu presets for built-in providers. `modelIds` are matched against
+ * API `option.id` in preference order — the first id present in the catalog wins.
+ */
+export const BASIC_OPENCODE_MODEL_PRESETS = [
+  { label: 'GPT 6', modelIds: ['openai/gpt-6-sol', 'openai/gpt-6'] }
+] as const;
+
+/** Custom provider model (from opencode.json via /settings/opencode-providers). */
+export interface OpenCodeCustomModel {
+  /** Full option id, e.g. `moonshot/kimi-k3`. */
+  id: string;
+  /** Display name from provider config, e.g. `Kimi K3`. */
+  label: string;
+}
+
+export interface OpenCodeQuickOption extends ModelSelectOption {
+  /** Catalog option id this entry selects. */
+  optionId: string;
+  /** Model dimension name — used to exclude covered models from the expanded list. */
+  modelName: string;
+}
 
 export interface ModelPickerState {
   modelList: string[];
@@ -87,6 +112,14 @@ export function cursorPresetValue(label: string): string {
 
 export function cursorModelValue(model: string): string {
   return `${CURSOR_MODEL_VALUE_PREFIX}${model}`;
+}
+
+export function openCodeQuickValue(optionId: string): string {
+  return `${OPENCODE_QUICK_VALUE_PREFIX}${optionId}`;
+}
+
+export function openCodeCurrentValue(optionId: string): string {
+  return `${OPENCODE_CURRENT_VALUE_PREFIX}${optionId}`;
 }
 
 function optionMatchesCursorPreset(option: AgentModelOption, preset: CursorModelPreset): boolean {
@@ -284,6 +317,92 @@ export function buildCursorPresetOptions(options: AgentModelOption[]): ModelSele
   return BASIC_CURSOR_MODEL_PRESETS.filter((preset) =>
     options.some((option) => optionMatchesCursorPreset(option, preset))
   ).map((preset) => ({ value: cursorPresetValue(preset.label), label: preset.label }));
+}
+
+/**
+ * OpenCode quick-menu entries: Auto (when in the catalog), then custom provider
+ * models with their configured names, then built-in presets (GPT 6).
+ * Entries whose id is absent from the catalog are skipped.
+ */
+export function buildOpenCodeQuickOptions(
+  options: AgentModelOption[],
+  customModels: OpenCodeCustomModel[]
+): OpenCodeQuickOption[] {
+  const entries: OpenCodeQuickOption[] = [];
+  const seen = new Set<string>();
+  const push = (option: AgentModelOption, label: string): void => {
+    if (seen.has(option.id)) return;
+    seen.add(option.id);
+    entries.push({
+      value: openCodeQuickValue(option.id),
+      label,
+      optionId: option.id,
+      modelName: option.model
+    });
+  };
+
+  const auto = options.find((option) => option.id === 'auto');
+  if (auto) push(auto, 'Auto');
+
+  for (const custom of customModels) {
+    const option = options.find((candidate) => candidate.id === custom.id);
+    if (option) push(option, custom.label);
+  }
+
+  for (const preset of BASIC_OPENCODE_MODEL_PRESETS) {
+    const option = preset.modelIds
+      .map((id) => options.find((candidate) => candidate.id === id))
+      .find((candidate): candidate is AgentModelOption => Boolean(candidate));
+    if (option) push(option, preset.label);
+  }
+
+  return entries;
+}
+
+/**
+ * Visible options for the OpenCode quick select: quick entries, plus a current-value
+ * entry when the selection isn't quick-covered, plus (when expanded) all remaining
+ * model names — mirroring the Cursor preset/More… behavior.
+ */
+export function buildVisibleOpenCodeModelOptions(args: {
+  picker: ModelPickerState;
+  selected: AgentModelOption;
+  quickOptions: OpenCodeQuickOption[];
+  bShowAll: boolean;
+}): ModelSelectOption[] {
+  const { picker, selected, quickOptions, bShowAll } = args;
+  const options: ModelSelectOption[] = quickOptions.map(({ value, label }) => ({ value, label }));
+  const quickModelNames = new Set(quickOptions.map((entry) => entry.modelName));
+
+  if (!quickOptions.some((entry) => entry.optionId === selected.id)) {
+    const context = selected.context === 'Default' ? '' : `, ${selected.context}`;
+    options.push({
+      value: openCodeCurrentValue(selected.id),
+      label: `${selected.model} (${selected.thinking}${context})`
+    });
+  }
+
+  if (bShowAll) {
+    for (const model of picker.modelList) {
+      if (quickModelNames.has(model)) continue;
+      // The selected model is already represented by the current-value entry.
+      if (model === selected.model) continue;
+      options.push({ value: model, label: model });
+    }
+  }
+
+  return options;
+}
+
+export function hasHiddenOpenCodeModelOptions(args: {
+  bShowAll: boolean;
+  modelList: string[];
+  quickOptions: OpenCodeQuickOption[];
+}): boolean {
+  const { bShowAll, modelList, quickOptions } = args;
+  if (bShowAll) return false;
+  const quickModelNames = new Set(quickOptions.map((entry) => entry.modelName));
+  return modelList.some((model) => !quickModelNames.has(model));
 }
 
 export function buildVisibleModelOptions(args: {
