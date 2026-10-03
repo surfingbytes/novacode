@@ -88,7 +88,10 @@ const availableAgents = computed(() => {
   return agents;
 });
 
-const gridColsClass = computed(() => `grid-cols-${Math.min(availableAgents.value.length, 3)}`);
+const GRID_COLS_CLASSES = ['grid-cols-1', 'grid-cols-1', 'grid-cols-2', 'grid-cols-3', 'grid-cols-4', 'grid-cols-5'];
+const gridColsClass = computed(
+  () => GRID_COLS_CLASSES[Math.min(availableAgents.value.length, GRID_COLS_CLASSES.length - 1)],
+);
 const modalTitle = computed(() => props.title ?? 'New session');
 const modalEyebrow = computed(() => (props.title ? `// ${props.title.toLowerCase()}` : '// new session'));
 const createLabel = computed(() => props.submitLabel ?? 'Create');
@@ -205,7 +208,7 @@ watch(agentType, () => {
   <BaseModal
     :model-value="modelValue"
     labelledby="new-session-title"
-    panel-class="max-w-sm"
+    :panel-class="availableAgents.length > 3 ? 'max-w-md' : 'max-w-sm'"
     @update:model-value="close"
   >
     <!-- Panel -->
@@ -237,7 +240,7 @@ watch(agentType, () => {
                     v-for="agent in availableAgents"
                     :key="agent"
                     type="button"
-                    class="text-xs px-2 py-1.5 rounded-md border border-transparent transition-colors text-text-muted hover:text-text-primary hover:bg-fg/[0.06]"
+                    class="min-w-0 truncate text-xs px-1 sm:px-2 py-1.5 rounded-md border border-transparent transition-colors text-text-muted hover:text-text-primary hover:bg-fg/[0.06]"
                     :style="agentType === agent ? agentSelectedStyle(agent) : {}"
                     :title="
                       agent === 'cursor-agent'
