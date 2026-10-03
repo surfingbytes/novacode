@@ -18,7 +18,7 @@ import {
   isTimeoutError,
   type CursorAuthCheck
 } from '../classes/agentError';
-import { hasAnyOpenCodeAuth } from '../classes/openCodeProviders';
+import { hasAnyOpenCodeAuth, looksLikeOpenAiApiKey } from '../classes/openCodeProviders';
 
 const CURSOR_AUTH_FILE = '.config/cursor/auth.json';
 // OpenCode stores provider credentials in its XDG data dir. `config.agentEnv()` sets
@@ -233,9 +233,10 @@ export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
             existing = {};
           }
         }
+        const providerId = looksLikeOpenAiApiKey(trimmed) ? 'openai' : 'opencode-go';
         writeFileSync(
           authPath,
-          JSON.stringify({ ...existing, 'opencode-go': { key: trimmed, type: 'api' } }, null, 2),
+          JSON.stringify({ ...existing, [providerId]: { key: trimmed, type: 'api' } }, null, 2),
           'utf8'
         );
       } catch (err) {

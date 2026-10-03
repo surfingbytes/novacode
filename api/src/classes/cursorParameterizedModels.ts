@@ -9,12 +9,14 @@
 // node_modules
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import { join } from 'node:path';
 import { client, methods, ndJsonStream, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 import type { RequestPermissionRequest, RequestPermissionResponse, SessionConfigOption } from '@agentclientprotocol/sdk';
 
 // classes
 import { config } from './config';
 import type { CursorModelOption } from './cursorModels';
+import { createSwrCache, readSwrDiskCache, writeSwrDiskCache } from './swrCache';
 
 const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
 const PROBE_TIMEOUT_MS = 120_000;
@@ -26,8 +28,16 @@ const FAST_PARAM_ID = 'fast';
 type SelectOption = { value: string; name: string };
 type ParamValues = { id: string; values: string[]; currentValue?: string };
 
-let cache: { models: CursorModelOption[]; fetchedAt: number } | null = null;
-let inFlight: Promise<CursorModelOption[]> | null = null;
+function diskPath(): string {
+  return join(config.configDir, 'cache', 'cursor-parameterized-models.json');
+}
+
+const catalogCache = createSwrCache<CursorModelOption[]>({
+  ttlMs: CACHE_TTL_MS,
+  isValid: (models) => models.length > 1,
+  loadDisk: () => readSwrDiskCache<CursorModelOption[]>(diskPath()),
+  saveDisk: (entry) => writeSwrDiskCache(diskPath(), entry),
+});
 
 function autoApprovePermission(params: RequestPermissionRequest): RequestPermissionResponse {
   const allowOption = params.options.find(
@@ -368,32 +378,22 @@ async function probeParameterizedModels(): Promise<CursorModelOption[]> {
  * Prefer ACP parameterized catalog (includes default context windows like 272k).
  * Falls back to empty so callers can use the CLI variants list.
  */
+async function fetchParameterizedModels(): Promise<CursorModelOption[]> {
+  return withTimeout(
+    probeParameterizedModels(),
+    PROBE_TIMEOUT_MS,
+    'parameterized cursor models probe'
+  ).catch(() => [] as CursorModelOption[]);
+}
+
 export async function getParameterizedCursorModels(): Promise<{
   models: CursorModelOption[];
   fromCache: boolean;
 }> {
-  const now = Date.now();
-  if (cache && now - cache.fetchedAt < CACHE_TTL_MS) {
-    return { models: cache.models, fromCache: true };
-  }
+  const { value, fromCache } = await catalogCache.get(fetchParameterizedModels);
+  return { models: value, fromCache };
+}
 
-  if (!inFlight) {
-    inFlight = withTimeout(
-      probeParameterizedModels(),
-      PROBE_TIMEOUT_MS,
-      'parameterized cursor models probe'
-    )
-      .catch(() => [] as CursorModelOption[])
-      .finally(() => {
-        inFlight = null;
-      });
-  }
-
-  const models = await inFlight;
-  if (models.length > 1) {
-    cache = { models, fetchedAt: Date.now() };
-    return { models, fromCache: false };
-  }
-
-  return { models: [], fromCache: false };
+export function resetParameterizedCursorModelsCache(): void {
+  catalogCache.reset();
 }

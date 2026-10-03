@@ -280,10 +280,13 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
   const globalAny = globalThis as any;
   if (!globalAny.__chatBroadcastHookInstalled) {
     globalAny.__chatBroadcastHookInstalled = true;
+    // busy=true re-fires on every subagent count update; attach once per run.
+    const runsWithBroadcast = new WeakSet<object>();
     subscribeBusy((sessionId, _workspaceId, busy) => {
       if (!busy) return;
       const run = getActiveRun(sessionId);
-      if (!run) return;
+      if (!run || runsWithBroadcast.has(run)) return;
+      runsWithBroadcast.add(run);
       run.subscribers.add({
         onStream: (line) => broadcastChat(sessionId, { type: 'stream', data: line }),
         onDone: () => broadcastChat(sessionId, { type: 'done' }),

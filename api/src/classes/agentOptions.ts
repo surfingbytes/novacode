@@ -1,6 +1,7 @@
 // node_modules
 import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import { join } from 'node:path';
 import stripAnsi from 'strip-ansi';
 import {
   client,
@@ -24,6 +25,8 @@ import { getParameterizedCursorModels } from './cursorParameterizedModels';
 import { getOpenCodeModels } from './openCodeModels';
 import { getAgentModes, MODE_SENTINEL } from './agentModes';
 import { getAgentConfigOptions } from './agentConfigOptions';
+import { logger } from './logger';
+import { createSwrCache, readSwrDiskCache, writeSwrDiskCache } from './swrCache';
 
 // types
 import type { AgentType } from '../@types/index';
@@ -59,7 +62,32 @@ export interface AgentOptionsResponse {
   source: 'cli' | 'acp' | 'mixed' | 'static';
 }
 
-const cache = new Map<string, { options: Omit<AgentOptionsResponse, 'fromCache'>; fetchedAt: number }>();
+type CachedAgentOptions = Omit<AgentOptionsResponse, 'fromCache'>;
+
+const optionCaches = new Map<string, ReturnType<typeof createSwrCache<CachedAgentOptions>>>();
+
+function agentOptionsDiskPath(cacheKey: string): string {
+  const safe = cacheKey.replace(/[^a-z0-9._-]+/gi, '_');
+  return join(config.configDir, 'cache', 'agent-options', `${safe}.json`);
+}
+
+function optionsCache(cacheKey: string) {
+  let cached = optionCaches.get(cacheKey);
+  if (!cached) {
+    cached = createSwrCache<CachedAgentOptions>({
+      ttlMs: CACHE_TTL_MS,
+      isValid: (options) => options.models.length > 0,
+      loadDisk: () => readSwrDiskCache<CachedAgentOptions>(agentOptionsDiskPath(cacheKey)),
+      saveDisk: (entry) => writeSwrDiskCache(agentOptionsDiskPath(cacheKey), entry),
+    });
+    optionCaches.set(cacheKey, cached);
+  }
+  return cached;
+}
+
+function agentOptionsCacheKey(agentType: AgentType, claudeToken?: string | null): string {
+  return agentType === 'claude' ? `${agentType}:${claudeToken ? 'auth' : 'anon'}` : agentType;
+}
 
 function autoApprovePermission(params: RequestPermissionRequest): RequestPermissionResponse {
   const allowOption = params.options.find(
@@ -534,26 +562,35 @@ function withFallbacks(
   };
 }
 
+async function fetchAgentOptions(
+  agentType: AgentType,
+  claudeToken?: string | null
+): Promise<CachedAgentOptions> {
+  return agentType === 'cursor-agent'
+    ? cursorOptions()
+    : agentType === 'claude'
+      ? withFallbacks(agentType, await probeClaudeOptions(claudeToken))
+      : withFallbacks(agentType, await probeSubprocessAcpOptions(agentType));
+}
+
 export async function getAgentOptions(
   agentType: AgentType,
   opts?: { claudeToken?: string | null }
 ): Promise<AgentOptionsResponse> {
-  const now = Date.now();
-  const cacheKey = agentType === 'claude'
-    ? `${agentType}:${opts?.claudeToken ? 'auth' : 'anon'}`
-    : agentType;
-  const cached = cache.get(cacheKey);
-  if (cached && now - cached.fetchedAt < CACHE_TTL_MS) {
-    return { ...cached.options, fromCache: true };
+  const cacheKey = agentOptionsCacheKey(agentType, opts?.claudeToken);
+  const cached = await optionsCache(cacheKey).get(() => fetchAgentOptions(agentType, opts?.claudeToken));
+  return { ...cached.value, fromCache: cached.fromCache };
+}
+
+export function warmupCursorAgentOptions(): void {
+  void getAgentOptions('cursor-agent').catch((err) => {
+    logger.warn({ err }, 'Cursor agent options warmup failed');
+  });
+}
+
+export function resetAgentOptionsCache(): void {
+  for (const cached of optionCaches.values()) {
+    cached.reset();
   }
-
-  const options =
-    agentType === 'cursor-agent'
-      ? await cursorOptions()
-      : agentType === 'claude'
-        ? withFallbacks(agentType, await probeClaudeOptions(opts?.claudeToken))
-        : withFallbacks(agentType, await probeSubprocessAcpOptions(agentType));
-
-  cache.set(cacheKey, { options, fetchedAt: now });
-  return { ...options, fromCache: false };
+  optionCaches.clear();
 }

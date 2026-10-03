@@ -41,6 +41,7 @@ import { logger } from './classes/logger';
 import { resolveCorsOrigin } from './classes/corsOrigin';
 import { applyReachableMcpAutoload } from './classes/mcpServersForAcp';
 import { signalStartupReady } from './classes/startupStatus';
+import { warmupCursorAgentOptions } from './classes/agentOptions';
 import { isLocalLoginEnabled, readOidcSettings } from './classes/oidc';
 
 const startTime = Date.now();
@@ -235,6 +236,8 @@ async function main(): Promise<void> {
     .catch((err) => {
       fastify.log.warn({ err }, 'MCP autoload probe failed');
     });
+
+  warmupCursorAgentOptions();
 
   // recover stale orchestrator runs from previous process
   try {

@@ -29,7 +29,7 @@ export interface SaveOpenCodeProviderInput {
   adapter: OpenCodeProviderAdapter;
   npm?: string;
   baseURL: string;
-  models: OpenCodeProviderModel[];
+  models?: OpenCodeProviderModel[];
   apiKey?: string;
 }
 
@@ -156,22 +156,71 @@ function validateUrl(rawUrl: string): string {
   }
 }
 
-function validateModels(models: OpenCodeProviderModel[]): OpenCodeProviderModel[] {
+const NON_CHAT_MODEL_RE =
+  /embedding|whisper|tts|dall-e|dalle|moderation|transcribe|gpt-image|sora|realtime|babbage|davinci|text-similarity|text-search|code-search|omni-moderation/i;
+
+export function looksLikeOpenAiApiKey(key: string): boolean {
+  return /^sk-(?:proj-|svcacct-)?/i.test(key.trim());
+}
+
+function prettifyModelId(id: string): string {
+  return id
+    .split(/[/:_\-\s]+/)
+    .filter(Boolean)
+    .map((token) => {
+      const lower = token.toLowerCase();
+      if (lower === 'gpt') return 'GPT';
+      if (/^\d/.test(token)) return token.toUpperCase();
+      return lower.charAt(0).toUpperCase() + lower.slice(1);
+    })
+    .join(' ');
+}
+
+function isAgentModelId(id: string): boolean {
+  const lower = id.toLowerCase();
+  if (NON_CHAT_MODEL_RE.test(lower)) return false;
+  return /^(gpt-|o[0-9]|chatgpt|codex)/.test(lower) || lower.includes('gpt-');
+}
+
+function normalizeModels(models: OpenCodeProviderModel[]): OpenCodeProviderModel[] {
   const normalized = models
     .map((model) => ({
       id: model.id.trim(),
       name: model.name.trim() || model.id.trim()
     }))
     .filter((model) => model.id);
-  if (normalized.length === 0) {
-    throw new Error('At least one model id is required.');
-  }
   for (const model of normalized) {
     if (!/^[a-z0-9][a-z0-9._:/@+-]*$/i.test(model.id)) {
       throw new Error(`Invalid model id: ${model.id}`);
     }
   }
   return normalized;
+}
+
+export async function discoverOpenAiCompatibleModels(
+  baseURL: string,
+  apiKey: string
+): Promise<OpenCodeProviderModel[]> {
+  const url = `${baseURL.replace(/\/+$/, '')}/models`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(15_000)
+  });
+  if (!response.ok) {
+    throw new Error(`Could not list models from the API (${response.status}).`);
+  }
+  const body: unknown = await response.json();
+  const records =
+    body && typeof body === 'object' && Array.isArray((body as { data?: unknown }).data)
+      ? (body as { data: Array<{ id?: unknown }> }).data
+      : [];
+  const models = records
+    .map((record) => (typeof record.id === 'string' ? record.id.trim() : ''))
+    .filter((id) => id && isAgentModelId(id))
+    .map((id) => ({ id, name: prettifyModelId(id) }));
+  const unique = new Map<string, OpenCodeProviderModel>();
+  for (const model of models) unique.set(model.id, model);
+  return [...unique.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
 function isAuthenticated(auth: Record<string, OpenCodeAuthEntry>, providerId: string): boolean {
@@ -218,10 +267,10 @@ export function hasAnyOpenCodeAuth(configDir: string): boolean {
   });
 }
 
-export function saveOpenCodeProvider(
+export async function saveOpenCodeProvider(
   configDir: string,
   input: SaveOpenCodeProviderInput
-): OpenCodeProviderSummary {
+): Promise<OpenCodeProviderSummary> {
   const id = validateProviderId(input.id);
   const name = input.name.trim() || id;
   const baseURL = validateUrl(input.baseURL);
@@ -229,7 +278,22 @@ export function saveOpenCodeProvider(
   if (!npm) {
     throw new Error('Provider package is required for custom adapters.');
   }
-  const models = validateModels(input.models);
+
+  let models = normalizeModels(input.models ?? []);
+  const existingAuth = readAuth(configDir);
+  const apiKey = input.apiKey?.trim() || existingAuth[id]?.key?.trim();
+
+  if (models.length === 0 && input.adapter === 'openai-compatible') {
+    if (!apiKey) {
+      throw new Error('API key required to load models, or add at least one model id.');
+    }
+    models = await discoverOpenAiCompatibleModels(baseURL, apiKey);
+    if (models.length === 0) {
+      throw new Error('The API returned no chat models. Add model ids manually.');
+    }
+  } else if (models.length === 0 && input.adapter !== 'openai') {
+    throw new Error('At least one model id is required.');
+  }
 
   const configRoot = readJsonObject(configPath(configDir));
   if (!configRoot.$schema) {
@@ -240,27 +304,29 @@ export function saveOpenCodeProvider(
   // that may have been set manually or by other tools — a re-save from the
   // dashboard must not strip them.
   const existingModels = objectProp(objectProp(providers[id]).models);
-  providers[id] = {
+  const nextProvider: JsonRecord = {
     npm,
     name,
-    options: { baseURL },
-    models: Object.fromEntries(
+    options: { baseURL }
+  };
+  if (models.length > 0) {
+    nextProvider['models'] = Object.fromEntries(
       models.map((model) => [
         model.id,
         { ...objectProp(existingModels[model.id]), name: model.name }
       ])
-    )
-  };
+    );
+  }
+  providers[id] = nextProvider;
   writeJsonObject(configPath(configDir), configRoot);
 
-  const apiKey = input.apiKey?.trim();
-  if (apiKey) {
+  if (input.apiKey?.trim()) {
     const auth = readAuth(configDir);
-    auth[id] = { key: apiKey, type: 'api' };
+    auth[id] = { key: input.apiKey.trim(), type: 'api' };
     writeAuth(configDir, auth);
   }
 
-  const authenticated = apiKey ? true : isAuthenticated(readAuth(configDir), id);
+  const authenticated = Boolean(input.apiKey?.trim()) || isAuthenticated(readAuth(configDir), id);
   return { id, name, npm, adapter: adapterFromNpm(npm), baseURL, models, authenticated };
 }
 

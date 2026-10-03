@@ -487,7 +487,7 @@ export interface SaveOpenCodeProviderPayload {
   adapter: OpenCodeProviderAdapter;
   npm?: string;
   baseURL: string;
-  models: OpenCodeProviderModel[];
+  models?: OpenCodeProviderModel[];
   apiKey?: string;
 }
 

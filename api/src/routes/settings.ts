@@ -296,7 +296,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     adapter: OpenCodeProviderAdapterSchema,
     npm: Type.Optional(Type.String()),
     baseURL: Type.String(),
-    models: Type.Array(OpenCodeProviderModelSchema),
+    models: Type.Optional(Type.Array(OpenCodeProviderModelSchema)),
     apiKey: Type.Optional(Type.String())
   });
 
@@ -333,7 +333,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.status(400).send({ error: 'Provider id cannot be changed while editing.' });
       }
       try {
-        const provider = saveOpenCodeProvider(config.configDir, body);
+        const provider = await saveOpenCodeProvider(config.configDir, body);
         clearOpenCodeModelsCache();
         return provider;
       } catch (err) {

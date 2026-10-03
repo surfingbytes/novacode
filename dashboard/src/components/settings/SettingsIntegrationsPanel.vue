@@ -269,6 +269,21 @@ const openAddOpenCodeProvider = (): void => {
   bShowOpenCodeProviderModal.value = true;
 };
 
+const openAddOpenAIProvider = (): void => {
+  openCodeProviderEditId.value = null;
+  openCodeProviderError.value = '';
+  openCodeProviderForm.value = {
+    id: 'openai',
+    name: 'OpenAI',
+    adapter: 'openai',
+    npm: '',
+    baseURL: 'https://api.openai.com/v1',
+    models: '',
+    apiKey: ''
+  };
+  bShowOpenCodeProviderModal.value = true;
+};
+
 const openAddKimiProvider = (): void => {
   openCodeProviderEditId.value = null;
   openCodeProviderError.value = '';
@@ -333,8 +348,13 @@ const saveOpenCodeProvider = async (): Promise<void> => {
     return;
   }
   const models = parseOpenCodeProviderModels();
-  if (models.length === 0) {
+  const usesApiCatalog = form.adapter === 'openai' || form.adapter === 'openai-compatible';
+  if (models.length === 0 && !usesApiCatalog) {
     openCodeProviderError.value = 'Add at least one model id.';
+    return;
+  }
+  if (models.length === 0 && usesApiCatalog && !form.apiKey.trim() && !openCodeProviderEditId.value) {
+    openCodeProviderError.value = 'Paste an API key to load models, or add model ids.';
     return;
   }
   if (form.adapter === 'custom' && !form.npm.trim()) {
@@ -610,6 +630,7 @@ onMounted((): void => {
               <span class="nc-chip" :class="bOpenCodeAuthenticated ? 'success' : ''">{{ openCodeProviderCountLabel }}</span>
             </div>
             <div class="settings-auth-card__actions">
+              <button class="settings-btn-accent" @click="openAddOpenAIProvider">Add OpenAI</button>
               <button class="settings-btn-accent" @click="openAddKimiProvider">Add Moonshot/Kimi</button>
               <button class="settings-btn" @click="openAddOpenCodeProvider">Add custom provider</button>
               <button class="settings-btn" @click="openOpenCodeApiKeyModal">Legacy OpenCode key</button>
@@ -642,7 +663,11 @@ onMounted((): void => {
                     </div>
                     <p class="mt-1 truncate font-mono text-xs text-text-muted">{{ provider.baseURL }}</p>
                     <p class="mt-1 text-xs text-text-muted">
-                      {{ provider.models.map((model) => model.name || model.id).join(', ') }}
+                      {{
+                        provider.models.length > 0
+                          ? provider.models.map((model) => model.name || model.id).join(', ')
+                          : 'Uses provider catalog'
+                      }}
                     </p>
                   </div>
                   <div class="flex shrink-0 items-center gap-1">
@@ -792,12 +817,12 @@ onMounted((): void => {
               <div>
                 <label class="block text-sm font-medium text-text-primary mb-1.5">
                   Models
-                  <span class="text-text-muted font-normal">(one per line, id=name)</span>
+                  <span class="text-text-muted font-normal">(one per line, id=name; leave empty to load from the API)</span>
                 </label>
                 <textarea
                   v-model="openCodeProviderForm.models"
                   rows="4"
-                  placeholder="kimi-k3=Kimi K3"
+                  placeholder="Leave empty to load all chat models"
                   class="w-full bg-fg/[0.05] border border-fg/[0.1] rounded-lg px-3 py-2.5 text-sm text-text-primary font-mono placeholder:text-text-muted outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/10 transition-all resize-y"
                   :disabled="bSavingOpenCodeProvider"
                 ></textarea>
