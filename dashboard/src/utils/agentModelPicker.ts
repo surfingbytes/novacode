@@ -34,7 +34,7 @@ export type ModelSelectOption = { value: string; label: string };
  * API `option.id` in preference order — the first id present in the catalog wins.
  */
 export const BASIC_OPENCODE_MODEL_PRESETS = [
-  { label: 'GPT 6', modelIds: ['openai/gpt-6-sol', 'openai/gpt-6'] }
+  { label: 'GPT 6.1', modelIds: ['openai/gpt-6.1-sol', 'openai/gpt-6-sol', 'openai/gpt-6'] }
 ] as const;
 
 /** Custom provider model (from opencode.json via /settings/opencode-providers). */
@@ -321,7 +321,7 @@ export function buildCursorPresetOptions(options: AgentModelOption[]): ModelSele
 
 /**
  * OpenCode quick-menu entries: Auto (when in the catalog), then custom provider
- * models with their configured names, then built-in presets (GPT 6).
+ * models with their configured names, then built-in presets (GPT 6.1).
  * Entries whose id is absent from the catalog are skipped.
  */
 export function buildOpenCodeQuickOptions(

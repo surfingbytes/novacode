@@ -67,6 +67,7 @@ function openCodeOption(id: string, model?: string, thinking = 'Default'): Agent
 
 const OPENCODE_CATALOG: AgentModelOption[] = [
   openCodeOption('moonshot/kimi-k3', 'Moonshot Kimi K3'),
+  openCodeOption('openai/gpt-6.1-sol', 'Openai GPT 6.1 Sol'),
   openCodeOption('openai/gpt-6-sol', 'Openai GPT 6 Sol'),
   openCodeOption('openai/gpt-6-sol-fast', 'Openai GPT 6 Sol', 'Fast'),
   openCodeOption('openai/gpt-6-astra', 'Openai GPT 6 Astra'),
@@ -74,15 +75,21 @@ const OPENCODE_CATALOG: AgentModelOption[] = [
 ];
 
 describe('buildOpenCodeQuickOptions', () => {
-  it('lists custom provider models with configured names, then GPT 6', () => {
+  it('lists custom provider models with configured names, then GPT 6.1 (Sol)', () => {
     const quick = buildOpenCodeQuickOptions(OPENCODE_CATALOG, [
       { id: 'moonshot/kimi-k3', label: 'Kimi K3' },
     ]);
-    expect(quick.map((entry) => entry.label)).toEqual(['Kimi K3', 'GPT 6']);
+    expect(quick.map((entry) => entry.label)).toEqual(['Kimi K3', 'GPT 6.1']);
     expect(quick.map((entry) => entry.optionId)).toEqual([
       'moonshot/kimi-k3',
-      'openai/gpt-6-sol',
+      'openai/gpt-6.1-sol',
     ]);
+  });
+
+  it('falls back to GPT 6 Sol when 6.1 is absent from the catalog', () => {
+    const without61 = OPENCODE_CATALOG.filter((option) => option.id !== 'openai/gpt-6.1-sol');
+    const quick = buildOpenCodeQuickOptions(without61, []);
+    expect(quick.map((entry) => entry.optionId)).toEqual(['openai/gpt-6-sol']);
   });
 
   it('puts Auto first when the catalog has it', () => {
@@ -97,7 +104,7 @@ describe('buildOpenCodeQuickOptions', () => {
     const quick = buildOpenCodeQuickOptions(OPENCODE_CATALOG, [
       { id: 'moonshot/kimi-k2', label: 'Kimi K2' },
     ]);
-    expect(quick.map((entry) => entry.label)).toEqual(['GPT 6']);
+    expect(quick.map((entry) => entry.label)).toEqual(['GPT 6.1']);
   });
 
   it('returns an empty list when nothing matches', () => {
@@ -110,7 +117,7 @@ describe('buildVisibleOpenCodeModelOptions', () => {
   const customModels = [{ id: 'moonshot/kimi-k3', label: 'Kimi K3' }];
 
   it('shows quick entries plus the current selection when it is not quick-covered', () => {
-    const selected = OPENCODE_CATALOG[4]!;
+    const selected = OPENCODE_CATALOG[5]!;
     const picker = buildModelPickerState(OPENCODE_CATALOG, selected);
     const quick = buildOpenCodeQuickOptions(OPENCODE_CATALOG, customModels);
     const visible = buildVisibleOpenCodeModelOptions({
@@ -121,7 +128,7 @@ describe('buildVisibleOpenCodeModelOptions', () => {
     });
     expect(visible.map((option) => option.label)).toEqual([
       'Kimi K3',
-      'GPT 6',
+      'GPT 6.1',
       'Openai GPT 5 5 (Default)',
     ]);
     expect(visible[2]!.value).toBe(openCodeCurrentValue('openai/gpt-5.5'));
@@ -139,14 +146,15 @@ describe('buildVisibleOpenCodeModelOptions', () => {
     });
     expect(visible.map((option) => option.label)).toEqual([
       'Kimi K3',
-      'GPT 6',
+      'GPT 6.1',
       'Openai GPT 5 5',
       'Openai GPT 6 Astra',
+      'Openai GPT 6 Sol',
     ]);
   });
 
   it('shows a variant selection with its thinking dimension', () => {
-    const selected = OPENCODE_CATALOG[2]!; // gpt-6-sol-fast
+    const selected = OPENCODE_CATALOG[3]!; // gpt-6-sol-fast
     const picker = buildModelPickerState(OPENCODE_CATALOG, selected);
     const quick = buildOpenCodeQuickOptions(OPENCODE_CATALOG, customModels);
     const visible = buildVisibleOpenCodeModelOptions({
@@ -157,7 +165,7 @@ describe('buildVisibleOpenCodeModelOptions', () => {
     });
     expect(visible.map((option) => option.label)).toEqual([
       'Kimi K3',
-      'GPT 6',
+      'GPT 6.1',
       'Openai GPT 6 Sol (Fast)',
     ]);
   });
@@ -191,7 +199,7 @@ describe('hasHiddenOpenCodeModelOptions', () => {
     expect(
       hasHiddenOpenCodeModelOptions({
         bShowAll: false,
-        modelList: ['Moonshot Kimi K3', 'Openai GPT 6 Sol'],
+        modelList: ['Moonshot Kimi K3', 'Openai GPT 6.1 Sol'],
         quickOptions: quick,
       })
     ).toBe(false);
