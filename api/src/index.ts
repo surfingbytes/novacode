@@ -41,7 +41,7 @@ import { logger } from './classes/logger';
 import { resolveCorsOrigin } from './classes/corsOrigin';
 import { applyReachableMcpAutoload } from './classes/mcpServersForAcp';
 import { signalStartupReady } from './classes/startupStatus';
-import { warmupCursorAgentOptions } from './classes/agentOptions';
+import { warmupAgentOptions } from './classes/agentOptions';
 import { isLocalLoginEnabled, readOidcSettings } from './classes/oidc';
 
 const startTime = Date.now();
@@ -237,7 +237,16 @@ async function main(): Promise<void> {
       fastify.log.warn({ err }, 'MCP autoload probe failed');
     });
 
-  warmupCursorAgentOptions();
+  void db
+    .listUsers()
+    .then((users) => users.find((user) => user.claudeToken)?.claudeToken ?? null)
+    .catch((err) => {
+      logger.warn({ err }, 'Failed to load Claude token for agent options warmup');
+      return null;
+    })
+    .then((claudeToken) => {
+      warmupAgentOptions({ claudeToken });
+    });
 
   // recover stale orchestrator runs from previous process
   try {

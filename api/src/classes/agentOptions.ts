@@ -582,10 +582,24 @@ export async function getAgentOptions(
   return { ...cached.value, fromCache: cached.fromCache };
 }
 
-export function warmupCursorAgentOptions(): void {
-  void getAgentOptions('cursor-agent').catch((err) => {
-    logger.warn({ err }, 'Cursor agent options warmup failed');
-  });
+const ALL_AGENT_TYPES: AgentType[] = [
+  'cursor-agent',
+  'claude',
+  'mistral-vibe',
+  'open-code',
+  'codex',
+];
+
+export function warmupAgentOptions(opts?: { claudeToken?: string | null }): void {
+  const claudeToken = opts?.claudeToken ?? process.env['CLAUDE_CODE_OAUTH_TOKEN'] ?? null;
+  for (const agentType of ALL_AGENT_TYPES) {
+    void getAgentOptions(
+      agentType,
+      agentType === 'claude' ? { claudeToken } : undefined
+    ).catch((err) => {
+      logger.warn({ err, agentType }, 'Agent options warmup failed');
+    });
+  }
 }
 
 export function resetAgentOptionsCache(): void {
