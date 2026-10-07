@@ -63,8 +63,11 @@ ENV PATH="/root/.local/bin:/root/.opencode/bin:/usr/local/bin:${PATH}"
 # Install Cursor agent CLI (official installer does not expose a version pin)
 RUN curl https://cursor.com/install -fsS | bash
 
-# Install Mistral Vibe CLI (official installer does not expose a version pin)
-RUN curl -LsSf https://mistral.ai/vibe/install.sh | bash
+# Install Mistral Vibe CLI via uv. Official install.sh builds from source (needs
+# cargo); --python 3.12 --no-build uses the published manylinux wheel instead.
+ARG MISTRAL_VIBE_VERSION=2.26.0
+RUN curl -LsSf https://astral.sh/uv/0.11.26/install.sh | sh \
+    && uv tool install "mistral-vibe==${MISTRAL_VIBE_VERSION}" --python 3.12 --no-build
 
 # Install OpenCode CLI
 ARG OPENCODE_VERSION=1.18.33

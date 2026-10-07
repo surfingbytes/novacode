@@ -9,8 +9,9 @@ RUN npm install -g @anthropic-ai/claude-code
 # Install Cursor agent CLI
 RUN curl https://cursor.com/install -fsS | bash
 
-# Install Mistral Vibe CLI
-RUN curl -LsSf https://mistral.ai/vibe/install.sh | bash
+# Install Mistral Vibe CLI via uv (wheel needs 3.12; source build needs cargo)
+RUN curl -LsSf https://astral.sh/uv/0.11.26/install.sh | sh \
+    && uv tool install mistral-vibe --python 3.12 --no-build
 
 # Install OpenCode CLI
 RUN curl -fsSL https://opencode.ai/install | bash
