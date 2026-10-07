@@ -51,7 +51,8 @@ function checkStdio(configDir: string, cfg: McpClientServerConfig): Promise<McpC
       child = spawn(cmd, args, {
         cwd: configDir,
         env,
-        stdio: 'ignore',
+        // Keep stdin open: stdio MCP servers exit normally when they receive EOF.
+        stdio: ['pipe', 'ignore', 'ignore'],
         shell: false
       });
     } catch (e) {
