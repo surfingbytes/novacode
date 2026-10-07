@@ -20,6 +20,8 @@ import type { AcpSessionResponse } from './acpSessionHelpers';
 import { extractAgentErrorDetail } from './agentError';
 import type { AgentErrorDetail } from './agentError';
 import { logger } from './logger';
+import { config } from './config';
+import { getConfiguredAcpMcpServers } from './mcpServersForAcp';
 import { buildPromptContent, sessionResetNoticeEventLine } from './acpSubprocessRunner';
 import type { AcpPermissionHandler, AcpPromptAttachment, SessionConfigSyncHandler } from './acpSubprocessRunner';
 
@@ -177,23 +179,24 @@ export async function runClaudeAcp(
   }
 
   const agent = await getSharedAgent();
+  const mcpServers = await getConfiguredAcpMcpServers(config.configDir);
   let resolvedSessionId: string;
   let sessionResponse: AcpSessionResponse;
   /** True when a brand-new conversation was created (rules must be injected). */
   let isFreshSession = false;
 
   if (!acpSessionId) {
-    const created = await agent.newSession({ cwd, mcpServers: [] });
+    const created = await agent.newSession({ cwd, mcpServers });
     sessionResponse = created;
     resolvedSessionId = created.sessionId;
     isFreshSession = true;
   } else {
     try {
-      sessionResponse = await agent.resumeSession({ sessionId: acpSessionId, cwd, mcpServers: [] });
+      sessionResponse = await agent.resumeSession({ sessionId: acpSessionId, cwd, mcpServers });
       resolvedSessionId = acpSessionId;
     } catch {
       onEvent(sessionResetNoticeEventLine());
-      const created = await agent.newSession({ cwd, mcpServers: [] });
+      const created = await agent.newSession({ cwd, mcpServers });
       sessionResponse = created;
       resolvedSessionId = created.sessionId;
       isFreshSession = true;

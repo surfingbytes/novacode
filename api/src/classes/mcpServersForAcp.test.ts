@@ -7,6 +7,7 @@ import { writeAgentMcpAutoloadFiles, writeMcpClients } from './config';
 import {
   applyMcpAutoloadFromChecks,
   getMcpAutoloadStatus,
+  getConfiguredAcpMcpServers,
   mcpUnavailableNoticeText,
   partitionMcpClients,
   toAcpMcpServer
@@ -140,6 +141,30 @@ describe('writeMcpClients', () => {
 });
 
 describe('applyMcpAutoloadFromChecks', () => {
+  it('loads Settings servers for ACP and reflects edits, disabling and deletion', async () => {
+    const configDir = tempConfigDir();
+    const clients = {
+      files: { command: 'uvx', args: ['files'], env: { TOKEN: 'test' } },
+      down: { url: 'http://127.0.0.1:1/mcp' },
+      disabled: { url: 'http://disabled/mcp', enabled: false }
+    };
+    writeMcpClients(configDir, clients);
+    applyMcpAutoloadFromChecks(configDir, clients, {
+      files: { ok: true, kind: 'stdio' },
+      down: { ok: false, kind: 'http' },
+      disabled: { ok: true, kind: 'http' }
+    });
+    expect(await getConfiguredAcpMcpServers(configDir)).toEqual([
+      { name: 'files', command: 'uvx', args: ['files'], env: [{ name: 'TOKEN', value: 'test' }] }
+    ]);
+    writeMcpClients(configDir, { files: { ...clients.files, args: ['updated'] } });
+    expect((await getConfiguredAcpMcpServers(configDir))[0]).toMatchObject({ args: ['updated'] });
+    writeMcpClients(configDir, { files: { ...clients.files, enabled: false } });
+    expect(await getConfiguredAcpMcpServers(configDir)).toEqual([]);
+    writeMcpClients(configDir, {});
+    expect(await getConfiguredAcpMcpServers(configDir)).toEqual([]);
+  });
+
   it('writes only reachable servers to agent autoload files', () => {
     const configDir = tempConfigDir();
     const clients = {

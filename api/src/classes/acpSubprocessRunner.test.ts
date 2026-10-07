@@ -12,7 +12,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 
 // classes
 import {
@@ -21,6 +21,11 @@ import {
   runAcpSubprocessPrompt,
 } from './acpSubprocessRunner';
 import type { AcpAskQuestionHandler, AcpPermissionHandler } from './acpSubprocessRunner';
+import * as mcpSettings from './mcpServersForAcp';
+
+beforeEach(() => {
+  vi.spyOn(mcpSettings, 'getConfiguredAcpMcpServers').mockResolvedValue([]);
+});
 
 const MOCK_AGENT_PATH = join(process.cwd(), 'src', 'classes', '__fixtures__', 'mockAcpAgent.mjs');
 const MOCK_SESSION_ID = 'mock-acp-session-1';
@@ -48,6 +53,7 @@ function setupMock(mode: string): { workDir: string; logPath: string } {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   delete process.env.MOCK_MODE;
   delete process.env.MOCK_LOG;
   delete process.env.MOCK_TRANSCRIPTS_DIR;
@@ -106,6 +112,18 @@ function runMock(
 }
 
 describe('runAcpSubprocessPrompt', () => {
+  it.each([null, 'existing-session-42'])('passes Settings MCP servers on new and resumed sessions (%s)', async (sessionId) => {
+    const { workDir, logPath } = setupMock('prompt-ok');
+    const servers = [{ name: 'search-console', command: 'uvx', args: ['mcp-search-console'], env: [] }];
+    vi.mocked(mcpSettings.getConfiguredAcpMcpServers).mockResolvedValue(servers);
+
+    const result = await runMock('nova-settings-mcp', sessionId, workDir);
+
+    expect(result.error).toBeUndefined();
+    const call = readMockLog(logPath).find((m) => m.method === (sessionId ? 'session/load' : 'session/new'));
+    expect(call?.params?.mcpServers).toEqual(servers);
+  });
+
   it('creates a new ACP session on the first turn and returns its id', async () => {
     const { workDir, logPath } = setupMock('prompt-ok');
 

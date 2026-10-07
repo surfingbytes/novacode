@@ -37,6 +37,21 @@ export function getMcpAutoloadStatus(): McpAutoloadStatus {
   return autoloadStatus;
 }
 
+/** Use the Settings configuration for ACP agents as well as file-based clients. */
+export async function getConfiguredAcpMcpServers(configDir: string): Promise<McpServer[]> {
+  if (autoloadStatus.status === 'pending') {
+    await applyReachableMcpAutoload(configDir);
+  }
+  const reachable = new Set(autoloadStatus.enabled);
+  const servers: McpServer[] = [];
+  for (const [name, cfg] of Object.entries(readMcpClients(configDir))) {
+    if (!isMcpClientEnabled(cfg) || !reachable.has(name)) continue;
+    const server = toAcpMcpServer(name, cfg);
+    if (server) servers.push(server);
+  }
+  return servers;
+}
+
 function headersToAcp(headers?: Record<string, string>): Array<{ name: string; value: string }> {
   return Object.entries(headers ?? {}).map(([name, value]) => ({ name, value }));
 }

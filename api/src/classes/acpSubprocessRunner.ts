@@ -29,7 +29,7 @@ import { applySessionMode, applySessionModel, applySessionConfig, findConfigOpti
 import type { AcpSessionResponse } from './acpSessionHelpers';
 import { extractAgentErrorDetail, type AgentErrorDetail } from './agentError';
 import { logger, truncateLogText } from './logger';
-import { mcpUnavailableNoticeEventLine } from './mcpServersForAcp';
+import { getConfiguredAcpMcpServers, mcpUnavailableNoticeEventLine } from './mcpServersForAcp';
 import { createSubagentTranscriptWatcher } from './cursorSubagentTranscripts';
 
 export type AcpEventHandler = (line: string) => void;
@@ -1183,7 +1183,7 @@ export async function runAcpSubprocessPrompt(
       let sessionResponse: AcpSessionResponse;
       let resolvedModeId: string | undefined;
       let resolvedModelId: string | undefined;
-      const mcpServers = params.mcpServers ?? [];
+      const mcpServers = params.mcpServers ?? await getConfiguredAcpMcpServers(config.configDir);
 
       const newSession = async (servers: McpServer[]): Promise<NewSessionResponse> => {
         phase('session:new:start');
