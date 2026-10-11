@@ -105,4 +105,15 @@ fi
 write_status "api" "Starting API…" 90
 log "handing off to API"
 
+# Password-required sudo for the runtime user (Terminal tab). Agents without
+# that password cannot elevate. Sudoers is rewritten each start from UID/passwd.
+if command -v sudo >/dev/null 2>&1; then
+  runtime_user="$(getent passwd "$uid" | cut -d: -f1 || true)"
+  if [ -n "$runtime_user" ]; then
+    printf '%s ALL=(ALL:ALL) ALL\n' "$runtime_user" > /etc/sudoers.d/novacode-runtime
+    chmod 440 /etc/sudoers.d/novacode-runtime
+    log "sudo enabled for ${runtime_user} (password required)"
+  fi
+fi
+
 exec gosu "${uid}:${gid}" "$@"

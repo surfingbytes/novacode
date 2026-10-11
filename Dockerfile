@@ -48,9 +48,10 @@ RUN --mount=type=cache,target=/root/.cache/prisma \
 FROM node:24
 
 # Keep build tools at runtime — node-pty's native addon needs them for the
-# platform-specific binary. Also install git, gosu (for entrypoint chown+drop).
+# platform-specific binary. Also install git, gosu (for entrypoint chown+drop),
+# and sudo for the in-app Terminal tab (password required; see entrypoint).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl bash jq sqlite3 gosu openssh-client ffmpeg \
+    git curl bash jq sqlite3 gosu sudo openssh-client ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code CLI globally so "Login to Claude" works in the app
