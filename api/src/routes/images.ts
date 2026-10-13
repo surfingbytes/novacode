@@ -93,18 +93,14 @@ const EXT_TO_CONTENT_TYPE: Record<string, string> = {
   '.zip': 'application/zip',
 };
 
-const ALLOWED_EXTENSIONS = new Set(Object.keys(EXT_TO_CONTENT_TYPE));
-
-function resolveExtension(mimeType: string, filename?: string): string | null {
+/** Prefer the real filename extension; mime map is only a fallback when none is present. */
+function resolveExtension(mimeType: string, filename?: string): string {
   const fromName = filename ? extname(filename).toLowerCase() : '';
-  if (fromName && ALLOWED_EXTENSIONS.has(fromName)) {
+  // Accept any extension (e.g. .ics) — do not maintain an allowlist.
+  if (fromName.length > 1) {
     return fromName;
   }
-  const fromMime = MIME_TO_EXT[mimeType];
-  if (fromMime) {
-    return fromMime;
-  }
-  return null;
+  return MIME_TO_EXT[mimeType] ?? '.bin';
 }
 
 /** Keep the original name when possible so agents see a recognizable path. */
@@ -181,9 +177,6 @@ export async function imageRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       let ext = resolveExtension(body.mimeType, body.filename);
-      if (!ext) {
-        return reply.status(400).send({ error: 'Unsupported file type' });
-      }
 
       const dir = join(IMAGE_DIR, sessionId);
 
