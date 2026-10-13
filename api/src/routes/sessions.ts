@@ -11,6 +11,7 @@ import { mergeInternalSessionConfig } from '../classes/linkedPlanContext';
 import { normalizeApprovalPolicy } from '../classes/approvalPolicy';
 import { setActiveRunApprovalPolicy } from '../classes/chatEngine';
 import { getPlanDocumentsSource } from '../classes/planDocumentSources';
+import { resolveWorkspaceAbsolutePath } from '../classes/workspacePaths';
 import { workspaceTerminalManager } from '../classes/workspaceTerminalManager';
 import { getActiveSessionIds, getActiveBusySubagents, cancelRun } from './chat';
 import { deleteSessionImages } from './images';
@@ -166,11 +167,13 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       if (!session || session.workspaceId !== workspaceId) {
         return reply.status(404).send({ error: 'Session not found' });
       }
+      const workspace = await db.getWorkspace(workspaceId);
+      const workspacePath = workspace ? resolveWorkspaceAbsolutePath(workspace.path) : null;
       // Chat history streams over the chat WebSocket — keep it out of this
       // response so long sessions load fast on slow links.
       return reply.send({
         ...normalizeSessionForApi(session),
-        planDocuments: await getPlanDocumentsSource(session.agentType).listForSession(
+        planDocuments: await getPlanDocumentsSource(session.agentType, { workspacePath }).listForSession(
           session.sessionId
         ),
       });
@@ -297,7 +300,9 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       if (!session || session.workspaceId !== workspaceId) {
         return reply.status(404).send({ error: 'Session not found' });
       }
-      const deleted = await getPlanDocumentsSource(session.agentType).deleteById(
+      const workspace = await db.getWorkspace(workspaceId);
+      const workspacePath = workspace ? resolveWorkspaceAbsolutePath(workspace.path) : null;
+      const deleted = await getPlanDocumentsSource(session.agentType, { workspacePath }).deleteById(
         planId,
         session.sessionId
       );

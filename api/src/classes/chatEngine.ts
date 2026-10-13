@@ -689,8 +689,20 @@ export async function dispatchPrompt(
   // history — re-sending them every turn would duplicate tokens. Lazy callback
   // so resumed turns never touch the disk for rules.
   const getRulesPrefix = () => buildWorkspaceRulesPrefix(workspacePath, agentType);
+  let linkedPlanWorkspacePath: string | null = workspacePath;
+  if (linkedPlanContext && currentMessages.length === 1) {
+    const sourceSession = await db.getSession(linkedPlanContext.sourceSessionId);
+    if (sourceSession) {
+      const sourceWorkspace = await db.getWorkspace(sourceSession.workspaceId);
+      if (sourceWorkspace) {
+        linkedPlanWorkspacePath = resolveWorkspaceAbsolutePath(sourceWorkspace.path);
+      }
+    }
+  }
   const linkedPlanPrefix = currentMessages.length === 1
-    ? await buildLinkedPlanContextPrefix(linkedPlanContext)
+    ? await buildLinkedPlanContextPrefix(linkedPlanContext, {
+        workspacePath: linkedPlanWorkspacePath,
+      })
     : '';
   const agentPrompt = linkedPlanPrefix.trim()
     ? `${linkedPlanPrefix}\n\n---\n\nUser request:\n${effectiveText}`

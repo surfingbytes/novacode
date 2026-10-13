@@ -59,7 +59,7 @@ export async function runOpenCodeAcp(
       getRulesPrefix: params.getRulesPrefix,
       // OpenCode's built-in plan-file workflow is TUI-only; over ACP the plan
       // agent needs explicit instructions (embedding the ACP session id) so the
-      // plan lands where getPlanDocumentsSource('open-code') looks for it.
+      // plan lands in `.opencode/plans` / XDG where getPlanDocumentsSource looks.
       transformPrompt:
         params.mode === 'plan'
           ? (promptText, acpSessionId) =>

@@ -15,6 +15,7 @@ import {
   buildOpenCodePlanModeInstruction,
   getPlanDocumentsSource,
   openCodePlansDir,
+  openCodeWorkspacePlansDir,
 } from './planDocumentSources';
 
 // ---------------------------------- Engine (planDocuments) ----------------------------------
@@ -147,6 +148,27 @@ describe('getPlanDocumentsSource', () => {
     expect(await source.listForSession(acpSessionId)).toEqual([]);
   });
 
+  it('reads open-code plans from <workspace>/.opencode/plans and prefers them over XDG', async () => {
+    process.env['XDG_DATA_HOME'] = join(tmp, 'xdg');
+    const workspacePath = join(tmp, 'ws');
+    const wsPlans = openCodeWorkspacePlansDir(workspacePath);
+    const xdgPlans = join(tmp, 'xdg', 'opencode', 'plans');
+    mkdirSync(wsPlans, { recursive: true });
+    mkdirSync(xdgPlans, { recursive: true });
+    const acpSessionId = 'ses_workspace_plan';
+    writeFileSync(join(wsPlans, 'feature.md'), `<!-- ${acpSessionId} -->\n# Workspace plan\n`, 'utf8');
+    writeFileSync(join(xdgPlans, 'feature.md'), `<!-- ${acpSessionId} -->\n# XDG plan\n`, 'utf8');
+    writeFileSync(join(xdgPlans, 'legacy.md'), `<!-- ${acpSessionId} -->\n# Legacy only\n`, 'utf8');
+
+    const source = getPlanDocumentsSource('open-code', { workspacePath });
+    const docs = await source.listForSession(acpSessionId);
+    expect(docs.map((d) => d.id).sort()).toEqual(['feature.md', 'legacy.md']);
+    expect((await source.getById('feature.md', acpSessionId))?.title).toBe('Workspace plan');
+    expect(await source.deleteById('feature.md', acpSessionId)).toBe(true);
+    expect(existsSync(join(wsPlans, 'feature.md'))).toBe(false);
+    expect(existsSync(join(xdgPlans, 'feature.md'))).toBe(true);
+  });
+
   it('resolves the open-code plans dir under configDir when XDG_DATA_HOME is unset', () => {
     delete process.env['XDG_DATA_HOME'];
     config.configDir = tmp;
@@ -157,12 +179,14 @@ describe('getPlanDocumentsSource', () => {
 // ---------------------------------- Plan-mode prompt injection ----------------------------------
 
 describe('buildOpenCodePlanModeInstruction', () => {
-  it('embeds the plans dir and the session-id comment convention', () => {
+  it('embeds the workspace plans path, XDG fallback, and session-id comment', () => {
     process.env['XDG_DATA_HOME'] = '/tmp/xdg-test';
     const text = buildOpenCodePlanModeInstruction('ses_abc123');
+    expect(text).toContain('.opencode/plans');
     expect(text).toContain('/tmp/xdg-test/opencode/plans');
     expect(text).toContain('<!-- ses_abc123 -->');
-    expect(text).toContain('plan');
+    expect(text).toMatch(/ONE required exception/i);
+    expect(text).toMatch(/overrides/i);
     delete process.env['XDG_DATA_HOME'];
   });
 });

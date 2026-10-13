@@ -108,7 +108,8 @@ export function mergeInternalSessionConfig(
 }
 
 export async function buildLinkedPlanContextPrefix(
-  context: LinkedPlanContext | null
+  context: LinkedPlanContext | null,
+  opts?: { workspacePath?: string | null }
 ): Promise<string> {
   if (!context) return '';
 
@@ -125,10 +126,9 @@ export async function buildLinkedPlanContextPrefix(
   if (context.contextMode === 'full') {
     // Default to the cursor source for linked contexts created before
     // sourceAgentType existed (cursor was the only file-based plan source).
-    const doc = await getPlanDocumentsSource(context.sourceAgentType ?? 'cursor-agent').getById(
-      context.planId,
-      context.sourceAcpSessionId
-    );
+    const doc = await getPlanDocumentsSource(context.sourceAgentType ?? 'cursor-agent', {
+      workspacePath: opts?.workspacePath,
+    }).getById(context.planId, context.sourceAcpSessionId);
     if (doc?.markdown.trim()) {
       parts.push('', '## Full Source Plan', '', doc.markdown.trim());
     }
