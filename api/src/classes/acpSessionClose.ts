@@ -4,6 +4,7 @@
 
 // classes
 import { db } from './database';
+import { closeClaudeAcpForNovaSession } from './claudeAcp';
 import { closeCursorAcpSession } from './cursorAcp';
 import { closeCodexAcpSession } from './codexAcp';
 import { closeOpenCodeAcpSession } from './openCodeAcp';
@@ -16,8 +17,16 @@ import type { AgentType } from '../@types/index';
 export async function closeAcpSessionForAgent(
   agentType: AgentType,
   acpSessionId: string,
-  workspacePath: string
+  workspacePath: string,
+  novaSessionId?: string
 ): Promise<void> {
+  if (agentType === 'claude') {
+    if (novaSessionId) {
+      await closeClaudeAcpForNovaSession(novaSessionId, acpSessionId || null);
+    }
+    return;
+  }
+
   if (!acpSessionId) return;
 
   if (agentType === 'cursor-agent') {
@@ -29,17 +38,23 @@ export async function closeAcpSessionForAgent(
   } else if (agentType === 'mistral-vibe') {
     await closeVibeAcpSession(acpSessionId, workspacePath);
   }
-  // Claude uses embedded agent — no subprocess session to close.
 }
 
 export async function closeAcpSessionForNovaSession(novaSessionId: string): Promise<void> {
   const session = await db.getSession(novaSessionId);
-  if (!session?.sessionId) return;
+  if (!session) return;
+
+  const agentType = (session.agentType as AgentType | null) ?? 'cursor-agent';
+  if (agentType === 'claude') {
+    await closeClaudeAcpForNovaSession(novaSessionId, session.sessionId);
+    return;
+  }
+
+  if (!session.sessionId) return;
 
   const workspace = await db.getWorkspace(session.workspaceId);
   if (!workspace) return;
 
   const workspacePath = resolveWorkspaceAbsolutePath(workspace.path);
-  const agentType = (session.agentType as AgentType | null) ?? 'cursor-agent';
-  await closeAcpSessionForAgent(agentType, session.sessionId, workspacePath);
+  await closeAcpSessionForAgent(agentType, session.sessionId, workspacePath, novaSessionId);
 }

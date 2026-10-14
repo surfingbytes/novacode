@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 
 // classes
 import { getAgentModels } from './agentModels';
-import { runClaudeAcp } from './claudeAcp';
+import { closeClaudeAcpForNovaSession, runClaudeAcp } from './claudeAcp';
 import { runCodexAcp } from './codexAcp';
 import { runCursorAcp } from './cursorAcp';
 import { runOpenCodeAcp } from './openCodeAcp';
@@ -288,18 +288,23 @@ export async function runOneShotAgentText(params: {
       permission
     );
   } else if (params.agentType === 'claude') {
-    result = await runClaudeAcp(
-      {
-        acpSessionId: null,
-        cwd: params.cwd,
-        promptText: params.promptText,
-        model: params.model,
-        claudeToken: params.claudeToken
-      },
-      onEvent,
-      undefined,
-      permission
-    );
+    try {
+      result = await runClaudeAcp(
+        {
+          novaSessionId: runId,
+          acpSessionId: null,
+          cwd: params.cwd,
+          promptText: params.promptText,
+          model: params.model,
+          claudeToken: params.claudeToken
+        },
+        onEvent,
+        undefined,
+        permission
+      );
+    } finally {
+      await closeClaudeAcpForNovaSession(runId);
+    }
   } else {
     result = await runCursorAcp(
       { acpSessionId: null, cwd: params.cwd, promptText: params.promptText, model: params.model },

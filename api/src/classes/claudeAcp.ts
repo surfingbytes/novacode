@@ -3,6 +3,7 @@
 // import() → require(), which fails for ESM packages. We use a new Function('m','return import(m)')
 // wrapper so the import stays as a true ESM dynamic import at runtime. Types are import-type only.
 import type { AgentSideConnection } from '@agentclientprotocol/sdk';
+import { PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 import type {
   SessionNotification,
   RequestPermissionRequest,
@@ -33,6 +34,13 @@ const activeHandlers = new Map<string, AcpEventHandler>();
 const activeConfigSyncHandlers = new Map<string, SessionConfigSyncHandler>();
 const activePermissionHandlers = new Map<string, AcpPermissionHandler>();
 
+// One ClaudeAcpAgent per Nova session so parallel chats cannot share query/task
+// state inside a singleton agent (which previously made two sessions feel like one).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const agentsByNovaSession = new Map<string, any>();
+const novaByAcpSession = new Map<string, string>();
+const initializedNovaSessions = new Set<string>();
+
 function emitClaudeConfigSync(
   sessionId: string,
   sync: { modeId?: string; modelId?: string; config?: Record<string, string> }
@@ -59,16 +67,16 @@ function extractClaudeConfigSync(
     if (modelOpt?.type === 'select' && 'currentValue' in modelOpt && typeof modelOpt.currentValue === 'string') {
       sync.modelId = modelOpt.currentValue;
     }
-    const config: Record<string, string> = {};
+    const configOptions: Record<string, string> = {};
     for (const opt of update.configOptions) {
       if (opt.type !== 'select') continue;
       const cat = opt.category ?? opt.id;
       if (cat === 'mode' || cat === 'model' || opt.id === 'mode' || opt.id === 'model') continue;
       if ('currentValue' in opt && typeof opt.currentValue === 'string') {
-        config[opt.id] = opt.currentValue;
+        configOptions[opt.id] = opt.currentValue;
       }
     }
-    if (Object.keys(config).length > 0) sync.config = config;
+    if (Object.keys(configOptions).length > 0) sync.config = configOptions;
     if (sync.modelId || sync.config) emitClaudeConfigSync(sessionId, sync);
   }
 }
@@ -118,26 +126,72 @@ const acpClientProxy = {
 
 // --------------------------------------------- Claude-specific agent ---------------------------------------------
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let sharedAgent: any = null;
-
 // new Function wrapper prevents TypeScript (module: commonjs) from compiling import() → require().
 // At runtime this stays as a true ESM dynamic import, which can load ESM-only packages.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const esmImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
 
-// Lazily imports the ESM-only package and constructs the singleton agent.
-async function getSharedAgent(): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
-  if (!sharedAgent) {
-    const { ClaudeAcpAgent } = await esmImport('@agentclientprotocol/claude-agent-acp');
-    sharedAgent = new ClaudeAcpAgent(acpClientProxy as unknown as AgentSideConnection);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let ClaudeAcpAgentCtor: (new (client: AgentSideConnection) => any) | null = null;
+
+async function loadClaudeAcpAgentCtor(): Promise<new (client: AgentSideConnection) => any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+  if (!ClaudeAcpAgentCtor) {
+    const mod = await esmImport('@agentclientprotocol/claude-agent-acp');
+    ClaudeAcpAgentCtor = mod.ClaudeAcpAgent;
   }
-  return sharedAgent;
+  return ClaudeAcpAgentCtor!;
+}
+
+async function getAgentForNovaSession(novaSessionId: string): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+  let agent = agentsByNovaSession.get(novaSessionId);
+  if (!agent) {
+    const Ctor = await loadClaudeAcpAgentCtor();
+    agent = new Ctor(acpClientProxy as unknown as AgentSideConnection);
+    agentsByNovaSession.set(novaSessionId, agent);
+  }
+  if (!initializedNovaSessions.has(novaSessionId)) {
+    await agent.initialize({
+      protocolVersion: PROTOCOL_VERSION,
+      clientInfo: { name: 'nova-code', version: '1.0.0' },
+      clientCapabilities: {
+        fs: { readTextFile: false, writeTextFile: false },
+        terminal: false,
+      },
+    });
+    initializedNovaSessions.add(novaSessionId);
+  }
+  return agent;
+}
+
+function rememberAcpBinding(novaSessionId: string, acpSessionId: string): void {
+  const previousNova = novaByAcpSession.get(acpSessionId);
+  if (previousNova && previousNova !== novaSessionId) {
+    logger.warn(
+      { acpSessionId, previousNova, novaSessionId },
+      'Claude ACP session id rebound to a different Nova session'
+    );
+  }
+  novaByAcpSession.set(acpSessionId, novaSessionId);
+}
+
+function findAgentForAcpSession(acpSessionId: string): any | null { // eslint-disable-line @typescript-eslint/no-explicit-any
+  const novaSessionId = novaByAcpSession.get(acpSessionId);
+  if (novaSessionId) {
+    return agentsByNovaSession.get(novaSessionId) ?? null;
+  }
+  // Fallback scan — bindings are set before prompt, but cancel during startup
+  // may race ahead of rememberAcpBinding.
+  for (const agent of agentsByNovaSession.values()) {
+    if (agent?.sessions?.[acpSessionId]) return agent;
+  }
+  return null;
 }
 
 // --------------------------------------------- Public API ---------------------------------------------
 
 export interface RunClaudeAcpParams {
+  /** Nova session id — isolates the embedded Claude agent instance. */
+  novaSessionId: string;
   /** ACP session ID from a previous run — null to start a new session. */
   acpSessionId: string | null;
   cwd: string;
@@ -173,13 +227,23 @@ export async function runClaudeAcp(
   onConfigSync?: SessionConfigSyncHandler,
   onRequestPermission?: AcpPermissionHandler
 ): Promise<RunClaudeAcpResult> {
-  const { acpSessionId, cwd, promptText, claudeToken, model, mode, configJson, onSessionId } = params;
+  const {
+    novaSessionId,
+    acpSessionId,
+    cwd,
+    promptText,
+    claudeToken,
+    model,
+    mode,
+    configJson,
+    onSessionId,
+  } = params;
 
   if (claudeToken) {
     process.env['CLAUDE_CODE_OAUTH_TOKEN'] = claudeToken;
   }
 
-  const agent = await getSharedAgent();
+  const agent = await getAgentForNovaSession(novaSessionId);
   const mcpServers = await getConfiguredAcpMcpServers(config.configDir);
   let resolvedSessionId: string;
   let sessionResponse: AcpSessionResponse;
@@ -203,6 +267,8 @@ export async function runClaudeAcp(
       isFreshSession = true;
     }
   }
+
+  rememberAcpBinding(novaSessionId, resolvedSessionId);
 
   await applySessionMode(agent, resolvedSessionId, mode, sessionResponse);
   await applySessionModel(agent, resolvedSessionId, model, sessionResponse);
@@ -254,5 +320,39 @@ export async function runClaudeAcp(
 }
 
 export function cancelClaudeAcp(acpSessionId: string): void {
-  sharedAgent?.cancel({ sessionId: acpSessionId }).catch(() => {});
+  const agent = findAgentForAcpSession(acpSessionId);
+  agent?.cancel({ sessionId: acpSessionId }).catch(() => {});
+}
+
+/** Tear down the embedded Claude agent for a Nova session (delete / close). */
+export async function closeClaudeAcpForNovaSession(
+  novaSessionId: string,
+  acpSessionId?: string | null
+): Promise<void> {
+  const agent = agentsByNovaSession.get(novaSessionId);
+  if (!agent) return;
+
+  try {
+    if (acpSessionId) {
+      try {
+        await agent.closeSession({ sessionId: acpSessionId });
+      } catch {
+        try {
+          await agent.deleteSession?.({ sessionId: acpSessionId });
+        } catch {
+          // best-effort
+        }
+      }
+      novaByAcpSession.delete(acpSessionId);
+    }
+    await agent.dispose?.();
+  } catch (err) {
+    logger.debug({ err, novaSessionId }, 'Claude ACP dispose failed');
+  } finally {
+    agentsByNovaSession.delete(novaSessionId);
+    initializedNovaSessions.delete(novaSessionId);
+    for (const [acpId, novaId] of novaByAcpSession.entries()) {
+      if (novaId === novaSessionId) novaByAcpSession.delete(acpId);
+    }
+  }
 }

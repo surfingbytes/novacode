@@ -940,8 +940,9 @@ watch(
       persistCacheTimer = null;
     }
     planDocs.resetPlanDocuments();
-    chatSocket.resetChatState();
+    // Close the old socket before reset so its late frames cannot land after clear.
     chatSocket.disconnect();
+    chatSocket.resetChatState();
     usageTurns.value = [];
     usageSummary.value = null;
     expandedToolOutputIds.value = new Set();

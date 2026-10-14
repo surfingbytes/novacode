@@ -910,6 +910,7 @@ export async function dispatchPrompt(
     } else {
       result = await runClaudeAcp(
         {
+          novaSessionId: sessionId,
           acpSessionId: currentAcpSessionId,
           cwd: workspacePath,
           promptText: agentPrompt,

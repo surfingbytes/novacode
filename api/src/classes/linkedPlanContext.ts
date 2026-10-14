@@ -15,6 +15,11 @@ export interface LinkedPlanContext {
   contextMode: LinkedPlanContextMode;
   /** Agent that produced the source plan; selects the plan-documents source. */
   sourceAgentType?: string;
+  /**
+   * Inline full plan markdown when the source has no file-backed plan id
+   * (e.g. Claude ACP stream plans). Preferred over disk lookup when set.
+   */
+  planMarkdown?: string;
 }
 
 export function parseLinkedPlanContext(value: unknown): LinkedPlanContext | null {
@@ -42,6 +47,9 @@ export function parseLinkedPlanContext(value: unknown): LinkedPlanContext | null
       ...(typeof parsed.sourceAgentType === 'string' && parsed.sourceAgentType
         ? { sourceAgentType: parsed.sourceAgentType }
         : {}),
+      ...(typeof parsed.planMarkdown === 'string' && parsed.planMarkdown.trim()
+        ? { planMarkdown: parsed.planMarkdown }
+        : {}),
     };
   } catch {
     return null;
@@ -58,6 +66,7 @@ export function serializeLinkedPlanContext(context: LinkedPlanContext): string {
     entryContent: context.entryContent,
     contextMode: context.contextMode,
     ...(context.sourceAgentType ? { sourceAgentType: context.sourceAgentType } : {}),
+    ...(context.planMarkdown?.trim() ? { planMarkdown: context.planMarkdown } : {}),
   });
 }
 
@@ -124,13 +133,18 @@ export async function buildLinkedPlanContextPrefix(
   ];
 
   if (context.contextMode === 'full') {
-    // Default to the cursor source for linked contexts created before
-    // sourceAgentType existed (cursor was the only file-based plan source).
-    const doc = await getPlanDocumentsSource(context.sourceAgentType ?? 'cursor-agent', {
-      workspacePath: opts?.workspacePath,
-    }).getById(context.planId, context.sourceAcpSessionId);
-    if (doc?.markdown.trim()) {
-      parts.push('', '## Full Source Plan', '', doc.markdown.trim());
+    const inlineMarkdown = context.planMarkdown?.trim() ?? '';
+    if (inlineMarkdown) {
+      parts.push('', '## Full Source Plan', '', inlineMarkdown);
+    } else {
+      // Default to the cursor source for linked contexts created before
+      // sourceAgentType existed (cursor was the only file-based plan source).
+      const doc = await getPlanDocumentsSource(context.sourceAgentType ?? 'cursor-agent', {
+        workspacePath: opts?.workspacePath,
+      }).getById(context.planId, context.sourceAcpSessionId);
+      if (doc?.markdown.trim()) {
+        parts.push('', '## Full Source Plan', '', doc.markdown.trim());
+      }
     }
   }
 

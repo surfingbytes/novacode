@@ -90,6 +90,8 @@ export function useChatSocket(ctx: UseChatSocketContext) {
   const seenVibeToolCallIds = new Set<string>();
 
   let socket: ManagedSocket | null = null;
+  /** Bumped on disconnect/reset so late frames from a prior socket are ignored. */
+  let socketEpoch = 0;
 
   const parser = createChatStreamParser({
     thinkingText: streamingThinkingText,
@@ -353,11 +355,18 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     if (socket) {
       return;
     }
+    const epoch = socketEpoch;
+    const sessionId = ctx.sessionId();
     socket = createManagedSocket({
-      url: buildChatWsUrl(ctx.sessionId()),
+      url: buildChatWsUrl(sessionId),
       shouldBeConnected: ctx.shouldBeConnected,
-      onMessage: onSocketMessage,
+      onMessage: (data) => {
+        // Drop frames from a socket that was closed during a session switch.
+        if (epoch !== socketEpoch || ctx.sessionId() !== sessionId) return;
+        onSocketMessage(data);
+      },
       onConnectionChange: (bConnected) => {
+        if (epoch !== socketEpoch) return;
         bWsConnected.value = bConnected;
         if (bConnected) {
           bWsReconnecting.value = false;
@@ -366,6 +375,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
         }
       },
       onUnauthorized: () => {
+        if (epoch !== socketEpoch) return;
         setChatError('Connection closed (auth)');
       }
     });
@@ -377,6 +387,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
       return;
     }
     if (socket) {
+      socketEpoch += 1;
       socket.close();
       socket = null;
     }
@@ -385,6 +396,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
   }
 
   function disconnect(): void {
+    socketEpoch += 1;
     socket?.close();
     socket = null;
     bWsConnected.value = false;
@@ -512,7 +524,11 @@ export function useChatSocket(ctx: UseChatSocketContext) {
 
   /** Reset everything (session switch / unmount). */
   function resetChatState(): void {
+    // Invalidate any in-flight frames before clearing so a late message cannot
+    // repopulate this state and then win against the next session's empty history.
+    socketEpoch += 1;
     bHistoryLoaded.value = false;
+    bIsStreaming.value = false;
     messages.value = [];
     seenVibeMessageIds.clear();
     seenVibeToolCallIds.clear();
@@ -523,6 +539,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     queuedPrompts.value = [];
     pendingApprovals.value = [];
     pendingQuestions.value = [];
+    lastPromptRequest.value = null;
     bHasMore.value = false;
     bLoadingMore.value = false;
     clearChatError();

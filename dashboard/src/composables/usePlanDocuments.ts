@@ -251,40 +251,44 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
   }
 
   function resolvePlanLinkMeta(plan: PlanDocument): {
-    backendPlanId?: string;
-    planSourceSessionId?: string;
+    planId: string;
+    planSourceSessionId: string;
     sourceAgentType?: Session['agentType'];
+    planMarkdown?: string;
   } {
+    const planSourceSessionId =
+      plan.planSourceSessionId ?? ctx.session.value?.sessionId ?? 'inline';
+    const planMarkdown = plan.markdown.trim() || undefined;
     return {
-      backendPlanId: plan.backendPlanId,
-      planSourceSessionId: plan.planSourceSessionId ?? ctx.session.value?.sessionId ?? undefined,
-      sourceAgentType: ctx.session.value?.agentType ?? undefined
+      // File-backed ids when present; otherwise the UI plan id (Claude stream plans).
+      planId: plan.backendPlanId ?? plan.id,
+      planSourceSessionId,
+      sourceAgentType: ctx.session.value?.agentType ?? undefined,
+      // Always embed markdown so agents without a plan-file source (Claude) still
+      // get a real server-side linked plan attach on the first prompt.
+      ...(planMarkdown ? { planMarkdown } : {})
     };
   }
 
   function startSessionFromFullPlan(plan: PlanDocument | null): void {
     if (!plan?.markdown.trim()) return;
 
-    const { backendPlanId, planSourceSessionId, sourceAgentType } = resolvePlanLinkMeta(plan);
-    const linkedPlanContext =
-      backendPlanId && planSourceSessionId
-        ? {
-            sourceSessionId: ctx.sessionId(),
-            sourceAcpSessionId: planSourceSessionId,
-            planId: backendPlanId,
-            planTitle: plan.title,
-            entryIndex: 0,
-            entryContent: plan.title,
-            contextMode: 'full' as const,
-            ...(sourceAgentType ? { sourceAgentType } : {})
-          }
-        : undefined;
+    const { planId, planSourceSessionId, sourceAgentType, planMarkdown } = resolvePlanLinkMeta(plan);
+    const linkedPlanContext: LinkedPlanContext = {
+      sourceSessionId: ctx.sessionId(),
+      sourceAcpSessionId: planSourceSessionId,
+      planId,
+      planTitle: plan.title,
+      entryIndex: 0,
+      entryContent: plan.title,
+      contextMode: 'full',
+      ...(sourceAgentType ? { sourceAgentType } : {}),
+      ...(planMarkdown ? { planMarkdown } : {})
+    };
 
     ctx.onStartPlanSession({
       defaultName: `Plan: ${plan.title.slice(0, 80)}`,
-      draftPrompt: linkedPlanContext
-        ? `Implement the linked plan "${plan.title}".`
-        : `Implement this plan:\n\n${plan.markdown.trim()}`,
+      draftPrompt: `Implement the linked plan "${plan.title}".`,
       linkedPlanContext,
       defaultAgentType: ctx.session.value?.agentType,
       defaultModelSelection: ctx.modelSelection.value,
@@ -297,26 +301,24 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
     if (!entryText) return;
 
     const pointNumber = index + 1;
-    const { backendPlanId, planSourceSessionId, sourceAgentType } = resolvePlanLinkMeta(plan);
-    const linkedPlanContext =
-      backendPlanId && planSourceSessionId
-        ? {
-            sourceSessionId: ctx.sessionId(),
-            sourceAcpSessionId: planSourceSessionId,
-            planId: backendPlanId,
-            planTitle: plan.title,
-            entryIndex: index,
-            entryContent: entryText,
-            contextMode: 'target-only' as const,
-            ...(sourceAgentType ? { sourceAgentType } : {})
-          }
-        : undefined;
+    const { planId, planSourceSessionId, sourceAgentType, planMarkdown } = resolvePlanLinkMeta(plan);
+    const linkedPlanContext: LinkedPlanContext = {
+      sourceSessionId: ctx.sessionId(),
+      sourceAcpSessionId: planSourceSessionId,
+      planId,
+      planTitle: plan.title,
+      entryIndex: index,
+      entryContent: entryText,
+      // Include full plan markdown when available so the implementer sees surrounding context
+      // even for agents (Claude) that have no file-backed plan documents.
+      contextMode: planMarkdown ? 'full' : 'target-only',
+      ...(sourceAgentType ? { sourceAgentType } : {}),
+      ...(planMarkdown ? { planMarkdown } : {})
+    };
 
     ctx.onStartPlanSession({
       defaultName: `Point ${pointNumber}: ${shortPlanEntry(entryText).slice(0, 80)}`,
-      draftPrompt: linkedPlanContext
-        ? `Implement point ${pointNumber} from the linked plan.`
-        : `Implement point ${pointNumber} from "${plan.title}":\n\n${entryText}`,
+      draftPrompt: `Implement point ${pointNumber} from the linked plan.`,
       linkedPlanContext,
       defaultAgentType: ctx.session.value?.agentType,
       defaultModelSelection: ctx.modelSelection.value,

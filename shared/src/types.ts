@@ -158,6 +158,11 @@ export interface LinkedPlanContext {
   contextMode: LinkedPlanContextMode;
   /** Agent that produced the source plan; selects the plan-documents source. */
   sourceAgentType?: AgentType;
+  /**
+   * Inline full plan markdown when the source has no file-backed plan id
+   * (e.g. Claude ACP stream plans). Preferred over disk lookup when set.
+   */
+  planMarkdown?: string;
 }
 
 export interface ChatWsClientMessage {
