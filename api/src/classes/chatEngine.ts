@@ -21,6 +21,7 @@ import { runCodexAcp, cancelCodexAcp } from './codexAcp';
 import { sendTaskDonePush } from './push';
 import { normalizeSessionMode } from './sessionMode';
 import { normalizeApprovalPolicy } from './approvalPolicy';
+import { isPlanApprovalRequest, planMarkdownFromPermission } from './planApproval';
 import type {
   AcpAskQuestionParams,
   AcpAskQuestionResponse,
@@ -264,6 +265,9 @@ function approvalRequestFromAcp(params: RequestPermissionRequest): ChatApprovalR
     (typeof toolCall.title === 'string' && toolCall.title.trim()) ||
     (typeof toolCall.name === 'string' && toolCall.name.trim()) ||
     'Approve tool action';
+  const planMarkdown = isPlanApprovalRequest(params)
+    ? planMarkdownFromPermission(params)
+    : undefined;
 
   return {
     id: randomUUID(),
@@ -275,6 +279,7 @@ function approvalRequestFromAcp(params: RequestPermissionRequest): ChatApprovalR
     command,
     cwd,
     rawInput: toolCall.rawInput,
+    planMarkdown,
     options,
   };
 }
@@ -334,6 +339,24 @@ function resolvePendingApprovalsWithAllowAll(run: ActiveRun): void {
   }
 }
 
+/** Push plan markdown into the live stream so the Plan tab can show it. */
+function emitPlanUpdateToRun(run: ActiveRun, planMarkdown: string, title?: string): void {
+  const line = JSON.stringify({
+    sessionId: 'plan-surface',
+    update: {
+      sessionUpdate: 'plan',
+      title: title?.trim() || 'Plan',
+      markdown: planMarkdown,
+      entries: [],
+    },
+  });
+  run.assistantEvents.push(line);
+  run.bufferedLines.push(line);
+  for (const sub of run.subscribers) {
+    sub.onStream(line);
+  }
+}
+
 /** Update live-run approval policy; allow_all flushes any waiting prompts. */
 export function setActiveRunApprovalPolicy(
   sessionId: string,
@@ -355,6 +378,12 @@ export function requestAcpPermissionForSession(
   const approval = approvalRequestFromAcp(params);
   if (!run || !approval) {
     return Promise.resolve(cancelledPermissionResponse());
+  }
+
+  // Surface the plan into the stream/Plan tab even when allow_all auto-accepts
+  // (no approval UI is shown in that case).
+  if (approval.planMarkdown) {
+    emitPlanUpdateToRun(run, approval.planMarkdown, approval.title);
   }
 
   if (run.approvalPolicy === 'allow_all') {

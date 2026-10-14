@@ -390,6 +390,30 @@ describe('ACP native events', () => {
     expect(items[0].planEntries?.[0]?.status).toBe('completed');
   });
 
+  it('promotes ExitPlanMode tool_call content into a plan item', () => {
+    const parser = createChatStreamParser();
+    const items: DisplayItem[] = [];
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'exit-1',
+          name: 'ExitPlanMode',
+          title: 'Approve Plan',
+          kind: 'switch_mode',
+          rawInput: { plan: '# Ship it\n\n1. Build\n2. Test' },
+          content: [{ type: 'content', content: { type: 'text', text: '# Ship it\n\n1. Build\n2. Test' } }]
+        }
+      }),
+      items
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('plan');
+    expect(items[0].planTitle).toBe('Approve Plan');
+    expect(items[0].planMarkdown).toContain('# Ship it');
+  });
+
   it('forwards mode/model/config sync to hooks', () => {
     const onModeUpdate = vi.fn();
     const onModelUpdate = vi.fn();

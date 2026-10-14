@@ -202,6 +202,68 @@ export function todosFromAcpUpdate(update: Record<string, unknown>): TodoDisplay
   return normalizeTodoItems(rawTodos);
 }
 
+function textFromAcpToolContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  const parts: string[] = [];
+  for (const item of content) {
+    if (!item || typeof item !== 'object') continue;
+    const obj = item as Record<string, unknown>;
+    if (obj.type === 'text' && typeof obj.text === 'string') {
+      parts.push(obj.text);
+      continue;
+    }
+    if (obj.type === 'content' && obj.content && typeof obj.content === 'object') {
+      const inner = obj.content as Record<string, unknown>;
+      if (inner.type === 'text' && typeof inner.text === 'string') {
+        parts.push(inner.text);
+      }
+    }
+  }
+  return parts.join('');
+}
+
+/** Full plan body from ExitPlanMode / Approve Plan tool calls (not task-list plan updates). */
+function planMarkdownFromToolUpdate(update: Record<string, unknown>): string | undefined {
+  const name = typeof update.name === 'string' ? update.name : '';
+  const title = typeof update.title === 'string' ? update.title.trim() : '';
+  const rawInput =
+    update.rawInput && typeof update.rawInput === 'object' && !Array.isArray(update.rawInput)
+      ? (update.rawInput as Record<string, unknown>)
+      : null;
+  const fromInput = typeof rawInput?.plan === 'string' ? rawInput.plan.trim() : '';
+  const fromContent = textFromAcpToolContent(update.content).trim();
+  const isPlanTool =
+    name === 'ExitPlanMode' ||
+    title === 'Approve Plan' ||
+    title === 'Exited Plan Mode' ||
+    !!fromInput;
+  if (!isPlanTool) return undefined;
+  return fromInput || fromContent || undefined;
+}
+
+function upsertPlanMarkdown(
+  items: DisplayItem[],
+  markdown: string,
+  title: string | undefined,
+  sourceSessionId: string | undefined
+): void {
+  const existing = items.find((item) => item.kind === 'plan');
+  if (existing) {
+    existing.planMarkdown = markdown;
+    existing.planTitle = title ?? existing.planTitle;
+    existing.planSourceSessionId = sourceSessionId ?? existing.planSourceSessionId;
+    return;
+  }
+  items.push({
+    kind: 'plan',
+    planSourceSessionId: sourceSessionId,
+    planEntries: [],
+    planTitle: title,
+    planMarkdown: markdown
+  });
+}
+
 // ---------------------------------- Markdown ----------------------------------
 
 marked.setOptions({ breaks: true, gfm: true });
@@ -563,6 +625,11 @@ export function createChatStreamParser(hooks: ChatStreamParserHooks = {}) {
       const todoItems = todosFromAcpUpdate(update);
       if (todoItems) {
         items.push({ kind: 'todos', callId: toolCallId, status: 'running', todoItems });
+        return;
+      }
+      const planMarkdown = planMarkdownFromToolUpdate(update);
+      if (planMarkdown) {
+        upsertPlanMarkdown(items, planMarkdown, typeof update.title === 'string' ? update.title : undefined, opts?.sourceSessionId);
         return;
       }
       const kind = update.kind as string | undefined;

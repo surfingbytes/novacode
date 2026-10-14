@@ -113,6 +113,8 @@ export interface ChatApprovalRequest {
   command?: string;
   cwd?: string;
   rawInput?: unknown;
+  /** Plan markdown for ExitPlanMode / approve-plan prompts — always shown to the user. */
+  planMarkdown?: string;
   options: ChatApprovalOption[];
 }
 

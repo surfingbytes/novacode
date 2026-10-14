@@ -73,7 +73,8 @@ function extractClaudeConfigSync(
   }
 }
 
-// Auto-approve all tool permissions — agent runs in a trusted backend context.
+// Auto-approve all tool permissions when no turn handler is registered —
+// agent runs in a trusted backend context. Active turns use chatEngine policy.
 async function handlePermissionRequest(
   params: RequestPermissionRequest
 ): Promise<RequestPermissionResponse> {

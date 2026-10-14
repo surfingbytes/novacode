@@ -50,6 +50,8 @@ export interface UseChatSocketContext {
   onConfigUpdate: (config: Record<string, string>) => void;
   /** A new plan item appeared in the live stream (id like `live-plan-N`) */
   onNewPlanItem: (planId: string) => void;
+  /** Plan-mode approval arrived — keep the user on chat so they can review/accept */
+  onPlanApprovalRequested?: () => void;
   /** History replaced / older page prepended / new content — UI scroll hooks */
   onHistoryLoaded: () => void;
   onHistoryPage: () => void;
@@ -246,6 +248,25 @@ export function useChatSocket(ctx: UseChatSocketContext) {
       ...pendingApprovals.value.filter((approval) => approval.id !== msg.approval?.id),
       msg.approval
     ];
+    const planMarkdown = msg.approval.planMarkdown?.trim();
+    if (planMarkdown) {
+      const existing = streamingItems.value.find((item) => item.kind === 'plan');
+      if (existing) {
+        existing.planMarkdown = planMarkdown;
+        existing.planTitle = msg.approval.title || existing.planTitle;
+      } else {
+        const planIndex = streamingItems.value.filter((item) => item.kind === 'plan').length;
+        streamingItems.value.push({
+          kind: 'plan',
+          planId: `live-plan-${planIndex}`,
+          planTitle: msg.approval.title,
+          planMarkdown,
+          planEntries: []
+        });
+      }
+      ctx.onPlanApprovalRequested?.();
+      ctx.onContentAppended();
+    }
   }
 
   function handleApprovalResolved(msg: ChatWsServerMessage): void {

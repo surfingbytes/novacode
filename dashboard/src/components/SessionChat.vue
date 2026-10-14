@@ -273,6 +273,15 @@ const chatSocket = useChatSocket({
     planDocs.selectedPlanId.value = planId;
     activeTab.value = 'plan';
   },
+  onPlanApprovalRequested: () => {
+    // Plan body is on the Plan tab; keep chat selected only when the user must
+    // click an approval option (Ask policy). Allow-all already auto-accepted.
+    if (approvalPolicy.value === 'ask') {
+      activeTab.value = 'chat';
+      return;
+    }
+    activeTab.value = 'plan';
+  },
   onHistoryLoaded: () => {
     // A cached snapshot is already on screen: the list's pinned-bottom follow
     // keeps the view correct — don't yank the user if they scrolled up to read.

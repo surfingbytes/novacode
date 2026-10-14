@@ -19,7 +19,12 @@ import { sessionsApi } from '@/classes/api';
 // utils
 import { relativeTimeShort } from '@/utils/relativeTime';
 import { agentTypeShortLabel } from '@/utils/agentTypeMeta';
-import { isToolCallDisplayItem, type DisplayItem, type StreamUsage } from '@/utils/chatDisplayItems';
+import {
+  isToolCallDisplayItem,
+  renderMdCached,
+  type DisplayItem,
+  type StreamUsage
+} from '@/utils/chatDisplayItems';
 
 // types
 import type {
@@ -343,8 +348,13 @@ function approvalOptionClass(kind: string): string {
 }
 
 function approvalSubtitle(approval: ChatApprovalRequest): string {
+  if (approval.planMarkdown) return 'Review the plan, then choose how to proceed';
   if (approval.toolName && approval.toolKind) return `${approval.toolName} · ${approval.toolKind}`;
   return approval.toolName ?? approval.toolKind ?? 'Tool permission';
+}
+
+function approvalPlanHtml(approval: ChatApprovalRequest): string {
+  return renderMdCached(approval.planMarkdown);
 }
 
 /** questionRequestId -> questionId -> selected option ids */
@@ -781,12 +791,17 @@ defineExpose({
                   <div class="min-w-0 flex-1">
                     <div class="font-medium text-text-primary">{{ approval.title }}</div>
                     <div class="mt-0.5 text-xs text-text-muted">{{ approvalSubtitle(approval) }}</div>
+                    <div
+                      v-if="approval.planMarkdown"
+                      class="chat-markdown plan-markdown mt-3 max-h-[min(28rem,50vh)] overflow-y-auto rounded border border-fg/10 bg-fg/[0.03] px-3 py-2.5 text-sm text-text-primary"
+                      v-html="approvalPlanHtml(approval)"
+                    />
                     <pre
-                      v-if="approval.command"
+                      v-else-if="approval.command"
                       class="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded bg-fg/[0.04] px-2 py-1.5 font-mono text-[11px] text-text-muted"
                       >{{ approval.command }}</pre
                     >
-                    <div v-if="approval.cwd" class="mt-1 truncate font-mono text-[11px] text-text-muted/70">
+                    <div v-if="approval.cwd && !approval.planMarkdown" class="mt-1 truncate font-mono text-[11px] text-text-muted/70">
                       cwd: {{ approval.cwd }}
                     </div>
                     <div class="mt-3 flex flex-wrap gap-2">
