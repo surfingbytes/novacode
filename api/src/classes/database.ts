@@ -11,6 +11,7 @@ import { computeLastListPreview } from './chatPreview';
 import {
   chatMessageToRowData,
   escapeIlikeContains,
+  planUpdateTargetIndex,
   sessionMessageRowToChat
 } from './sessionMessages';
 import { hashApiToken, MAX_API_TOKENS_PER_USER } from './apiTokens';
@@ -677,70 +678,21 @@ export const db = {
    * Append an ACP-style `sessionUpdate: "plan"` event into chat history so the
    * Plan tab survives reload (same persistence path Claude ACP plan updates use).
    */
-  async appendSessionPlanUpdate(
-    sessionId: string,
-    plan: {
-      title?: string;
-      markdown?: string;
-      entries?: Array<{ content: string; status: string; priority?: string }>;
-    }
-  ): Promise<boolean> {
+  async appendSessionPlanUpdate(sessionId: string, line: string): Promise<boolean> {
     const session = await _prisma.session.findUnique({ where: { id: sessionId } });
     if (!session) return false;
-
-    const line = JSON.stringify({
-      sessionId: session.sessionId ?? 'plan-surface',
-      update: {
-        sessionUpdate: 'plan',
-        ...(plan.title?.trim() ? { title: plan.title.trim() } : {}),
-        ...(plan.markdown?.trim() ? { markdown: plan.markdown.trim() } : {}),
-        entries: plan.entries ?? [],
-      },
-    });
 
     const rows = await _prisma.sessionMessage.findMany({
       where: { sessionId },
       orderBy: { position: 'asc' },
     });
+    const messages = rows.map(sessionMessageRowToChat);
+    const targetIndex = planUpdateTargetIndex(messages);
 
-    const isPlanEvent = (raw: string): boolean => {
-      try {
-        const parsed = JSON.parse(raw) as { update?: { sessionUpdate?: string } };
-        return parsed?.update?.sessionUpdate === 'plan';
-      } catch {
-        return false;
-      }
-    };
-
-    let target = [...rows].reverse().find((row) => {
-      if (row.role !== 'assistant' || !row.eventsJson) return false;
-      try {
-        const events = JSON.parse(row.eventsJson) as unknown;
-        return Array.isArray(events) && events.some((e) => typeof e === 'string' && isPlanEvent(e));
-      } catch {
-        return false;
-      }
-    });
-
-    if (!target) {
-      target = [...rows].reverse().find((row) => row.role === 'assistant');
-    }
-
-    if (target) {
-      let events: string[] = [];
-      if (target.eventsJson) {
-        try {
-          const parsed = JSON.parse(target.eventsJson) as unknown;
-          if (Array.isArray(parsed) && parsed.every((item) => typeof item === 'string')) {
-            events = parsed;
-          }
-        } catch {
-          events = [];
-        }
-      }
-      events.push(line);
+    if (targetIndex >= 0) {
+      const events = [...(messages[targetIndex].events ?? []), line];
       await _prisma.sessionMessage.update({
-        where: { id: target.id },
+        where: { id: rows[targetIndex].id },
         data: { eventsJson: JSON.stringify(events) },
       });
       await _prisma.session.update({

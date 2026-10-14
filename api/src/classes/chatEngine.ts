@@ -22,6 +22,7 @@ import { sendTaskDonePush } from './push';
 import { normalizeSessionMode } from './sessionMode';
 import { normalizeApprovalPolicy } from './approvalPolicy';
 import { isPlanApprovalRequest, planMarkdownFromPermission } from './planApproval';
+import { planUpdateTargetIndex } from './sessionMessages';
 import type {
   AcpAskQuestionParams,
   AcpAskQuestionResponse,
@@ -108,6 +109,22 @@ export function getActiveBusySubagents(sessionId: string): BusySubagents | null 
 
 export function getActiveRun(sessionId: string): ActiveRun | undefined {
   return activeRuns.get(sessionId);
+}
+
+/**
+ * Mirror a persisted plan edit into the active run's message list; the run
+ * rewrites all session messages from that list when it finishes.
+ */
+export function appendPlanUpdateToActiveRun(sessionId: string, line: string): void {
+  const run = activeRuns.get(sessionId);
+  if (!run) return;
+  const targetIndex = planUpdateTargetIndex(run.messages);
+  if (targetIndex < 0) {
+    run.messages.push({ role: 'assistant', events: [line], createdAt: new Date().toISOString() });
+    return;
+  }
+  const target = run.messages[targetIndex];
+  target.events = [...(target.events ?? []), line];
 }
 
 export function isSessionBusy(sessionId: string): boolean {

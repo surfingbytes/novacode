@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   chatMessageToRowData,
   escapeIlikeContains,
+  planUpdateTargetIndex,
   sessionMessageRowToChat
 } from './sessionMessages';
 
@@ -51,5 +52,25 @@ describe('sessionMessageRowToChat', () => {
 describe('escapeIlikeContains', () => {
   it('escapes LIKE wildcards', () => {
     expect(escapeIlikeContains('100%_done\\x')).toBe('100\\%\\_done\\\\x');
+  });
+});
+
+describe('planUpdateTargetIndex', () => {
+  const plan = JSON.stringify({ update: { sessionUpdate: 'plan', entries: [] } });
+  const text = JSON.stringify({ update: { sessionUpdate: 'agent_message_chunk' } });
+
+  it('prefers the latest assistant message carrying a plan update', () => {
+    expect(
+      planUpdateTargetIndex([
+        { role: 'assistant', events: [plan] },
+        { role: 'user' },
+        { role: 'assistant', events: [text] }
+      ])
+    ).toBe(0);
+  });
+
+  it('falls back to the latest assistant message, else -1', () => {
+    expect(planUpdateTargetIndex([{ role: 'assistant', events: [text] }, { role: 'user' }])).toBe(0);
+    expect(planUpdateTargetIndex([{ role: 'user' }])).toBe(-1);
   });
 });

@@ -75,6 +75,8 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
    * from API responses).
    */
   const planMarkdownOverrides = ref(new Map<string, string>());
+  /** Keeps plan persists in click order; each one carries the cumulative markdown. */
+  let planPersistChain: Promise<unknown> = Promise.resolve();
 
   function lookupPlanMarkdownOverride(
     doc: PlanDocument,
@@ -450,15 +452,22 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
 
     setPlanMarkdownOverride(plan, nextMarkdown);
 
-    try {
-      await sessionsApi.persistPlanUpdate(ctx.workspaceId(), ctx.sessionId(), {
+    const workspaceId = ctx.workspaceId();
+    const sessionId = ctx.sessionId();
+    const request = planPersistChain.then(() =>
+      sessionsApi.persistPlanUpdate(workspaceId, sessionId, {
         title: plan.title,
         markdown: nextMarkdown,
         entries: persistEntries,
         ...(plan.backendPlanId ? { planId: plan.backendPlanId } : {})
-      });
-    } catch {
-      // Optimistic override stays for this view; reload would lose it if persist failed.
+      })
+    );
+    planPersistChain = request.catch(() => undefined);
+    try {
+      await request;
+    } catch (err) {
+      console.error('Failed to persist plan mark-as-done', err);
+      if (ctx.sessionId() === sessionId) setPlanMarkdownOverride(plan, plan.markdown);
       return;
     }
 

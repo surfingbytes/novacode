@@ -65,6 +65,32 @@ export function chatMessageToRowData(
   };
 }
 
+function isPlanSessionUpdateLine(raw: string): boolean {
+  try {
+    const parsed = JSON.parse(raw) as { update?: { sessionUpdate?: string } };
+    return parsed?.update?.sessionUpdate === 'plan';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Message that should receive a user plan edit: the latest assistant message
+ * already carrying a plan update, else the latest assistant message; -1 if none.
+ */
+export function planUpdateTargetIndex(
+  messages: Array<{ role: string; events?: string[] | null }>
+): number {
+  let fallback = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role !== 'assistant') continue;
+    if (fallback < 0) fallback = index;
+    if (message.events?.some(isPlanSessionUpdateLine)) return index;
+  }
+  return fallback;
+}
+
 /** Escape `%`, `_`, and `\` so Prisma `contains` is a literal substring match. */
 export function escapeIlikeContains(term: string): string {
   return term.replace(/[\\%_]/g, '\\$&');

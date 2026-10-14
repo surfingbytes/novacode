@@ -9,7 +9,7 @@ import { createSessionWithAgent } from '../classes/sessionService';
 import { closeAcpSessionForNovaSession } from '../classes/acpSessionClose';
 import { mergeInternalSessionConfig } from '../classes/linkedPlanContext';
 import { normalizeApprovalPolicy } from '../classes/approvalPolicy';
-import { setActiveRunApprovalPolicy } from '../classes/chatEngine';
+import { appendPlanUpdateToActiveRun, setActiveRunApprovalPolicy } from '../classes/chatEngine';
 import { getPlanDocumentsSource } from '../classes/planDocumentSources';
 import { resolveWorkspaceAbsolutePath } from '../classes/workspacePaths';
 import { workspaceTerminalManager } from '../classes/workspaceTerminalManager';
@@ -27,6 +27,19 @@ import type { AgentType } from '../@types/index';
 import type { LinkedPlanContext } from '../classes/linkedPlanContext';
 
 // -------------------------------------------------- Helpers --------------------------------------------------
+
+/** Per-session tail promise so plan-update read-modify-writes never interleave. */
+const planUpdateChains = new Map<string, Promise<unknown>>();
+
+function runSerializedPlanUpdate<T>(sessionId: string, task: () => Promise<T>): Promise<T> {
+  const previous = planUpdateChains.get(sessionId) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(task);
+  planUpdateChains.set(sessionId, next);
+  void next.finally(() => {
+    if (planUpdateChains.get(sessionId) === next) planUpdateChains.delete(sessionId);
+  }).catch(() => undefined);
+  return next;
+}
 
 function parseTagsFromBody(body: unknown): string[] | null | undefined {
   if (!body || typeof body !== 'object' || !('tags' in body)) {
@@ -385,21 +398,31 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.status(404).send({ error: 'Session not found' });
       }
 
-      const ok = await db.appendSessionPlanUpdate(sessionId, {
-        title: typeof body.title === 'string' ? body.title : undefined,
-        markdown: markdown || undefined,
-        entries: entries
-          .filter(
-            (entry) =>
-              entry &&
-              typeof entry.content === 'string' &&
-              typeof entry.status === 'string'
-          )
-          .map((entry) => ({
-            content: entry.content,
-            status: entry.status,
-            ...(typeof entry.priority === 'string' ? { priority: entry.priority } : {}),
-          })),
+      const title = typeof body.title === 'string' ? body.title.trim() : '';
+      const line = JSON.stringify({
+        sessionId: session.sessionId ?? 'plan-surface',
+        update: {
+          sessionUpdate: 'plan',
+          ...(title ? { title } : {}),
+          ...(markdown ? { markdown } : {}),
+          entries: entries
+            .filter(
+              (entry) =>
+                entry &&
+                typeof entry.content === 'string' &&
+                typeof entry.status === 'string'
+            )
+            .map((entry) => ({
+              content: entry.content,
+              status: entry.status,
+              ...(typeof entry.priority === 'string' ? { priority: entry.priority } : {}),
+            })),
+        },
+      });
+      const ok = await runSerializedPlanUpdate(sessionId, async () => {
+        const appended = await db.appendSessionPlanUpdate(sessionId, line);
+        if (appended) appendPlanUpdateToActiveRun(sessionId, line);
+        return appended;
       });
       if (!ok) {
         return reply.status(500).send({ error: 'Failed to persist plan update' });
