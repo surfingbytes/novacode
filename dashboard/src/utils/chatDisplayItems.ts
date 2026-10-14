@@ -979,12 +979,24 @@ export function parseHistoryEventsCached(events: string[]): DisplayItem[] {
 
 // ---------------------------------- prepareDisplayItem ----------------------------------
 
+/** Suffix appended to a plan step name when the user marks it done. */
+export const PLAN_DONE_SUFFIX = ' - done';
+
+export function isPlanContentDone(content: string | undefined): boolean {
+  return Boolean(content?.trimEnd().endsWith(PLAN_DONE_SUFFIX));
+}
+
 export function isPlanEntryCompleted(status: string | undefined): boolean {
   if (!status) return false;
   const normalized = status.toLowerCase();
   return (
     normalized === 'completed' || normalized === 'done' || normalized === 'todo_status_completed'
   );
+}
+
+/** True when the entry is completed via ACP status or the " - done" name suffix. */
+export function isPlanEntryDone(entry: Pick<PlanEntry, 'content' | 'status'>): boolean {
+  return isPlanEntryCompleted(entry.status) || isPlanContentDone(entry.content);
 }
 
 export function isPlanEntryInProgress(status: string | undefined): boolean {
@@ -1072,7 +1084,10 @@ export function entriesFromPlanMarkdown(markdown: string): PlanEntry[] {
       (entry) => entry.content === content
     );
     if (existing) return existing;
-    const entry = { content, status: 'pending' };
+    const entry = {
+      content,
+      status: isPlanContentDone(content) ? 'completed' : 'pending'
+    };
     target.push(entry);
     return entry;
   };
@@ -1112,21 +1127,34 @@ export function entriesFromPlanMarkdown(markdown: string): PlanEntry[] {
       : headingEntries;
 }
 
-export function renderPlanMarkdownWithActions(markdown: string, entries: PlanEntry[]): string {
-  if (!entries.length) return renderMdCached(markdown);
+function planActionTargetKind(
+  line: string,
+  hasNumberedEntries: boolean
+): 'full-plan' | 'entry' | null {
+  const bNumberedLine = /^#{1,4}\s+\d+[\.)]\s+/.test(line) || /^\s{0,3}\d+[\.)]\s+/.test(line);
+  const bTaskLine = /^\s{0,3}[-*]\s+\[[ xX]\]\s+/.test(line);
+  const bHeadingLine = /^#{1,4}\s+/.test(line);
+  const bActionTarget = hasNumberedEntries
+    ? bNumberedLine
+    : bNumberedLine || bTaskLine || bHeadingLine;
+  if (!bActionTarget) return null;
+  if (bHeadingLine && !bNumberedLine && !bTaskLine) return 'full-plan';
+  return 'entry';
+}
 
+/** Appends " - done" to the Nth startable plan entry line in markdown. */
+export function markPlanEntryDoneInMarkdown(markdown: string, entryIndex: number): string | null {
+  if (entryIndex < 0) return null;
   const lines = markdown.replace(/\r\n/g, '\n').split('\n');
-  const out: string[] = [];
-  let inFence = false;
-  let fenceMarker: '`' | '~' | null = null;
-  let entryIndex = 0;
   const hasNumberedEntries = lines.some(
     (line) => /^#{1,4}\s+\d+[\.)]\s+/.test(line) || /^\s{0,3}\d+[\.)]\s+/.test(line)
   );
+  let inFence = false;
+  let fenceMarker: '`' | '~' | null = null;
+  let currentEntry = 0;
 
-  for (const rawLine of lines) {
-    out.push(rawLine);
-    const line = rawLine.trimEnd();
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i].trimEnd();
     const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
     if (fenceMatch) {
       const marker = fenceMatch[1][0] as '`' | '~';
@@ -1139,27 +1167,94 @@ export function renderPlanMarkdownWithActions(markdown: string, entries: PlanEnt
       }
       continue;
     }
-    if (inFence || entryIndex >= entries.length) continue;
-
-    const bNumberedLine = /^#{1,4}\s+\d+[\.)]\s+/.test(line) || /^\s{0,3}\d+[\.)]\s+/.test(line);
-    const bTaskLine = /^\s{0,3}[-*]\s+\[[ xX]\]\s+/.test(line);
-    const bHeadingLine = /^#{1,4}\s+/.test(line);
-    const bActionTarget = hasNumberedEntries
-      ? bNumberedLine
-      : bNumberedLine || bTaskLine || bHeadingLine;
-    if (!bActionTarget) continue;
-
-    const fullPlanAttribute =
-      bHeadingLine && !bNumberedLine && !bTaskLine ? ' data-plan-full-plan="true"' : '';
-    out.push(
-      '',
-      `<div class="plan-start-action-inline"><button type="button" class="plan-start-session-btn" data-plan-entry-index="${entryIndex}"${fullPlanAttribute}>Start session</button></div>`,
-      ''
-    );
-    if (!fullPlanAttribute) {
-      entryIndex += 1;
+    if (inFence) continue;
+    if (planActionTargetKind(line, hasNumberedEntries) !== 'entry') continue;
+    if (currentEntry !== entryIndex) {
+      currentEntry += 1;
+      continue;
     }
+    if (isPlanContentDone(stripMarkdownSyntax(line))) return null;
+    lines[i] = `${lines[i].trimEnd()}${PLAN_DONE_SUFFIX}`;
+    return lines.join('\n');
   }
+  return null;
+}
+
+export function renderPlanMarkdownWithActions(markdown: string, entries: PlanEntry[]): string {
+  if (!entries.length) return renderMdCached(markdown);
+
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n');
+  const out: string[] = [];
+  let inFence = false;
+  let fenceMarker: '`' | '~' | null = null;
+  let entryIndex = 0;
+  let openStep = false;
+  const hasNumberedEntries = lines.some(
+    (line) => /^#{1,4}\s+\d+[\.)]\s+/.test(line) || /^\s{0,3}\d+[\.)]\s+/.test(line)
+  );
+
+  const closeStep = (): void => {
+    if (!openStep) return;
+    out.push('', '</div>', '');
+    openStep = false;
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1][0] as '`' | '~';
+      if (!inFence) {
+        inFence = true;
+        fenceMarker = marker;
+      } else if (marker === fenceMarker) {
+        inFence = false;
+        fenceMarker = null;
+      }
+      out.push(rawLine);
+      continue;
+    }
+
+    if (!inFence) {
+      const kind = planActionTargetKind(line, hasNumberedEntries);
+      if (kind === 'full-plan') {
+        closeStep();
+        out.push(rawLine);
+        out.push(
+          '',
+          `<div class="plan-start-action-inline"><button type="button" class="plan-start-session-btn" data-plan-entry-index="${entryIndex}" data-plan-full-plan="true">Start session</button></div>`,
+          ''
+        );
+        continue;
+      }
+      if (kind === 'entry' && entryIndex < entries.length) {
+        closeStep();
+        const entry = entries[entryIndex];
+        const done = isPlanEntryDone(entry);
+        out.push(
+          '',
+          `<div class="plan-step" data-plan-entry-index="${entryIndex}" data-plan-done="${done ? 'true' : 'false'}">`,
+          ''
+        );
+        openStep = true;
+        out.push(rawLine);
+        const buttons = [
+          `<button type="button" class="plan-start-session-btn" data-plan-entry-index="${entryIndex}">Start session</button>`
+        ];
+        if (!done) {
+          buttons.push(
+            `<button type="button" class="plan-mark-done-btn" data-plan-mark-done="${entryIndex}">Mark as done</button>`
+          );
+        }
+        out.push('', `<div class="plan-start-action-inline">${buttons.join('')}</div>`, '');
+        entryIndex += 1;
+        continue;
+      }
+    }
+
+    out.push(rawLine);
+  }
+  closeStep();
 
   return renderMdCached(out.join('\n'));
 }
@@ -1270,10 +1365,13 @@ export function planDocumentFromItem(
   const markdown =
     item.planMarkdown?.trim() || fallback?.markdown.trim() || markdownFromPlanEntries(entries);
   if (!markdown && entries.length === 0) return null;
-  const startableEntries = entries.length ? entries : entriesFromPlanMarkdown(markdown);
-  const completedCount = startableEntries.filter((entry) =>
-    isPlanEntryCompleted(entry.status)
-  ).length;
+  const startableEntries = (entries.length ? entries : entriesFromPlanMarkdown(markdown)).map(
+    (entry) =>
+      isPlanContentDone(entry.content) && !isPlanEntryCompleted(entry.status)
+        ? { ...entry, status: 'completed' }
+        : entry
+  );
+  const completedCount = startableEntries.filter((entry) => isPlanEntryDone(entry)).length;
   return {
     id,
     backendPlanId: fallback?.planId,
@@ -1305,7 +1403,7 @@ export function planDocumentFromFileSummary(
     markdown,
     entries: [],
     startableEntries,
-    completedCount: 0,
+    completedCount: startableEntries.filter((entry) => isPlanEntryDone(entry)).length,
     renderedHtml: renderPlanMarkdownWithActions(markdown, startableEntries),
     createdAt: '',
     live: false

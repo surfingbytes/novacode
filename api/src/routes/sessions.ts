@@ -326,6 +326,38 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
+  // PATCH /api/workspaces/:workspaceId/sessions/:sessionId/plan-documents/:planId
+  fastify.patch(
+    '/api/workspaces/:workspaceId/sessions/:sessionId/plan-documents/:planId',
+    { preHandler: jwtPreHandler },
+    async (request, reply) => {
+      const { workspaceId, sessionId, planId } = request.params as {
+        workspaceId: string;
+        sessionId: string;
+        planId: string;
+      };
+      const { markdown } = (request.body ?? {}) as { markdown?: string };
+      if (typeof markdown !== 'string' || !markdown.trim()) {
+        return reply.status(400).send({ error: 'markdown is required' });
+      }
+      const session = await db.getSession(sessionId);
+      if (!session || session.workspaceId !== workspaceId) {
+        return reply.status(404).send({ error: 'Session not found' });
+      }
+      const workspace = await db.getWorkspace(workspaceId);
+      const workspacePath = workspace ? resolveWorkspaceAbsolutePath(workspace.path) : null;
+      const updated = await getPlanDocumentsSource(session.agentType, { workspacePath }).updateById(
+        planId,
+        session.sessionId,
+        markdown
+      );
+      if (!updated) {
+        return reply.status(404).send({ error: 'Plan document not found' });
+      }
+      return reply.send(updated);
+    }
+  );
+
   // -------------------------------------------------- Session bulk actions --------------------------------------------------
 
   // POST /api/workspaces/:workspaceId/sessions/bulk-delete

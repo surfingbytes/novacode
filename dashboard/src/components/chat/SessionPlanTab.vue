@@ -6,12 +6,12 @@
  */
 
 // node_modules
-import { onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { ChevronDown } from 'lucide-vue-next';
 
 // utils
 import {
-  isPlanEntryCompleted,
+  isPlanEntryDone,
   planStatusIcon,
   type PlanDocument,
   type PlanEntry
@@ -19,7 +19,7 @@ import {
 
 // -------------------------------------------------- Props --------------------------------------------------
 
-defineProps<{
+const props = defineProps<{
   planDocuments: PlanDocument[];
   selectedPlanDocument: PlanDocument | null;
 }>();
@@ -32,6 +32,7 @@ const emit = defineEmits<{
   (e: 'delete'): void;
   (e: 'start-full-plan', plan: PlanDocument): void;
   (e: 'start-plan-entry', payload: { plan: PlanDocument; entry: PlanEntry; index: number }): void;
+  (e: 'mark-plan-entry-done', payload: { plan: PlanDocument; entry: PlanEntry; index: number }): void;
   (e: 'markdown-click', event: MouseEvent): void;
 }>();
 
@@ -39,6 +40,22 @@ const emit = defineEmits<{
 
 const bPlanActionsMenuOpen = ref(false);
 const planActionsMenuRef = ref<HTMLElement | null>(null);
+/** Collapsed done steps is the default. */
+const bCollapseDoneSteps = ref(true);
+
+// -------------------------------------------------- Computed --------------------------------------------------
+
+const visiblePlanEntries = computed(() => {
+  const plan = props.selectedPlanDocument;
+  if (!plan) return [];
+  return plan.startableEntries
+    .map((entry, index) => ({ entry, index }))
+    .filter(({ entry }) => !bCollapseDoneSteps.value || !isPlanEntryDone(entry));
+});
+
+const doneStepsCount = computed(
+  () => props.selectedPlanDocument?.startableEntries.filter((entry) => isPlanEntryDone(entry)).length ?? 0
+);
 
 // -------------------------------------------------- Methods --------------------------------------------------
 
@@ -67,6 +84,10 @@ function onStartFullPlan(plan: PlanDocument): void {
 
 function onStartPlanEntry(plan: PlanDocument, entry: PlanEntry, index: number): void {
   emit('start-plan-entry', { plan, entry, index });
+}
+
+function onMarkPlanEntryDone(plan: PlanDocument, entry: PlanEntry, index: number): void {
+  emit('mark-plan-entry-done', { plan, entry, index });
 }
 
 function handleDocumentClick(e: MouseEvent): void {
@@ -134,6 +155,16 @@ onUnmounted(() => {
           </option>
         </select>
 
+        <button
+          v-if="selectedPlanDocument && doneStepsCount > 0"
+          type="button"
+          class="button is-transparent text-xs"
+          :title="bCollapseDoneSteps ? 'Expand done steps' : 'Collapse done steps'"
+          @click="bCollapseDoneSteps = !bCollapseDoneSteps"
+        >
+          {{ bCollapseDoneSteps ? 'Expand done' : 'Collapse done' }}
+        </button>
+
         <div
           v-if="selectedPlanDocument"
           ref="planActionsMenuRef"
@@ -191,6 +222,7 @@ onUnmounted(() => {
         <div class="rounded-2xl border border-fg/10 bg-fg/[0.03] px-5 py-4 md:px-8 md:py-6">
           <div
             class="chat-markdown plan-markdown text-sm text-text-primary"
+            :class="{ 'plan-collapse-done': bCollapseDoneSteps }"
             v-html="selectedPlanDocument.renderedHtml"
             @click="emit('markdown-click', $event)"
           ></div>
@@ -225,7 +257,7 @@ onUnmounted(() => {
           </div>
           <ul class="space-y-1.5 px-4 py-3">
             <li
-              v-for="(entry, index) in selectedPlanDocument.startableEntries"
+              v-for="{ entry, index } in visiblePlanEntries"
               :key="`${selectedPlanDocument.id}-todo-${index}`"
               class="flex items-start gap-2 text-xs"
             >
@@ -278,11 +310,7 @@ onUnmounted(() => {
               </svg>
               <span
                 class="min-w-0 flex-1 leading-snug"
-                :class="
-                  isPlanEntryCompleted(entry.status)
-                    ? 'text-text-muted line-through'
-                    : 'text-text-primary'
-                "
+                :class="isPlanEntryDone(entry) ? 'text-text-muted line-through' : 'text-text-primary'"
               >
                 {{ entry.content }}
               </span>
@@ -294,6 +322,21 @@ onUnmounted(() => {
               >
                 Start session
               </button>
+              <button
+                v-if="!isPlanEntryDone(entry)"
+                type="button"
+                class="shrink-0 rounded-md border border-fg/10 px-2 py-1 text-[11px] font-medium text-text-primary hover:bg-fg/[0.06]"
+                title="Mark this plan point as done"
+                @click="onMarkPlanEntryDone(selectedPlanDocument, entry, index)"
+              >
+                Mark as done
+              </button>
+            </li>
+            <li
+              v-if="bCollapseDoneSteps && doneStepsCount > 0 && visiblePlanEntries.length === 0"
+              class="text-xs text-text-muted py-1"
+            >
+              All {{ doneStepsCount }} steps are done.
             </li>
           </ul>
         </div>
@@ -362,26 +405,47 @@ onUnmounted(() => {
 }
 
 .plan-markdown :deep(.plan-start-action-inline) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
   margin: -0.25rem 0 0.75rem;
 }
 
-.plan-markdown :deep(.plan-start-session-btn) {
+.plan-markdown :deep(.plan-start-session-btn),
+.plan-markdown :deep(.plan-mark-done-btn) {
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
-  border: 1px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
   border-radius: 0.45rem;
-  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
   padding: 0.3rem 0.5rem;
-  color: var(--color-primary);
   font-size: 0.72rem;
   font-weight: 600;
   line-height: 1;
   vertical-align: middle;
 }
 
+.plan-markdown :deep(.plan-start-session-btn) {
+  border: 1px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  color: var(--color-primary);
+}
+
 .plan-markdown :deep(.plan-start-session-btn:hover) {
   background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+}
+
+.plan-markdown :deep(.plan-mark-done-btn) {
+  border: 1px solid color-mix(in srgb, var(--color-fg) 14%, transparent);
+  background: color-mix(in srgb, var(--color-fg) 4%, transparent);
+  color: var(--color-text-primary);
+}
+
+.plan-markdown :deep(.plan-mark-done-btn:hover) {
+  background: color-mix(in srgb, var(--color-fg) 8%, transparent);
+}
+
+.plan-markdown.plan-collapse-done :deep(.plan-step[data-plan-done='true']) {
+  display: none;
 }
 
 .plan-markdown :deep(strong) {

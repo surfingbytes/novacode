@@ -14,6 +14,7 @@ import { sessionsApi } from '@/classes/api';
 // utils
 import {
   bestPlanMarkdownFallback,
+  markPlanEntryDoneInMarkdown,
   normalizePlanSearchText,
   planDocumentFromFileSummary,
   planDocumentFromItem,
@@ -61,6 +62,8 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
   const planDocumentsRefreshTimers = new Set<ReturnType<typeof setTimeout>>();
   /** Backend plan ids / markdown keys removed this session so chat copies don't reappear. */
   const dismissedPlanKeys = ref(new Set<string>());
+  /** Local markdown overrides (e.g. mark-as-done) keyed by plan UI id / backend id. */
+  const planMarkdownOverrides = ref(new Map<string, string>());
 
   // -------------------------------------------------- Computed --------------------------------------------------
 
@@ -68,26 +71,64 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
     const docs: PlanDocument[] = [];
     const seenMarkdown = new Map<string, number>();
     const dismissed = dismissedPlanKeys.value;
+    const overrides = planMarkdownOverrides.value;
+    const applyMarkdownOverride = (doc: PlanDocument | null): PlanDocument | null => {
+      if (!doc) return null;
+      const override =
+        overrides.get(doc.id) ?? (doc.backendPlanId ? overrides.get(doc.backendPlanId) : undefined);
+      if (!override || override === doc.markdown) return doc;
+      if (doc.backendPlanId) {
+        const rebuilt = planDocumentFromFileSummary(
+          {
+            id: doc.backendPlanId,
+            sessionId: doc.planSourceSessionId ?? '',
+            title: doc.title,
+            markdown: override
+          },
+          0
+        );
+        return rebuilt
+          ? { ...rebuilt, id: doc.id, createdAt: doc.createdAt, live: doc.live }
+          : { ...doc, markdown: override };
+      }
+      // Re-parse from overridden markdown so " - done" suffixes update entries.
+      const rebuilt = planDocumentFromItem(
+        {
+          kind: 'plan',
+          planId: doc.id,
+          planTitle: doc.title,
+          planMarkdown: override,
+          planSourceSessionId: doc.planSourceSessionId
+        },
+        doc.id,
+        0,
+        doc.createdAt,
+        doc.live
+      );
+      return rebuilt ?? { ...doc, markdown: override };
+    };
     const addPlanDocument = (doc: PlanDocument | null): void => {
-      if (!doc) return;
-      const key = normalizePlanSearchText(doc.markdown);
+      const resolved = applyMarkdownOverride(doc);
+      if (!resolved) return;
+      const key = normalizePlanSearchText(resolved.markdown);
       if (
-        dismissed.has(`id:${doc.id}`) ||
-        (doc.backendPlanId && dismissed.has(`id:${doc.backendPlanId}`)) ||
+        dismissed.has(`id:${resolved.id}`) ||
+        (resolved.backendPlanId && dismissed.has(`id:${resolved.backendPlanId}`)) ||
         (key && dismissed.has(`md:${key}`))
       ) {
         return;
       }
       if (key && seenMarkdown.has(key)) {
         const existing = docs[seenMarkdown.get(key)!];
-        if (doc.backendPlanId && !existing.backendPlanId) {
-          existing.backendPlanId = doc.backendPlanId;
-          existing.planSourceSessionId = doc.planSourceSessionId ?? existing.planSourceSessionId;
+        if (resolved.backendPlanId && !existing.backendPlanId) {
+          existing.backendPlanId = resolved.backendPlanId;
+          existing.planSourceSessionId =
+            resolved.planSourceSessionId ?? existing.planSourceSessionId;
         }
         return;
       }
       if (key) seenMarkdown.set(key, docs.length);
-      docs.push(doc);
+      docs.push(resolved);
     };
     const filePlanDocuments = ctx.session.value?.planDocuments;
     for (const { msg, items, key } of ctx.displayMessages.value) {
@@ -326,9 +367,64 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
     });
   }
 
+  function setPlanMarkdownOverride(plan: PlanDocument, markdown: string): void {
+    const next = new Map(planMarkdownOverrides.value);
+    next.set(plan.id, markdown);
+    if (plan.backendPlanId) next.set(plan.backendPlanId, markdown);
+    planMarkdownOverrides.value = next;
+  }
+
+  async function markPlanEntryDone(
+    plan: PlanDocument,
+    _entry: PlanEntry,
+    index: number
+  ): Promise<void> {
+    const nextMarkdown = markPlanEntryDoneInMarkdown(plan.markdown, index);
+    if (!nextMarkdown) return;
+
+    setPlanMarkdownOverride(plan, nextMarkdown);
+
+    if (!plan.backendPlanId) return;
+    try {
+      const response = await sessionsApi.updatePlanDocument(
+        ctx.workspaceId(),
+        ctx.sessionId(),
+        plan.backendPlanId,
+        nextMarkdown
+      );
+      const updated = response.data;
+      if (ctx.session.value?.planDocuments) {
+        ctx.session.value = {
+          ...ctx.session.value,
+          planDocuments: ctx.session.value.planDocuments.map((doc) =>
+            doc.id === plan.backendPlanId
+              ? {
+                  ...doc,
+                  title: updated.title || doc.title,
+                  markdown: updated.markdown
+                }
+              : doc
+          )
+        };
+      }
+    } catch {
+      // Local override already applied; refresh may reconcile later.
+    }
+  }
+
   function onPlanMarkdownClick(event: MouseEvent): void {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
+
+    const markDoneButton = target.closest<HTMLButtonElement>('[data-plan-mark-done]');
+    if (markDoneButton) {
+      const plan = selectedPlanDocument.value;
+      const index = Number(markDoneButton.dataset.planMarkDone);
+      const entry = Number.isFinite(index) ? plan?.startableEntries[index] : undefined;
+      if (plan && entry) void markPlanEntryDone(plan, entry, index);
+      return;
+    }
+
     const button = target.closest<HTMLButtonElement>('[data-plan-entry-index]');
     if (!button) return;
 
@@ -349,6 +445,7 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
     clearPlanDocumentsRefreshTimers();
     selectedPlanId.value = null;
     dismissedPlanKeys.value = new Set();
+    planMarkdownOverrides.value = new Map();
   }
 
   // -------------------------------------------------- Export --------------------------------------------------
@@ -366,6 +463,7 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
     clearPlanDocumentsRefreshTimers,
     downloadPlan,
     deletePlan,
+    markPlanEntryDone,
     startSessionFromFullPlan,
     startSessionFromPlanEntry,
     onPlanMarkdownClick,

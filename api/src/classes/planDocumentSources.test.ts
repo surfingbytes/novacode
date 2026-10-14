@@ -1,6 +1,6 @@
 // node_modules
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -10,6 +10,7 @@ import {
   deletePlanDocumentById,
   getPlanDocumentById,
   listPlanDocumentsForAcpSession,
+  updatePlanDocumentById,
 } from './planDocuments';
 import {
   buildOpenCodePlanModeInstruction,
@@ -87,6 +88,19 @@ describe('planDocuments engine', () => {
     expect(await deletePlanDocumentById(convention, '../keep.md', 'sess-1')).toBe(false);
     expect(await deletePlanDocumentById(convention, 'missing.md', 'sess-1')).toBe(false);
   });
+
+  it('updates plan markdown while preserving the session comment', async () => {
+    writePlan('plan.md', 'sess-1', '# Title\n\n1. First step\n2. Second step');
+    const updated = await updatePlanDocumentById(
+      convention,
+      'plan.md',
+      'sess-1',
+      '# Title\n\n1. First step - done\n2. Second step'
+    );
+    expect(updated?.markdown).toContain('First step - done');
+    expect(readFileSync(join(dir, 'plan.md'), 'utf8')).toMatch(/^<!-- sess-1 -->/);
+    expect(await updatePlanDocumentById(convention, 'plan.md', 'other', '# X')).toBeNull();
+  });
 });
 
 // ---------------------------------- Per-agent sources ----------------------------------
@@ -115,6 +129,7 @@ describe('getPlanDocumentsSource', () => {
       expect(await source.listForSession('whatever')).toEqual([]);
       expect(await source.getById('x.md', 'whatever')).toBeNull();
       expect(await source.deleteById('x.md', 'whatever')).toBe(false);
+      expect(await source.updateById('x.md', 'whatever', '# x')).toBeNull();
     }
   });
 

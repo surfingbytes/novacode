@@ -12,7 +12,7 @@
 
 // node_modules
 import type { Dirent } from 'fs';
-import { readdir, readFile, unlink } from 'fs/promises';
+import { readdir, readFile, unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
 
 export interface PlanDocumentSummary {
@@ -107,6 +107,49 @@ export async function deletePlanDocumentById(
   } catch {
     return false;
   }
+}
+
+/**
+ * Rewrites a plan file's markdown body while preserving the session-id comment
+ * (and any YAML frontmatter that precedes the body).
+ */
+export async function updatePlanDocumentById(
+  convention: PlanDocumentFileConvention,
+  id: string,
+  acpSessionId: string | null | undefined,
+  markdown: string
+): Promise<PlanDocumentSummary | null> {
+  if (!acpSessionId || !convention.isSafeId(id)) return null;
+
+  const path = join(convention.dir, id);
+  let raw: string;
+  try {
+    raw = await readFile(path, 'utf8');
+  } catch {
+    return null;
+  }
+
+  const existing = planDocumentFromContent(id, raw);
+  if (!existing || existing.sessionId !== acpSessionId) return null;
+
+  const body = markdown.trim();
+  if (!body) return null;
+
+  let nextContent: string;
+  const bodyIdx = raw.indexOf(existing.markdown);
+  if (bodyIdx >= 0) {
+    nextContent = `${raw.slice(0, bodyIdx)}${body}\n`;
+  } else {
+    nextContent = `<!-- ${acpSessionId} -->\n${body}\n`;
+  }
+
+  try {
+    await writeFile(path, nextContent, 'utf8');
+  } catch {
+    return null;
+  }
+
+  return planDocumentFromContent(id, nextContent);
 }
 
 export async function listPlanDocumentsForAcpSession(

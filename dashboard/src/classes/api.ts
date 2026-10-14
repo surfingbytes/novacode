@@ -726,6 +726,17 @@ export const sessionsApi = {
       `/workspaces/${workspaceId}/sessions/${sessionId}/plan-documents/${encodeURIComponent(planId)}`
     ),
 
+  updatePlanDocument: (
+    workspaceId: string,
+    sessionId: string,
+    planId: string,
+    markdown: string
+  ): ReturnType<typeof http.patch<{ id: string; sessionId: string; title: string; markdown: string }>> =>
+    http.patch(
+      `/workspaces/${workspaceId}/sessions/${sessionId}/plan-documents/${encodeURIComponent(planId)}`,
+      { markdown }
+    ),
+
   bulkDelete: (
     workspaceId: string,
     ids: string[]

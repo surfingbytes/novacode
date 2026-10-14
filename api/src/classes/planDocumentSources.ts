@@ -23,6 +23,7 @@ import {
   deletePlanDocumentById,
   getPlanDocumentById,
   listPlanDocumentsForAcpSession,
+  updatePlanDocumentById,
   type PlanDocumentFileConvention,
   type PlanDocumentSummary,
 } from './planDocuments';
@@ -31,6 +32,11 @@ export interface PlanDocumentsSource {
   listForSession(acpSessionId: string | null | undefined): Promise<PlanDocumentSummary[]>;
   getById(planId: string, acpSessionId: string | null | undefined): Promise<PlanDocumentSummary | null>;
   deleteById(planId: string, acpSessionId: string | null | undefined): Promise<boolean>;
+  updateById(
+    planId: string,
+    acpSessionId: string | null | undefined,
+    markdown: string
+  ): Promise<PlanDocumentSummary | null>;
 }
 
 export interface PlanDocumentsSourceOptions {
@@ -78,6 +84,8 @@ function sourceFromConvention(convention: () => PlanDocumentFileConvention): Pla
     getById: (planId, acpSessionId) =>
       getPlanDocumentById(convention(), planId, { sessionId: acpSessionId || null }),
     deleteById: (planId, acpSessionId) => deletePlanDocumentById(convention(), planId, acpSessionId),
+    updateById: (planId, acpSessionId, markdown) =>
+      updatePlanDocumentById(convention(), planId, acpSessionId, markdown),
   };
 }
 
@@ -111,6 +119,13 @@ function sourceFromConventions(conventions: () => PlanDocumentFileConvention[]):
       }
       return false;
     },
+    updateById: async (planId, acpSessionId, markdown) => {
+      for (const convention of conventions()) {
+        const updated = await updatePlanDocumentById(convention, planId, acpSessionId, markdown);
+        if (updated) return updated;
+      }
+      return null;
+    },
   };
 }
 
@@ -118,6 +133,7 @@ const noopSource: PlanDocumentsSource = {
   listForSession: async () => [],
   getById: async () => null,
   deleteById: async () => false,
+  updateById: async () => null,
 };
 
 const cursorSource = sourceFromConvention(cursorConvention);

@@ -11,6 +11,8 @@ import {
   filePathFromToolItem,
   isToolCallDisplayItem,
   entriesFromPlanMarkdown,
+  markPlanEntryDoneInMarkdown,
+  renderPlanMarkdownWithActions,
   shouldSkipDuplicateVibeEventLine,
   indexSeenVibeIdsFromEvents,
   type DisplayItem
@@ -688,6 +690,34 @@ describe('entriesFromPlanMarkdown', () => {
     const md = '- [ ] Do the thing\n- [x] Done thing';
     const entries = entriesFromPlanMarkdown(md);
     expect(entries).toHaveLength(2);
+  });
+
+  it('marks entries ending with " - done" as completed', () => {
+    const md = '1. First step - done\n2. Second step';
+    const entries = entriesFromPlanMarkdown(md);
+    expect(entries[0]).toMatchObject({ content: 'First step - done', status: 'completed' });
+    expect(entries[1]).toMatchObject({ content: 'Second step', status: 'pending' });
+  });
+});
+
+describe('markPlanEntryDoneInMarkdown', () => {
+  it('appends " - done" to the target entry line', () => {
+    const md = '# Goal\n\n1. First step\n2. Second step\n';
+    expect(markPlanEntryDoneInMarkdown(md, 0)).toContain('1. First step - done');
+    expect(markPlanEntryDoneInMarkdown(md, 1)).toContain('2. Second step - done');
+    expect(markPlanEntryDoneInMarkdown('1. Already - done\n', 0)).toBeNull();
+  });
+});
+
+describe('renderPlanMarkdownWithActions', () => {
+  it('wraps steps and adds mark-as-done for pending entries', () => {
+    const md = '1. First step\n\nDetails\n\n2. Second step - done\n';
+    const entries = entriesFromPlanMarkdown(md);
+    const html = renderPlanMarkdownWithActions(md, entries);
+    expect(html).toContain('data-plan-done="false"');
+    expect(html).toContain('data-plan-done="true"');
+    expect(html).toContain('plan-mark-done');
+    expect(html).toContain('Start session');
   });
 });
 

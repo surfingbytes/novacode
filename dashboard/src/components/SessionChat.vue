@@ -1314,6 +1314,9 @@ onUnmounted(() => {
         @delete="bShowDeletePlanModal = true"
         @start-full-plan="planDocs.startSessionFromFullPlan"
         @start-plan-entry="({ plan, entry, index }) => planDocs.startSessionFromPlanEntry(plan, entry, index)"
+        @mark-plan-entry-done="
+          ({ plan, entry, index }) => planDocs.markPlanEntryDone(plan, entry, index)
+        "
         @markdown-click="planDocs.onPlanMarkdownClick"
       />
 
