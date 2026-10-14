@@ -616,16 +616,16 @@ async function resolvePromptAttachments(
 
 export async function dispatchPrompt(
   opts: DispatchPromptOpts
-): Promise<{ error?: string; errorCode?: AgentErrorCode }> {
+): Promise<{ error?: string; errorCode?: AgentErrorCode; requeue?: boolean }> {
   const { sessionId, text, model, mode, imagePaths = [], subscriber } = opts;
 
   if (activeRuns.has(sessionId)) {
-    return { error: 'Agent is busy' };
+    return { error: 'Agent is busy', requeue: true };
   }
 
   const session = await db.getSession(sessionId);
   if (!session) {
-    return { error: 'Session not found' };
+    return { error: 'Session not found', requeue: true };
   }
 
   const agentType: AgentType = (session.agentType as AgentType | null) ?? 'claude';
@@ -634,12 +634,15 @@ export async function dispatchPrompt(
     extractLinkedPlanContextFromConfig(session.sessionConfigJson);
 
   if (agentType !== 'claude' && agentType !== 'mistral-vibe' && agentType !== 'cursor-agent' && agentType !== 'open-code' && agentType !== 'codex') {
-    return { error: `Agent type '${agentType}' is not yet supported via ACP. Coming soon.` };
+    return {
+      error: `Agent type '${agentType}' is not yet supported via ACP. Coming soon.`,
+      requeue: true
+    };
   }
 
   const workspace = await db.getWorkspace(session.workspaceId);
   if (!workspace) {
-    return { error: 'Workspace not found' };
+    return { error: 'Workspace not found', requeue: true };
   }
 
   let currentMessages: ChatMessage[] = [];
@@ -671,14 +674,15 @@ export async function dispatchPrompt(
   } catch (err) {
     currentMessages.pop();
     logger.error({ err, sessionId }, 'Failed to persist user message / preview');
-    return { error: 'Failed to save message' };
+    return { error: 'Failed to save message', requeue: true };
   }
 
   const { attachments, textPaths } = await resolvePromptAttachments(imagePaths);
   const effectiveText = textPaths.length > 0 ? `${text}\n\n${textPaths.join('\n')}` : text;
   const workspacePath = resolveWorkspaceAbsolutePath(workspace.path);
   if (!isPathUnderBrowseRoot(workspacePath)) {
-    return { error: 'Invalid workspace path' };
+    // User message is already persisted — do not put the queue item back.
+    return { error: 'Invalid workspace path', requeue: false };
   }
 
   const assistantEvents: string[] = [];

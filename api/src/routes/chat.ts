@@ -159,8 +159,21 @@ async function tryProcessQueue(sessionId: string): Promise<void> {
       subscriber: sub
     });
     if (result.error) {
+      // Queue item was already removed. Put it back when the user message was not
+      // persisted, otherwise the prompt vanishes while session title naming still runs.
+      if (result.requeue !== false) {
+        await db.enqueueSessionQueueItem({
+          sessionId,
+          text: next.text,
+          model: next.model,
+          mode: next.mode,
+          imagePaths: next.imagePaths
+        });
+        await broadcastQueueUpdate(sessionId);
+      }
       broadcastChat(sessionId, { type: 'error', message: result.error, code: result.errorCode });
-      void tryProcessQueue(sessionId);
+      // Do not immediately retry: permanent errors would loop, and "Agent is busy"
+      // is drained when the active run's onDone calls tryProcessQueue.
     }
   } finally {
     queueWorkers.delete(sessionId);
@@ -319,8 +332,31 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
       return;
     }
 
-    const queue = await loadQueue(id);
-    const existingRun = getActiveRun(id);
+    // Load DB history BEFORE registering for broadcasts. Registering first, then
+    // awaiting the DB, let prompt-started land and then a stale empty history
+    // wipe the UI (named session, blank chat) — especially on a fast first send.
+    let queue = await loadQueue(id);
+    let existingRun = getActiveRun(id);
+    if (!existingRun) {
+      // Await DB before registering. Re-read once more so a run that started and
+      // finished during the first fetch is not sent as a stale empty snapshot.
+      let pageResult = await db.listSessionMessagesPage(id, 0, HISTORY_PAGE_SIZE);
+      existingRun = getActiveRun(id);
+      if (!existingRun) {
+        pageResult = await db.listSessionMessagesPage(id, 0, HISTORY_PAGE_SIZE);
+        queue = await loadQueue(id);
+        existingRun = getActiveRun(id);
+        if (!existingRun) {
+          registerChatSocket(id, socket);
+          send(socket, {
+            type: 'history',
+            messages: pageResult.messages,
+            hasMore: pageResult.hasMore,
+            queue
+          });
+        }
+      }
+    }
     if (existingRun) {
       // Snapshot the buffer, replay it, THEN register for the session broadcast:
       // lines up to the snapshot are delivered once via the replay, lines after
@@ -346,10 +382,6 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
         // but the 'done' broadcast fired before this socket registered.
         send(socket, { type: 'done' });
       }
-    } else {
-      registerChatSocket(id, socket);
-      const { messages: page, hasMore } = await db.listSessionMessagesPage(id, 0, HISTORY_PAGE_SIZE);
-      send(socket, { type: 'history', messages: page, hasMore, queue });
     }
 
     socket.on('message', async (raw: Buffer) => {

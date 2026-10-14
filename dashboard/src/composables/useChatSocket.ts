@@ -22,6 +22,7 @@ import {
   type DisplayItem,
   type StreamUsage
 } from '@/utils/chatDisplayItems';
+import { shouldRetainLocalChatHistory } from '@/utils/chatHistoryApply';
 
 // types
 import type {
@@ -112,21 +113,28 @@ export function useChatSocket(ctx: UseChatSocketContext) {
   // -------------------------------------------------- Frame handlers --------------------------------------------------
 
   function handleHistory(msg: ChatWsServerMessage): void {
+    const incoming = msg.messages ?? [];
+    // Stale empty snapshot after prompt-started / optimistic send — keep the turn.
+    const bRetainLocal = shouldRetainLocalChatHistory(incoming.length, messages.value.length);
     bHistoryLoaded.value = true;
-    messages.value = msg.messages ?? [];
-    seenVibeMessageIds.clear();
-    seenVibeToolCallIds.clear();
-    for (const m of messages.value) {
-      indexSeenVibeIdsFromEvents(m.events, seenVibeMessageIds, seenVibeToolCallIds);
+    if (!bRetainLocal) {
+      messages.value = incoming;
+      seenVibeMessageIds.clear();
+      seenVibeToolCallIds.clear();
+      for (const m of messages.value) {
+        indexSeenVibeIdsFromEvents(m.events, seenVibeMessageIds, seenVibeToolCallIds);
+      }
+      streamingItems.value = [];
+      streamingRawLines.length = 0;
+      streamingThinkingText.value = '';
+      pendingApprovals.value = [];
+      pendingQuestions.value = [];
+      bIsStreaming.value = msg.streaming === true;
+    } else if (msg.streaming === true) {
+      bIsStreaming.value = true;
     }
     queuedPrompts.value = msg.queue ?? [];
     bHasMore.value = msg.hasMore ?? false;
-    streamingItems.value = [];
-    streamingRawLines.length = 0;
-    streamingThinkingText.value = '';
-    pendingApprovals.value = [];
-    pendingQuestions.value = [];
-    bIsStreaming.value = msg.streaming === true;
     ctx.onHistoryLoaded();
     ctx.onMessagesChanged?.();
   }
@@ -150,12 +158,24 @@ export function useChatSocket(ctx: UseChatSocketContext) {
       text: prompt.text,
       imagePaths: prompt.imagePaths ?? []
     };
-    messages.value.push({
-      role: 'user',
-      content: prompt.text,
-      imagePaths: prompt.imagePaths?.length ? prompt.imagePaths : undefined,
-      createdAt: prompt.createdAt
-    });
+    const imagePaths = prompt.imagePaths?.length ? prompt.imagePaths : undefined;
+    const last = messages.value[messages.value.length - 1];
+    const bSameOptimistic =
+      last?.role === 'user' &&
+      (last.content ?? '') === prompt.text &&
+      JSON.stringify(last.imagePaths ?? []) === JSON.stringify(imagePaths ?? []);
+    if (bSameOptimistic && last) {
+      last.createdAt = prompt.createdAt;
+    } else {
+      messages.value.push({
+        role: 'user',
+        content: prompt.text,
+        imagePaths,
+        createdAt: prompt.createdAt
+      });
+    }
+    bHistoryLoaded.value = true;
+    bIsStreaming.value = true;
     ctx.onContentAppended();
     ctx.onMessagesChanged?.();
   }
@@ -363,6 +383,16 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     }
     clearChatError();
     lastPromptRequest.value = { text: payload.text, imagePaths: payload.imagePaths };
+    // Show the user turn immediately so a late/stale empty history frame cannot
+    // leave a named session with a blank pane.
+    messages.value.push({
+      role: 'user',
+      content: payload.text,
+      imagePaths: payload.imagePaths.length > 0 ? payload.imagePaths : undefined,
+      createdAt: new Date().toISOString()
+    });
+    bHistoryLoaded.value = true;
+    bIsStreaming.value = true;
     socket.send({
       type: 'prompt',
       text: payload.text,
@@ -370,18 +400,31 @@ export function useChatSocket(ctx: UseChatSocketContext) {
       mode: payload.mode,
       imagePaths: payload.imagePaths
     });
+    ctx.onContentAppended();
+    ctx.onMessagesChanged?.();
     return true;
   }
 
   function retryLastPrompt(model: string): void {
     if (!lastPromptRequest.value || !socket || !bWsConnected.value) return;
     clearChatError();
+    const { text, imagePaths } = lastPromptRequest.value;
+    messages.value.push({
+      role: 'user',
+      content: text,
+      imagePaths: imagePaths.length > 0 ? imagePaths : undefined,
+      createdAt: new Date().toISOString()
+    });
+    bHistoryLoaded.value = true;
+    bIsStreaming.value = true;
     socket.send({
       type: 'prompt',
-      text: lastPromptRequest.value.text,
+      text,
       model,
-      imagePaths: lastPromptRequest.value.imagePaths
+      imagePaths
     });
+    ctx.onContentAppended();
+    ctx.onMessagesChanged?.();
   }
 
   function cancelPrompt(): void {
