@@ -25,6 +25,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     createdAt: '2026-07-24T10:00:00.000Z',
     updatedAt: '2026-07-24T10:00:00.000Z',
     archived: false,
+    isFavorite: false,
     ...overrides
   };
 }

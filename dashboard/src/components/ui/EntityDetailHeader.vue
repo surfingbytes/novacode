@@ -163,9 +163,12 @@ onUnmounted(() => {
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M11 9l3 3-3 3"/></svg>
         </button>
         <div class="flex flex-col min-w-0">
-          <h1 class="text-base font-semibold text-text-primary truncate">
-            {{ bLoading ? '…' : title }}
-          </h1>
+          <div class="flex items-center gap-1 min-w-0">
+            <h1 class="text-base font-semibold text-text-primary truncate">
+              {{ bLoading ? '…' : title }}
+            </h1>
+            <slot name="title-trailing" />
+          </div>
           <!-- workspace name + optional trailing meta (cost, rules, …) -->
           <div
             v-if="subtitle || subtitleItems.length > 0 || $slots['subtitle-trailing']"

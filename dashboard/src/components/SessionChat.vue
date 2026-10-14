@@ -787,6 +787,19 @@ async function toggleArchive(): Promise<void> {
   }
 }
 
+async function toggleFavorite(): Promise<void> {
+  if (!session.value || session.value.archived) return;
+  try {
+    const { data: updated } = await sessionsApi.update(props.workspaceId, props.sessionId, {
+      isFavorite: !session.value.isFavorite
+    });
+    session.value = updated;
+    workspacesStore.upsertSession(updated);
+  } catch (err: unknown) {
+    toastStore.error(apiErrorMessage(err, 'Failed to update favorite'));
+  }
+}
+
 // ── Session fetch ─────────────────────────────────────────────────────────────
 async function fetchSession(): Promise<boolean> {
   const seq = ++fetchSessionSeq;
@@ -1060,6 +1073,31 @@ onUnmounted(() => {
       @archive="toggleArchive"
       @delete="bShowDeleteModal = true"
     >
+      <template v-if="session && !session.archived" #title-trailing>
+        <button
+          type="button"
+          class="session-fav-btn"
+          :class="{ 'session-fav-btn--on': session.isFavorite }"
+          :title="session.isFavorite ? 'Remove favorite' : 'Add to favorites'"
+          :aria-label="session.isFavorite ? 'Remove favorite' : 'Add to favorites'"
+          :aria-pressed="session.isFavorite"
+          @click="toggleFavorite"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            :fill="session.isFavorite ? 'currentColor' : 'none'"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z" />
+          </svg>
+        </button>
+      </template>
       <template #subtitle-trailing>
         <template v-if="sessionCostLabel">
           <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>
@@ -1356,4 +1394,34 @@ onUnmounted(() => {
     @auto-continue-updated="handleAutoContinueUpdated"
   />
 </template>
+
+<style scoped>
+.session-fav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg-subtle);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background 0.1s,
+    color 0.1s;
+}
+.session-fav-btn:hover {
+  background: var(--bg-hover);
+  color: var(--fg-muted);
+}
+.session-fav-btn--on {
+  color: var(--accent);
+}
+.session-fav-btn--on:hover {
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+}
+</style>
 

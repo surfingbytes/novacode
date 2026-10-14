@@ -204,10 +204,11 @@ const filteredSessions = computed(() => {
     list = list.filter((s) => sessionHasTag(s, activeFilter.value));
   }
   return [...list].sort((a, b) => {
-    // Busy sessions first
+    // Favorites first, then busy, then by updatedAt descending
+    const favDiff = (b.isFavorite ? 1 : 0) - (a.isFavorite ? 1 : 0);
+    if (favDiff !== 0) return favDiff;
     const busyDiff = (b.busy ? 1 : 0) - (a.busy ? 1 : 0);
     if (busyDiff !== 0) return busyDiff;
-    // Then by updatedAt descending (newest first)
     return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
   });
 });
@@ -238,6 +239,9 @@ const combinedItems = computed<CombinedItem[]>(() => {
   }));
   const merged: CombinedItem[] = [...sessionItems, ...orchestratorItems];
   return merged.sort((a, b) => {
+    const aFav = a.kind === 'session' && a.session.isFavorite ? 1 : 0;
+    const bFav = b.kind === 'session' && b.session.isFavorite ? 1 : 0;
+    if (bFav !== aFav) return bFav - aFav;
     const aUpdated = a.kind === 'session' ? a.session.updatedAt : a.orchestrator.updatedAt;
     const bUpdated = b.kind === 'session' ? b.session.updatedAt : b.orchestrator.updatedAt;
     return new Date(bUpdated).getTime() - new Date(aUpdated).getTime();

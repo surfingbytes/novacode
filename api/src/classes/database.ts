@@ -553,6 +553,7 @@ export const db = {
       name?: string;
       tags?: string[] | null;
       archived?: boolean;
+      isFavorite?: boolean;
       claudeLimitResetAt?: string | null;
     }
   ): Promise<Session | undefined> {
@@ -571,6 +572,34 @@ export const db = {
       }
     }
 
+    const archived = patch.archived ?? existingSession.archived;
+    let isFavorite = existingSession.isFavorite;
+    if (patch.isFavorite !== undefined) {
+      if (patch.isFavorite && archived) {
+        throw new FavoriteLimitError('Archived sessions cannot be favorited');
+      }
+      isFavorite = patch.isFavorite;
+    }
+    if (archived) {
+      isFavorite = false;
+    }
+
+    // Starring should not reshuffle lists by last-interaction date.
+    const favoriteOnly =
+      patch.isFavorite !== undefined &&
+      patch.sessionId === undefined &&
+      patch.modelSelection === undefined &&
+      patch.sessionMode === undefined &&
+      patch.approvalPolicy === undefined &&
+      patch.sessionConfigJson === undefined &&
+      patch.lastPreviewText === undefined &&
+      patch.lastPreviewRole === undefined &&
+      patch.lastUsageJson === undefined &&
+      patch.name === undefined &&
+      !('tags' in patch) &&
+      patch.archived === undefined &&
+      patch.claudeLimitResetAt === undefined;
+
     const row = await _prisma.session.update({
       where: { id },
       data: {
@@ -584,9 +613,10 @@ export const db = {
         ...(patch.lastUsageJson !== undefined && { lastUsageJson: patch.lastUsageJson }),
         name: patch.name ?? existingSession.name,
         ...(tagsJson !== undefined && { tags: tagsJson }),
-        archived: patch.archived ?? existingSession.archived,
+        archived,
+        isFavorite,
         ...(patch.claudeLimitResetAt !== undefined && { claudeLimitResetAt: patch.claudeLimitResetAt }),
-        updatedAt: new Date().toISOString()
+        ...(!favoriteOnly && { updatedAt: new Date().toISOString() })
       }
     });
 

@@ -121,6 +121,9 @@ const items = computed<SidebarItem[]>(() => {
 
   const list: SidebarItem[] = [...sessionItems, ...orchestratorItems];
   return list.sort((a, b) => {
+    const aFav = a.kind === 'session' && a.session.isFavorite ? 1 : 0;
+    const bFav = b.kind === 'session' && b.session.isFavorite ? 1 : 0;
+    if (bFav !== aFav) return bFav - aFav;
     const aUpdated = a.kind === 'session' ? a.session.updatedAt : a.orchestrator.updatedAt;
     const bUpdated = b.kind === 'session' ? b.session.updatedAt : b.orchestrator.updatedAt;
     return new Date(bUpdated).getTime() - new Date(aUpdated).getTime();
@@ -499,6 +502,22 @@ watch(
                   <span class="truncate flex-1 min-w-0 text-sm font-medium text-text-primary">
                     {{ item.session.name || 'Untitled session' }}
                   </span>
+                  <svg
+                    v-if="item.session.isFavorite"
+                    class="text-primary shrink-0 self-center"
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-label="Favorite"
+                    title="Favorite"
+                  >
+                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z" />
+                  </svg>
                   <span class="text-[11px] text-text-muted shrink-0 whitespace-nowrap tabular-nums">
                     {{ relativeTimeShort(item.session.updatedAt) }}
                   </span>

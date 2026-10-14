@@ -101,10 +101,17 @@ const favoriteWorkspaces = computed(() => workspacesStore.favoriteWorkspaces);
 const activeQuickSessions = computed(() => workspacesStore.activeBusySessions);
 const mergedQuickSessions = computed(() => {
   const activeIds = new Set(activeQuickSessions.value.map((s) => s.id));
-  const recentSessions = workspacesStore.allSessions
-    .filter((s) => !s.archived && !activeIds.has(s.id))
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  return [...activeQuickSessions.value, ...recentSessions].slice(0, 10);
+  const byUpdatedDesc = (a: { updatedAt: string }, b: { updatedAt: string }) =>
+    new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+  const favorites = workspacesStore.allSessions
+    .filter((s) => !s.archived && s.isFavorite)
+    .sort(byUpdatedDesc);
+  const favoriteIds = new Set(favorites.map((s) => s.id));
+  const busyRest = activeQuickSessions.value.filter((s) => !favoriteIds.has(s.id));
+  const recentRest = workspacesStore.allSessions
+    .filter((s) => !s.archived && !favoriteIds.has(s.id) && !activeIds.has(s.id))
+    .sort(byUpdatedDesc);
+  return [...favorites, ...busyRest, ...recentRest].slice(0, 10);
 });
 
 const newSessionTags = computed((): string[] => {
@@ -395,6 +402,22 @@ onBeforeUnmount(() => {
               <div class="sidebar__session-name">
                 {{ session.name || 'Untitled' }}
               </div>
+              <svg
+                v-if="session.isFavorite"
+                class="sidebar__session-star"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-label="Favorite"
+                title="Favorite"
+              >
+                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z" />
+              </svg>
               <span
                 v-if="isSessionUnread(session) && !session.busy"
                 class="sidebar__session-done"
@@ -780,6 +803,11 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   min-width: 0;
   flex: 1;
+}
+
+.sidebar__session-star {
+  flex-shrink: 0;
+  color: var(--accent);
 }
 
 .sidebar__session-done {

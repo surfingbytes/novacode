@@ -2,7 +2,7 @@
 import { FastifyInstance } from 'fastify';
 
 // classes
-import { db, normalizeTagStringList } from '../classes/database';
+import { db, FavoriteLimitError, normalizeTagStringList } from '../classes/database';
 import { normalizeSessionForApi } from '../classes/sessionNormalize';
 import { jwtPreHandler } from '../classes/auth';
 import { createSessionWithAgent } from '../classes/sessionService';
@@ -229,6 +229,7 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         name?: string;
         tags?: string[] | string | null;
         archived?: boolean;
+        isFavorite?: boolean;
         modelSelection?: string;
         sessionMode?: string;
         approvalPolicy?: string;
@@ -242,6 +243,7 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         name?: string;
         tags?: string[] | null;
         archived?: boolean;
+        isFavorite?: boolean;
         modelSelection?: string;
         sessionMode?: string;
         approvalPolicy?: string;
@@ -255,6 +257,9 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       }
       if (body.archived !== undefined) {
         patch.archived = body.archived;
+      }
+      if (body.isFavorite !== undefined) {
+        patch.isFavorite = body.isFavorite;
       }
       if (body.modelSelection !== undefined) {
         patch.modelSelection = body.modelSelection;
@@ -271,7 +276,15 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
           body.sessionConfigJson
         );
       }
-      const updated = await db.updateSession(sessionId, patch);
+      let updated;
+      try {
+        updated = await db.updateSession(sessionId, patch);
+      } catch (err: unknown) {
+        if (err instanceof FavoriteLimitError) {
+          return reply.status(400).send({ error: err.message });
+        }
+        throw err;
+      }
       if (!updated) {
         return reply.status(500).send({ error: 'Failed to update session' });
       }

@@ -275,6 +275,7 @@ export interface Session {
   createdAt: string;
   updatedAt: string;
   archived: boolean;
+  isFavorite: boolean;
   busy?: boolean;
   /** Outstanding Task/subagent counts while `busy` (running of total launched this turn). */
   busySubagents?: { running: number; total: number } | null;

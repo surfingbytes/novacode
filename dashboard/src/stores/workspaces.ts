@@ -369,6 +369,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     reloadAfterReconnect,
     reloadIfLoadFailed,
     markSessionRead,
+    upsertSession,
     createWorkspace,
     updateWorkspace,
     toggleFavorite,

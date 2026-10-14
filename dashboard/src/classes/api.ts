@@ -702,6 +702,7 @@ export const sessionsApi = {
       name?: string;
       tags?: string[] | null;
       archived?: boolean;
+      isFavorite?: boolean;
       modelSelection?: string;
       sessionMode?: string;
       approvalPolicy?: ApprovalPolicy;
