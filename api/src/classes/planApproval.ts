@@ -1,13 +1,17 @@
 /**
  * Detect Claude ExitPlanMode (and similar) permission requests that present a
- * plan for user review. These must never be auto-approved — the plan is the
- * product of plan mode.
+ * plan for user review — used to surface plan markdown in the Plan tab / UI.
  */
 import type { RequestPermissionRequest } from '@agentclientprotocol/sdk';
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
+}
+
+function stringProp(obj: Record<string, unknown> | null, key: string): string {
+  const value = obj?.[key];
+  return typeof value === 'string' ? value : '';
 }
 
 /** Flatten ACP content blocks into plain text. */
@@ -41,13 +45,10 @@ function planFromRawInput(rawInput: unknown): string {
 /** True when this permission request is "approve / exit plan mode". */
 export function isPlanApprovalRequest(params: RequestPermissionRequest): boolean {
   const toolCall = asRecord(params.toolCall) ?? {};
-  const name = typeof toolCall.name === 'string' ? toolCall.name : '';
+  const name = stringProp(toolCall, 'name');
   if (name === 'ExitPlanMode') return true;
 
-  const title =
-    (typeof (params as { title?: unknown }).title === 'string'
-      ? (params as { title: string }).title
-      : '') || (typeof toolCall.title === 'string' ? toolCall.title : '');
+  const title = stringProp(asRecord(params), 'title') || stringProp(toolCall, 'title');
   if (title.trim() === 'Approve Plan') return true;
 
   if (planFromRawInput(toolCall.rawInput)) return true;
