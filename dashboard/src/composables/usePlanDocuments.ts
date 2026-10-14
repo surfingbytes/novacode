@@ -498,7 +498,7 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
       return;
     }
 
-    const button = target.closest<HTMLButtonElement>('[data-plan-entry-index]');
+    const button = target.closest<HTMLButtonElement>('button.plan-start-session-btn');
     if (!button) return;
 
     const plan = selectedPlanDocument.value;

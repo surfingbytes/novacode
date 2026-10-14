@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // node_modules
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { computed, nextTick, ref } from 'vue';
@@ -33,7 +34,7 @@ function planLine(markdown: string, entries: Array<{ content: string; status: st
   });
 }
 
-function mountPlanDocuments(messages: HistoryMessage[]) {
+function mountPlanDocuments(messages: HistoryMessage[], onStartPlanSession: () => void = () => {}) {
   const displayMessages = computed(() =>
     messages.map((msg, index) => {
       const items =
@@ -54,7 +55,7 @@ function mountPlanDocuments(messages: HistoryMessage[]) {
     streamingDisplayItems: computed(() => []),
     activeTab: ref('plan'),
     modelSelection: ref(''),
-    onStartPlanSession: () => {}
+    onStartPlanSession
   });
 }
 
@@ -91,6 +92,25 @@ describe('usePlanDocuments mark-as-done', () => {
       'Second',
       'Third - done'
     ]);
+  });
+
+  it('starts a session only from the Start session button', () => {
+    const onStartPlanSession = vi.fn();
+    const view = mountPlanDocuments(
+      [{ role: 'assistant', createdAt: '1', events: [planLine('# Plan\n\n1. First\n\nDetails\n\n2. Second')] }],
+      onStartPlanSession
+    );
+    const host = document.createElement('div');
+    host.innerHTML = view.selectedPlanDocument.value!.renderedHtml;
+    const click = (el: Element) =>
+      view.onPlanMarkdownClick({ target: el } as unknown as MouseEvent);
+
+    click(host.querySelector('.plan-step-body p')!);
+    click(host.querySelector('.plan-step-title')!);
+    expect(onStartPlanSession).not.toHaveBeenCalled();
+
+    click(host.querySelector('button.plan-start-session-btn')!);
+    expect(onStartPlanSession).toHaveBeenCalledTimes(1);
   });
 
   it('rolls back the optimistic mark when persisting fails', async () => {
