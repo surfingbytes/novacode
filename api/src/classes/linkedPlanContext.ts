@@ -11,6 +11,8 @@ export interface LinkedPlanContext {
   planId: string;
   planTitle: string;
   entryIndex: number;
+  /** Hierarchical point label ("6", "5.3"); falls back to entryIndex + 1. */
+  entryLabel?: string;
   entryContent: string;
   contextMode: LinkedPlanContextMode;
   /** Agent that produced the source plan; selects the plan-documents source. */
@@ -42,6 +44,9 @@ export function parseLinkedPlanContext(value: unknown): LinkedPlanContext | null
       planId: parsed.planId,
       planTitle: parsed.planTitle,
       entryIndex: parsed.entryIndex,
+      ...(typeof parsed.entryLabel === 'string' && parsed.entryLabel.trim()
+        ? { entryLabel: parsed.entryLabel.trim() }
+        : {}),
       entryContent: parsed.entryContent,
       contextMode: parsed.contextMode === 'full' ? 'full' : 'target-only',
       ...(typeof parsed.sourceAgentType === 'string' && parsed.sourceAgentType
@@ -63,6 +68,7 @@ export function serializeLinkedPlanContext(context: LinkedPlanContext): string {
     planId: context.planId,
     planTitle: context.planTitle,
     entryIndex: context.entryIndex,
+    ...(context.entryLabel?.trim() ? { entryLabel: context.entryLabel.trim() } : {}),
     entryContent: context.entryContent,
     contextMode: context.contextMode,
     ...(context.sourceAgentType ? { sourceAgentType: context.sourceAgentType } : {}),
@@ -125,7 +131,7 @@ export async function buildLinkedPlanContextPrefix(
   const parts = [
     'Linked plan context is attached to this session by Nova Code.',
     `Source plan: ${context.planTitle}`,
-    `Target point: ${context.entryIndex + 1}`,
+    `Target point: ${context.entryLabel?.trim() || context.entryIndex + 1}`,
     '',
     '## Target Plan Point',
     '',

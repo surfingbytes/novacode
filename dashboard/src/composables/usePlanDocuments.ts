@@ -24,6 +24,7 @@ import {
   planDocumentFromFileSummary,
   planDocumentFromItem,
   planMarkdownBaseKey,
+  planEntryLabels,
   planMarkdownCandidatesFromDocuments,
   type PlanDocument,
   type PlanEntry
@@ -379,7 +380,9 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
     const entryText = entry.content.trim();
     if (!entryText) return;
 
-    const pointNumber = index + 1;
+    const labels = planEntryLabels(plan.markdown);
+    const pointNumber =
+      labels.length === plan.startableEntries.length ? labels[index] : String(index + 1);
     const { planId, planSourceSessionId, sourceAgentType, planMarkdown } = resolvePlanLinkMeta(plan);
     const linkedPlanContext: LinkedPlanContext = {
       sourceSessionId: ctx.sessionId(),
@@ -387,6 +390,7 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
       planId,
       planTitle: plan.title,
       entryIndex: index,
+      entryLabel: pointNumber,
       entryContent: entryText,
       // Include full plan markdown when available so the implementer sees surrounding context
       // even for agents (Claude) that have no file-backed plan documents.

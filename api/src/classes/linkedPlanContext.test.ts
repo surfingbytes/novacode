@@ -38,6 +38,13 @@ describe('linkedPlanContext', () => {
     expect(prefix).toContain('Add tests');
   });
 
+  it('names the target by hierarchical label when present', async () => {
+    const withLabel = { ...base, entryIndex: 12, entryLabel: '5.3' };
+    expect(parseLinkedPlanContext(serializeLinkedPlanContext(withLabel))).toEqual(withLabel);
+    expect(await buildLinkedPlanContextPrefix(withLabel)).toContain('Target point: 5.3');
+    expect(await buildLinkedPlanContextPrefix(base)).toContain('Target point: 3');
+  });
+
   it('still works for target-only without planMarkdown', async () => {
     const prefix = await buildLinkedPlanContextPrefix({
       ...base,

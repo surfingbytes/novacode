@@ -154,6 +154,8 @@ export interface LinkedPlanContext {
   planId: string;
   planTitle: string;
   entryIndex: number;
+  /** Hierarchical point label shown to the agent ("6", "5.3"); falls back to entryIndex + 1. */
+  entryLabel?: string;
   entryContent: string;
   contextMode: LinkedPlanContextMode;
   /** Agent that produced the source plan; selects the plan-documents source. */

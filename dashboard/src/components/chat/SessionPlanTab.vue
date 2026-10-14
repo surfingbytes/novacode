@@ -12,6 +12,7 @@ import { ChevronDown } from 'lucide-vue-next';
 // utils
 import {
   isPlanEntryDone,
+  planEntryParentIndexes,
   planStatusIcon,
   type PlanDocument,
   type PlanEntry
@@ -48,7 +49,17 @@ const bCollapseDoneSteps = ref(true);
 const planEntries = computed(() => {
   const plan = props.selectedPlanDocument;
   if (!plan) return [];
-  return plan.startableEntries.map((entry, index) => ({ entry, index }));
+  const entries = plan.startableEntries;
+  const parents = planEntryParentIndexes(plan.markdown);
+  const hasDoneAncestor = (index: number): boolean => {
+    for (let parent = parents[index] ?? -1; parent >= 0; parent = parents[parent] ?? -1) {
+      if (entries[parent] && isPlanEntryDone(entries[parent])) return true;
+    }
+    return false;
+  };
+  return entries
+    .map((entry, index) => ({ entry, index }))
+    .filter(({ index }) => !bCollapseDoneSteps.value || !hasDoneAncestor(index));
 });
 
 const doneStepsCount = computed(

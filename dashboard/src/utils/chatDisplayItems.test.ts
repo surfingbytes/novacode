@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // node_modules
 import { describe, it, expect, vi } from 'vitest';
 
@@ -12,6 +13,8 @@ import {
   isToolCallDisplayItem,
   entriesFromPlanMarkdown,
   markPlanEntryDoneInMarkdown,
+  planEntryLabels,
+  planEntryParentIndexes,
   renderPlanMarkdownWithActions,
   shouldSkipDuplicateVibeEventLine,
   indexSeenVibeIdsFromEvents,
@@ -706,6 +709,44 @@ describe('markPlanEntryDoneInMarkdown', () => {
     expect(markPlanEntryDoneInMarkdown(md, 0)).toContain('1. First step - done');
     expect(markPlanEntryDoneInMarkdown(md, 1)).toContain('2. Second step - done');
     expect(markPlanEntryDoneInMarkdown('1. Already - done\n', 0)).toBeNull();
+  });
+});
+
+describe('nested plan steps', () => {
+  const md = [
+    '## 5. Rename mechanism - done',
+    '',
+    '1. Dashboard card',
+    '2. Landing card',
+    '',
+    '## 6. Next step',
+    '',
+    '1. Sub of six',
+    '',
+    '## Notes',
+    '',
+    'tail'
+  ].join('\n');
+
+  it('maps list substeps to their numbered heading', () => {
+    expect(planEntryParentIndexes(md)).toEqual([-1, 0, 0, -1, 3]);
+  });
+
+  it('labels full steps and substeps hierarchically', () => {
+    expect(planEntryLabels(md)).toEqual(['5', '5.1', '5.2', '6', '6.1']);
+    expect(planEntryLabels('1. One\n2. Two\n3. Three')).toEqual(['1', '2', '3']);
+  });
+
+  it('renders substeps inside the parent step body so collapse hides them', () => {
+    const html = renderPlanMarkdownWithActions(md, entriesFromPlanMarkdown(md));
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const done = doc.querySelector('.plan-step[data-plan-done="true"]')!;
+    const body = done.querySelector(':scope > .plan-step-body')!;
+    expect(body.textContent).toContain('Dashboard card');
+    expect(body.textContent).toContain('Landing card');
+    expect(body.textContent).not.toContain('Next step');
+    expect(doc.body.textContent).toContain('tail');
+    expect(done.parentElement?.closest('.plan-step')).toBeNull();
   });
 });
 

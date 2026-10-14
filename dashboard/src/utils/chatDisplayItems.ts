@@ -1183,27 +1183,25 @@ export function markPlanEntryDoneInMarkdown(markdown: string, entryIndex: number
   return null;
 }
 
-export function renderPlanMarkdownWithActions(markdown: string, entries: PlanEntry[]): string {
-  if (!entries.length) return renderMdCached(markdown);
+/** List-item steps nest under any heading step. */
+const PLAN_LIST_STEP_LEVEL = 10;
 
+interface PlanLineInfo {
+  rawLine: string;
+  kind: 'entry' | 'full-plan' | 'heading' | 'text';
+  /** Heading depth (1-4) or PLAN_LIST_STEP_LEVEL for list steps; 0 for plain text. */
+  level: number;
+}
+
+function scanPlanLines(markdown: string): PlanLineInfo[] {
   const lines = markdown.replace(/\r\n/g, '\n').split('\n');
-  const out: string[] = [];
-  let inFence = false;
-  let fenceMarker: '`' | '~' | null = null;
-  let entryIndex = 0;
-  let openStep = false;
   const hasNumberedEntries = lines.some(
     (line) => /^#{1,4}\s+\d+[\.)]\s+/.test(line) || /^\s{0,3}\d+[\.)]\s+/.test(line)
   );
+  let inFence = false;
+  let fenceMarker: '`' | '~' | null = null;
 
-  const closeStep = (): void => {
-    if (!openStep) return;
-    // Close plan-step-body, then plan-step.
-    out.push('', '</div>', '', '</div>', '');
-    openStep = false;
-  };
-
-  for (const rawLine of lines) {
+  return lines.map((rawLine) => {
     const line = rawLine.trimEnd();
     const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
     if (fenceMatch) {
@@ -1215,57 +1213,118 @@ export function renderPlanMarkdownWithActions(markdown: string, entries: PlanEnt
         inFence = false;
         fenceMarker = null;
       }
-      out.push(rawLine);
-      continue;
+      return { rawLine, kind: 'text', level: 0 };
     }
+    if (inFence) return { rawLine, kind: 'text', level: 0 };
 
-    if (!inFence) {
-      const kind = planActionTargetKind(line, hasNumberedEntries);
-      if (kind === 'full-plan') {
-        closeStep();
-        out.push(rawLine);
-        out.push(
-          '',
-          `<div class="plan-start-action-inline"><button type="button" class="plan-start-session-btn" data-plan-entry-index="${entryIndex}" data-plan-full-plan="true">Start session</button></div>`,
-          ''
+    const headingLevel = line.match(/^(#{1,4})\s+/)?.[1].length ?? 0;
+    const kind = planActionTargetKind(line, hasNumberedEntries);
+    if (kind === 'entry') {
+      return { rawLine, kind, level: headingLevel || PLAN_LIST_STEP_LEVEL };
+    }
+    if (kind === 'full-plan') return { rawLine, kind, level: headingLevel };
+    if (headingLevel) return { rawLine, kind: 'heading', level: headingLevel };
+    return { rawLine, kind: 'text', level: 0 };
+  });
+}
+
+/** Parent step index for each startable entry (-1 for top-level steps). */
+export function planEntryParentIndexes(markdown: string): number[] {
+  const parents: number[] = [];
+  const stack: Array<{ index: number; level: number }> = [];
+  for (const info of scanPlanLines(markdown)) {
+    if (info.kind === 'text') continue;
+    while (stack.length && stack[stack.length - 1].level >= info.level) stack.pop();
+    if (info.kind !== 'entry') continue;
+    parents.push(stack.length ? stack[stack.length - 1].index : -1);
+    stack.push({ index: parents.length - 1, level: info.level });
+  }
+  return parents;
+}
+
+/**
+ * Hierarchical label per startable entry ("6", "5.3"), using the number written
+ * in the markdown when present, else the position among siblings.
+ */
+export function planEntryLabels(markdown: string): string[] {
+  const labels: string[] = [];
+  const stack: Array<{ level: number; label: string; childCount: number }> = [];
+  let topLevelCount = 0;
+  for (const info of scanPlanLines(markdown)) {
+    if (info.kind === 'text') continue;
+    while (stack.length && stack[stack.length - 1].level >= info.level) stack.pop();
+    if (info.kind !== 'entry') continue;
+    const parent = stack[stack.length - 1];
+    const ordinal = parent ? ++parent.childCount : ++topLevelCount;
+    const written = info.rawLine.match(/^\s*(?:#{1,4}\s+)?(\d+)[.)]\s/)?.[1];
+    const own = written ?? String(ordinal);
+    const label = parent ? `${parent.label}.${own}` : own;
+    labels.push(label);
+    stack.push({ level: info.level, label, childCount: 0 });
+  }
+  return labels;
+}
+
+export function renderPlanMarkdownWithActions(markdown: string, entries: PlanEntry[]): string {
+  if (!entries.length) return renderMdCached(markdown);
+
+  const out: string[] = [];
+  let entryIndex = 0;
+  const openLevels: number[] = [];
+
+  // Close steps at or below `level` so substeps stay inside their parent's body.
+  const closeStepsFrom = (level: number): void => {
+    while (openLevels.length && openLevels[openLevels.length - 1] >= level) {
+      openLevels.pop();
+      out.push('', '</div>', '', '</div>', '');
+    }
+  };
+
+  for (const { rawLine, kind, level } of scanPlanLines(markdown)) {
+    if (kind === 'heading') {
+      closeStepsFrom(level);
+    } else if (kind === 'full-plan') {
+      closeStepsFrom(level);
+      out.push(rawLine);
+      out.push(
+        '',
+        `<div class="plan-start-action-inline"><button type="button" class="plan-start-session-btn" data-plan-entry-index="${entryIndex}" data-plan-full-plan="true">Start session</button></div>`,
+        ''
+      );
+      continue;
+    } else if (kind === 'entry' && entryIndex < entries.length) {
+      closeStepsFrom(level);
+      const done = isPlanEntryDone(entries[entryIndex]);
+      out.push(
+        '',
+        `<div class="plan-step" data-plan-entry-index="${entryIndex}" data-plan-done="${done ? 'true' : 'false'}">`,
+        '',
+        '<div class="plan-step-title">',
+        '',
+        rawLine,
+        '',
+        '</div>',
+        '',
+        '<div class="plan-step-body">',
+        ''
+      );
+      openLevels.push(level);
+      const buttons = [
+        `<button type="button" class="plan-start-session-btn" data-plan-entry-index="${entryIndex}">Start session</button>`
+      ];
+      if (!done) {
+        buttons.push(
+          `<button type="button" class="plan-mark-done-btn" data-plan-mark-done="${entryIndex}">Mark as done</button>`
         );
-        continue;
       }
-      if (kind === 'entry' && entryIndex < entries.length) {
-        closeStep();
-        const entry = entries[entryIndex];
-        const done = isPlanEntryDone(entry);
-        out.push(
-          '',
-          `<div class="plan-step" data-plan-entry-index="${entryIndex}" data-plan-done="${done ? 'true' : 'false'}">`,
-          '',
-          '<div class="plan-step-title">',
-          '',
-          rawLine,
-          '',
-          '</div>',
-          '',
-          '<div class="plan-step-body">',
-          ''
-        );
-        openStep = true;
-        const buttons = [
-          `<button type="button" class="plan-start-session-btn" data-plan-entry-index="${entryIndex}">Start session</button>`
-        ];
-        if (!done) {
-          buttons.push(
-            `<button type="button" class="plan-mark-done-btn" data-plan-mark-done="${entryIndex}">Mark as done</button>`
-          );
-        }
-        out.push(`<div class="plan-start-action-inline">${buttons.join('')}</div>`, '');
-        entryIndex += 1;
-        continue;
-      }
+      out.push(`<div class="plan-start-action-inline">${buttons.join('')}</div>`, '');
+      entryIndex += 1;
+      continue;
     }
 
     out.push(rawLine);
   }
-  closeStep();
+  closeStepsFrom(0);
 
   return renderMdCached(out.join('\n'));
 }
