@@ -358,6 +358,68 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
+  // POST /api/workspaces/:workspaceId/sessions/:sessionId/plan-update
+  // Persist a plan snapshot into chat history (ACP sessionUpdate: plan), matching
+  // how Claude ACP plan entry status updates are stored and replayed.
+  fastify.post(
+    '/api/workspaces/:workspaceId/sessions/:sessionId/plan-update',
+    { preHandler: jwtPreHandler },
+    async (request, reply) => {
+      const { workspaceId, sessionId } = request.params as {
+        workspaceId: string;
+        sessionId: string;
+      };
+      const body = (request.body ?? {}) as {
+        title?: string;
+        markdown?: string;
+        entries?: Array<{ content: string; status: string; priority?: string }>;
+        planId?: string;
+      };
+      const markdown = typeof body.markdown === 'string' ? body.markdown.trim() : '';
+      const entries = Array.isArray(body.entries) ? body.entries : [];
+      if (!markdown && entries.length === 0) {
+        return reply.status(400).send({ error: 'markdown or entries is required' });
+      }
+      const session = await db.getSession(sessionId);
+      if (!session || session.workspaceId !== workspaceId) {
+        return reply.status(404).send({ error: 'Session not found' });
+      }
+
+      const ok = await db.appendSessionPlanUpdate(sessionId, {
+        title: typeof body.title === 'string' ? body.title : undefined,
+        markdown: markdown || undefined,
+        entries: entries
+          .filter(
+            (entry) =>
+              entry &&
+              typeof entry.content === 'string' &&
+              typeof entry.status === 'string'
+          )
+          .map((entry) => ({
+            content: entry.content,
+            status: entry.status,
+            ...(typeof entry.priority === 'string' ? { priority: entry.priority } : {}),
+          })),
+      });
+      if (!ok) {
+        return reply.status(500).send({ error: 'Failed to persist plan update' });
+      }
+
+      // Best-effort: also write file-backed plans when a plan id is provided.
+      if (typeof body.planId === 'string' && body.planId && markdown) {
+        const workspace = await db.getWorkspace(workspaceId);
+        const workspacePath = workspace ? resolveWorkspaceAbsolutePath(workspace.path) : null;
+        await getPlanDocumentsSource(session.agentType, { workspacePath }).updateById(
+          body.planId,
+          session.sessionId,
+          markdown
+        );
+      }
+
+      return reply.send({ ok: true });
+    }
+  );
+
   // -------------------------------------------------- Session bulk actions --------------------------------------------------
 
   // POST /api/workspaces/:workspaceId/sessions/bulk-delete

@@ -673,6 +673,110 @@ export const db = {
     };
   },
 
+  /**
+   * Append an ACP-style `sessionUpdate: "plan"` event into chat history so the
+   * Plan tab survives reload (same persistence path Claude ACP plan updates use).
+   */
+  async appendSessionPlanUpdate(
+    sessionId: string,
+    plan: {
+      title?: string;
+      markdown?: string;
+      entries?: Array<{ content: string; status: string; priority?: string }>;
+    }
+  ): Promise<boolean> {
+    const session = await _prisma.session.findUnique({ where: { id: sessionId } });
+    if (!session) return false;
+
+    const line = JSON.stringify({
+      sessionId: session.sessionId ?? 'plan-surface',
+      update: {
+        sessionUpdate: 'plan',
+        ...(plan.title?.trim() ? { title: plan.title.trim() } : {}),
+        ...(plan.markdown?.trim() ? { markdown: plan.markdown.trim() } : {}),
+        entries: plan.entries ?? [],
+      },
+    });
+
+    const rows = await _prisma.sessionMessage.findMany({
+      where: { sessionId },
+      orderBy: { position: 'asc' },
+    });
+
+    const isPlanEvent = (raw: string): boolean => {
+      try {
+        const parsed = JSON.parse(raw) as { update?: { sessionUpdate?: string } };
+        return parsed?.update?.sessionUpdate === 'plan';
+      } catch {
+        return false;
+      }
+    };
+
+    let target = [...rows].reverse().find((row) => {
+      if (row.role !== 'assistant' || !row.eventsJson) return false;
+      try {
+        const events = JSON.parse(row.eventsJson) as unknown;
+        return Array.isArray(events) && events.some((e) => typeof e === 'string' && isPlanEvent(e));
+      } catch {
+        return false;
+      }
+    });
+
+    if (!target) {
+      target = [...rows].reverse().find((row) => row.role === 'assistant');
+    }
+
+    if (target) {
+      let events: string[] = [];
+      if (target.eventsJson) {
+        try {
+          const parsed = JSON.parse(target.eventsJson) as unknown;
+          if (Array.isArray(parsed) && parsed.every((item) => typeof item === 'string')) {
+            events = parsed;
+          }
+        } catch {
+          events = [];
+        }
+      }
+      events.push(line);
+      await _prisma.sessionMessage.update({
+        where: { id: target.id },
+        data: { eventsJson: JSON.stringify(events) },
+      });
+      await _prisma.session.update({
+        where: { id: sessionId },
+        data: { updatedAt: new Date().toISOString() },
+      });
+      return true;
+    }
+
+    const max = await _prisma.sessionMessage.aggregate({
+      where: { sessionId },
+      _max: { position: true },
+    });
+    const position = (max._max.position ?? -1) + 1;
+    const createdAt = new Date().toISOString();
+    await _prisma.$transaction([
+      _prisma.sessionMessage.create({
+        data: {
+          id: randomUUID(),
+          sessionId,
+          position,
+          role: 'assistant',
+          content: '',
+          eventsJson: JSON.stringify([line]),
+          imagePathsJson: null,
+          createdAt,
+        },
+      }),
+      _prisma.session.update({
+        where: { id: sessionId },
+        data: { updatedAt: createdAt },
+      }),
+    ]);
+    return true;
+  },
+
   async persistSessionMessages(
     sessionId: string,
     messages: ChatMessage[],

@@ -1296,9 +1296,6 @@ export function planMarkdownBaseKey(markdown: string | undefined): string {
   return normalizePlanSearchText((markdown ?? '').replace(/(?:\s*-\s*done\b)/gi, ''));
 }
 
-/** sessionConfigJson key for persisted plan markdown edits (mark-as-done, etc.). */
-export const PLAN_MARKDOWN_OVERRIDES_CONFIG_KEY = '__novaPlanMarkdownOverrides';
-
 function firstMarkdownHeading(markdown: string): string {
   const heading = unwrapMarkdownFence(markdown)
     .match(/^#{1,3}\s+(.+)$/m)?.[1]

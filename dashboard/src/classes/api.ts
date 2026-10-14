@@ -737,6 +737,19 @@ export const sessionsApi = {
       { markdown }
     ),
 
+  /** Persist plan snapshot into chat history (ACP plan update), same path as Claude ACP. */
+  persistPlanUpdate: (
+    workspaceId: string,
+    sessionId: string,
+    payload: {
+      title?: string;
+      markdown?: string;
+      entries?: Array<{ content: string; status: string; priority?: string }>;
+      planId?: string;
+    }
+  ): ReturnType<typeof http.post<{ ok: boolean }>> =>
+    http.post(`/workspaces/${workspaceId}/sessions/${sessionId}/plan-update`, payload),
+
   bulkDelete: (
     workspaceId: string,
     ids: string[]

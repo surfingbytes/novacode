@@ -14,9 +14,13 @@ import { sessionsApi } from '@/classes/api';
 // utils
 import {
   bestPlanMarkdownFallback,
+  entriesFromPlanMarkdown,
+  isPlanContentDone,
+  isPlanEntryDone,
   markPlanEntryDoneInMarkdown,
+  markdownFromPlanEntries,
   normalizePlanSearchText,
-  PLAN_MARKDOWN_OVERRIDES_CONFIG_KEY,
+  PLAN_DONE_SUFFIX,
   planDocumentFromFileSummary,
   planDocumentFromItem,
   planMarkdownBaseKey,
@@ -64,26 +68,13 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
   const planDocumentsRefreshTimers = new Set<ReturnType<typeof setTimeout>>();
   /** Backend plan ids / markdown keys removed this session so chat copies don't reappear. */
   const dismissedPlanKeys = ref(new Set<string>());
-  /** Markdown overrides (mark-as-done) keyed by plan id / backend id / base content. */
+  /**
+   * Optimistic markdown overrides for the current page view only.
+   * Durable persistence is an ACP `sessionUpdate: plan` event in chat history
+   * (same path Claude ACP uses), not sessionConfigJson (__nova keys are stripped
+   * from API responses).
+   */
   const planMarkdownOverrides = ref(new Map<string, string>());
-
-  function parsePlanMarkdownOverrides(
-    config: Record<string, string> | null | undefined
-  ): Map<string, string> {
-    const raw = config?.[PLAN_MARKDOWN_OVERRIDES_CONFIG_KEY];
-    if (!raw?.trim()) return new Map();
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return new Map();
-      const next = new Map<string, string>();
-      for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-        if (typeof value === 'string' && value.trim()) next.set(key, value);
-      }
-      return next;
-    } catch {
-      return new Map();
-    }
-  }
 
   function lookupPlanMarkdownOverride(
     doc: PlanDocument,
@@ -95,15 +86,6 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
       overrides.get(`base:${planMarkdownBaseKey(doc.markdown)}`)
     );
   }
-
-  // Hydrate overrides from session config whenever the session payload changes.
-  watch(
-    () => ctx.session.value?.sessionConfigJson,
-    (config) => {
-      planMarkdownOverrides.value = parsePlanMarkdownOverrides(config);
-    },
-    { immediate: true }
-  );
 
   // -------------------------------------------------- Computed --------------------------------------------------
 
@@ -421,36 +403,13 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
     });
   }
 
-  function setPlanMarkdownOverride(plan: PlanDocument, markdown: string): Map<string, string> {
+  function setPlanMarkdownOverride(plan: PlanDocument, markdown: string): void {
     const next = new Map(planMarkdownOverrides.value);
     next.set(plan.id, markdown);
     if (plan.backendPlanId) next.set(plan.backendPlanId, markdown);
     const baseKey = planMarkdownBaseKey(markdown) || planMarkdownBaseKey(plan.markdown);
     if (baseKey) next.set(`base:${baseKey}`, markdown);
     planMarkdownOverrides.value = next;
-    return next;
-  }
-
-  async function persistPlanMarkdownOverrides(overrides: Map<string, string>): Promise<void> {
-    if (!ctx.session.value) return;
-    const serialized = JSON.stringify(Object.fromEntries(overrides));
-    const nextConfig = {
-      ...(ctx.session.value.sessionConfigJson ?? {}),
-      [PLAN_MARKDOWN_OVERRIDES_CONFIG_KEY]: serialized
-    };
-    ctx.session.value = {
-      ...ctx.session.value,
-      sessionConfigJson: nextConfig
-    };
-    const { data: updated } = await sessionsApi.update(ctx.workspaceId(), ctx.sessionId(), {
-      sessionConfigJson: nextConfig
-    });
-    if (ctx.session.value?.id === updated.id) {
-      ctx.session.value = {
-        ...ctx.session.value,
-        sessionConfigJson: updated.sessionConfigJson ?? nextConfig
-      };
-    }
   }
 
   async function markPlanEntryDone(
@@ -458,42 +417,58 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
     _entry: PlanEntry,
     index: number
   ): Promise<void> {
-    const nextMarkdown = markPlanEntryDoneInMarkdown(plan.markdown, index);
-    if (!nextMarkdown) return;
+    const markedMarkdown = markPlanEntryDoneInMarkdown(plan.markdown, index);
+    const nextEntries: PlanEntry[] = plan.startableEntries.map((entry, i) => {
+      if (i === index) {
+        const content = isPlanContentDone(entry.content)
+          ? entry.content
+          : `${entry.content.trimEnd()}${PLAN_DONE_SUFFIX}`;
+        return { content, status: 'completed' };
+      }
+      return {
+        content: entry.content,
+        status: isPlanEntryDone(entry) ? 'completed' : entry.status
+      };
+    });
+    const nextMarkdown =
+      markedMarkdown ??
+      (plan.markdown.trim() ? plan.markdown : markdownFromPlanEntries(nextEntries));
+    if (!nextMarkdown.trim() && nextEntries.length === 0) return;
 
-    const overrides = setPlanMarkdownOverride(plan, nextMarkdown);
+    // Prefer entries derived from the edited markdown when the line edit landed.
+    const persistEntries = markedMarkdown
+      ? entriesFromPlanMarkdown(markedMarkdown).map((entry) => ({
+          content: entry.content,
+          status: isPlanEntryDone(entry) ? 'completed' : entry.status,
+          priority: 'medium'
+        }))
+      : nextEntries.map((entry) => ({
+          content: entry.content,
+          status: entry.status,
+          priority: 'medium'
+        }));
+
+    setPlanMarkdownOverride(plan, nextMarkdown);
 
     try {
-      await persistPlanMarkdownOverrides(overrides);
+      await sessionsApi.persistPlanUpdate(ctx.workspaceId(), ctx.sessionId(), {
+        title: plan.title,
+        markdown: nextMarkdown,
+        entries: persistEntries,
+        ...(plan.backendPlanId ? { planId: plan.backendPlanId } : {})
+      });
     } catch {
-      // Keep local override; user still sees the mark until reload.
+      // Optimistic override stays for this view; reload would lose it if persist failed.
+      return;
     }
 
-    if (!plan.backendPlanId) return;
-    try {
-      const response = await sessionsApi.updatePlanDocument(
-        ctx.workspaceId(),
-        ctx.sessionId(),
-        plan.backendPlanId,
-        nextMarkdown
-      );
-      const updated = response.data;
-      if (ctx.session.value?.planDocuments) {
-        ctx.session.value = {
-          ...ctx.session.value,
-          planDocuments: ctx.session.value.planDocuments.map((doc) =>
-            doc.id === plan.backendPlanId
-              ? {
-                  ...doc,
-                  title: updated.title || doc.title,
-                  markdown: updated.markdown
-                }
-              : doc
-          )
-        };
-      }
-    } catch {
-      // Session-config persistence above is the durable source of truth.
+    if (plan.backendPlanId && ctx.session.value?.planDocuments) {
+      ctx.session.value = {
+        ...ctx.session.value,
+        planDocuments: ctx.session.value.planDocuments.map((doc) =>
+          doc.id === plan.backendPlanId ? { ...doc, markdown: nextMarkdown } : doc
+        )
+      };
     }
   }
 
@@ -530,8 +505,7 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
     clearPlanDocumentsRefreshTimers();
     selectedPlanId.value = null;
     dismissedPlanKeys.value = new Set();
-    // Overrides rehydrate from the next session's sessionConfigJson via the watcher.
-    planMarkdownOverrides.value = parsePlanMarkdownOverrides(ctx.session.value?.sessionConfigJson);
+    planMarkdownOverrides.value = new Map();
   }
 
   // -------------------------------------------------- Export --------------------------------------------------
