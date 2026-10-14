@@ -33,6 +33,7 @@ import type {
   ChatQueueItem,
   ChatWsServerMessage
 } from '@/@types/index';
+import { resolvePlanDisplayTitle } from '@novacode/shared';
 
 // -------------------------------------------------- Context --------------------------------------------------
 
@@ -252,16 +253,17 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     ];
     const planMarkdown = msg.approval.planMarkdown?.trim();
     if (planMarkdown) {
+      const planTitle = resolvePlanDisplayTitle(msg.approval.title, planMarkdown);
       const existing = streamingItems.value.find((item) => item.kind === 'plan');
       if (existing) {
         existing.planMarkdown = planMarkdown;
-        existing.planTitle = msg.approval.title || existing.planTitle;
+        existing.planTitle = planTitle || existing.planTitle;
       } else {
         const planIndex = streamingItems.value.filter((item) => item.kind === 'plan').length;
         streamingItems.value.push({
           kind: 'plan',
           planId: `live-plan-${planIndex}`,
-          planTitle: msg.approval.title,
+          planTitle,
           planMarkdown,
           planEntries: []
         });

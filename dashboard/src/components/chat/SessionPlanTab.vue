@@ -45,12 +45,10 @@ const bCollapseDoneSteps = ref(true);
 
 // -------------------------------------------------- Computed --------------------------------------------------
 
-const visiblePlanEntries = computed(() => {
+const planEntries = computed(() => {
   const plan = props.selectedPlanDocument;
   if (!plan) return [];
-  return plan.startableEntries
-    .map((entry, index) => ({ entry, index }))
-    .filter(({ entry }) => !bCollapseDoneSteps.value || !isPlanEntryDone(entry));
+  return plan.startableEntries.map((entry, index) => ({ entry, index }));
 });
 
 const doneStepsCount = computed(
@@ -257,12 +255,12 @@ onUnmounted(() => {
           </div>
           <ul class="space-y-1.5 px-4 py-3">
             <li
-              v-for="{ entry, index } in visiblePlanEntries"
+              v-for="{ entry, index } in planEntries"
               :key="`${selectedPlanDocument.id}-todo-${index}`"
               class="flex items-start gap-2 text-xs"
             >
               <svg
-                v-if="planStatusIcon(entry.status) === 'completed'"
+                v-if="planStatusIcon(entry.status) === 'completed' || isPlanEntryDone(entry)"
                 width="13"
                 height="13"
                 viewBox="0 0 24 24"
@@ -314,29 +312,25 @@ onUnmounted(() => {
               >
                 {{ entry.content }}
               </span>
-              <button
-                type="button"
-                class="shrink-0 rounded-md border border-fg/10 px-2 py-1 text-[11px] font-medium text-primary hover:bg-primary/10"
-                title="Start a new session from this plan point"
-                @click="onStartPlanEntry(selectedPlanDocument, entry, index)"
-              >
-                Start session
-              </button>
-              <button
-                v-if="!isPlanEntryDone(entry)"
-                type="button"
-                class="shrink-0 rounded-md border border-fg/10 px-2 py-1 text-[11px] font-medium text-text-primary hover:bg-fg/[0.06]"
-                title="Mark this plan point as done"
-                @click="onMarkPlanEntryDone(selectedPlanDocument, entry, index)"
-              >
-                Mark as done
-              </button>
-            </li>
-            <li
-              v-if="bCollapseDoneSteps && doneStepsCount > 0 && visiblePlanEntries.length === 0"
-              class="text-xs text-text-muted py-1"
-            >
-              All {{ doneStepsCount }} steps are done.
+              <template v-if="!isPlanEntryDone(entry) || !bCollapseDoneSteps">
+                <button
+                  type="button"
+                  class="shrink-0 rounded-md border border-fg/10 px-2 py-1 text-[11px] font-medium text-primary hover:bg-primary/10"
+                  title="Start a new session from this plan point"
+                  @click="onStartPlanEntry(selectedPlanDocument, entry, index)"
+                >
+                  Start session
+                </button>
+                <button
+                  v-if="!isPlanEntryDone(entry)"
+                  type="button"
+                  class="shrink-0 rounded-md border border-fg/10 px-2 py-1 text-[11px] font-medium text-text-primary hover:bg-fg/[0.06]"
+                  title="Mark this plan point as done"
+                  @click="onMarkPlanEntryDone(selectedPlanDocument, entry, index)"
+                >
+                  Mark as done
+                </button>
+              </template>
             </li>
           </ul>
         </div>
@@ -444,8 +438,13 @@ onUnmounted(() => {
   background: color-mix(in srgb, var(--color-fg) 8%, transparent);
 }
 
-.plan-markdown.plan-collapse-done :deep(.plan-step[data-plan-done='true']) {
+/* Collapsed = titles stay, step body (actions + details) hides. */
+.plan-markdown.plan-collapse-done :deep(.plan-step[data-plan-done='true'] .plan-step-body) {
   display: none;
+}
+
+.plan-markdown :deep(.plan-step-title) > :first-child {
+  margin-top: 0;
 }
 
 .plan-markdown :deep(strong) {

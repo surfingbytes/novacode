@@ -12,6 +12,7 @@ import { marked } from 'marked';
 
 // types
 import type { PlanDocumentSummary } from '@/@types/index';
+import { resolvePlanDisplayTitle } from '@novacode/shared';
 
 // ---------------------------------- Types ----------------------------------
 
@@ -248,10 +249,11 @@ function upsertPlanMarkdown(
   title: string | undefined,
   sourceSessionId: string | undefined
 ): void {
+  const planTitle = resolvePlanDisplayTitle(title, markdown);
   const existing = items.find((item) => item.kind === 'plan');
   if (existing) {
     existing.planMarkdown = markdown;
-    existing.planTitle = title ?? existing.planTitle;
+    existing.planTitle = planTitle ?? existing.planTitle;
     existing.planSourceSessionId = sourceSessionId ?? existing.planSourceSessionId;
     return;
   }
@@ -259,7 +261,7 @@ function upsertPlanMarkdown(
     kind: 'plan',
     planSourceSessionId: sourceSessionId,
     planEntries: [],
-    planTitle: title,
+    planTitle,
     planMarkdown: markdown
   });
 }
@@ -704,18 +706,19 @@ export function createChatStreamParser(hooks: ChatStreamParserHooks = {}) {
       const title = typeof update.title === 'string' ? update.title : undefined;
       const markdown = typeof update.markdown === 'string' ? update.markdown : undefined;
       if (!entries?.length && !markdown?.trim()) return;
+      const planTitle = resolvePlanDisplayTitle(title, markdown);
       const existing = items.find((i) => i.kind === 'plan');
       if (existing) {
         existing.planEntries = entries ?? existing.planEntries;
         existing.planSourceSessionId = opts?.sourceSessionId ?? existing.planSourceSessionId;
-        existing.planTitle = title ?? existing.planTitle;
+        existing.planTitle = planTitle ?? existing.planTitle;
         existing.planMarkdown = markdown ?? existing.planMarkdown;
       } else {
         items.push({
           kind: 'plan',
           planSourceSessionId: opts?.sourceSessionId,
           planEntries: entries ?? [],
-          planTitle: title,
+          planTitle,
           planMarkdown: markdown
         });
       }
@@ -1195,7 +1198,8 @@ export function renderPlanMarkdownWithActions(markdown: string, entries: PlanEnt
 
   const closeStep = (): void => {
     if (!openStep) return;
-    out.push('', '</div>', '');
+    // Close plan-step-body, then plan-step.
+    out.push('', '</div>', '', '</div>', '');
     openStep = false;
   };
 
@@ -1234,10 +1238,17 @@ export function renderPlanMarkdownWithActions(markdown: string, entries: PlanEnt
         out.push(
           '',
           `<div class="plan-step" data-plan-entry-index="${entryIndex}" data-plan-done="${done ? 'true' : 'false'}">`,
+          '',
+          '<div class="plan-step-title">',
+          '',
+          rawLine,
+          '',
+          '</div>',
+          '',
+          '<div class="plan-step-body">',
           ''
         );
         openStep = true;
-        out.push(rawLine);
         const buttons = [
           `<button type="button" class="plan-start-session-btn" data-plan-entry-index="${entryIndex}">Start session</button>`
         ];
@@ -1246,7 +1257,7 @@ export function renderPlanMarkdownWithActions(markdown: string, entries: PlanEnt
             `<button type="button" class="plan-mark-done-btn" data-plan-mark-done="${entryIndex}">Mark as done</button>`
           );
         }
-        out.push('', `<div class="plan-start-action-inline">${buttons.join('')}</div>`, '');
+        out.push(`<div class="plan-start-action-inline">${buttons.join('')}</div>`, '');
         entryIndex += 1;
         continue;
       }
@@ -1279,6 +1290,14 @@ export function normalizePlanSearchText(value: string | undefined): string {
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
 }
+
+/** Stable key for a plan body ignoring " - done" markers (for override lookup). */
+export function planMarkdownBaseKey(markdown: string | undefined): string {
+  return normalizePlanSearchText((markdown ?? '').replace(/(?:\s*-\s*done\b)/gi, ''));
+}
+
+/** sessionConfigJson key for persisted plan markdown edits (mark-as-done, etc.). */
+export const PLAN_MARKDOWN_OVERRIDES_CONFIG_KEY = '__novaPlanMarkdownOverrides';
 
 function firstMarkdownHeading(markdown: string): string {
   const heading = unwrapMarkdownFence(markdown)

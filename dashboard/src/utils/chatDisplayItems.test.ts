@@ -412,7 +412,7 @@ describe('ACP native events', () => {
     );
     expect(items).toHaveLength(1);
     expect(items[0].kind).toBe('plan');
-    expect(items[0].planTitle).toBe('Approve Plan');
+    expect(items[0].planTitle).toBe('Ship it');
     expect(items[0].planMarkdown).toContain('# Ship it');
   });
 
@@ -710,10 +710,12 @@ describe('markPlanEntryDoneInMarkdown', () => {
 });
 
 describe('renderPlanMarkdownWithActions', () => {
-  it('wraps steps and adds mark-as-done for pending entries', () => {
+  it('wraps step title/body and adds mark-as-done for pending entries', () => {
     const md = '1. First step\n\nDetails\n\n2. Second step - done\n';
     const entries = entriesFromPlanMarkdown(md);
     const html = renderPlanMarkdownWithActions(md, entries);
+    expect(html).toContain('plan-step-title');
+    expect(html).toContain('plan-step-body');
     expect(html).toContain('data-plan-done="false"');
     expect(html).toContain('data-plan-done="true"');
     expect(html).toContain('plan-mark-done');

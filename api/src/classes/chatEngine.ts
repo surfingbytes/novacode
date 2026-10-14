@@ -38,6 +38,7 @@ import {
 } from './linkedPlanContext';
 import { logger, truncateLogText } from './logger';
 import { parseUsageUpdateLine } from './sessionUsage';
+import { resolvePlanDisplayTitle } from '@novacode/shared';
 
 // types
 import type { ChatMessage, AgentType, ApprovalPolicy } from '../@types/index';
@@ -383,7 +384,11 @@ export function requestAcpPermissionForSession(
   // Surface the plan into the stream/Plan tab even when allow_all auto-accepts
   // (no approval UI is shown in that case).
   if (approval.planMarkdown) {
-    emitPlanUpdateToRun(run, approval.planMarkdown, approval.title);
+    emitPlanUpdateToRun(
+      run,
+      approval.planMarkdown,
+      resolvePlanDisplayTitle(approval.title, approval.planMarkdown)
+    );
   }
 
   if (run.approvalPolicy === 'allow_all') {
