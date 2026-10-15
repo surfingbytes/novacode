@@ -10,8 +10,15 @@ import { closeAcpSessionForNovaSession } from '../classes/acpSessionClose';
 import { mergeInternalSessionConfig } from '../classes/linkedPlanContext';
 import { normalizeApprovalPolicy } from '../classes/approvalPolicy';
 import { appendPlanUpdateToActiveRun, setActiveRunApprovalPolicy } from '../classes/chatEngine';
-import { getPlanDocumentsSource } from '../classes/planDocumentSources';
+import {
+  claimClaudePlanForSession,
+  claudePlanFileIdsFromEventLines,
+  getPlanDocumentsSource,
+  planMarkdownHintsFromEventLines,
+  syncClaudePlanDocumentsForSession,
+} from '../classes/planDocumentSources';
 import { resolveWorkspaceAbsolutePath } from '../classes/workspacePaths';
+import type { PlanDocumentSummary } from '../classes/planDocuments';
 import { workspaceTerminalManager } from '../classes/workspaceTerminalManager';
 import { getActiveSessionIds, getActiveBusySubagents, cancelRun } from './chat';
 import { deleteSessionImages } from './images';
@@ -39,6 +46,25 @@ function runSerializedPlanUpdate<T>(sessionId: string, task: () => Promise<T>): 
     if (planUpdateChains.get(sessionId) === next) planUpdateChains.delete(sessionId);
   }).catch(() => undefined);
   return next;
+}
+
+/** Load plan files for a session; Claude also claims untagged ~/.claude/plans matches. */
+async function resolveSessionPlanDocuments(session: {
+  agentType: string | null;
+  sessionId: string | null;
+  id: string;
+}, workspacePath: string | null): Promise<PlanDocumentSummary[]> {
+  const source = getPlanDocumentsSource(session.agentType, { workspacePath });
+  if (session.agentType !== 'claude' || !session.sessionId) {
+    return source.listForSession(session.sessionId);
+  }
+
+  const messages = await db.listSessionMessages(session.id);
+  const eventLines = messages.flatMap((message) => message.events ?? []);
+  return syncClaudePlanDocumentsForSession(session.sessionId, {
+    markdownHints: planMarkdownHintsFromEventLines(eventLines),
+    planFileIds: claudePlanFileIdsFromEventLines(eventLines),
+  });
 }
 
 function parseTagsFromBody(body: unknown): string[] | null | undefined {
@@ -186,9 +212,7 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       // response so long sessions load fast on slow links.
       return reply.send({
         ...normalizeSessionForApi(session),
-        planDocuments: await getPlanDocumentsSource(session.agentType, { workspacePath }).listForSession(
-          session.sessionId
-        ),
+        planDocuments: await resolveSessionPlanDocuments(session, workspacePath),
       });
     }
   );
@@ -428,15 +452,19 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.status(500).send({ error: 'Failed to persist plan update' });
       }
 
-      // Best-effort: also write file-backed plans when a plan id is provided.
-      if (typeof body.planId === 'string' && body.planId && markdown) {
+      // Disk is source of truth for file-backed agents (incl. Claude after claim).
+      if (markdown && session.sessionId) {
         const workspace = await db.getWorkspace(workspaceId);
         const workspacePath = workspace ? resolveWorkspaceAbsolutePath(workspace.path) : null;
-        await getPlanDocumentsSource(session.agentType, { workspacePath }).updateById(
-          body.planId,
-          session.sessionId,
-          markdown
-        );
+        const source = getPlanDocumentsSource(session.agentType, { workspacePath });
+        let planId = typeof body.planId === 'string' ? body.planId : '';
+        if (!planId && session.agentType === 'claude') {
+          const claimed = await claimClaudePlanForSession(session.sessionId, markdown);
+          planId = claimed?.id ?? '';
+        }
+        if (planId) {
+          await source.updateById(planId, session.sessionId, markdown);
+        }
       }
 
       return reply.send({ ok: true });

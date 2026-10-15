@@ -244,6 +244,8 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
     try {
       const response = await sessionsApi.get(ctx.workspaceId(), ctx.sessionId());
       if (!ctx.session.value || response.data.id !== ctx.session.value.id) return;
+      // Disk/API is source of truth — drop optimistic mark-as-done overrides.
+      planMarkdownOverrides.value = new Map();
       ctx.session.value = {
         ...ctx.session.value,
         planDocuments: response.data.planDocuments ?? []
@@ -344,8 +346,8 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
       planId: plan.backendPlanId ?? plan.id,
       planSourceSessionId,
       sourceAgentType: ctx.session.value?.agentType ?? undefined,
-      // Always embed markdown so agents without a plan-file source (Claude) still
-      // get a real server-side linked plan attach on the first prompt.
+      // Embed markdown so linked sessions still see the full plan even if the
+      // file is missing or the target agent has no file-backed plan source.
       ...(planMarkdown ? { planMarkdown } : {})
     };
   }
@@ -483,6 +485,8 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
         )
       };
     }
+    // Reload file-backed plans so Claude/Cursor disk (with " - done") is authoritative.
+    schedulePlanDocumentsRefresh(100);
   }
 
   function onPlanMarkdownClick(event: MouseEvent): void {

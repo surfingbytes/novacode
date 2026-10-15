@@ -14,10 +14,17 @@ import {
 } from './planDocuments';
 import {
   buildOpenCodePlanModeInstruction,
+  claimClaudePlanForSession,
+  claudePlanFileIdFromPath,
+  claudePlanFileIdsFromEventLines,
+  claudePlansDir,
   getPlanDocumentsSource,
   openCodePlansDir,
   openCodeWorkspacePlansDir,
+  planMarkdownHintsFromEventLines,
+  syncClaudePlanDocumentsForSession,
 } from './planDocumentSources';
+import { claimPlanDocumentForSession, scorePlanMarkdownMatch } from './planDocuments';
 
 // ---------------------------------- Engine (planDocuments) ----------------------------------
 
@@ -101,6 +108,53 @@ describe('planDocuments engine', () => {
     expect(readFileSync(join(dir, 'plan.md'), 'utf8')).toMatch(/^<!-- sess-1 -->/);
     expect(await updatePlanDocumentById(convention, 'plan.md', 'other', '# X')).toBeNull();
   });
+
+  it('claims an untagged plan file and stamps the session comment without rewriting body', async () => {
+    writeFileSync(
+      join(dir, 'untagged.md'),
+      '# Lumezzo offer plan\n\n## 15. Pilot\n\nDetails here\n',
+      'utf8'
+    );
+    const claimed = await claimPlanDocumentForSession(
+      convention,
+      'acp-sess-1',
+      '# Lumezzo offer plan\n\n## 15. Pilot\n'
+    );
+    expect(claimed?.id).toBe('untagged.md');
+    expect(claimed?.sessionId).toBe('acp-sess-1');
+    const raw = readFileSync(join(dir, 'untagged.md'), 'utf8');
+    expect(raw).toMatch(/^<!-- acp-sess-1 -->/);
+    expect(raw).toContain('Details here');
+  });
+
+  it('claims the only untagged plan file when the hint is weak but exclusive', async () => {
+    writeFileSync(join(dir, 'only.md'), '# Something else entirely\n\nBody\n', 'utf8');
+    const claimed = await claimPlanDocumentForSession(convention, 'sess-solo', '# Unrelated hint\n');
+    expect(claimed?.id).toBe('only.md');
+    expect(readFileSync(join(dir, 'only.md'), 'utf8')).toMatch(/^<!-- sess-solo -->/);
+  });
+
+  it('updates an untagged plan by claiming it and writing done markers into the file', async () => {
+    writeFileSync(join(dir, 'plan.md'), '# Title\n\n1. First step\n2. Second step\n', 'utf8');
+    const updated = await updatePlanDocumentById(
+      convention,
+      'plan.md',
+      'acp-1',
+      '# Title\n\n1. First step - done\n2. Second step'
+    );
+    expect(updated?.sessionId).toBe('acp-1');
+    expect(readFileSync(join(dir, 'plan.md'), 'utf8')).toContain('First step - done');
+    expect(readFileSync(join(dir, 'plan.md'), 'utf8')).toMatch(/^<!-- acp-1 -->/);
+  });
+
+  it('scores matching plan titles highly', () => {
+    expect(
+      scorePlanMarkdownMatch(
+        '# Lumezzo — offer plan\n\n## 1. A',
+        '# Lumezzo — offer plan\n\n## 1. A\n\n## 2. B'
+      )
+    ).toBeGreaterThan(500);
+  });
 });
 
 // ---------------------------------- Per-agent sources ----------------------------------
@@ -124,13 +178,79 @@ describe('getPlanDocumentsSource', () => {
   });
 
   it('returns a noop source for agents without a plan-file convention', async () => {
-    for (const agentType of ['claude', 'mistral-vibe', 'codex', undefined, null] as const) {
+    for (const agentType of ['mistral-vibe', 'codex', undefined, null] as const) {
       const source = getPlanDocumentsSource(agentType);
       expect(await source.listForSession('whatever')).toEqual([]);
       expect(await source.getById('x.md', 'whatever')).toBeNull();
       expect(await source.deleteById('x.md', 'whatever')).toBe(false);
       expect(await source.updateById('x.md', 'whatever', '# x')).toBeNull();
     }
+  });
+
+  it('reads and claims Claude plans from <configDir>/.claude/plans', async () => {
+    config.configDir = tmp;
+    const plansDir = claudePlansDir();
+    mkdirSync(plansDir, { recursive: true });
+    const acpSessionId = 'claude-acp-uuid-1';
+    writeFileSync(
+      join(plansDir, 'agile-finding-pelican.md'),
+      '# Lumezzo — offer, pricing and growth plan\n\n## 15. Pilot\n\nDecision text\n',
+      'utf8'
+    );
+
+    expect(await getPlanDocumentsSource('claude').listForSession(acpSessionId)).toEqual([]);
+
+    const claimed = await claimClaudePlanForSession(
+      acpSessionId,
+      '# Lumezzo — offer, pricing and growth plan\n\n## 15. Pilot\n'
+    );
+    expect(claimed?.id).toBe('agile-finding-pelican.md');
+    expect(readFileSync(join(plansDir, 'agile-finding-pelican.md'), 'utf8')).toMatch(
+      /^<!-- claude-acp-uuid-1 -->/
+    );
+
+    const docs = await getPlanDocumentsSource('claude').listForSession(acpSessionId);
+    expect(docs.map((d) => d.id)).toEqual(['agile-finding-pelican.md']);
+    expect(docs[0]?.markdown).toContain('Decision text');
+
+    const updated = await getPlanDocumentsSource('claude').updateById(
+      'agile-finding-pelican.md',
+      acpSessionId,
+      '# Lumezzo — offer, pricing and growth plan\n\n## 15. Pilot - done\n\nDecision text'
+    );
+    expect(updated?.markdown).toContain('Pilot - done');
+    expect(readFileSync(join(plansDir, 'agile-finding-pelican.md'), 'utf8')).toContain(
+      'Pilot - done'
+    );
+
+    const synced = await syncClaudePlanDocumentsForSession(acpSessionId, {
+      markdownHints: ['# Lumezzo — offer, pricing and growth plan\n'],
+    });
+    expect(synced).toHaveLength(1);
+  });
+
+  it('extracts Claude plan paths and markdown hints from ACP event lines', () => {
+    expect(claudePlanFileIdFromPath('/config/.claude/plans/agile-finding-pelican.md')).toBe(
+      'agile-finding-pelican.md'
+    );
+    expect(claudePlanFileIdFromPath('/tmp/other.md')).toBeNull();
+
+    const lines = [
+      JSON.stringify({
+        update: {
+          sessionUpdate: 'tool_call',
+          rawInput: { file_path: '/config/.claude/plans/agile-finding-pelican.md' },
+        },
+      }),
+      JSON.stringify({
+        update: {
+          sessionUpdate: 'plan',
+          markdown: '# Plan title\n\nBody',
+        },
+      }),
+    ];
+    expect(claudePlanFileIdsFromEventLines(lines)).toEqual(['agile-finding-pelican.md']);
+    expect(planMarkdownHintsFromEventLines(lines)).toEqual(['# Plan title\n\nBody']);
   });
 
   it('reads cursor plans from <configDir>/.cursor/plans (*.plan.md only)', async () => {

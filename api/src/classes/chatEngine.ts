@@ -37,6 +37,11 @@ import {
   buildLinkedPlanContextPrefix,
   extractLinkedPlanContextFromConfig,
 } from './linkedPlanContext';
+import {
+  claimClaudePlanForSession,
+  claudePlanFileIdsFromEventLines,
+  tagClaudePlanFileForSession,
+} from './planDocumentSources';
 import { logger, truncateLogText } from './logger';
 import { parseUsageUpdateLine } from './sessionUsage';
 import { resolvePlanDisplayTitle } from '@novacode/shared';
@@ -55,6 +60,8 @@ import type {
 export interface ActiveRun {
   cancel: () => void;
   workspaceId: string;
+  agentType: AgentType;
+  acpSessionId: string | null;
   messages: ChatMessage[];
   assistantEvents: string[];
   bufferedLines: string[];
@@ -406,6 +413,9 @@ export function requestAcpPermissionForSession(
       approval.planMarkdown,
       resolvePlanDisplayTitle(approval.title, approval.planMarkdown)
     );
+    if (run.agentType === 'claude' && run.acpSessionId) {
+      void claimClaudePlanForSession(run.acpSessionId, approval.planMarkdown);
+    }
   }
 
   if (run.approvalPolicy === 'allow_all') {
@@ -786,6 +796,8 @@ export async function dispatchPrompt(
       }
     },
     workspaceId: session.workspaceId,
+    agentType,
+    acpSessionId: currentAcpSessionId,
     messages: currentMessages,
     assistantEvents,
     bufferedLines: [],
@@ -812,6 +824,23 @@ export async function dispatchPrompt(
     if (backgroundTasks) {
       run.backgroundTasks = backgroundTasks.total > 0 ? backgroundTasks : null;
       emitBusy(sessionId, session.workspaceId, true, run.backgroundTasks);
+    }
+    if (agentType === 'claude' && run.acpSessionId) {
+      for (const planFileId of claudePlanFileIdsFromEventLines([line])) {
+        void tagClaudePlanFileForSession(run.acpSessionId, planFileId);
+      }
+      try {
+        const parsed = JSON.parse(line) as {
+          update?: { sessionUpdate?: string; markdown?: unknown };
+        };
+        const md =
+          parsed.update?.sessionUpdate === 'plan' && typeof parsed.update.markdown === 'string'
+            ? parsed.update.markdown.trim()
+            : '';
+        if (md) void claimClaudePlanForSession(run.acpSessionId, md);
+      } catch {
+        // non-JSON stream lines
+      }
     }
     assistantEvents.push(line);
     run.bufferedLines.push(line);
@@ -944,6 +973,7 @@ export async function dispatchPrompt(
           getRulesPrefix,
           onSessionId: (id) => {
             currentAcpSessionId = id;
+            run.acpSessionId = id;
             // Stop pressed during session startup (before the ACP session id was
             // known) — honour it as soon as the id arrives instead of dropping it.
             if (cancelled) cancelClaudeAcp(id);
@@ -1001,6 +1031,7 @@ export async function dispatchPrompt(
         : null;
     if (newAcpSessionId) {
       currentAcpSessionId = newAcpSessionId;
+      run.acpSessionId = newAcpSessionId;
     }
 
     const assistantMessage: ChatMessage = {

@@ -1311,6 +1311,7 @@ onUnmounted(() => {
         :selected-plan-document="selectedPlanDocument"
         @select="selectedPlanId = $event"
         @download="planDocs.downloadPlan"
+        @refresh="() => void planDocs.refreshPlanDocuments({ selectLatest: false })"
         @delete="bShowDeletePlanModal = true"
         @start-full-plan="planDocs.startSessionFromFullPlan"
         @start-plan-entry="({ plan, entry, index }) => planDocs.startSessionFromPlanEntry(plan, entry, index)"

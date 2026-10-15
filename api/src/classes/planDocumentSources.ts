@@ -9,18 +9,21 @@
  *                  and <XDG_DATA_HOME>/opencode/plans/*.md (legacy / fallback),
  *                  `<!-- acp-session-id -->` header (written via plan-mode prompt
  *                  injection in openCodeAcp.ts)
- *  - claude:       no file source — ACP `plan` session updates cover the plan tab
- *                  (its ~/.claude/plans files carry no session association)
+ *  - claude:       <configDir>/.claude/plans/*.md — Claude Code plan mode writes these
+ *                  without a session comment; Nova stamps `<!-- acp-session-id -->` on
+ *                  claim / Write-to-plans / mark-as-done so the file is source of truth
  *  - others:       no plan-file convention
  */
 
 // node_modules
-import { join } from 'path';
+import { basename, join } from 'path';
 
 // classes
 import { config } from './config';
 import {
+  claimPlanDocumentForSession,
   deletePlanDocumentById,
+  ensurePlanSessionTag,
   getPlanDocumentById,
   listPlanDocumentsForAcpSession,
   updatePlanDocumentById,
@@ -48,6 +51,11 @@ function cursorPlansDir(): string {
   return join(config.configDir, '.cursor', 'plans');
 }
 
+/** Claude Code plan-mode files (HOME/CLAUDE_CONFIG_DIR → configDir). */
+export function claudePlansDir(): string {
+  return join(config.configDir, '.claude', 'plans');
+}
+
 /**
  * OpenCode resolves its data home from XDG_DATA_HOME, which agentEnv defaults
  * to <configDir>/.local/share for spawned agent processes.
@@ -73,6 +81,14 @@ function cursorConvention(): PlanDocumentFileConvention {
 function openCodeMdConvention(dir: string): PlanDocumentFileConvention {
   return {
     dir,
+    matches: (fileName) => fileName.endsWith('.md'),
+    isSafeId: (id) => /^[^/\\]+\.md$/.test(id),
+  };
+}
+
+function claudeConvention(): PlanDocumentFileConvention {
+  return {
+    dir: claudePlansDir(),
     matches: (fileName) => fileName.endsWith('.md'),
     isSafeId: (id) => /^[^/\\]+\.md$/.test(id),
   };
@@ -137,6 +153,7 @@ const noopSource: PlanDocumentsSource = {
 };
 
 const cursorSource = sourceFromConvention(cursorConvention);
+const claudeSource = sourceFromConvention(claudeConvention);
 
 function openCodeSource(opts?: PlanDocumentsSourceOptions): PlanDocumentsSource {
   return sourceFromConventions(() => {
@@ -159,9 +176,115 @@ export function getPlanDocumentsSource(
       return cursorSource;
     case 'open-code':
       return openCodeSource(opts);
+    case 'claude':
+      return claudeSource;
     default:
       return noopSource;
   }
+}
+
+/** Stamp/claim a Claude plan file path mentioned in a tool call. */
+export async function tagClaudePlanFileForSession(
+  acpSessionId: string | null | undefined,
+  planFileId: string
+): Promise<PlanDocumentSummary | null> {
+  return ensurePlanSessionTag(claudeConvention(), planFileId, acpSessionId);
+}
+
+/** Claim the best-matching Claude plan file for this session from markdown. */
+export async function claimClaudePlanForSession(
+  acpSessionId: string | null | undefined,
+  hintMarkdown: string
+): Promise<PlanDocumentSummary | null> {
+  return claimPlanDocumentForSession(claudeConvention(), acpSessionId, hintMarkdown);
+}
+
+/**
+ * Associate Claude disk plans with this ACP session using markdown hints and/or
+ * explicit plan file ids, then return the tagged docs (disk = source of truth).
+ */
+export async function syncClaudePlanDocumentsForSession(
+  acpSessionId: string | null | undefined,
+  opts?: { markdownHints?: string[]; planFileIds?: string[] }
+): Promise<PlanDocumentSummary[]> {
+  if (!acpSessionId) return [];
+
+  for (const planFileId of opts?.planFileIds ?? []) {
+    await tagClaudePlanFileForSession(acpSessionId, planFileId);
+  }
+  for (const hint of opts?.markdownHints ?? []) {
+    if (hint.trim()) await claimClaudePlanForSession(acpSessionId, hint);
+  }
+  return listPlanDocumentsForAcpSession(claudeConvention(), acpSessionId);
+}
+
+/** Basename of a `.claude/plans/*.md` path, or null if not a Claude plan file. */
+export function claudePlanFileIdFromPath(filePath: string | null | undefined): string | null {
+  if (!filePath || typeof filePath !== 'string') return null;
+  const normalized = filePath.replace(/\\/g, '/');
+  const marker = '/.claude/plans/';
+  const idx = normalized.lastIndexOf(marker);
+  if (idx < 0) return null;
+  const id = basename(normalized.slice(idx + marker.length));
+  return claudeConvention().isSafeId(id) ? id : null;
+}
+
+/**
+ * Extract Claude plan file basenames from ACP stream/event JSON lines
+ * (Write/Edit tool_call rawInput.file_path).
+ */
+export function claudePlanFileIdsFromEventLines(lines: string[]): string[] {
+  const ids = new Set<string>();
+  for (const line of lines) {
+    try {
+      const parsed = JSON.parse(line) as {
+        update?: {
+          sessionUpdate?: string;
+          rawInput?: unknown;
+          path?: unknown;
+          filePath?: unknown;
+        };
+      };
+      const update = parsed.update;
+      if (!update) continue;
+      const raw =
+        update.rawInput && typeof update.rawInput === 'object' && !Array.isArray(update.rawInput)
+          ? (update.rawInput as Record<string, unknown>)
+          : null;
+      const candidates = [
+        typeof raw?.file_path === 'string' ? raw.file_path : '',
+        typeof raw?.filePath === 'string' ? raw.filePath : '',
+        typeof raw?.path === 'string' ? raw.path : '',
+        typeof update.path === 'string' ? update.path : '',
+        typeof update.filePath === 'string' ? update.filePath : '',
+      ];
+      for (const candidate of candidates) {
+        const id = claudePlanFileIdFromPath(candidate);
+        if (id) ids.add(id);
+      }
+    } catch {
+      // ignore non-JSON lines
+    }
+  }
+  return [...ids];
+}
+
+/** Latest plan markdown bodies from ACP `sessionUpdate: plan` event lines (newest first). */
+export function planMarkdownHintsFromEventLines(lines: string[]): string[] {
+  const hints: string[] = [];
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    try {
+      const parsed = JSON.parse(lines[i]!) as {
+        update?: { sessionUpdate?: string; markdown?: unknown };
+      };
+      if (parsed.update?.sessionUpdate !== 'plan') continue;
+      const markdown = typeof parsed.update.markdown === 'string' ? parsed.update.markdown.trim() : '';
+      if (markdown) hints.push(markdown);
+    } catch {
+      // ignore
+    }
+  }
+  return hints;
 }
 
 /**

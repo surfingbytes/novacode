@@ -30,12 +30,15 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'select', planId: string): void;
   (e: 'download', plan: PlanDocument): void;
+  (e: 'refresh'): void;
   (e: 'delete'): void;
   (e: 'start-full-plan', plan: PlanDocument): void;
   (e: 'start-plan-entry', payload: { plan: PlanDocument; entry: PlanEntry; index: number }): void;
   (e: 'mark-plan-entry-done', payload: { plan: PlanDocument; entry: PlanEntry; index: number }): void;
   (e: 'markdown-click', event: MouseEvent): void;
 }>();
+
+const bRefreshingPlan = ref(false);
 
 // -------------------------------------------------- Refs --------------------------------------------------
 
@@ -79,6 +82,15 @@ function onSelectPlan(planId: string): void {
 function onDownload(plan: PlanDocument): void {
   closePlanActionsMenu();
   emit('download', plan);
+}
+
+function onRefresh(): void {
+  if (bRefreshingPlan.value) return;
+  bRefreshingPlan.value = true;
+  emit('refresh');
+  window.setTimeout(() => {
+    bRefreshingPlan.value = false;
+  }, 800);
 }
 
 function onDelete(): void {
@@ -182,6 +194,15 @@ onUnmounted(() => {
           <button
             type="button"
             class="button is-transparent rounded-r-none! text-xs"
+            title="Reload plan from disk"
+            :disabled="bRefreshingPlan"
+            @click="onRefresh"
+          >
+            {{ bRefreshingPlan ? 'Refreshing…' : 'Refresh' }}
+          </button>
+          <button
+            type="button"
+            class="button is-transparent rounded-none! border-l border-fg/10 text-xs"
             title="Download plan as Markdown"
             @click="onDownload(selectedPlanDocument)"
           >
@@ -206,6 +227,13 @@ onUnmounted(() => {
               @click="onStartFullPlan(selectedPlanDocument)"
             >
               Start whole plan in new session
+            </button>
+            <button
+              type="button"
+              class="flex w-full items-center px-3 py-2 text-left text-xs text-text-primary hover:bg-fg/[0.06]"
+              @click="onRefresh"
+            >
+              Refresh from disk
             </button>
             <button
               type="button"
