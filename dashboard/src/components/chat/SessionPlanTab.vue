@@ -177,7 +177,7 @@ onUnmounted(() => {
         <div
           v-if="selectedPlanDocument"
           ref="planActionsMenuRef"
-          class="relative inline-flex shrink-0"
+          class="relative inline-flex shrink-0 items-center"
         >
           <button
             type="button"
@@ -189,12 +189,12 @@ onUnmounted(() => {
           </button>
           <button
             type="button"
-            class="button is-transparent is-icon rounded-l-none! border-l border-fg/10"
+            class="button is-transparent is-icon h-[30px]! w-[30px]! min-w-[30px]! rounded-l-none! border-l border-fg/10"
             title="Plan actions"
             aria-label="Plan actions"
             @click.stop="bPlanActionsMenuOpen = !bPlanActionsMenuOpen"
           >
-            <ChevronDown class="h-3.5 w-3.5" />
+            <ChevronDown class="h-3.5! w-3.5!" />
           </button>
           <div
             v-if="bPlanActionsMenuOpen"
