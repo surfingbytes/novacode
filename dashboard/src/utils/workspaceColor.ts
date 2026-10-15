@@ -35,6 +35,25 @@ export function sessionStatusDotStyle(
 }
 
 /**
+ * Favorite star in the sidebar status slot (replaces the status dot): same
+ * busy/idle lighting as the dot, but via SVG color + drop-shadow so it stays
+ * readable when the rail is collapsed.
+ */
+export function sessionFavoriteStarStyle(
+  workspace: WorkspaceColorSource,
+  busy: boolean | undefined
+): Record<string, string> {
+  const color = workspaceColor(workspace);
+  if (busy) {
+    return {
+      color,
+      filter: `drop-shadow(0 0 3px color-mix(in oklab, ${color} 45%, transparent))`
+    };
+  }
+  return { color: `color-mix(in oklab, ${color} 45%, transparent)` };
+}
+
+/**
  * Finished/unread "Done" pill tinted with the workspace color (not accent).
  * Matches the collapsed sidebar checkmark so both states share identity color.
  */

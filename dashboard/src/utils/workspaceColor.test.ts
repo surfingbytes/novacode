@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 
 // utils
 import {
+  sessionFavoriteStarStyle,
   sessionStatusDotStyle,
   sessionUnreadDoneStyle,
   workspaceColor
@@ -38,6 +39,26 @@ describe('sessionStatusDotStyle', () => {
 
   it('falls back to the accent token for colorless workspaces', () => {
     expect(sessionStatusDotStyle(null, true).background).toBe('var(--accent)');
+  });
+});
+
+describe('sessionFavoriteStarStyle', () => {
+  it('busy star uses the full workspace color with a glow', () => {
+    expect(sessionFavoriteStarStyle({ color: '#ff8800' }, true)).toEqual({
+      color: '#ff8800',
+      filter: 'drop-shadow(0 0 3px color-mix(in oklab, #ff8800 45%, transparent))'
+    });
+  });
+
+  it('idle star uses the dimmed workspace color without a glow', () => {
+    expect(sessionFavoriteStarStyle({ color: '#ff8800' }, false)).toEqual({
+      color: 'color-mix(in oklab, #ff8800 45%, transparent)'
+    });
+    expect(sessionFavoriteStarStyle({ color: '#ff8800' }, false).filter).toBeUndefined();
+  });
+
+  it('falls back to the accent token for colorless workspaces', () => {
+    expect(sessionFavoriteStarStyle(null, true).color).toBe('var(--accent)');
   });
 });
 
