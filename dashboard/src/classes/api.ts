@@ -500,7 +500,13 @@ export const gitApi = {
     files: string[],
     repo?: string
   ): ReturnType<typeof http.post<{ message: string }>> =>
-    http.post<{ message: string }>(`/git/workspace/${workspaceId}/commit-message`, { files, repo }),
+    http.post<{ message: string }>(
+      `/git/workspace/${workspaceId}/commit-message`,
+      { files, repo },
+      // Slightly above the API one-shot wall clock so the server can return a
+      // real error instead of the browser reporting a bare Network Error.
+      { timeout: 50_000 }
+    ),
   push: (workspaceId: string, repo?: string): ReturnType<typeof http.post<{ output: string }>> =>
     http.post<{ output: string }>(`/git/workspace/${workspaceId}/push`, undefined, {
       params: { repo }

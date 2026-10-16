@@ -4,10 +4,10 @@ import { randomUUID } from 'node:crypto';
 // classes
 import { getAgentModels } from './agentModels';
 import { closeClaudeAcpForNovaSession, runClaudeAcp } from './claudeAcp';
-import { runCodexAcp } from './codexAcp';
-import { runCursorAcp } from './cursorAcp';
-import { runOpenCodeAcp } from './openCodeAcp';
-import { runVibeAcp } from './vibeAcp';
+import { cancelCodexAcp, runCodexAcp } from './codexAcp';
+import { cancelCursorAcp, runCursorAcp } from './cursorAcp';
+import { cancelOpenCodeAcp, runOpenCodeAcp } from './openCodeAcp';
+import { cancelVibeAcp, runVibeAcp } from './vibeAcp';
 import type { AcpPermissionHandler } from './acpSubprocessRunner';
 
 // types
@@ -28,6 +28,8 @@ const SESSION_TITLE_MAX_LENGTH = 60;
 const SESSION_TITLE_PROMPT_MAX_CHARS = 1500;
 const COMMIT_MESSAGE_SUBJECT_MAX_LENGTH = 72;
 const COMMIT_MESSAGE_BODY_MAX_CHARS = 400;
+/** Hard cap so reverse proxies (often ~60s) return an app error instead of a dropped connection. */
+export const ONE_SHOT_AGENT_TIMEOUT_MS = 45_000;
 const RULES_PREAMBLE_RE =
   /\b(?:i(?:'ve| have)? loaded|rules? (?:are |were )?loaded|the following rules|workspace rules\b.*\bapply|i will follow|follow them as)\b/i;
 const PAYWALL_TEXT_RE =
@@ -247,6 +249,26 @@ export function extractFirstAssistantText(messages: ChatMessage[]): string {
   return '';
 }
 
+async function cancelOneShotRun(agentType: AgentType, runId: string): Promise<void> {
+  if (agentType === 'claude') {
+    await closeClaudeAcpForNovaSession(runId);
+    return;
+  }
+  if (agentType === 'open-code') {
+    cancelOpenCodeAcp(runId);
+    return;
+  }
+  if (agentType === 'codex') {
+    cancelCodexAcp(runId);
+    return;
+  }
+  if (agentType === 'mistral-vibe') {
+    cancelVibeAcp(runId);
+    return;
+  }
+  cancelCursorAcp(runId);
+}
+
 export async function runOneShotAgentText(params: {
   agentType: AgentType;
   cwd: string;
@@ -256,71 +278,91 @@ export async function runOneShotAgentText(params: {
   runIdPrefix?: string;
   /** Cancel tool-permission requests so the agent only returns text. */
   denyTools?: boolean;
+  /** Override the default one-shot wall-clock timeout (ms). */
+  timeoutMs?: number;
 }): Promise<string> {
   const chunks: string[] = [];
   const onEvent = (line: string): void => appendAssistantText(line, chunks);
   const runId = `${params.runIdPrefix ?? 'one-shot'}-${randomUUID()}`;
   const permission = params.denyTools ? denyAllPermission : undefined;
-  let result: { error?: string };
+  const timeoutMs = params.timeoutMs ?? ONE_SHOT_AGENT_TIMEOUT_MS;
 
-  if (params.agentType === 'open-code') {
-    result = await runOpenCodeAcp(
-      { acpSessionId: null, cwd: params.cwd, promptText: params.promptText, model: params.model },
-      onEvent,
-      runId,
-      undefined,
-      permission
-    );
-  } else if (params.agentType === 'codex') {
-    result = await runCodexAcp(
-      { acpSessionId: null, cwd: params.cwd, promptText: params.promptText, model: params.model },
-      onEvent,
-      runId,
-      undefined,
-      permission
-    );
-  } else if (params.agentType === 'mistral-vibe') {
-    result = await runVibeAcp(
-      { acpSessionId: null, cwd: params.cwd, promptText: params.promptText },
-      onEvent,
-      runId,
-      undefined,
-      permission
-    );
-  } else if (params.agentType === 'claude') {
-    try {
-      result = await runClaudeAcp(
-        {
-          novaSessionId: runId,
-          acpSessionId: null,
-          cwd: params.cwd,
-          promptText: params.promptText,
-          model: params.model,
-          claudeToken: params.claudeToken
-        },
+  const runAgent = async (): Promise<string> => {
+    let result: { error?: string };
+
+    if (params.agentType === 'open-code') {
+      result = await runOpenCodeAcp(
+        { acpSessionId: null, cwd: params.cwd, promptText: params.promptText, model: params.model },
         onEvent,
+        runId,
         undefined,
         permission
       );
-    } finally {
-      await closeClaudeAcpForNovaSession(runId);
+    } else if (params.agentType === 'codex') {
+      result = await runCodexAcp(
+        { acpSessionId: null, cwd: params.cwd, promptText: params.promptText, model: params.model },
+        onEvent,
+        runId,
+        undefined,
+        permission
+      );
+    } else if (params.agentType === 'mistral-vibe') {
+      result = await runVibeAcp(
+        { acpSessionId: null, cwd: params.cwd, promptText: params.promptText },
+        onEvent,
+        runId,
+        undefined,
+        permission
+      );
+    } else if (params.agentType === 'claude') {
+      try {
+        result = await runClaudeAcp(
+          {
+            novaSessionId: runId,
+            acpSessionId: null,
+            cwd: params.cwd,
+            promptText: params.promptText,
+            model: params.model,
+            claudeToken: params.claudeToken
+          },
+          onEvent,
+          undefined,
+          permission
+        );
+      } finally {
+        await closeClaudeAcpForNovaSession(runId);
+      }
+    } else {
+      result = await runCursorAcp(
+        { acpSessionId: null, cwd: params.cwd, promptText: params.promptText, model: params.model },
+        onEvent,
+        runId,
+        undefined,
+        permission
+      );
     }
-  } else {
-    result = await runCursorAcp(
-      { acpSessionId: null, cwd: params.cwd, promptText: params.promptText, model: params.model },
-      onEvent,
-      runId,
-      undefined,
-      permission
-    );
-  }
 
-  if (result.error) {
-    throw new Error(result.error);
+    if (result.error) {
+      throw new Error(result.error);
+    }
+    const message = cleanGeneratedAgentText(chunks.join(''));
+    if (!message) {
+      throw new Error('AI did not return text');
+    }
+    return message;
+  };
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      void cancelOneShotRun(params.agentType, runId);
+      reject(new Error(`Timed out after ${Math.round(timeoutMs / 1000)}s generating text`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([runAgent(), timeoutPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
-  const message = cleanGeneratedAgentText(chunks.join(''));
-  if (!message) {
-    throw new Error('AI did not return text');
-  }
-  return message;
 }

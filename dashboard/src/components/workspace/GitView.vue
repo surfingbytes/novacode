@@ -328,8 +328,20 @@ const canGenerateCommitMessage = (targetRepo: string): boolean =>
 
 // -------------------------------------------------- Methods --------------------------------------------------
 const gitErrorMessage = (e: unknown, fallback: string): string => {
-  const msg = e as { response?: { data?: { error?: string } }; message?: string };
-  return msg?.response?.data?.error ?? msg?.message ?? fallback;
+  const msg = e as {
+    response?: { data?: { error?: string } };
+    message?: string;
+    code?: string;
+  };
+  const fromApi = msg?.response?.data?.error;
+  if (fromApi) return fromApi;
+  if (msg?.code === 'ECONNABORTED' || /timeout/i.test(msg?.message ?? '')) {
+    return 'Request timed out — try again';
+  }
+  if (msg?.message === 'Network Error') {
+    return 'Could not reach the server — try again';
+  }
+  return msg?.message ?? fallback;
 };
 
 const setGitActionResult = (
@@ -363,11 +375,11 @@ const loadBranches = async (repo: string): Promise<void> => {
 
 const refresh = async (): Promise<void> => {
   bIsLoading.value = true;
-  error.value = null;
   try {
     const response = await gitApi.status(props.workspaceId);
     files.value = response.data.files;
     repos.value = response.data.repos ?? [];
+    error.value = null;
 
     if (repos.value.length === 1) {
       selectedGitRepo.value = repos.value[0].repo;
@@ -396,7 +408,14 @@ const refresh = async (): Promise<void> => {
       await loadHistory();
     }
   } catch (e: unknown) {
-    error.value = gitErrorMessage(e, 'Failed to get git status');
+    const message = gitErrorMessage(e, 'Failed to get git status');
+    // Keep the last-known file list visible — a failed poll (e.g. while a long
+    // commit-message request holds browser connections) must not wipe the pane.
+    if (!bHasLoadedStatus.value) {
+      error.value = message;
+    } else {
+      setGitActionResult('error', message);
+    }
   } finally {
     bHasLoadedStatus.value = true;
     bIsLoading.value = false;
@@ -514,6 +533,12 @@ const generateCommitMessage = async (targetRepo: string): Promise<void> => {
 
   bGeneratingCommitMessage.value = true;
   commitResult.value = null;
+  // Pause status polling so hung/slow AI requests do not starve the browser's
+  // per-host connection pool and make status look like a Network Error.
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
   try {
     const response = await gitApi.generateCommitMessage(
       props.workspaceId,
@@ -541,6 +566,9 @@ const generateCommitMessage = async (targetRepo: string): Promise<void> => {
     }, 5000);
   } finally {
     bGeneratingCommitMessage.value = false;
+    if (props.active && !pollTimer) {
+      pollTimer = setInterval(refresh, 5000);
+    }
   }
 };
 
