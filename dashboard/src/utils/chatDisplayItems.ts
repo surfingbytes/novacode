@@ -8,7 +8,7 @@
  */
 
 // node_modules
-import { marked } from 'marked';
+import { marked, type Tokens } from 'marked';
 
 // types
 import type { PlanDocumentSummary } from '@/@types/index';
@@ -300,18 +300,7 @@ marked.use({
         `</div>`
       );
     },
-    link(
-      this: { parser: { parseInline: (tokens: unknown[]) => string } },
-      {
-        href,
-        title,
-        tokens
-      }: {
-        href: string;
-        title?: string | null;
-        tokens: unknown[];
-      }
-    ) {
+    link({ href, title, tokens }: Tokens.Link) {
       const text = this.parser.parseInline(tokens);
       if (!href) return text;
       const titleAttr = title ? ` title="${escapeHtmlForMd(title)}"` : '';
