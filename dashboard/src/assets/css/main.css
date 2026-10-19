@@ -611,6 +611,16 @@ hr {
   overflow-wrap: anywhere;
   word-break: break-word;
 
+  a {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 0.12em;
+
+    &:hover {
+      color: var(--color-primary-hover);
+    }
+  }
+
   .code-block-card {
     max-width: 100%;
 

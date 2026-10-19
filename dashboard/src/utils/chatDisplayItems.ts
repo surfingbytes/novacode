@@ -279,6 +279,10 @@ function escapeHtmlForMd(text: string): string {
     .replace(/'/g, '&#39;');
 }
 
+function isExternalHttpUrl(href: string): boolean {
+  return /^https?:\/\//i.test(href) || href.startsWith('//');
+}
+
 marked.use({
   renderer: {
     code({ text, lang }: { text: string; lang?: string }) {
@@ -295,6 +299,26 @@ marked.use({
         `<pre><code${langAttr}>${escapeHtmlForMd(text)}</code></pre>` +
         `</div>`
       );
+    },
+    link(
+      this: { parser: { parseInline: (tokens: unknown[]) => string } },
+      {
+        href,
+        title,
+        tokens
+      }: {
+        href: string;
+        title?: string | null;
+        tokens: unknown[];
+      }
+    ) {
+      const text = this.parser.parseInline(tokens);
+      if (!href) return text;
+      const titleAttr = title ? ` title="${escapeHtmlForMd(title)}"` : '';
+      const externalAttrs = isExternalHttpUrl(href)
+        ? ' target="_blank" rel="noopener noreferrer"'
+        : '';
+      return `<a href="${escapeHtmlForMd(href)}"${titleAttr}${externalAttrs}>${text}</a>`;
     }
   }
 });

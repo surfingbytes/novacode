@@ -183,6 +183,26 @@ function onChatMarkdownClick(e: MouseEvent): void {
     void copyCodeBlockFromEvent(e);
     return;
   }
+
+  // Open http(s) links outside the PWA (standalone often keeps target=_blank in-app).
+  const anchor = target.closest('a');
+  if (
+    anchor instanceof HTMLAnchorElement &&
+    e.button === 0 &&
+    !e.metaKey &&
+    !e.ctrlKey &&
+    !e.shiftKey &&
+    !e.altKey
+  ) {
+    const href = anchor.href;
+    if (/^https?:\/\//i.test(href)) {
+      e.preventDefault();
+      e.stopPropagation();
+      window.open(href, '_blank', 'noopener,noreferrer');
+      return;
+    }
+  }
+
   if (!(target instanceof HTMLImageElement)) return;
   e.preventDefault();
   e.stopPropagation();

@@ -493,6 +493,25 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
 
+    // Open http(s) links outside the PWA (standalone often keeps target=_blank in-app).
+    const anchor = target.closest('a');
+    if (
+      anchor instanceof HTMLAnchorElement &&
+      event.button === 0 &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.shiftKey &&
+      !event.altKey
+    ) {
+      const href = anchor.href;
+      if (/^https?:\/\//i.test(href)) {
+        event.preventDefault();
+        event.stopPropagation();
+        window.open(href, '_blank', 'noopener,noreferrer');
+        return;
+      }
+    }
+
     const markDoneButton = target.closest<HTMLButtonElement>('[data-plan-mark-done]');
     if (markDoneButton) {
       const plan = selectedPlanDocument.value;
