@@ -1193,7 +1193,7 @@ onUnmounted(() => {
         <RouterLink
           v-if="rulesSubtitleLabel"
           :to="rulesSubtitleTo"
-          class="md:hidden inline-flex items-center gap-1 min-w-0 hover:text-text-primary"
+          class="inline-flex items-center gap-1 min-w-0 hover:text-text-primary"
           :title="rulesSubtitleTitle"
         >
           <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>
@@ -1201,19 +1201,6 @@ onUnmounted(() => {
         </RouterLink>
       </template>
     </EntityDetailHeader>
-
-    <div
-      v-if="rulesSubtitleLabel && activeTab === 'chat'"
-      class="hidden md:block px-4 md:px-6 py-1.5 border-b border-fg/10 shrink-0 text-[11px] text-text-muted"
-    >
-      <RouterLink
-        :to="rulesSubtitleTo"
-        class="hover:text-text-primary"
-        :title="rulesSubtitleTitle"
-      >
-        {{ rulesSubtitleLabel }}
-      </RouterLink>
-    </div>
 
     <div
       v-if="error"
