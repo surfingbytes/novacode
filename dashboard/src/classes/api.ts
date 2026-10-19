@@ -16,6 +16,7 @@ import type {
   CreateWorkspacePayload,
   UpdateWorkspacePayload,
   Session,
+  SessionSpecStatus,
   Orchestrator,
   RoleTemplate,
   WorkspaceRuleFileSummary,
@@ -852,6 +853,30 @@ export const sessionsApi = {
     const url = `${base}/sessions/${sessionId}/images/${encodeURIComponent(filename)}`;
     return token ? `${url}?token=${encodeURIComponent(token)}` : url;
   }
+};
+
+// ---------------------------------- Session spec (chat → orchestrator) ----------------------------------
+export interface SessionSpecResponse {
+  status: SessionSpecStatus;
+  content: string | null;
+}
+
+export const sessionSpecApi = {
+  get: (workspaceId: string, sessionId: string): ReturnType<typeof http.get<SessionSpecResponse>> =>
+    http.get<SessionSpecResponse>(`/workspaces/${workspaceId}/sessions/${sessionId}/spec`),
+
+  /** Create the (empty template) spec file only. */
+  create: (workspaceId: string, sessionId: string): ReturnType<typeof http.post<SessionSpecResponse>> =>
+    http.post<SessionSpecResponse>(`/workspaces/${workspaceId}/sessions/${sessionId}/spec`),
+
+  /** Agent writes the spec from the chat, then a ready-to-run orchestrator is generated (background). */
+  generateOrchestrator: (
+    workspaceId: string,
+    sessionId: string
+  ): ReturnType<typeof http.post<{ status: SessionSpecStatus }>> =>
+    http.post<{ status: SessionSpecStatus }>(
+      `/workspaces/${workspaceId}/sessions/${sessionId}/spec/orchestrator`
+    )
 };
 
 // ---------------------------------- Orchestrator ----------------------------------

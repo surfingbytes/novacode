@@ -117,6 +117,10 @@ Optional features include **scheduled automations**, **role templates**, and **b
 - **Run** (`POST .../run` with optional `startIndex`) executes each step in its own session. Steps may declare `dependsOn` (0-based indexes); if a dependency **failed** or was **skipped**, the step is marked skipped and the run continues. A step failure no longer aborts the rest of the plan. Final `runStatus` is `failed` if any step failed, otherwise `completed`.
 - **Clone** (`POST .../clone`) copies name (`Copy of …`), tags, agent type, shared context, and steps without session ids or run results.
 - The dashboard can **run from step N**, edit the plan after a run, and clone from the plan footer or the workspace sidebar.
+- **From a chat (spec → orchestrator)**: each session can have a spec file at `/config/specs/<workspaceId>/<sessionId>.md` (never inside the workspace). When it exists, every prompt in that session carries a one-line note with the path, and the folder is passed as ACP `additionalDirectories` (Claude, Codex, Vibe; Cursor/OpenCode fall back to the normal approval prompt).
+  - `GET .../sessions/:sessionId/spec` — status (`exists`, `hasContent`, `path`, `orchestratorId`, `bChatNewerThanSpec`, `job`) + content. `POST .../spec` creates the template file only.
+  - `POST .../spec/orchestrator` (202) runs in the background: the session's own agent writes the spec as a normal chat turn (reply wrapped in `<nova-spec>`, saved by Nova), the same agent type + model splits it into steps (the spec is stored verbatim as `sharedContext`), a final *Verify against spec* step is appended, and the orchestrator is created with `sourceSessionId`. Progress is pushed as `session-spec-status` on the sessions WebSocket; a push notification fires when the plan is ready.
+  - Steps of such a plan run with the source chat's agent type and model.
 
 ---
 

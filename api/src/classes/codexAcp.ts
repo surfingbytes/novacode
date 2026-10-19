@@ -26,6 +26,8 @@ export interface RunCodexAcpParams {
   configJson?: Record<string, string>;
   /** Lazy rules-prefix builder, invoked only when a fresh ACP session is created. */
   getRulesPrefix?: () => Promise<string>;
+  /** Extra dirs the agent may use without per-file approval (ACP additionalDirectories). */
+  additionalDirectories?: string[];
 }
 
 export interface RunCodexAcpResult {
@@ -57,6 +59,7 @@ export async function runCodexAcp(
       mode: params.mode,
       configJson: params.configJson,
       getRulesPrefix: params.getRulesPrefix,
+      additionalDirectories: params.additionalDirectories,
       logTag: 'codexAcp',
     },
     onEvent,

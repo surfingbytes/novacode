@@ -66,6 +66,12 @@ export function broadcastOrchestratorUpsert(workspaceId: string, orchestrator: u
   broadcastGlobalSessions({ type: 'orchestrator-upsert', orchestrator });
 }
 
+/** Spec file / spec→orchestrator job state changed for a chat session. */
+export function broadcastSessionSpecStatus(workspaceId: string, status: unknown): void {
+  broadcastWorkspace(workspaceId, { type: 'session-spec-status', status });
+  broadcastGlobalSessions({ type: 'session-spec-status', status });
+}
+
 export function broadcastServerShutdown(): void {
   const msg: WsServerMessage = { type: 'server-shutdown' };
   const payload = JSON.stringify(msg);

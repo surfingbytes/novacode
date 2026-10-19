@@ -176,7 +176,10 @@ model Orchestrator {
   runCurrentStep  Int?      @map("run_current_step")
   runTotalSteps   Int?      @map("run_total_steps")
   runStartedAt    String?   @map("run_started_at")
+  /** Chat session this plan was generated from (spec → orchestrator). */
+  sourceSessionId String?   @map("source_session_id")
 
+  @@index([sourceSessionId])
   @@map("orchestrators")
 }
 

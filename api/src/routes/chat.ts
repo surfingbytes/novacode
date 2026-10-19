@@ -24,6 +24,7 @@ import {
   getActiveRun,
   cancelRun,
   dispatchPrompt,
+  dispatchPromptAndWait,
   respondToAcpPermission,
   respondToAcpAskQuestion,
   subscribeBusy,
@@ -178,6 +179,39 @@ async function tryProcessQueue(sessionId: string): Promise<void> {
   } finally {
     queueWorkers.delete(sessionId);
   }
+}
+
+/**
+ * Run a server-initiated prompt as a normal turn of the session (same agent,
+ * model and conversation) and wait for it. Open chats see it like a sent message.
+ * Prompts the user queued meanwhile run afterwards.
+ */
+export async function runServerPromptInSession(opts: {
+  sessionId: string;
+  text: string;
+  timeoutMs?: number;
+}): Promise<{ error?: string; messages?: ChatMessage[] }> {
+  const { sessionId, text } = opts;
+  if (getActiveRun(sessionId)) {
+    return { error: 'Agent is busy' };
+  }
+  const session = await db.getSession(sessionId);
+  if (!session) {
+    return { error: 'Session not found' };
+  }
+  broadcastChat(sessionId, {
+    type: 'prompt-started',
+    prompt: { text, createdAt: new Date().toISOString() }
+  });
+  const result = await dispatchPromptAndWait({
+    sessionId,
+    text,
+    model: session.modelSelection,
+    mode: session.sessionMode,
+    timeoutMs: opts.timeoutMs
+  });
+  void tryProcessQueue(sessionId);
+  return result;
 }
 
 function paginateMessages(allMessages: ChatMessage[], offset: number): { messages: ChatMessage[]; hasMore: boolean } {

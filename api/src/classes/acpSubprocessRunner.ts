@@ -141,6 +141,14 @@ export interface AcpSubprocessRunParams {
    */
   getRulesPrefix?: () => Promise<string>;
   /**
+   * Extra directories the agent may read/write without per-file approval (ACP
+   * `additionalDirectories`, e.g. the session's spec folder). Only sent when the
+   * agent advertises `sessionCapabilities.additionalDirectories`, or when
+   * `additionalDirectoriesUnadvertised` is set for agents known to accept it anyway.
+   */
+  additionalDirectories?: string[];
+  additionalDirectoriesUnadvertised?: boolean;
+  /**
    * MCP servers already filtered to reachable ones. Defaults to none — callers
    * that want MCP must probe first. A down server must never be passed here.
    */
@@ -876,6 +884,20 @@ function createPhaseLogger(logTag: string, novaSessionId: string) {
   };
 }
 
+/** Directories to send as ACP `additionalDirectories`, or null when unsupported/empty. */
+export function resolveAdditionalDirectories(
+  params: Pick<AcpSubprocessRunParams, 'additionalDirectories' | 'additionalDirectoriesUnadvertised'>,
+  initialized: unknown
+): string[] | null {
+  const dirs = params.additionalDirectories?.filter((dir) => dir.trim()) ?? [];
+  if (dirs.length === 0) return null;
+  const capabilities = (initialized as {
+    agentCapabilities?: { sessionCapabilities?: { additionalDirectories?: unknown } | null };
+  } | null)?.agentCapabilities?.sessionCapabilities;
+  const bAdvertised = capabilities?.additionalDirectories != null;
+  return bAdvertised || params.additionalDirectoriesUnadvertised ? dirs : null;
+}
+
 export async function runAcpSubprocessPrompt(
   params: AcpSubprocessRunParams,
   onEvent: AcpEventHandler,
@@ -1170,7 +1192,7 @@ export async function runAcpSubprocessPrompt(
       const agent = acpAgent(ctx);
 
       phase('initialize:start');
-      await ctx.request(methods.agent.initialize, {
+      const initialized = await ctx.request(methods.agent.initialize, {
         protocolVersion: PROTOCOL_VERSION,
         clientInfo: { name: 'nova-code', version: '1.0.0' },
         clientCapabilities: params.cursorExtensions
@@ -1178,6 +1200,8 @@ export async function runAcpSubprocessPrompt(
           : { session: { configOptions: { boolean: true } } },
       });
       phase('initialize:done');
+
+      const extraDirs = resolveAdditionalDirectories(params, initialized);
 
       let resolvedSessionId: string;
       let sessionResponse: AcpSessionResponse;
@@ -1190,6 +1214,7 @@ export async function runAcpSubprocessPrompt(
         const created = (await ctx.request(methods.agent.session.new, {
           cwd,
           mcpServers: servers,
+          ...(extraDirs ? { additionalDirectories: extraDirs } : {}),
         })) as NewSessionResponse;
         phase('session:new:done');
         return created;
@@ -1212,6 +1237,7 @@ export async function runAcpSubprocessPrompt(
             sessionId: acpSessionId,
             cwd,
             mcpServers: servers,
+            ...(extraDirs ? { additionalDirectories: extraDirs } : {}),
           })) as LoadSessionResponse;
           phase('session:load:done');
           return { sessionId: acpSessionId, response: loaded, isFresh: false };

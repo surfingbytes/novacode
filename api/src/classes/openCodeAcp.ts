@@ -27,6 +27,8 @@ export interface RunOpenCodeAcpParams {
   configJson?: Record<string, string>;
   /** Lazy rules-prefix builder, invoked only when a fresh ACP session is created. */
   getRulesPrefix?: () => Promise<string>;
+  /** Extra dirs the agent may use without per-file approval (ACP additionalDirectories). */
+  additionalDirectories?: string[];
 }
 
 export interface RunOpenCodeAcpResult {
@@ -57,6 +59,7 @@ export async function runOpenCodeAcp(
       mode: params.mode,
       configJson: params.configJson,
       getRulesPrefix: params.getRulesPrefix,
+      additionalDirectories: params.additionalDirectories,
       // OpenCode's built-in plan-file workflow is TUI-only; over ACP the plan
       // agent needs explicit instructions (embedding the ACP session id) so the
       // plan lands in `.opencode/plans` / XDG where getPlanDocumentsSource looks.

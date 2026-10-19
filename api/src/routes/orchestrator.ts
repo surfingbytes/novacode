@@ -24,7 +24,7 @@ import { broadcastOrchestratorUpsert, broadcastWorkspaceSessionsRefresh } from '
 import { sendPushToAll } from '../classes/push';
 
 // types
-import type { ChatMessage, OrchestratorSubtasksPayload, SubTask } from '../@types/index';
+import type { AgentType, ChatMessage, OrchestratorSubtasksPayload, SubTask } from '../@types/index';
 
 const DECOMPOSE_INSTRUCTION = `You are a task planner. The user will describe a high-level goal or ask to modify an existing task list.
 
@@ -171,7 +171,9 @@ function parseSubtasksArray(arr: unknown): SubTask[] | null {
 }
 
 /** Parse planner JSON: sharedContext + subtasks (legacy: only subtasks array in object). */
-function parsePlanFromLlmResponse(raw: string): { sharedContext: string; subtasks: SubTask[] } | null {
+export function parsePlanFromLlmResponse(
+  raw: string
+): { name?: string; sharedContext: string; subtasks: SubTask[] } | null {
   const trimmed = raw.trim();
   let working = trimmed.includes('{') ? trimmed.slice(trimmed.indexOf('{')) : trimmed;
   let jsonStr = working;
@@ -201,11 +203,12 @@ function parsePlanFromLlmResponse(raw: string): { sharedContext: string; subtask
   }
   const sharedContext =
     typeof parsed.sharedContext === 'string' ? parsed.sharedContext : '';
-  return { sharedContext, subtasks };
+  const name = typeof parsed.name === 'string' && parsed.name.trim() ? parsed.name.trim() : undefined;
+  return { ...(name ? { name } : {}), sharedContext, subtasks };
 }
 
 /** Persist an orchestrator patch and push it to subscribed dashboards (no polling needed). */
-async function updateOrchestratorAndBroadcast(
+export async function updateOrchestratorAndBroadcast(
   workspaceId: string,
   orchestratorId: string,
   patch: Parameters<typeof db.updateOrchestrator>[1]
@@ -537,6 +540,12 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       return;
     }
 
+    // Plans generated from a chat run every step with that chat's model.
+    const sourceSession = orchestrator.sourceSessionId
+      ? await db.getSession(orchestrator.sourceSessionId)
+      : undefined;
+    const sourceModel = sourceSession?.modelSelection;
+
     const bRestart =
       orchestrator.runStatus === 'failed' ||
       (orchestrator.runStatus === 'running' && orchestrator.runCurrentStep === 0);
@@ -565,6 +574,8 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
 
         const createResult = await createSessionWithAgent({
           workspaceId,
+          agentType: orchestrator.agentType as AgentType,
+          ...(sourceModel ? { modelSelection: sourceModel } : {}),
           name: task.name,
           tags:
             task.category && String(task.category).trim()
@@ -589,6 +600,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         const runResult = await dispatchPromptAndWait({
           sessionId: createResult.session.id,
           text: stepPrompt,
+          ...(sourceModel ? { model: sourceModel } : {}),
           timeoutMs: 60000_000
         });
         if (runResult.error) {

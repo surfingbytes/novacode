@@ -24,6 +24,8 @@ export interface RunVibeAcpParams {
   mode?: string;
   /** Lazy rules-prefix builder, invoked only when a fresh ACP session is created. */
   getRulesPrefix?: () => Promise<string>;
+  /** Extra dirs the agent may use without per-file approval (ACP additionalDirectories). */
+  additionalDirectories?: string[];
 }
 
 export interface RunVibeAcpResult {
@@ -51,6 +53,9 @@ export async function runVibeAcp(
       attachments: params.attachments,
       mode: params.mode,
       getRulesPrefix: params.getRulesPrefix,
+      additionalDirectories: params.additionalDirectories,
+      // Vibe accepts additional_directories on new/load but does not advertise it.
+      additionalDirectoriesUnadvertised: true,
       logTag: 'vibeAcp',
     },
     onEvent,

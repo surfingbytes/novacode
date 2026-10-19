@@ -10,6 +10,7 @@ import GitView from '@/components/workspace/GitView.vue';
 import AppTerminal from '@/components/AppTerminal.vue';
 import ConfirmModal from '@/components/ConfirmModal.vue';
 import SessionEditModal from '@/components/SessionEditModal.vue';
+import SessionSpecButton from '@/components/chat/SessionSpecButton.vue';
 import ClaudeLimitPopup from '@/components/ClaudeLimitPopup.vue';
 import ChatMessageList from '@/components/chat/ChatMessageList.vue';
 import ChatComposer, { type PendingAttachment } from '@/components/chat/ChatComposer.vue';
@@ -404,6 +405,11 @@ watch(
     }
     session.value = { ...session.value, name: storeName };
   }
+);
+
+/** Spec → orchestrator needs a conversation the agent can turn into a spec. */
+const bHasAssistantReply = computed(
+  () => !!session.value?.sessionId || messages.value.some((message) => message.role === 'assistant')
 );
 
 const liveBusySubagents = computed(() => {
@@ -1149,6 +1155,14 @@ onUnmounted(() => {
             <path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z" />
           </svg>
         </button>
+      </template>
+      <template v-if="session && !session.archived" #actions-leading>
+        <SessionSpecButton
+          :workspace-id="workspaceId"
+          :session-id="session.id"
+          :b-busy="bIsStreaming"
+          :b-has-conversation="bHasAssistantReply"
+        />
       </template>
       <template #subtitle-trailing>
         <template v-if="headerCiState !== 'none'">

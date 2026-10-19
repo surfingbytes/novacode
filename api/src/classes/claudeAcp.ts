@@ -209,6 +209,8 @@ export interface RunClaudeAcpParams {
    * re-sending them would duplicate tokens on every turn.
    */
   getRulesPrefix?: () => Promise<string>;
+  /** Extra dirs the agent may use without per-file approval (ACP additionalDirectories). */
+  additionalDirectories?: string[];
   /** Called with the resolved session ID before the prompt starts — used to keep cancel state in sync. */
   onSessionId?: (id: string) => void;
 }
@@ -238,6 +240,9 @@ export async function runClaudeAcp(
     configJson,
     onSessionId,
   } = params;
+  const extraDirs = params.additionalDirectories?.length
+    ? { additionalDirectories: params.additionalDirectories }
+    : {};
 
   if (claudeToken) {
     process.env['CLAUDE_CODE_OAUTH_TOKEN'] = claudeToken;
@@ -251,17 +256,17 @@ export async function runClaudeAcp(
   let isFreshSession = false;
 
   if (!acpSessionId) {
-    const created = await agent.newSession({ cwd, mcpServers });
+    const created = await agent.newSession({ cwd, mcpServers, ...extraDirs });
     sessionResponse = created;
     resolvedSessionId = created.sessionId;
     isFreshSession = true;
   } else {
     try {
-      sessionResponse = await agent.resumeSession({ sessionId: acpSessionId, cwd, mcpServers });
+      sessionResponse = await agent.resumeSession({ sessionId: acpSessionId, cwd, mcpServers, ...extraDirs });
       resolvedSessionId = acpSessionId;
     } catch {
       onEvent(sessionResetNoticeEventLine());
-      const created = await agent.newSession({ cwd, mcpServers });
+      const created = await agent.newSession({ cwd, mcpServers, ...extraDirs });
       sessionResponse = created;
       resolvedSessionId = created.sessionId;
       isFreshSession = true;

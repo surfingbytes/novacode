@@ -958,6 +958,7 @@ export const db = {
     workspaceId: string;
     tags?: string | null;
     agentType?: string;
+    sourceSessionId?: string | null;
   }): Promise<Orchestrator> {
     const id = randomUUID();
     const createdAt = new Date().toISOString();
@@ -971,9 +972,21 @@ export const db = {
         subtasksJson: null,
         workspaceId: data.workspaceId,
         createdAt,
-        archived: false
+        archived: false,
+        sourceSessionId: data.sourceSessionId ?? null
       }
     });
+  },
+
+  /** Newest non-archived plan generated from a chat session (spec → orchestrator). */
+  async getLatestOrchestratorBySourceSession(
+    sourceSessionId: string
+  ): Promise<OrchestratorWithCategory | undefined> {
+    const row = await _prisma.orchestrator.findFirst({
+      where: { sourceSessionId, archived: false },
+      orderBy: { createdAt: 'desc' }
+    });
+    return (row ?? undefined) as OrchestratorWithCategory | undefined;
   },
 
   async updateOrchestrator(

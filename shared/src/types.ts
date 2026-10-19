@@ -50,6 +50,30 @@ export interface Orchestrator {
   runCurrentStep?: number | null;
   runTotalSteps?: number | null;
   runStartedAt?: string | null;
+  /** Chat session this plan was generated from (spec → orchestrator). */
+  sourceSessionId?: string | null;
+}
+
+// ---------------------------------- Session spec (chat → orchestrator) ----------------------------------
+
+/** Background "create orchestrator from chat" job phase for one session. */
+export type SessionSpecJobState = 'idle' | 'writing-spec' | 'planning' | 'failed';
+
+export interface SessionSpecStatus {
+  sessionId: string;
+  /** Spec file exists on disk (it may still hold only the template). */
+  exists: boolean;
+  /** True when the file has content beyond the generated template header. */
+  hasContent: boolean;
+  /** Absolute path of the spec file (also told to the agent). */
+  path: string;
+  /** ISO mtime of the spec file. */
+  updatedAt: string | null;
+  /** Newest non-archived orchestrator generated from this session. */
+  orchestratorId: string | null;
+  /** Chat changed after the spec file was last written. */
+  bChatNewerThanSpec: boolean;
+  job: { state: SessionSpecJobState; error?: string };
 }
 
 // ---------------------------------- Terminal WebSocket protocol ----------------------------------

@@ -8,11 +8,19 @@ import { createManagedSocket, type ManagedSocket } from '@/lib/wsClient';
 
 // stores
 import { useOrchestratorsStore } from '@/stores/orchestrators';
+import { useSessionSpecsStore } from '@/stores/sessionSpecs';
 import { forgetLocalStateForId } from '@/lib/sessionLocalState';
 import { isViewingSession } from '@/utils/sessionUnread';
 
 // types
-import type { Workspace, CreateWorkspacePayload, UpdateWorkspacePayload, Session, Orchestrator } from '@/@types/index';
+import type {
+  Workspace,
+  CreateWorkspacePayload,
+  UpdateWorkspacePayload,
+  Session,
+  Orchestrator,
+  SessionSpecStatus
+} from '@/@types/index';
 
 const LIST_RETRY_DELAYS_MS = [1000, 3000];
 
@@ -217,6 +225,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
             | { type: 'session-deleted'; id: string; workspaceId?: string }
             | { type: 'busy-changed'; id: string; busy: boolean; busySubagents?: Session['busySubagents'] }
             | { type: 'orchestrator-upsert'; orchestrator: Orchestrator }
+            | { type: 'session-spec-status'; status: SessionSpecStatus }
             | { type: 'refresh' }
             | { type: 'server-shutdown' }
             | { type: 'ping' };
@@ -238,6 +247,10 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
           } else if (messagePayload.type === 'orchestrator-upsert') {
             if (messagePayload.orchestrator) {
               useOrchestratorsStore().upsertOrchestrator(messagePayload.orchestrator);
+            }
+          } else if (messagePayload.type === 'session-spec-status') {
+            if (messagePayload.status) {
+              useSessionSpecsStore().applyStatus(messagePayload.status);
             }
           } else if (messagePayload.type === 'refresh') {
             fetchAllSessions();

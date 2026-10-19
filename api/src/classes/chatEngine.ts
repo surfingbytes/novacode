@@ -44,6 +44,7 @@ import {
 } from './planDocumentSources';
 import { logger, truncateLogText } from './logger';
 import { parseUsageUpdateLine } from './sessionUsage';
+import { buildSpecPromptNote, readSessionSpec, workspaceSpecDir } from './sessionSpec';
 import { resolvePlanDisplayTitle } from '@novacode/shared';
 
 // types
@@ -769,9 +770,14 @@ export async function dispatchPrompt(
         workspacePath: linkedPlanWorkspacePath,
       })
     : '';
+  // Sessions with a spec file get its path every turn (it may be created mid-chat)
+  // and the spec folder as an extra allowed directory, so edits need no approval.
+  const spec = await readSessionSpec(session.workspaceId, sessionId).catch(() => null);
+  const additionalDirectories = spec ? [workspaceSpecDir(session.workspaceId)] : undefined;
+  const promptWithSpec = spec ? `${buildSpecPromptNote(spec.path)}\n\n${effectiveText}` : effectiveText;
   const agentPrompt = linkedPlanPrefix.trim()
-    ? `${linkedPlanPrefix}\n\n---\n\nUser request:\n${effectiveText}`
-    : effectiveText;
+    ? `${linkedPlanPrefix}\n\n---\n\nUser request:\n${promptWithSpec}`
+    : promptWithSpec;
 
   // Get Claude OAuth token (only needed for claude agent type)
   const user = await db.getFirstUser();
@@ -900,7 +906,7 @@ export async function dispatchPrompt(
 
     if (agentType === 'mistral-vibe') {
       result = await runVibeAcp(
-        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt, attachments, mode: sessionMode, getRulesPrefix },
+        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt, attachments, mode: sessionMode, getRulesPrefix, additionalDirectories },
         onEvent,
         sessionId,
         onConfigSync,
@@ -917,6 +923,7 @@ export async function dispatchPrompt(
           mode: sessionMode,
           configJson: sessionConfig,
           getRulesPrefix,
+          additionalDirectories,
         },
         onEvent,
         sessionId,
@@ -935,6 +942,7 @@ export async function dispatchPrompt(
           mode: sessionMode,
           configJson: sessionConfig,
           getRulesPrefix,
+          additionalDirectories,
         },
         onEvent,
         sessionId,
@@ -952,6 +960,7 @@ export async function dispatchPrompt(
           mode: sessionMode,
           configJson: sessionConfig,
           getRulesPrefix,
+          additionalDirectories,
         },
         onEvent,
         sessionId,
@@ -971,6 +980,7 @@ export async function dispatchPrompt(
           mode: sessionMode,
           configJson: sessionConfig,
           getRulesPrefix,
+          additionalDirectories,
           onSessionId: (id) => {
             currentAcpSessionId = id;
             run.acpSessionId = id;
@@ -1092,6 +1102,7 @@ export function dispatchPromptAndWait(opts: {
   sessionId: string;
   text: string;
   model?: string;
+  mode?: string;
   timeoutMs?: number;
 }): Promise<{ error?: string; errorCode?: AgentErrorCode; messages?: ChatMessage[] }> {
   return new Promise((resolve) => {
@@ -1125,7 +1136,7 @@ export function dispatchPromptAndWait(opts: {
       sessionId: opts.sessionId,
       text: opts.text,
       model: opts.model ?? 'auto',
-      mode: 'default',
+      mode: opts.mode ?? 'default',
       subscriber,
     }).then((result) => {
       if (result.error) {

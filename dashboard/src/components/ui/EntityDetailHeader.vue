@@ -227,6 +227,11 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <!-- Entity-specific actions shown before the standard ones (all widths) -->
+    <div v-if="!bLoading && $slots['actions-leading']" class="flex items-center shrink-0">
+      <slot name="actions-leading" />
+    </div>
+
     <!-- Archive + Edit + Delete -->
     <div v-if="!bLoading" class="hidden lg:flex items-center gap-0.5 shrink-0">
       <button

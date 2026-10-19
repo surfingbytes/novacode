@@ -35,6 +35,8 @@ export interface RunCursorAcpParams {
   configJson?: Record<string, string>;
   /** Lazy rules-prefix builder, invoked only when a fresh ACP session is created. */
   getRulesPrefix?: () => Promise<string>;
+  /** Extra dirs the agent may use without per-file approval (ACP additionalDirectories). */
+  additionalDirectories?: string[];
 }
 
 export interface RunCursorAcpResult {
@@ -73,6 +75,7 @@ export async function runCursorAcp(
       mode: params.mode,
       configJson: params.configJson,
       getRulesPrefix: params.getRulesPrefix,
+      additionalDirectories: params.additionalDirectories,
       logTag: 'cursorAcp',
       cursorExtensions: true,
       skipModelConfigOption: true,

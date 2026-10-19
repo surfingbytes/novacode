@@ -19,6 +19,7 @@ import { runWorkspacePathMigrations } from './classes/workspacePathMigration';
 // routes
 import { authRoutes } from './routes/auth';
 import { workspaceRoutes } from './routes/workspaces';
+import { sessionSpecRoutes } from './routes/sessionSpec';
 import { agentAuthRoutes } from './routes/agentAuth';
 import { wsRoutes, broadcastServerShutdown } from './routes/ws';
 import { chatRoutes } from './routes/chat';
@@ -144,6 +145,7 @@ async function main(): Promise<void> {
   await fastify.register(workspaceRuleRoutes);
   await fastify.register(globalRuleRoutes);
   await fastify.register(orchestratorRoutes);
+  await fastify.register(sessionSpecRoutes);
   await fastify.register(automationRoutes);
   await fastify.register(imageRoutes);
   await fastify.register(pushRoutes);
