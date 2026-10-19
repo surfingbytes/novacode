@@ -90,6 +90,16 @@ export function appendAssistantText(line: string, chunks: string[]): void {
   }
 }
 
+/** Final text of the last assistant message: stored content, else rebuilt from its raw agent events. */
+export function lastAssistantText(messages: ChatMessage[] | undefined): string {
+  const last = [...(messages ?? [])].reverse().find((message) => message.role === 'assistant');
+  if (!last) return '';
+  if (last.content?.trim()) return last.content;
+  const chunks: string[] = [];
+  for (const line of last.events ?? []) appendAssistantText(line, chunks);
+  return chunks.join('');
+}
+
 export function cleanGeneratedAgentText(raw: string): string {
   return raw
     .trim()

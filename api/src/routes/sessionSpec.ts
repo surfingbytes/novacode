@@ -6,7 +6,7 @@ import { db } from '../classes/database';
 import { jwtPreHandler } from '../classes/auth';
 import { AGENT_ROUTE_RATE_LIMIT } from '../classes/rateLimits';
 import { isSessionBusy } from '../classes/chatEngine';
-import { appendAssistantText, runOneShotAgentText } from '../classes/oneShotAgentText';
+import { lastAssistantText, runOneShotAgentText } from '../classes/oneShotAgentText';
 import { resolveWorkspaceAbsolutePath } from '../classes/workspacePaths';
 import { sendPushToAll } from '../classes/push';
 import { logger } from '../classes/logger';
@@ -75,15 +75,6 @@ async function publishSpecStatus(sessionId: string): Promise<void> {
 async function setJobAndPublish(sessionId: string, job: SessionSpecJob): Promise<void> {
   setSessionSpecJob(sessionId, job);
   await publishSpecStatus(sessionId);
-}
-
-function lastAssistantText(messages: ChatMessage[] | undefined): string {
-  const last = [...(messages ?? [])].reverse().find((message) => message.role === 'assistant');
-  if (!last) return '';
-  if (last.content?.trim()) return last.content;
-  const chunks: string[] = [];
-  for (const line of last.events ?? []) appendAssistantText(line, chunks);
-  return chunks.join('');
 }
 
 /**

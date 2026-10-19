@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 // classes
 import { db, normalizeTagStringList } from '../classes/database';
 import { createSessionWithAgent } from '../classes/sessionService';
+import { lastAssistantText } from '../classes/oneShotAgentText';
 import { dispatchPrompt, dispatchPromptAndWait } from '../classes/chatEngine';
 import { jwtPreHandler } from '../classes/auth';
 import { AGENT_ROUTE_RATE_LIMIT } from '../classes/rateLimits';
@@ -49,6 +50,13 @@ Output only the JSON object, nothing else.`;
 function extractThinkingFromStreamLine(line: string): string | null {
   try {
     const event = JSON.parse(line) as Record<string, unknown>;
+    if (typeof event.sessionId === 'string' && event.update && typeof event.update === 'object') {
+      const update = event.update as { sessionUpdate?: string; content?: { type?: string; text?: string } };
+      if (update.sessionUpdate === 'agent_thought_chunk' && update.content?.type === 'text') {
+        return update.content.text || null;
+      }
+      return null;
+    }
     if (event.type === 'thinking') {
       const text = event.text ?? event.content;
       return typeof text === 'string' ? text : null;
@@ -71,31 +79,6 @@ function extractThinkingFromStreamLine(line: string): string | null {
   } catch {
     return null;
   }
-}
-
-function extractAssistantTextFromEvents(events: string[] | undefined): string {
-  if (!events?.length) {
-    return '';
-  }
-  let text = '';
-  for (const line of events) {
-    try {
-      const event = JSON.parse(line) as {
-        type?: string;
-        message?: { content?: Array<{ type?: string; text?: string }> };
-      };
-      if (event.type === 'assistant' && Array.isArray(event.message?.content)) {
-        for (const block of event.message.content) {
-          if (block.type === 'text' && typeof block.text === 'string') {
-            text += block.text;
-          }
-        }
-      }
-    } catch {
-      // skip malformed lines
-    }
-  }
-  return text;
 }
 
 /** Expected schema description for debugging (shown when decomposition fails). */
@@ -407,6 +390,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
 
       const tempSessionResult = await createSessionWithAgent({
         workspaceId,
+        agentType: orchestrator.agentType as AgentType,
         name: 'Orchestrator helper (temp)'
       });
       if (tempSessionResult.error || !tempSessionResult.session) {
@@ -450,8 +434,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
           }
         },
         onDone(messages: ChatMessage[]) {
-          const lastAssistant = messages.filter((m) => m.role === 'assistant').pop();
-          const rawText = extractAssistantTextFromEvents(lastAssistant?.events);
+          const rawText = lastAssistantText(messages);
           const plan = parsePlanFromLlmResponse(rawText);
 
           if (!plan) {
