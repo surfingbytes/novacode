@@ -72,7 +72,9 @@ model Workspace {
   archived     Boolean       @default(false)
   isFavorite   Boolean       @default(false) @map("is_favorite")
   favoriteOrder Int?         @map("favorite_order")
-  /** owner/name on the configured Gitea/Forgejo; null = detect from the git remote */
+  /** Forge connection id (forge.json); null = pick by the git remote's host */
+  forgeConnectionId String?  @map("forge_connection_id")
+  /** Repo path on that forge; null = derive from the git remote */
   forgeRepo    String?       @map("forge_repo")
   sessions     Session[]
   orchestrators Orchestrator[]

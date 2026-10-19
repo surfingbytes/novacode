@@ -1,5 +1,18 @@
 // types
-import type { CiRun, CiStatusResponse } from '@/@types/index';
+import type { CiRun, CiStatusResponse, ForgeProvider } from '@/@types/index';
+
+export function forgeProviderLabel(provider: ForgeProvider): string {
+  switch (provider) {
+    case 'github':
+      return 'GitHub';
+    case 'gitlab':
+      return 'GitLab';
+    case 'forgejo':
+      return 'Forgejo';
+    default:
+      return 'Gitea';
+  }
+}
 
 /** One state for compact badges: activity wins over the last finished result. */
 export type CiBadgeState = 'running' | 'queued' | 'success' | 'failure' | 'cancelled' | 'none';

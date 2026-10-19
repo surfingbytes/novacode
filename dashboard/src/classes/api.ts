@@ -37,8 +37,11 @@ import type {
   SessionUsageSummary,
   WorkspaceUsageSummary,
   CursorUsageSummaryResponse,
-  ForgeSettingsStatus,
+  ForgeConnectionStatus,
+  ForgeConnectionsResponse,
   ForgeConnectionTestResult,
+  ForgeProvider,
+  SaveForgeConnectionPayload,
   ForgeRepoDetectResponse,
   CiStatusResponse,
   CiFixPromptResponse
@@ -389,17 +392,30 @@ export const pushApi = {
     http.post<{ ok: boolean }>('/push/unsubscribe', { endpoint })
 };
 
-// ---------------------------------- Forge (Gitea / Forgejo) ----------------------------------
+// ---------------------------------- Forges (Gitea / Forgejo / GitHub / GitLab) ----------------------------------
 export const forgeApi = {
-  settings: (): ReturnType<typeof http.get<ForgeSettingsStatus>> =>
-    http.get<ForgeSettingsStatus>('/forge/settings'),
-  /** Tests the connection server-side before saving; omit `token` to keep the stored one. */
-  save: (url: string, token?: string): ReturnType<typeof http.put<ForgeSettingsStatus>> =>
-    http.put<ForgeSettingsStatus>('/forge/settings', { url, ...(token ? { token } : {}) }),
-  clear: (): ReturnType<typeof http.delete<ForgeSettingsStatus>> =>
-    http.delete<ForgeSettingsStatus>('/forge/settings'),
-  test: (url: string, token?: string): ReturnType<typeof http.post<ForgeConnectionTestResult>> =>
-    http.post<ForgeConnectionTestResult>('/forge/test', { url, ...(token ? { token } : {}) }),
+  connections: (): ReturnType<typeof http.get<ForgeConnectionsResponse>> =>
+    http.get<ForgeConnectionsResponse>('/forge/connections'),
+  /** The server tests the connection before saving. */
+  createConnection: (
+    payload: SaveForgeConnectionPayload
+  ): ReturnType<typeof http.post<ForgeConnectionStatus>> =>
+    http.post<ForgeConnectionStatus>('/forge/connections', payload),
+  /** Omit `token` to keep the stored one. */
+  updateConnection: (
+    id: string,
+    payload: SaveForgeConnectionPayload
+  ): ReturnType<typeof http.put<ForgeConnectionStatus>> =>
+    http.put<ForgeConnectionStatus>(`/forge/connections/${encodeURIComponent(id)}`, payload),
+  deleteConnection: (id: string): ReturnType<typeof http.delete> =>
+    http.delete(`/forge/connections/${encodeURIComponent(id)}`),
+  test: (payload: {
+    provider: ForgeProvider;
+    url: string;
+    token?: string;
+    connectionId?: string;
+  }): ReturnType<typeof http.post<ForgeConnectionTestResult>> =>
+    http.post<ForgeConnectionTestResult>('/forge/test', payload),
   detectRepo: (workspaceId: string): ReturnType<typeof http.get<ForgeRepoDetectResponse>> =>
     http.get<ForgeRepoDetectResponse>(`/forge/workspace/${workspaceId}/repo`),
   ciStatus: (

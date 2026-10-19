@@ -249,7 +249,9 @@ export interface Workspace {
   archived: boolean;
   isFavorite: boolean;
   favoriteOrder?: number | null;
-  /** `owner/name` on the configured forge; null = auto-detect from the git remote. */
+  /** Forge connection id; null = pick by the git remote's host. */
+  forgeConnectionId?: string | null;
+  /** Repo path on the forge; null = derive from the git remote. */
   forgeRepo?: string | null;
 }
 
@@ -344,15 +346,36 @@ export interface CursorUsageSummaryResponse {
   fetchedAt?: number;
 }
 
-/** Self-hosted Git forge with a Gitea-compatible API (Gitea, Forgejo). */
-export type ForgeProvider = 'gitea' | 'forgejo';
+/**
+ * Git hosting provider for CI status. `gitea` and `forgejo` share one API; when adding a
+ * connection either value means "Gitea-compatible" and the server detects which it is.
+ */
+export type ForgeProvider = 'gitea' | 'forgejo' | 'github' | 'gitlab';
 
-export interface ForgeSettingsStatus {
-  configured: boolean;
-  source: 'env' | 'file' | null;
-  url: string | null;
-  provider: ForgeProvider | null;
+/** A configured forge connection (the token is never sent to the browser). */
+export interface ForgeConnectionStatus {
+  id: string;
+  name: string;
+  provider: ForgeProvider;
+  /** Web URL, e.g. `https://github.com` or `https://git.example.com`. */
+  url: string;
+  /** Extra hostnames used in git remotes (e.g. an SSH domain that differs from `url`). */
+  remoteHosts: string[];
   version: string | null;
+  source: 'env' | 'file';
+}
+
+export interface ForgeConnectionsResponse {
+  connections: ForgeConnectionStatus[];
+}
+
+export interface SaveForgeConnectionPayload {
+  provider: ForgeProvider;
+  url: string;
+  /** Required when creating; omit on update to keep the stored token. */
+  token?: string;
+  name?: string;
+  remoteHosts?: string[];
 }
 
 export interface ForgeConnectionTestResult {
@@ -379,13 +402,19 @@ export interface CiRun {
 }
 
 export interface CiStatusResponse {
+  /** At least one forge connection exists. */
   configured: boolean;
-  /** `owner/name` on the forge, when resolved. */
+  connectionId: string | null;
+  connectionName: string | null;
+  provider: ForgeProvider | null;
+  /** Repository path on the forge (`owner/name`, or `group/sub/project` on GitLab). */
   repo: string | null;
   repoSource: 'override' | 'remote' | null;
   repoUrl: string | null;
+  /** Forge page listing runs/pipelines for the repo. */
+  runsUrl: string | null;
   branch: string | null;
-  /** `actions` = workflow runs API; `commit-status` = combined commit status fallback. */
+  /** `actions` = workflow runs / pipelines API; `commit-status` = combined commit status fallback. */
   source: 'actions' | 'commit-status' | null;
   lastCompleted: CiRun | null;
   running: CiRun[];
@@ -404,6 +433,9 @@ export interface CiFixPromptResponse {
 
 export interface ForgeRepoDetectResponse {
   configured: boolean;
+  connectionId: string | null;
+  connectionName: string | null;
+  provider: ForgeProvider | null;
   repo: string | null;
   source: 'override' | 'remote' | null;
 }
@@ -603,6 +635,7 @@ export interface CreateWorkspacePayload {
   defaultAgentType?: AgentType | null;
   tags?: string[] | null;
   forgeRepo?: string | null;
+  forgeConnectionId?: string | null;
 }
 
 export interface UpdateWorkspacePayload {
@@ -616,4 +649,5 @@ export interface UpdateWorkspacePayload {
   tags?: string[] | null;
   isFavorite?: boolean;
   forgeRepo?: string | null;
+  forgeConnectionId?: string | null;
 }

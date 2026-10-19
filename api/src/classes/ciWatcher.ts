@@ -1,7 +1,8 @@
 // classes
 import { config } from './config';
 import { db } from './database';
-import { getCachedCiRuns, isActiveCiRun, resolveForgeCredentials } from './forge';
+import { getCachedCiRuns, getForgeConnection } from './forge';
+import { isActiveCiRun } from './forgeCi';
 import { logger } from './logger';
 import { sendPushToAll } from './push';
 
@@ -27,7 +28,9 @@ export interface CiWatchTarget {
   workspaceName: string;
   /** Repo path inside the workspace (`''` = root). */
   repoPath: string;
-  /** `owner/name` on the forge. */
+  /** Forge connection the repo resolved to. */
+  connectionId: string;
+  /** Repo path on that forge. */
   forgeRepo: string;
   branch: string | null;
   sha: string | null;
@@ -57,7 +60,13 @@ export function touchCiWatch(target: CiWatchTarget): void {
   const existing = watches.get(key);
   if (existing) {
     // A branch switch resets observed runs so the old branch's runs do not "finish".
-    if (existing.branch !== target.branch || existing.forgeRepo !== target.forgeRepo) existing.active = null;
+    if (
+      existing.branch !== target.branch ||
+      existing.forgeRepo !== target.forgeRepo ||
+      existing.connectionId !== target.connectionId
+    ) {
+      existing.active = null;
+    }
     Object.assign(existing, target, {
       sessionId: target.sessionId ?? existing.sessionId,
       lastInterestAt: now
@@ -123,11 +132,11 @@ async function notifyRunFinished(watch: CiWatch, run: CiRun): Promise<void> {
 }
 
 async function pollWatch(watch: CiWatch, now: number): Promise<void> {
-  const creds = resolveForgeCredentials(config.configDir);
-  if (!creds) return;
+  const connection = getForgeConnection(config.configDir, watch.connectionId);
+  if (!connection) return;
   try {
     const result = await getCachedCiRuns(
-      creds,
+      connection,
       watch.forgeRepo,
       { branch: watch.branch, sha: watch.sha },
       { maxAgeMs: FAST_POLL_MS / 2 }
@@ -150,7 +159,6 @@ async function tick(): Promise<void> {
         watches.delete(key);
       }
     }
-    if (!resolveForgeCredentials(config.configDir)) return;
     // Polling only feeds notifications — skip it when no device wants CI pushes.
     if (!(await db.hasCiPushSubscriptions())) return;
     const due = [...watches.values()].filter((watch) => now >= watch.nextPollAt);

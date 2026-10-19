@@ -12,7 +12,7 @@ import { db, FavoriteLimitError } from '../classes/database';
 import { config } from '../classes/config';
 import { migrateCachesForWorkspacePathChange } from '../classes/workspacePathMigration';
 import { normalizeWorkspaceRelativePath } from '../classes/workspacePaths';
-import { normalizeForgeRepoInput } from '../classes/forge';
+import { getForgeConnection, normalizeForgeRepoInput } from '../classes/forge';
 
 const WorkspaceSchema = Type.Object({
   id: Type.String(),
@@ -29,6 +29,7 @@ const WorkspaceSchema = Type.Object({
   archived: Type.Boolean(),
   isFavorite: Type.Boolean(),
   favoriteOrder: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
+  forgeConnectionId: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   forgeRepo: Type.Optional(Type.Union([Type.String(), Type.Null()]))
 });
 
@@ -107,6 +108,17 @@ function normalizeDefaultAgentTypeForWrite(
   if (value === undefined) return undefined;
   if (value === null) return null;
   return WORKSPACE_AGENT_TYPES.has(value) ? value : null;
+}
+
+/** Validates the workspace forge override; the repo path format depends on the provider. */
+function normalizeForgeOverride(
+  connectionId: string | null,
+  repo: string | null
+): { forgeConnectionId: string | null; forgeRepo: string | null } {
+  const id = connectionId?.trim() || null;
+  const connection = id ? getForgeConnection(config.configDir, id) : null;
+  if (id && !connection) throw new Error('Unknown forge connection');
+  return { forgeConnectionId: id, forgeRepo: normalizeForgeRepoInput(repo, connection?.provider ?? null) };
 }
 
 export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
@@ -267,6 +279,7 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
           color: Type.Optional(Type.Union([Type.String(), Type.Null()])),
           defaultAgentType: Type.Optional(Type.Union([Type.String(), Type.Null()])),
           tags: Type.Optional(Type.Union([Type.Array(Type.String()), Type.Null()])),
+          forgeConnectionId: Type.Optional(Type.Union([Type.String(), Type.Null()])),
           forgeRepo: Type.Optional(Type.Union([Type.String(), Type.Null()]))
         }),
         response: {
@@ -276,13 +289,12 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
       }
     },
     async (request, reply) => {
-      const { name, path, group, gitUserName, gitUserEmail, color, defaultAgentType, tags, forgeRepo } =
-        request.body;
+      const { name, path, group, gitUserName, gitUserEmail, color, defaultAgentType, tags } = request.body;
       let safePath: string;
-      let forgeRepoNorm: string | null;
+      let forge: { forgeConnectionId: string | null; forgeRepo: string | null };
       try {
         safePath = validateAndNormalizeWorkspacePath(path);
-        forgeRepoNorm = normalizeForgeRepoInput(forgeRepo);
+        forge = normalizeForgeOverride(request.body.forgeConnectionId ?? null, request.body.forgeRepo ?? null);
       } catch (err) {
         return reply.code(400).send({ error: (err as Error).message });
       }
@@ -296,7 +308,7 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
         color: color?.trim() || undefined,
         defaultAgentType: normalizeDefaultAgentTypeForWrite(defaultAgentType),
         tags: tags ?? undefined,
-        forgeRepo: forgeRepoNorm
+        ...forge
       });
       return reply.code(201).send(normalizeWorkspaceResponse(workspace));
     }
@@ -319,6 +331,7 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
           defaultAgentType: Type.Optional(Type.Union([Type.String(), Type.Null()])),
           tags: Type.Optional(Type.Union([Type.Array(Type.String()), Type.Null()])),
           isFavorite: Type.Optional(Type.Boolean()),
+          forgeConnectionId: Type.Optional(Type.Union([Type.String(), Type.Null()])),
           forgeRepo: Type.Optional(Type.Union([Type.String(), Type.Null()]))
         }),
         response: {
@@ -339,14 +352,21 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
         defaultAgentType?: string | null;
         tags?: string[] | null;
         isFavorite?: boolean;
+        forgeConnectionId?: string | null;
         forgeRepo?: string | null;
       };
       let pathPatch: string | undefined;
       let previousPath: string | undefined;
-      let forgeRepoPatch: string | null | undefined;
+      let forgePatch: { forgeConnectionId?: string | null; forgeRepo?: string | null } = {};
       try {
         if (body.path !== undefined) pathPatch = validateAndNormalizeWorkspacePath(body.path);
-        if (body.forgeRepo !== undefined) forgeRepoPatch = normalizeForgeRepoInput(body.forgeRepo);
+        if (body.forgeConnectionId !== undefined || body.forgeRepo !== undefined) {
+          const existing = await db.getWorkspace(request.params.id);
+          forgePatch = normalizeForgeOverride(
+            body.forgeConnectionId !== undefined ? body.forgeConnectionId : (existing?.forgeConnectionId ?? null),
+            body.forgeRepo !== undefined ? body.forgeRepo : (existing?.forgeRepo ?? null)
+          );
+        }
       } catch (err) {
         return reply.code(400).send({ error: (err as Error).message });
       }
@@ -370,7 +390,7 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
           defaultAgentType: normalizeDefaultAgentTypeForWrite(body.defaultAgentType),
           tags: body.tags,
           isFavorite: body.isFavorite,
-          forgeRepo: forgeRepoPatch
+          ...forgePatch
         });
       } catch (err) {
         if (err instanceof FavoriteLimitError) {

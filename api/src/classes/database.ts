@@ -287,6 +287,7 @@ export const db = {
     color?: string | null;
     defaultAgentType?: string | null;
     tags?: string[] | null;
+    forgeConnectionId?: string | null;
     forgeRepo?: string | null;
   }): Promise<Workspace> {
     const id = randomUUID();
@@ -312,6 +313,7 @@ export const db = {
         sortOrder,
         defaultAgentType: data.defaultAgentType ?? null,
         tags: tagsJson,
+        forgeConnectionId: data.forgeConnectionId ?? null,
         forgeRepo: data.forgeRepo ?? null
       }
     });
@@ -331,6 +333,7 @@ export const db = {
       tags?: string[] | null;
       isFavorite?: boolean;
       /** null clears the override (back to remote auto-detect). */
+      forgeConnectionId?: string | null;
       forgeRepo?: string | null;
     }
   ): Promise<Workspace | undefined> {
@@ -389,6 +392,7 @@ export const db = {
         color: patch.color ?? existingWorkspace.color,
         defaultAgentType: patch.defaultAgentType ?? existingWorkspace.defaultAgentType,
         ...(tagsJson !== undefined && { tags: tagsJson }),
+        ...(patch.forgeConnectionId !== undefined && { forgeConnectionId: patch.forgeConnectionId }),
         ...(patch.forgeRepo !== undefined && { forgeRepo: patch.forgeRepo }),
         ...favoritePatch
       }

@@ -242,6 +242,7 @@ const handleSaveWorkspace = async (payload: {
   color: string | null;
   defaultAgentType: AgentType | null;
   tags: string[] | null;
+  forgeConnectionId?: string | null;
   forgeRepo?: string | null;
 }): Promise<void> => {
   if (editingWorkspace.value) {

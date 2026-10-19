@@ -12,13 +12,14 @@ import DirPickerModal from '@/components/DirPickerModal.vue';
 import { forgeApi } from '@/classes/api';
 
 // types
-import type { AgentType, ForgeRepoDetectResponse, Workspace } from '@/@types/index';
+import type { AgentType, ForgeConnectionStatus, ForgeRepoDetectResponse, Workspace } from '@/@types/index';
 
 // composables
 import { useInlineFieldErrors } from '@/composables/useInlineFieldErrors';
 
 // utils
 import { optionalEmailError, requiredTrimmed, workspacePathError } from '@/utils/formValidation';
+import { forgeProviderLabel } from '@/utils/ciStatusDisplay';
 
 // -------------------------------------------------- Props --------------------------------------------------
 const props = defineProps<{
@@ -55,7 +56,8 @@ const emit = defineEmits<{
       color: string | null;
       defaultAgentType: AgentType | null;
       tags: string[] | null;
-      /** Only sent when a forge is configured; null = auto-detect from the git remote. */
+      /** Only sent when a CI provider is connected; null = auto-detect from the git remote. */
+      forgeConnectionId?: string | null;
       forgeRepo?: string | null;
     }
   ): void;
@@ -71,6 +73,7 @@ interface FormState {
   color: string;
   defaultAgentType: string;
   tags: string[];
+  forgeConnectionId: string;
   forgeRepo: string;
 }
 
@@ -110,10 +113,11 @@ const form = ref<FormState>({
   color: '',
   defaultAgentType: '',
   tags: [],
+  forgeConnectionId: '',
   forgeRepo: ''
 });
-/** Forge connection + detected repo; the field is hidden until a forge is configured. */
-const bForgeConfigured = ref<boolean>(false);
+/** CI provider connections + what auto-detect resolves to; the fields stay hidden without connections. */
+const forgeConnections = ref<ForgeConnectionStatus[]>([]);
 const forgeDetected = ref<ForgeRepoDetectResponse | null>(null);
 const bSaving = ref<boolean>(false);
 const bShowDirPicker = ref<boolean>(false);
@@ -133,17 +137,30 @@ const { errors, touch, onInput, validateAll, reset } = useInlineFieldErrors({
 function forgeRepoError(value: string): string | undefined {
   const v = value.trim();
   if (!v) return undefined;
-  // owner/name, or a pasted repo/clone URL (the server extracts owner/name)
-  if (/^[\w.-]+\/[\w.-]+$/.test(v) || /^(https?|ssh):\/\//.test(v) || /^[^@\s]+@[^:\s]+:/.test(v)) return undefined;
+  // owner/name (GitLab: group/sub/project), or a pasted repo/clone URL
+  if (/^[\w.-]+(?:\/[\w.-]+)+$/.test(v) || /^(https?|ssh):\/\//.test(v) || /^[^@\s]+@[^:\s]+:/.test(v)) return undefined;
   return 'Use owner/name';
 }
 
 /** Placeholder hint: what auto-detect resolves to when the field is blank. */
 const forgeRepoPlaceholder = computed((): string => {
   const detected = forgeDetected.value;
-  if (detected?.source === 'remote' && detected.repo) return `Auto: ${detected.repo}`;
+  const sameConnection = !form.value.forgeConnectionId || form.value.forgeConnectionId === detected?.connectionId;
+  if (detected?.source === 'remote' && detected.repo && sameConnection) return `Auto: ${detected.repo}`;
   return 'owner/name';
 });
+
+/** Label for the "Auto-detect" option — names the connection the remote currently matches. */
+const forgeAutoLabel = computed((): string => {
+  const detected = forgeDetected.value;
+  if (detected?.source === 'remote' && detected.connectionName) return `Auto-detect (${detected.connectionName})`;
+  return 'Auto-detect from git remote';
+});
+
+function connectionLabel(connection: ForgeConnectionStatus): string {
+  const provider = forgeProviderLabel(connection.provider);
+  return connection.name.startsWith(provider) ? connection.name : `${connection.name} · ${provider}`;
+}
 
 // -------------------------------------------------- Computed --------------------------------------------------
 /** Tag suggestions from other workspaces, filtered by current input, excluding already-added tags. */
@@ -198,7 +215,10 @@ const submit = async (): Promise<void> => {
           ? (form.value.defaultAgentType as AgentType)
           : null,
       tags: tagsClean.length > 0 ? tagsClean : null,
-      ...(bForgeConfigured.value && { forgeRepo: form.value.forgeRepo.trim() || null })
+      ...(forgeConnections.value.length > 0 && {
+        forgeConnectionId: form.value.forgeConnectionId || null,
+        forgeRepo: form.value.forgeRepo.trim() || null
+      })
     });
   } finally {
     bSaving.value = false;
@@ -302,6 +322,7 @@ watch(
         defaultAgentType:
           props.workspace?.defaultAgentType ?? computeDefaultAgentTypeForCreate(),
         tags,
+        forgeConnectionId: props.workspace?.forgeConnectionId ?? '',
         forgeRepo: props.workspace?.forgeRepo ?? ''
       };
       tagInput.value = '';
@@ -315,9 +336,9 @@ watch(
 async function loadForgeInfo(): Promise<void> {
   forgeDetected.value = null;
   try {
-    const { data } = await forgeApi.settings();
-    bForgeConfigured.value = data.configured;
-    if (data.configured && props.workspace) {
+    const { data } = await forgeApi.connections();
+    forgeConnections.value = data.connections;
+    if (data.connections.length > 0 && props.workspace) {
       forgeDetected.value = (await forgeApi.detectRepo(props.workspace.id)).data;
     }
   } catch {
@@ -548,9 +569,15 @@ watch(AGENT_OPTIONS, (options) => {
             </div>
             <!-- Git Identity Override -->
 
-            <!-- Forge repository (Gitea / Forgejo CI status) -->
-            <div v-if="bForgeConfigured" class="field" :class="{ 'has-error': errors.forgeRepo }">
-              <div class="label">Gitea / Forgejo repository (optional)</div>
+            <!-- CI provider + repository (Git tab CI status) -->
+            <div v-if="forgeConnections.length > 0" class="field" :class="{ 'has-error': errors.forgeRepo }">
+              <div class="label">CI provider &amp; repository (optional)</div>
+              <div class="input-wrap">
+                <select v-model="form.forgeConnectionId" aria-label="CI provider connection">
+                  <option value="">{{ forgeAutoLabel }}</option>
+                  <option v-for="c in forgeConnections" :key="c.id" :value="c.id">{{ connectionLabel(c) }}</option>
+                </select>
+              </div>
               <div class="input-wrap">
                 <input
                   v-model="form.forgeRepo"
@@ -567,7 +594,8 @@ watch(AGENT_OPTIONS, (options) => {
                 {{ errors.forgeRepo }}
               </p>
               <p v-else class="hint">
-                Shows CI status on the Git tab. Leave blank to detect it from the git remote.
+                Shows CI status on the Git tab. Leave both on auto to match the git remote's host; pick a
+                connection for mirrors (e.g. GitHub repo built on Gitea).
               </p>
             </div>
           </div>

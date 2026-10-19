@@ -537,8 +537,8 @@ onMounted((): void => {
               <div class="settings-pref-row__text">
                 <div class="settings-pref-row__title">CI build notifications</div>
                 <div class="settings-pref-row__desc">
-                  Get a push notification when a Gitea/Forgejo build you were watching finishes (passed,
-                  failed or cancelled) — even with the app closed. Requires a forge on the Git tab of Settings.
+                  Get a push notification when a CI build you were watching finishes (passed, failed or
+                  cancelled) — even with the app closed. Requires a CI provider on the Git tab of Settings.
                 </div>
               </div>
               <button

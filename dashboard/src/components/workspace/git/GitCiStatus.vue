@@ -13,7 +13,7 @@ import {
 } from 'lucide-vue-next';
 
 // utils
-import { ciResultVerb, ciRunLabel } from '@/utils/ciStatusDisplay';
+import { ciResultVerb, ciRunLabel, forgeProviderLabel } from '@/utils/ciStatusDisplay';
 import { relativeTimeShort } from '@/utils/relativeTime';
 
 // types
@@ -35,9 +35,13 @@ const emit = defineEmits<{
 
 // -------------------------------------------------- Computed --------------------------------------------------
 const bVisible = computed((): boolean => Boolean(props.status?.configured && (props.status.repo || props.status.error)));
-const actionsUrl = computed((): string | null =>
-  props.status?.repoUrl ? `${props.status.repoUrl}${props.status.source === 'actions' ? '/actions' : ''}` : null
-);
+const runsUrl = computed((): string | null => props.status?.runsUrl ?? props.status?.repoUrl ?? null);
+const sourceTitle = computed((): string => {
+  const s = props.status;
+  if (!s) return '';
+  const where = s.connectionName ?? (s.provider ? forgeProviderLabel(s.provider) : 'forge');
+  return `${where} · ${s.repoSource === 'override' ? 'set in workspace settings' : 'detected from the git remote'}`;
+});
 const hiddenQueued = computed((): number =>
   props.status ? Math.max(0, props.status.queuedTotal - props.status.queued.length) : 0
 );
@@ -55,14 +59,15 @@ function runTime(run: CiRun): string {
   <div v-if="bVisible && status" class="mt-2 border-t border-fg/[0.06] pt-2 px-2 text-xs">
     <div class="flex items-center justify-between gap-2">
       <a
-        v-if="actionsUrl"
-        :href="actionsUrl"
+        v-if="runsUrl"
+        :href="runsUrl"
         target="_blank"
         rel="noopener noreferrer"
         class="min-w-0 truncate font-medium text-text-muted hover:text-text-primary"
-        :title="status.repoSource === 'override' ? 'Set in workspace settings' : 'Detected from the git remote'"
+        :title="sourceTitle"
       >
-        CI · <span class="font-mono">{{ status.repo }}</span>
+        CI<template v-if="status.provider"> · {{ forgeProviderLabel(status.provider) }}</template> ·
+        <span class="font-mono">{{ status.repo }}</span>
       </a>
       <span v-else class="font-medium text-text-muted">CI</span>
       <button

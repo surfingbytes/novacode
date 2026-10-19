@@ -11,9 +11,13 @@ function run(id: number, status: CiRun['status']): CiRun {
 function status(patch: Partial<CiStatusResponse>): CiStatusResponse {
   return {
     configured: true,
+    connectionId: 'c1',
+    connectionName: 'Gitea',
+    provider: 'gitea',
     repo: 'o/r',
     repoSource: 'remote',
     repoUrl: null,
+    runsUrl: null,
     branch: 'main',
     source: 'actions',
     lastCompleted: null,

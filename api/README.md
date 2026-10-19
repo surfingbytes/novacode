@@ -49,14 +49,19 @@ Uses the existing `cursor-agent login` token (`~/.config/cursor/auth.json`) — 
 
 - `GET /api/agent-auth/cursor/usage` — `{ authenticated, available, individual?, teamOnDemand?, billingCycleEnd? }` from Cursor `GET /api/usage-summary` (cached ~5 minutes)
 
-### Gitea / Forgejo CI
+### CI providers (Gitea, Forgejo, GitHub, GitLab)
 
-- `GET /api/forge/settings` — `{ configured, source, url, provider, version }` (never returns the token)
-- `PUT /api/forge/settings` — `{ url, token? }`; tests the connection, then stores `forge.json` in the config dir (omit `token` to keep the stored one)
-- `DELETE /api/forge/settings` — remove file settings (env `FORGE_URL` + `FORGE_TOKEN` still wins if set)
-- `POST /api/forge/test` — `{ url, token? }` → `{ ok, provider?, version?, username?, error? }`
-- `GET /api/forge/workspace/:workspaceId/repo` — forge `owner/name` (workspace override or detected from the git remote)
-- `GET /api/forge/workspace/:workspaceId/ci?repo=&sessionId=` — `CiStatusResponse` for the checked-out branch (Actions runs, falling back to commit statuses)
+Any number of connections can be configured side by side; workspaces are matched by their git remote host.
+
+- `GET /api/forge/connections` — `{ connections: ForgeConnectionStatus[] }` (never returns tokens)
+- `POST /api/forge/connections` — `{ provider, url, token, name?, remoteHosts? }`; tests, then stores in `forge.json`
+- `PUT /api/forge/connections/:id` — same body; omit `token` to keep the stored one
+- `DELETE /api/forge/connections/:id`
+- `POST /api/forge/test` — `{ provider, url, token?, connectionId? }` → `{ ok, provider?, version?, username?, error? }`
+- `GET /api/forge/workspace/:workspaceId/repo` — connection + repo the workspace resolves to (override or remote)
+- `GET /api/forge/workspace/:workspaceId/ci?repo=&sessionId=` — `CiStatusResponse` for the checked-out branch
 - `POST /api/forge/workspace/:workspaceId/ci/runs/:runId/fix-prompt?repo=` — `{ prompt, includesLogs }` for the agent
 
-The token needs `read:repository` and `read:user`. Push subscriptions accept `notifyTasks` / `notifyCi` to choose which notifications a device receives.
+Token scopes: Gitea/Forgejo `read:repository` + `read:user`; GitHub fine-grained read access to Actions, Commit statuses and Metadata (classic: `repo`); GitLab `read_api`. Env `FORGE_URL` + `FORGE_TOKEN` (+ `FORGE_PROVIDER`, `FORGE_NAME`, `FORGE_REMOTE_HOSTS`) adds a read-only connection.
+
+Push subscriptions accept `notifyTasks` / `notifyCi` to choose which notifications a device receives.
