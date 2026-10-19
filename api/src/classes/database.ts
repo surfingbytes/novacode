@@ -11,6 +11,7 @@ import { computeLastListPreview } from './chatPreview';
 import {
   chatMessageToRowData,
   escapeIlikeContains,
+  messageSearchText,
   planUpdateTargetIndex,
   sessionMessageRowToChat
 } from './sessionMessages';
@@ -112,6 +113,8 @@ export type SearchHit = {
   type: 'workspace' | 'session' | 'orchestrator' | 'role-template' | 'automation';
   workspaceId?: string;
   workspaceName?: string;
+  /** Last activity (ISO), shown next to the hit. */
+  updatedAt?: string;
 };
 
 function ilikeContains(term: string): { contains: string; mode: 'insensitive' } {
@@ -727,6 +730,7 @@ export const db = {
           content: '',
           eventsJson: JSON.stringify([line]),
           imagePathsJson: null,
+          searchText: '',
           createdAt,
         },
       }),
@@ -1398,6 +1402,39 @@ export const db = {
 
   // -------------------------------------------------- Search --------------------------------------------------
 
+  /** Fill `search_text` for messages persisted before the column existed. Returns rows updated. */
+  async backfillSessionMessageSearchText(): Promise<number> {
+    // events_json can be many MB per row (tool output), so keep batches small
+    const BATCH = 25;
+    let updated = 0;
+    for (;;) {
+      const rows = await _prisma.sessionMessage.findMany({
+        where: { searchText: null },
+        select: {
+          id: true,
+          role: true,
+          content: true,
+          eventsJson: true,
+          imagePathsJson: true,
+          createdAt: true
+        },
+        take: BATCH
+      });
+      if (rows.length === 0) return updated;
+      await _prisma.$transaction(
+        rows.map((row) =>
+          _prisma.sessionMessage.updateMany({
+            where: { id: row.id },
+            data: {
+              searchText: messageSearchText(sessionMessageRowToChat(row))
+            }
+          })
+        )
+      );
+      updated += rows.length;
+    }
+  },
+
   async searchCatalog(query: string): Promise<{
     workspaces: SearchHit[];
     sessions: SearchHit[];
@@ -1420,13 +1457,14 @@ export const db = {
           OR: [
             { name: contains },
             { lastPreviewText: contains },
-            { messages: { some: { content: contains } } }
+            { messages: { some: { OR: [{ content: contains }, { searchText: contains }] } } }
           ]
         },
         select: {
           id: true,
           name: true,
           lastPreviewText: true,
+          updatedAt: true,
           workspaceId: true,
           workspace: { select: { name: true } }
         },
@@ -1441,6 +1479,7 @@ export const db = {
         select: {
           id: true,
           name: true,
+          updatedAt: true,
           workspaceId: true,
           workspace: { select: { name: true } }
         },
@@ -1458,6 +1497,8 @@ export const db = {
         select: {
           id: true,
           name: true,
+          updatedAt: true,
+          lastRunAt: true,
           workspaceId: true,
           workspace: { select: { name: true } }
         },
@@ -1481,7 +1522,8 @@ export const db = {
           name: name || preview || 'Untitled session',
           type: 'session' as const,
           workspaceId: session.workspaceId,
-          workspaceName: session.workspace.name
+          workspaceName: session.workspace.name,
+          updatedAt: session.updatedAt
         };
       }),
       orchestrators: orchestrators.map((orchestrator) => ({
@@ -1489,7 +1531,8 @@ export const db = {
         name: orchestrator.name?.trim() || 'Untitled orchestrator',
         type: 'orchestrator' as const,
         workspaceId: orchestrator.workspaceId,
-        workspaceName: orchestrator.workspace.name
+        workspaceName: orchestrator.workspace.name,
+        updatedAt: orchestrator.updatedAt
       })),
       roleTemplates: roleTemplates.map((roleTemplate) => ({
         id: roleTemplate.id,
@@ -1501,7 +1544,8 @@ export const db = {
         name: automation.name,
         type: 'automation' as const,
         workspaceId: automation.workspaceId,
-        workspaceName: automation.workspace.name
+        workspaceName: automation.workspace.name,
+        updatedAt: automation.lastRunAt ?? automation.updatedAt
       }))
     };
   }

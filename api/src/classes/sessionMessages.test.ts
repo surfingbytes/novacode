@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   chatMessageToRowData,
   escapeIlikeContains,
+  messageSearchText,
   planUpdateTargetIndex,
   sessionMessageRowToChat
 } from './sessionMessages';
@@ -33,9 +34,6 @@ describe('sessionMessageRowToChat', () => {
 
   it('treats unknown roles as assistant and drops invalid JSON', () => {
     const message = sessionMessageRowToChat({
-      id: 'x',
-      sessionId: 's',
-      position: 0,
       role: 'system',
       content: '',
       eventsJson: '{not-json',
@@ -46,6 +44,23 @@ describe('sessionMessageRowToChat', () => {
     expect(message.content).toBeUndefined();
     expect(message.events).toBeUndefined();
     expect(message.imagePaths).toBeUndefined();
+  });
+});
+
+describe('messageSearchText', () => {
+  const chunk = (text: string): string =>
+    JSON.stringify({
+      sessionId: 's1',
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } }
+    });
+
+  it('joins assistant prose split across event chunks', () => {
+    const events = [chunk('Use the `{'), chunk('invoice}` placeholder'), '{"type":"session_config_sync"}'];
+    expect(messageSearchText({ role: 'assistant', events })).toBe('Use the `{invoice}` placeholder');
+  });
+
+  it('uses content only for user messages', () => {
+    expect(messageSearchText({ role: 'user', content: 'hi', events: [chunk('x')] })).toBe('hi');
   });
 });
 

@@ -267,6 +267,18 @@ async function main(): Promise<void> {
     fastify.log.error({ err }, 'Failed to mark stale orchestrator runs as failed');
   }
 
+  // assistant prose for global search (rows persisted before search_text existed)
+  void db
+    .backfillSessionMessageSearchText()
+    .then((count) => {
+      if (count > 0) {
+        fastify.log.info({ count }, 'Backfilled session message search text');
+      }
+    })
+    .catch((err: unknown) => {
+      fastify.log.error({ err }, 'Failed to backfill session message search text');
+    });
+
   // browse-root / abs-prefix path migration (workspace rows + agent project caches)
   try {
     await runWorkspacePathMigrations(config.configDir);

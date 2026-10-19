@@ -1,3 +1,6 @@
+// classes
+import { assistantTextFromEvents } from './assistantText';
+
 // types
 import type { ChatMessage } from '../@types/index';
 
@@ -9,10 +12,13 @@ export interface SessionMessageRow {
   content: string;
   eventsJson: string | null;
   imagePathsJson: string | null;
+  searchText: string | null;
   createdAt: string;
 }
 
-export function sessionMessageRowToChat(row: SessionMessageRow): ChatMessage {
+export function sessionMessageRowToChat(
+  row: Pick<SessionMessageRow, 'role' | 'content' | 'eventsJson' | 'imagePathsJson' | 'createdAt'>
+): ChatMessage {
   let events: string[] | undefined;
   if (row.eventsJson) {
     try {
@@ -46,6 +52,14 @@ export function sessionMessageRowToChat(row: SessionMessageRow): ChatMessage {
   };
 }
 
+/** Text global search matches against: stored content plus assistant prose from events. */
+export function messageSearchText(message: Pick<ChatMessage, 'role' | 'content' | 'events'>): string {
+  const content = message.content ?? '';
+  if (message.role !== 'assistant') return content;
+  const fromEvents = assistantTextFromEvents(message.events);
+  return content && fromEvents ? `${content}\n${fromEvents}` : content || fromEvents;
+}
+
 export function chatMessageToRowData(
   sessionId: string,
   position: number,
@@ -61,6 +75,7 @@ export function chatMessageToRowData(
     eventsJson: message.events && message.events.length > 0 ? JSON.stringify(message.events) : null,
     imagePathsJson:
       message.imagePaths && message.imagePaths.length > 0 ? JSON.stringify(message.imagePaths) : null,
+    searchText: messageSearchText(message),
     createdAt: message.createdAt
   };
 }

@@ -3,6 +3,9 @@
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 
+// utils
+import { relativeTimeShort } from '@/utils/relativeTime';
+
 // types
 interface SearchResult {
   id: string;
@@ -10,6 +13,7 @@ interface SearchResult {
   type: 'workspace' | 'session' | 'orchestrator' | 'role-template' | 'automation' | 'settings' | 'command';
   workspaceId?: string;
   workspaceName?: string;
+  updatedAt?: string;
 }
 
 interface SearchResultsGrouped {
@@ -594,21 +598,7 @@ onBeforeUnmount(() => {
                 <path d="M18 6L6 18 M6 6l12 12" />
               </svg>
             </button>
-            <button class="search-close lg:hidden" aria-label="Close" @click="emit('close')">
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.6"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M18 6L6 18 M6 6l12 12" />
-              </svg>
-            </button>
+            <button class="search-close" aria-label="Close" @click="emit('close')">Cancel</button>
           </div>
 
           <!-- Results -->
@@ -767,6 +757,13 @@ onBeforeUnmount(() => {
                         {{ result.workspaceName }}
                       </div>
                     </div>
+                    <span
+                      v-if="result.updatedAt"
+                      class="search-result-time nc-mono"
+                      :title="new Date(result.updatedAt).toLocaleString()"
+                    >
+                      {{ relativeTimeShort(result.updatedAt) }}
+                    </span>
                   </button>
                 </div>
               </template>
@@ -844,8 +841,7 @@ onBeforeUnmount(() => {
   color: var(--fg-subtle);
 }
 
-.search-clear,
-.search-close {
+.search-clear {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -861,10 +857,32 @@ onBeforeUnmount(() => {
     background 0.1s,
     color 0.1s;
 }
-.search-clear:hover,
+.search-clear:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+/* Mobile has no Esc key; desktop closes via Esc / overlay click. */
+.search-close {
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
 .search-close:hover {
   background: var(--bg-hover);
   color: var(--fg);
+}
+@media (min-width: 1024px) {
+  .search-close {
+    display: none;
+  }
 }
 
 .search-results {
@@ -958,6 +976,13 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   margin-top: 1px;
+}
+
+.search-result-time {
+  font-size: 11px;
+  color: var(--fg-subtle);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .search-footer {

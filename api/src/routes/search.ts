@@ -18,7 +18,8 @@ const SearchResultSchema = Type.Object({
     Type.Literal('automation')
   ]),
   workspaceId: Type.Optional(Type.String()),
-  workspaceName: Type.Optional(Type.String())
+  workspaceName: Type.Optional(Type.String()),
+  updatedAt: Type.Optional(Type.String())
 });
 
 const SearchResponseSchema = Type.Object({

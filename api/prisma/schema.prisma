@@ -122,6 +122,8 @@ model SessionMessage {
   content        String  @default("")
   eventsJson     String? @map("events_json")
   imagePathsJson String? @map("image_paths_json")
+  /** Plain text for global search (assistant prose lives only in events). Null = not yet backfilled. */
+  searchText     String? @map("search_text")
   createdAt      String  @map("created_at")
 
   @@unique([sessionId, position], map: "session_messages_session_id_position_key")
