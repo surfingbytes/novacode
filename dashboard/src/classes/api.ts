@@ -36,8 +36,12 @@ import type {
   SessionUsageTurn,
   SessionUsageSummary,
   WorkspaceUsageSummary,
-  CursorOrgApiStatus,
-  CursorPooledUsageResponse
+  CursorUsageSummaryResponse,
+  ForgeSettingsStatus,
+  ForgeConnectionTestResult,
+  ForgeRepoDetectResponse,
+  CiStatusResponse,
+  CiFixPromptResponse
 } from '@/@types/index';
 
 // ---------------------------------- HTTP ----------------------------------
@@ -376,11 +380,48 @@ export const pushApi = {
   subscribe: (subscription: {
     endpoint: string;
     keys: { p256dh: string; auth: string };
+    notifyTasks?: boolean;
+    notifyCi?: boolean;
   }): ReturnType<typeof http.post<{ ok: boolean }>> =>
     http.post<{ ok: boolean }>('/push/subscribe', subscription),
 
   unsubscribe: (endpoint: string): ReturnType<typeof http.post<{ ok: boolean }>> =>
     http.post<{ ok: boolean }>('/push/unsubscribe', { endpoint })
+};
+
+// ---------------------------------- Forge (Gitea / Forgejo) ----------------------------------
+export const forgeApi = {
+  settings: (): ReturnType<typeof http.get<ForgeSettingsStatus>> =>
+    http.get<ForgeSettingsStatus>('/forge/settings'),
+  /** Tests the connection server-side before saving; omit `token` to keep the stored one. */
+  save: (url: string, token?: string): ReturnType<typeof http.put<ForgeSettingsStatus>> =>
+    http.put<ForgeSettingsStatus>('/forge/settings', { url, ...(token ? { token } : {}) }),
+  clear: (): ReturnType<typeof http.delete<ForgeSettingsStatus>> =>
+    http.delete<ForgeSettingsStatus>('/forge/settings'),
+  test: (url: string, token?: string): ReturnType<typeof http.post<ForgeConnectionTestResult>> =>
+    http.post<ForgeConnectionTestResult>('/forge/test', { url, ...(token ? { token } : {}) }),
+  detectRepo: (workspaceId: string): ReturnType<typeof http.get<ForgeRepoDetectResponse>> =>
+    http.get<ForgeRepoDetectResponse>(`/forge/workspace/${workspaceId}/repo`),
+  ciStatus: (
+    workspaceId: string,
+    opts?: { repo?: string; sessionId?: string | null }
+  ): ReturnType<typeof http.get<CiStatusResponse>> =>
+    http.get<CiStatusResponse>(`/forge/workspace/${workspaceId}/ci`, {
+      params: {
+        ...(opts?.repo ? { repo: opts.repo } : {}),
+        ...(opts?.sessionId ? { sessionId: opts.sessionId } : {})
+      }
+    }),
+  fixPrompt: (
+    workspaceId: string,
+    runId: number,
+    repo?: string
+  ): ReturnType<typeof http.post<CiFixPromptResponse>> =>
+    http.post<CiFixPromptResponse>(
+      `/forge/workspace/${workspaceId}/ci/runs/${runId}/fix-prompt`,
+      {},
+      { params: repo ? { repo } : {} }
+    )
 };
 
 // ---------------------------------- Agent Auth (Cursor, Claude & OpenCode) ----------------------------------
@@ -395,17 +436,8 @@ export const agentAuthApi = {
     http.post<{ sessionId: string }>('/agent-auth/cursor/login'),
   cursorLogout: (): ReturnType<typeof http.delete> => http.delete('/agent-auth/cursor/logout'),
 
-  cursorOrgApiStatus: (): ReturnType<typeof http.get<CursorOrgApiStatus>> =>
-    http.get<CursorOrgApiStatus>('/agent-auth/cursor/org-api'),
-  setCursorOrgApi: (
-    apiKey: string,
-    organizationId: string
-  ): ReturnType<typeof http.put<CursorOrgApiStatus>> =>
-    http.put<CursorOrgApiStatus>('/agent-auth/cursor/org-api', { apiKey, organizationId }),
-  clearCursorOrgApi: (): ReturnType<typeof http.delete<CursorOrgApiStatus>> =>
-    http.delete<CursorOrgApiStatus>('/agent-auth/cursor/org-api'),
-  cursorPooledUsage: (): ReturnType<typeof http.get<CursorPooledUsageResponse>> =>
-    http.get<CursorPooledUsageResponse>('/agent-auth/cursor/pooled-usage'),
+  cursorUsage: (): ReturnType<typeof http.get<CursorUsageSummaryResponse>> =>
+    http.get<CursorUsageSummaryResponse>('/agent-auth/cursor/usage'),
 
   claudeStatus: (): ReturnType<typeof http.get<{ authenticated: boolean }>> =>
     http.get<{ authenticated: boolean }>('/agent-auth/claude/status'),

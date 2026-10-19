@@ -9,10 +9,19 @@ import {
 } from 'lucide-vue-next';
 
 // classes
-import { gitApi, type GitBranch, type GitCommit, type GitFile, type GitRepoStatus } from '@/classes/api';
+import {
+  apiErrorMessage,
+  forgeApi,
+  gitApi,
+  type GitBranch,
+  type GitCommit,
+  type GitFile,
+  type GitRepoStatus
+} from '@/classes/api';
 
 // composables
 import { usePaneLayout } from '@/composables/usePaneLayout';
+import { useCiStatus } from '@/composables/useCiStatus';
 
 // components
 import BaseModal from '@/components/BaseModal.vue';
@@ -22,6 +31,7 @@ import ContextMenu from '@/components/ContextMenu.vue';
 import type { ContextMenuItem } from '@/components/ContextMenu.vue';
 import GitChangesList from '@/components/workspace/git/GitChangesList.vue';
 import GitDiffPane from '@/components/workspace/git/GitDiffPane.vue';
+import GitCiStatus from '@/components/workspace/git/GitCiStatus.vue';
 import { gitFileKey as fileKey, gitParseFileKey as parseFileKey } from '@/components/workspace/git/gitDisplay';
 
 // -------------------------------------------------- Props --------------------------------------------------
@@ -30,12 +40,16 @@ const props = withDefaults(
     workspaceId: string;
     active: boolean;
     initialFilePath?: string | null;
+    /** Session hosting this view — CI notifications link back to it; enables "Fix with agent". */
+    sessionId?: string | null;
   }>(),
-  { initialFilePath: null }
+  { initialFilePath: null, sessionId: null }
 );
 
 const emit = defineEmits<{
   'update:selectedFilePath': [path: string | null];
+  /** Prompt asking the agent to fix a failed CI build (includes job logs when available). */
+  'fix-build': [prompt: string];
 }>();
 
 const {
@@ -101,7 +115,10 @@ const commitPatch = ref<string>('');
 const bCommitPatchLoading = ref<boolean>(false);
 const commitPatchError = ref<string | null>(null);
 
+const bFixingBuild = ref<boolean>(false);
+
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+let ciAfterPushTimer: ReturnType<typeof setTimeout> | null = null;
 let commitResultTimer: ReturnType<typeof setTimeout> | null = null;
 let pushResultTimer: ReturnType<typeof setTimeout> | null = null;
 let gitActionResultTimer: ReturnType<typeof setTimeout> | null = null;
@@ -136,6 +153,17 @@ const activeRepo = computed((): GitRepoStatus | null => {
   if (list.length === 1) return list[0];
   const found = list.find((r) => r.repo === selectedGitRepo.value);
   return found ?? list[0];
+});
+const {
+  status: ciStatus,
+  bLoading: bCiLoading,
+  refresh: refreshCiStatus
+} = useCiStatus({
+  workspaceId: computed(() => props.workspaceId),
+  repo: computed(() => activeRepo.value?.repo ?? ''),
+  sessionId: computed(() => props.sessionId),
+  active: computed(() => props.active && activeRepo.value !== null),
+  trigger: computed(() => activeRepo.value?.currentBranch ?? '')
 });
 const hasMixedSelection = computed((): boolean => {
   const selectedRepos = new Set<string>();
@@ -809,6 +837,9 @@ const pushChanges = async (targetRepo: string): Promise<void> => {
       repo: repos.value.length > 1 ? targetRepo : undefined
     };
     await refresh();
+    // Give the forge a moment to register the push-triggered run.
+    if (ciAfterPushTimer) clearTimeout(ciAfterPushTimer);
+    ciAfterPushTimer = setTimeout(() => void refreshCiStatus(), 4000);
   } catch (e: unknown) {
     const caughtError = e as { response?: { data?: { error?: string } }; message?: string };
     pushResult.value = {
@@ -822,6 +853,18 @@ const pushChanges = async (targetRepo: string): Promise<void> => {
     pushResultTimer = setTimeout(() => {
       pushResult.value = null;
     }, 5000);
+  }
+};
+
+const fixFailedBuild = async (runId: number): Promise<void> => {
+  bFixingBuild.value = true;
+  try {
+    const { data } = await forgeApi.fixPrompt(props.workspaceId, runId, activeRepo.value?.repo ?? '');
+    emit('fix-build', data.prompt);
+  } catch (e: unknown) {
+    setGitActionResult('error', apiErrorMessage(e, 'Could not load the failed build'), activeRepo.value?.repo);
+  } finally {
+    bFixingBuild.value = false;
   }
 };
 
@@ -890,6 +933,7 @@ onUnmounted((): void => {
   if (commitResultTimer) clearTimeout(commitResultTimer);
   if (pushResultTimer) clearTimeout(pushResultTimer);
   if (gitActionResultTimer) clearTimeout(gitActionResultTimer);
+  if (ciAfterPushTimer) clearTimeout(ciAfterPushTimer);
 });
 </script>
 
@@ -952,7 +996,18 @@ onUnmounted((): void => {
           commitMessagesByRepo[repo] = value;
         }
       "
-    />
+    >
+      <template #branch-footer>
+        <GitCiStatus
+          :status="ciStatus"
+          :b-loading="bCiLoading"
+          :b-can-fix="Boolean(sessionId)"
+          :b-fixing="bFixingBuild"
+          @refresh="refreshCiStatus"
+          @fix="(run) => fixFailedBuild(run.id)"
+        />
+      </template>
+    </GitChangesList>
     <GitDiffPane
       :b-show-detail="bShowDetail"
       :b-wide-pane="bWidePane"

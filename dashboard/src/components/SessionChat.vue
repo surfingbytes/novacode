@@ -3,6 +3,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
+import { CircleCheck, CircleSlash, CircleX, Clock, LoaderCircle } from 'lucide-vue-next';
 // components
 import FilesView from '@/components/workspace/FilesComponent.vue';
 import GitView from '@/components/workspace/GitView.vue';
@@ -44,13 +45,15 @@ import { toWorkspaceRelativePath } from '@/utils/workspaceFilePath';
 import { setViewingSession } from '@/utils/sessionUnread';
 import { formatSessionCostLabel, resolveSessionCostAmount } from '@/utils/sessionUsageDisplay';
 import {
-  formatPooledRemainingLabel,
+  formatRemainingLabel,
   formatRulesSubtitleLabel,
   formatRulesSubtitleTitle
-} from '@/utils/cursorPooledUsageDisplay';
+} from '@/utils/cursorUsageDisplay';
+import { ciBadgeState, ciBadgeTitle } from '@/utils/ciStatusDisplay';
 
 // composables
 import { useAgentOptions } from '@/composables/useAgentOptions';
+import { useCiStatus } from '@/composables/useCiStatus';
 import { useChatSocket } from '@/composables/useChatSocket';
 import { usePaneLayout } from '@/composables/usePaneLayout';
 import { usePlanDocuments } from '@/composables/usePlanDocuments';
@@ -584,11 +587,11 @@ const rulesSubtitleTo = computed(() => {
   }
   return { name: 'settings' as const, query: { tab: 'rules' } };
 });
-/** Org pooled remaining — used when ACP does not report per-session cost (typical for Cursor). */
+/** Account remaining — used when ACP does not report per-session cost (typical for Cursor). */
 const pooledRemainingLabel = computed(() => {
   if (sessionCostLabel.value != null) return null;
   if (pooledRemainingCents.value == null) return null;
-  return formatPooledRemainingLabel(pooledRemainingCents.value);
+  return formatRemainingLabel(pooledRemainingCents.value);
 });
 
 function tabFromQuery(raw: unknown): SessionTab | null {
@@ -644,6 +647,27 @@ function openWorkspaceFile(rawPath: string): void {
   syncSessionQuery();
 }
 
+// Header CI badge for the workspace root repo; the Git tab shows the full breakdown.
+const { status: headerCiStatus } = useCiStatus({
+  workspaceId: computed(() => props.workspaceId),
+  repo: computed(() => ''),
+  sessionId: computed(() => props.sessionId),
+  active: computed(() => activeTab.value !== 'git')
+});
+const headerCiState = computed(() => ciBadgeState(headerCiStatus.value));
+const headerCiTitle = computed(() => ciBadgeTitle(headerCiStatus.value));
+
+/** "Fix failed build" from the Git tab: draft the prompt in the composer for review. */
+function onFixBuild(prompt: string): void {
+  const draft = promptText.value.trim();
+  promptText.value = draft ? `${draft}\n\n${prompt}` : prompt;
+  activeTab.value = 'chat';
+  void nextTick(() => {
+    composerRef.value?.resizeTextarea();
+    composerRef.value?.focus();
+  });
+}
+
 function onFilesOpenPath(path: string | null): void {
   filesOpenPath.value = path;
   writeFilesOpenPath(props.workspaceId, path);
@@ -674,9 +698,9 @@ async function loadRulesCount(): Promise<void> {
 
 async function loadPooledRemaining(): Promise<void> {
   try {
-    const { data } = await agentAuthApi.cursorPooledUsage();
-    pooledRemainingCents.value =
-      data.available && data.pool ? data.pool.remainingCents : null;
+    const { data } = await agentAuthApi.cursorUsage();
+    const remaining = data.available ? data.individual?.remainingCents : null;
+    pooledRemainingCents.value = remaining ?? null;
   } catch {
     pooledRemainingCents.value = null;
   }
@@ -1127,6 +1151,23 @@ onUnmounted(() => {
         </button>
       </template>
       <template #subtitle-trailing>
+        <template v-if="headerCiState !== 'none'">
+          <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>
+          <button
+            type="button"
+            class="inline-flex shrink-0 items-center gap-1 hover:text-text-primary"
+            :title="headerCiTitle"
+            :aria-label="headerCiTitle"
+            @click="activeTab = 'git'"
+          >
+            <LoaderCircle v-if="headerCiState === 'running'" :size="12" :stroke-width="2" class="text-primary animate-spin" aria-hidden="true" />
+            <Clock v-else-if="headerCiState === 'queued'" :size="12" :stroke-width="2" aria-hidden="true" />
+            <CircleCheck v-else-if="headerCiState === 'success'" :size="12" :stroke-width="2" class="text-success" aria-hidden="true" />
+            <CircleX v-else-if="headerCiState === 'failure'" :size="12" :stroke-width="2" class="text-destructive" aria-hidden="true" />
+            <CircleSlash v-else :size="12" :stroke-width="2" aria-hidden="true" />
+            <span>CI</span>
+          </button>
+        </template>
         <template v-if="sessionCostLabel">
           <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>
           <span class="shrink-0 tabular-nums" :title="sessionCostLabel">{{ sessionCostLabel }}</span>
@@ -1366,6 +1407,8 @@ onUnmounted(() => {
         v-if="activeTab === 'git'"
         :workspace-id="workspaceId"
         :active="activeTab === 'git'"
+        :session-id="sessionId"
+        @fix-build="onFixBuild"
       />
     </div>
 

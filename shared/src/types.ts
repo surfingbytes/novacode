@@ -249,6 +249,8 @@ export interface Workspace {
   archived: boolean;
   isFavorite: boolean;
   favoriteOrder?: number | null;
+  /** `owner/name` on the configured forge; null = auto-detect from the git remote. */
+  forgeRepo?: string | null;
 }
 
 export interface PlanDocumentSummary {
@@ -316,29 +318,94 @@ export interface WorkspaceUsageSummary {
 /** Token/cost totals for one session (sum of persisted usage turns). */
 export type SessionUsageSummary = WorkspaceUsageSummary;
 
-/** Cursor Enterprise organization pooled spend (from `/organizations/pooled-usage`). */
-export interface CursorPooledUsagePool {
-  limitCents: number;
+/** One spend bucket from Cursor dashboard `usage-summary` (values in cents). */
+export interface CursorUsageBucket {
+  enabled: boolean;
   usedCents: number;
-  remainingCents: number;
-  contractStartDate: string | null;
-  contractEndDate: string | null;
+  limitCents: number | null;
+  remainingCents: number | null;
 }
 
-export interface CursorPooledUsageResponse {
-  configured: boolean;
+/**
+ * Account usage from Cursor `GET /api/usage-summary`, authenticated with the
+ * existing `cursor-agent login` token (not an Org/Admin API key).
+ */
+export interface CursorUsageSummaryResponse {
+  authenticated: boolean;
   available: boolean;
-  source?: 'env' | 'file';
-  organizationId?: string;
-  pool?: CursorPooledUsagePool;
+  billingCycleStart?: string;
+  billingCycleEnd?: string;
+  membershipType?: string;
+  limitType?: string;
+  isUnlimited?: boolean;
+  individual?: CursorUsageBucket;
+  teamOnDemand?: CursorUsageBucket;
   error?: string;
   fetchedAt?: number;
 }
 
-export interface CursorOrgApiStatus {
+/** Self-hosted Git forge with a Gitea-compatible API (Gitea, Forgejo). */
+export type ForgeProvider = 'gitea' | 'forgejo';
+
+export interface ForgeSettingsStatus {
   configured: boolean;
   source: 'env' | 'file' | null;
-  organizationId: string | null;
+  url: string | null;
+  provider: ForgeProvider | null;
+  version: string | null;
+}
+
+export interface ForgeConnectionTestResult {
+  ok: boolean;
+  provider?: ForgeProvider;
+  version?: string;
+  username?: string;
+  error?: string;
+}
+
+export type CiRunStatus = 'queued' | 'running' | 'success' | 'failure' | 'cancelled' | 'skipped' | 'unknown';
+
+export interface CiRun {
+  id: number;
+  number: number | null;
+  title: string;
+  status: CiRunStatus;
+  branch: string | null;
+  sha: string | null;
+  event: string | null;
+  url: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface CiStatusResponse {
+  configured: boolean;
+  /** `owner/name` on the forge, when resolved. */
+  repo: string | null;
+  repoSource: 'override' | 'remote' | null;
+  repoUrl: string | null;
+  branch: string | null;
+  /** `actions` = workflow runs API; `commit-status` = combined commit status fallback. */
+  source: 'actions' | 'commit-status' | null;
+  lastCompleted: CiRun | null;
+  running: CiRun[];
+  /** Oldest-first, capped at 3. */
+  queued: CiRun[];
+  queuedTotal: number;
+  error?: string;
+  fetchedAt: number;
+}
+
+export interface CiFixPromptResponse {
+  prompt: string;
+  /** False when job logs could not be fetched (prompt then only links to the run). */
+  includesLogs: boolean;
+}
+
+export interface ForgeRepoDetectResponse {
+  configured: boolean;
+  repo: string | null;
+  source: 'override' | 'remote' | null;
 }
 
 /** Stored API key metadata. The plaintext token is only returned once, on create. */
@@ -535,6 +602,7 @@ export interface CreateWorkspacePayload {
   color?: string | null;
   defaultAgentType?: AgentType | null;
   tags?: string[] | null;
+  forgeRepo?: string | null;
 }
 
 export interface UpdateWorkspacePayload {
@@ -547,4 +615,5 @@ export interface UpdateWorkspacePayload {
   defaultAgentType?: AgentType | null;
   tags?: string[] | null;
   isFavorite?: boolean;
+  forgeRepo?: string | null;
 }

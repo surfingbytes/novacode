@@ -5,6 +5,9 @@ import { ref, onMounted } from 'vue';
 // classes
 import { settingsApi } from '@/classes/api';
 
+// components
+import SettingsForgeSection from '@/components/settings/SettingsForgeSection.vue';
+
 // composables
 import { useInlineFieldErrors } from '@/composables/useInlineFieldErrors';
 
@@ -206,5 +209,7 @@ onMounted((): void => {
             </div>
           </div>
         </div>
+
+        <SettingsForgeSection />
   </div>
 </template>

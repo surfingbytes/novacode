@@ -3,6 +3,7 @@ import { pushApi } from '@/classes/api';
 import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 
 const STORAGE_KEY = 'notificationsEnabled';
+const CI_STORAGE_KEY = 'ciNotificationsEnabled';
 const DEFAULT_ICON = '/favicon.ico';
 /** Android status bar / collapsed notification — should be white-on-transparent, ~96×96 */
 const DEFAULT_BADGE = '/notification-badge.png';
@@ -20,6 +21,15 @@ export function isNotificationsEnabled(): boolean {
 
 export function setNotificationsEnabled(enabled: boolean): void {
   safeSetItem(STORAGE_KEY, String(enabled));
+}
+
+/** CI build notifications (Gitea/Forgejo) — independent of task notifications. */
+export function isCiNotificationsEnabled(): boolean {
+  return safeGetItem(CI_STORAGE_KEY) === 'true';
+}
+
+export function setCiNotificationsEnabled(enabled: boolean): void {
+  safeSetItem(CI_STORAGE_KEY, String(enabled));
 }
 
 export function canRequestPermission(): boolean {
@@ -59,13 +69,19 @@ function extractKeys(sub: PushSubscription): { p256dh: string; auth: string } | 
   return { p256dh: toBase64(p256dh), auth: toBase64(auth) };
 }
 
-export async function syncPushSubscription(enabled: boolean): Promise<void> {
+/**
+ * Keeps this device's Web Push subscription in line with the stored preferences. One
+ * subscription serves both kinds; the server filters pushes by `notifyTasks` / `notifyCi`.
+ */
+export async function syncPushSubscription(): Promise<void> {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
 
+  const notifyTasks = isNotificationsEnabled();
+  const notifyCi = isCiNotificationsEnabled();
   const registration = await navigator.serviceWorker.ready;
   const existing = await registration.pushManager.getSubscription();
 
-  if (!enabled || Notification.permission !== 'granted') {
+  if ((!notifyTasks && !notifyCi) || Notification.permission !== 'granted') {
     if (existing) {
       try {
         await pushApi.unsubscribe(existing.endpoint);
@@ -89,7 +105,7 @@ export async function syncPushSubscription(enabled: boolean): Promise<void> {
 
   const keys = extractKeys(subscription);
   if (!keys) return;
-  await pushApi.subscribe({ endpoint: subscription.endpoint, keys });
+  await pushApi.subscribe({ endpoint: subscription.endpoint, keys, notifyTasks, notifyCi });
 }
 
 async function hasActivePushSubscription(): Promise<boolean> {

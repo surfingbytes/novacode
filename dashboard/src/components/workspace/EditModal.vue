@@ -8,8 +8,11 @@ import ModalHeader from '@/components/ModalHeader.vue';
 import ColorPicker from '@/components/input/ColorPicker.vue';
 import DirPickerModal from '@/components/DirPickerModal.vue';
 
+// classes
+import { forgeApi } from '@/classes/api';
+
 // types
-import type { AgentType, Workspace } from '@/@types/index';
+import type { AgentType, ForgeRepoDetectResponse, Workspace } from '@/@types/index';
 
 // composables
 import { useInlineFieldErrors } from '@/composables/useInlineFieldErrors';
@@ -52,6 +55,8 @@ const emit = defineEmits<{
       color: string | null;
       defaultAgentType: AgentType | null;
       tags: string[] | null;
+      /** Only sent when a forge is configured; null = auto-detect from the git remote. */
+      forgeRepo?: string | null;
     }
   ): void;
 }>();
@@ -66,6 +71,7 @@ interface FormState {
   color: string;
   defaultAgentType: string;
   tags: string[];
+  forgeRepo: string;
 }
 
 // -------------------------------------------------- Computed --------------------------------------------------
@@ -103,8 +109,12 @@ const form = ref<FormState>({
   gitUserEmail: '',
   color: '',
   defaultAgentType: '',
-  tags: []
+  tags: [],
+  forgeRepo: ''
 });
+/** Forge connection + detected repo; the field is hidden until a forge is configured. */
+const bForgeConfigured = ref<boolean>(false);
+const forgeDetected = ref<ForgeRepoDetectResponse | null>(null);
 const bSaving = ref<boolean>(false);
 const bShowDirPicker = ref<boolean>(false);
 const bNewGroupAddActive = ref<boolean>(false);
@@ -116,7 +126,23 @@ const { errors, touch, onInput, validateAll, reset } = useInlineFieldErrors({
   name: () => requiredTrimmed(form.value.name, 'Name'),
   path: () => workspacePathError(form.value.path),
   defaultAgentType: () => requiredTrimmed(form.value.defaultAgentType, 'Default agent'),
-  gitUserEmail: () => optionalEmailError(form.value.gitUserEmail)
+  gitUserEmail: () => optionalEmailError(form.value.gitUserEmail),
+  forgeRepo: () => forgeRepoError(form.value.forgeRepo)
+});
+
+function forgeRepoError(value: string): string | undefined {
+  const v = value.trim();
+  if (!v) return undefined;
+  // owner/name, or a pasted repo/clone URL (the server extracts owner/name)
+  if (/^[\w.-]+\/[\w.-]+$/.test(v) || /^(https?|ssh):\/\//.test(v) || /^[^@\s]+@[^:\s]+:/.test(v)) return undefined;
+  return 'Use owner/name';
+}
+
+/** Placeholder hint: what auto-detect resolves to when the field is blank. */
+const forgeRepoPlaceholder = computed((): string => {
+  const detected = forgeDetected.value;
+  if (detected?.source === 'remote' && detected.repo) return `Auto: ${detected.repo}`;
+  return 'owner/name';
 });
 
 // -------------------------------------------------- Computed --------------------------------------------------
@@ -171,7 +197,8 @@ const submit = async (): Promise<void> => {
         AGENT_OPTIONS.value.some((o) => o.value === form.value.defaultAgentType)
           ? (form.value.defaultAgentType as AgentType)
           : null,
-      tags: tagsClean.length > 0 ? tagsClean : null
+      tags: tagsClean.length > 0 ? tagsClean : null,
+      ...(bForgeConfigured.value && { forgeRepo: form.value.forgeRepo.trim() || null })
     });
   } finally {
     bSaving.value = false;
@@ -274,14 +301,29 @@ watch(
         color: props.workspace?.color ?? '',
         defaultAgentType:
           props.workspace?.defaultAgentType ?? computeDefaultAgentTypeForCreate(),
-        tags
+        tags,
+        forgeRepo: props.workspace?.forgeRepo ?? ''
       };
       tagInput.value = '';
       newGroupError.value = null;
       reset();
+      void loadForgeInfo();
     }
   }
 );
+
+async function loadForgeInfo(): Promise<void> {
+  forgeDetected.value = null;
+  try {
+    const { data } = await forgeApi.settings();
+    bForgeConfigured.value = data.configured;
+    if (data.configured && props.workspace) {
+      forgeDetected.value = (await forgeApi.detectRepo(props.workspace.id)).data;
+    }
+  } catch {
+    // keep the field hidden / without a hint
+  }
+}
 
 watch(AGENT_OPTIONS, (options) => {
   if (props.workspace) return;
@@ -505,6 +547,29 @@ watch(AGENT_OPTIONS, (options) => {
               </div>
             </div>
             <!-- Git Identity Override -->
+
+            <!-- Forge repository (Gitea / Forgejo CI status) -->
+            <div v-if="bForgeConfigured" class="field" :class="{ 'has-error': errors.forgeRepo }">
+              <div class="label">Gitea / Forgejo repository (optional)</div>
+              <div class="input-wrap">
+                <input
+                  v-model="form.forgeRepo"
+                  type="text"
+                  :placeholder="forgeRepoPlaceholder"
+                  autocomplete="off"
+                  :aria-invalid="Boolean(errors.forgeRepo)"
+                  aria-describedby="workspace-forge-repo-error"
+                  @blur="touch('forgeRepo')"
+                  @input="onInput('forgeRepo')"
+                />
+              </div>
+              <p v-if="errors.forgeRepo" id="workspace-forge-repo-error" class="hint is-error">
+                {{ errors.forgeRepo }}
+              </p>
+              <p v-else class="hint">
+                Shows CI status on the Git tab. Leave blank to detect it from the git remote.
+              </p>
+            </div>
           </div>
 
           <!-- Footer -->

@@ -287,6 +287,7 @@ export const db = {
     color?: string | null;
     defaultAgentType?: string | null;
     tags?: string[] | null;
+    forgeRepo?: string | null;
   }): Promise<Workspace> {
     const id = randomUUID();
     const createdAt = new Date().toISOString();
@@ -310,7 +311,8 @@ export const db = {
         color: data.color ?? null,
         sortOrder,
         defaultAgentType: data.defaultAgentType ?? null,
-        tags: tagsJson
+        tags: tagsJson,
+        forgeRepo: data.forgeRepo ?? null
       }
     });
     return row;
@@ -328,6 +330,8 @@ export const db = {
       defaultAgentType?: string | null;
       tags?: string[] | null;
       isFavorite?: boolean;
+      /** null clears the override (back to remote auto-detect). */
+      forgeRepo?: string | null;
     }
   ): Promise<Workspace | undefined> {
     const existingWorkspace = await db.getWorkspace(id);
@@ -385,6 +389,7 @@ export const db = {
         color: patch.color ?? existingWorkspace.color,
         defaultAgentType: patch.defaultAgentType ?? existingWorkspace.defaultAgentType,
         ...(tagsJson !== undefined && { tags: tagsJson }),
+        ...(patch.forgeRepo !== undefined && { forgeRepo: patch.forgeRepo }),
         ...favoritePatch
       }
     });
@@ -1060,7 +1065,14 @@ export const db = {
     endpoint: string;
     p256dh: string;
     auth: string;
+    /** Omitted = keep the stored preference (defaults: tasks on, CI off). */
+    notifyTasks?: boolean;
+    notifyCi?: boolean;
   }): Promise<PushSubscription> {
+    const prefs = {
+      ...(data.notifyTasks !== undefined && { notifyTasks: data.notifyTasks }),
+      ...(data.notifyCi !== undefined && { notifyCi: data.notifyCi })
+    };
     const existing = await _prisma.pushSubscription.findUnique({
       where: { endpoint: data.endpoint }
     });
@@ -1070,7 +1082,8 @@ export const db = {
         data: {
           userId: data.userId,
           p256dh: data.p256dh,
-          auth: data.auth
+          auth: data.auth,
+          ...prefs
         }
       });
     }
@@ -1081,7 +1094,8 @@ export const db = {
         endpoint: data.endpoint,
         p256dh: data.p256dh,
         auth: data.auth,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        ...prefs
       }
     });
   },
@@ -1094,8 +1108,14 @@ export const db = {
     return _prisma.pushSubscription.findMany({ where: { userId } });
   },
 
-  async listPushSubscriptions(): Promise<PushSubscription[]> {
+  async listPushSubscriptions(kind?: 'task' | 'ci'): Promise<PushSubscription[]> {
+    if (kind === 'task') return _prisma.pushSubscription.findMany({ where: { notifyTasks: true } });
+    if (kind === 'ci') return _prisma.pushSubscription.findMany({ where: { notifyCi: true } });
     return _prisma.pushSubscription.findMany();
+  },
+
+  async hasCiPushSubscriptions(): Promise<boolean> {
+    return (await _prisma.pushSubscription.count({ where: { notifyCi: true } })) > 0;
   },
 
   // -------------------------------------------------- Role Templates --------------------------------------------------

@@ -22,7 +22,9 @@ import {
   stopAutoThemeWatcher
 } from '@/lib/themes';
 import {
+  isCiNotificationsEnabled,
   isNotificationsEnabled,
+  setCiNotificationsEnabled,
   setNotificationsEnabled,
   canRequestPermission,
   getPermissionState,
@@ -54,6 +56,7 @@ const lightThemeId = ref<string>(
 const bSavingTheme = ref<boolean>(false);
 
 const bNotifications = ref<boolean>(isNotificationsEnabled());
+const bCiNotifications = ref<boolean>(isCiNotificationsEnabled());
 const notifPermission = ref<NotificationPermission | 'unsupported'>(getPermissionState());
 
 const bSendOnEnter = ref<boolean>(isSendOnEnter());
@@ -104,11 +107,12 @@ function isUtilityAgentAvailable(agent: AgentType): boolean {
 }
 
 // -------------------------------------------------- Methods --------------------------------------------------
-const toggleNotifications = async (): Promise<void> => {
+/** Shared by the task and CI switches — both ride on the same push subscription. */
+const toggleNotificationKind = async (kind: 'tasks' | 'ci'): Promise<void> => {
   if (!canRequestPermission()) {
     return;
   }
-  const enabling = !bNotifications.value;
+  const enabling = kind === 'tasks' ? !bNotifications.value : !bCiNotifications.value;
   if (enabling && Notification.permission !== 'granted') {
     const perm = await requestPermission();
     notifPermission.value = perm;
@@ -116,10 +120,15 @@ const toggleNotifications = async (): Promise<void> => {
       return;
     }
   }
-  bNotifications.value = enabling;
-  setNotificationsEnabled(enabling);
+  if (kind === 'tasks') {
+    bNotifications.value = enabling;
+    setNotificationsEnabled(enabling);
+  } else {
+    bCiNotifications.value = enabling;
+    setCiNotificationsEnabled(enabling);
+  }
   try {
-    await syncPushSubscription(enabling);
+    await syncPushSubscription();
   } catch {
     // ignore push registration failures
   }
@@ -521,7 +530,25 @@ onMounted((): void => {
                 :disabled="notifPermission === 'denied'"
                 class="nc-toggle"
                 :class="bNotifications ? 'on' : ''"
-                @click="toggleNotifications"
+                @click="toggleNotificationKind('tasks')"
+              ><span class="nc-toggle-knob" /></button>
+            </div>
+            <div class="settings-pref-row">
+              <div class="settings-pref-row__text">
+                <div class="settings-pref-row__title">CI build notifications</div>
+                <div class="settings-pref-row__desc">
+                  Get a push notification when a Gitea/Forgejo build you were watching finishes (passed,
+                  failed or cancelled) — even with the app closed. Requires a forge on the Git tab of Settings.
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="bCiNotifications"
+                :disabled="notifPermission === 'denied'"
+                class="nc-toggle"
+                :class="bCiNotifications ? 'on' : ''"
+                @click="toggleNotificationKind('ci')"
               ><span class="nc-toggle-knob" /></button>
             </div>
           </div>

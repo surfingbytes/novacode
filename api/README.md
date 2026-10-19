@@ -43,13 +43,20 @@ Agents that emit ACP `usage_update` events persist a snapshot per turn.
 - `GET /api/workspaces/:workspaceId/sessions/:sessionId/usage` — `{ turns: SessionUsageTurn[], summary: SessionUsageSummary }`
 - `GET /api/workspaces/:workspaceId/usage` — workspace totals
 
-### Cursor organization pooled usage
+### Cursor account usage
 
-Enterprise orgs can surface Cursor’s pooled spend budget (used / limit / remaining):
+Uses the existing `cursor-agent login` token (`~/.config/cursor/auth.json`) — no Org/Admin API key.
 
-- `GET /api/agent-auth/cursor/org-api` — whether credentials are configured (`env` or `file`)
-- `PUT /api/agent-auth/cursor/org-api` — `{ apiKey, organizationId }` → store under `~/.config/cursor/org-api.json`
-- `DELETE /api/agent-auth/cursor/org-api` — clear file credentials (env still wins if set)
-- `GET /api/agent-auth/cursor/pooled-usage` — `{ configured, available, pool? }` from Cursor `POST /organizations/pooled-usage` (cached ~1 hour)
+- `GET /api/agent-auth/cursor/usage` — `{ authenticated, available, individual?, teamOnDemand?, billingCycleEnd? }` from Cursor `GET /api/usage-summary` (cached ~5 minutes)
 
-Credentials may also be injected with `CURSOR_ORG_API_KEY` and `CURSOR_ORG_ID`. The Organization API key needs `usage:*` or `admin:*`.
+### Gitea / Forgejo CI
+
+- `GET /api/forge/settings` — `{ configured, source, url, provider, version }` (never returns the token)
+- `PUT /api/forge/settings` — `{ url, token? }`; tests the connection, then stores `forge.json` in the config dir (omit `token` to keep the stored one)
+- `DELETE /api/forge/settings` — remove file settings (env `FORGE_URL` + `FORGE_TOKEN` still wins if set)
+- `POST /api/forge/test` — `{ url, token? }` → `{ ok, provider?, version?, username?, error? }`
+- `GET /api/forge/workspace/:workspaceId/repo` — forge `owner/name` (workspace override or detected from the git remote)
+- `GET /api/forge/workspace/:workspaceId/ci?repo=&sessionId=` — `CiStatusResponse` for the checked-out branch (Actions runs, falling back to commit statuses)
+- `POST /api/forge/workspace/:workspaceId/ci/runs/:runId/fix-prompt?repo=` — `{ prompt, includesLogs }` for the agent
+
+The token needs `read:repository` and `read:user`. Push subscriptions accept `notifyTasks` / `notifyCi` to choose which notifications a device receives.

@@ -51,6 +51,8 @@ model PushSubscription {
   p256dh    String
   auth      String
   createdAt String @map("created_at")
+  notifyTasks Boolean @default(true) @map("notify_tasks")
+  notifyCi    Boolean @default(false) @map("notify_ci")
 
   @@map("push_subscriptions")
 }
@@ -70,6 +72,8 @@ model Workspace {
   archived     Boolean       @default(false)
   isFavorite   Boolean       @default(false) @map("is_favorite")
   favoriteOrder Int?         @map("favorite_order")
+  /** owner/name on the configured Gitea/Forgejo; null = detect from the git remote */
+  forgeRepo    String?       @map("forge_repo")
   sessions     Session[]
   orchestrators Orchestrator[]
   automations  Automation[]

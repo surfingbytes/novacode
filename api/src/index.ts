@@ -34,6 +34,8 @@ import { automationRoutes } from './routes/automations';
 import { startAutomationScheduler, stopAutomationScheduler } from './classes/automationScheduler';
 import { imageRoutes } from './routes/images';
 import { pushRoutes } from './routes/push';
+import { forgeRoutes } from './routes/forge';
+import { startCiWatcher, stopCiWatcher } from './classes/ciWatcher';
 import { searchRoutes } from './routes/search';
 import { ensureVapidKeys } from './classes/push';
 import { ensureSshKey } from './classes/sshKey';
@@ -145,6 +147,7 @@ async function main(): Promise<void> {
   await fastify.register(automationRoutes);
   await fastify.register(imageRoutes);
   await fastify.register(pushRoutes);
+  await fastify.register(forgeRoutes);
   await fastify.register(searchRoutes);
 
   // health check (no auth, for monitoring/Docker HEALTHCHECK)
@@ -184,6 +187,7 @@ async function main(): Promise<void> {
     fastify.log.info(`${signal} received, shutting down gracefully`);
     broadcastServerShutdown();
     stopAutomationScheduler();
+    stopCiWatcher();
     await new Promise((r) => setTimeout(r, 5000));
     sessionManager.stopAll();
     workspaceTerminalManager.stopAll();
@@ -278,6 +282,7 @@ async function main(): Promise<void> {
 
   // automation scheduler
   startAutomationScheduler();
+  startCiWatcher();
 
 }
 

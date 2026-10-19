@@ -14,7 +14,12 @@ export interface PushPayload {
   url?: string;
   /** Small monochrome icon URL (Android status bar) */
   badge?: string;
+  /** Notification buttons; the service worker defaults to a Reply action when omitted. */
+  actions?: Array<{ action: string; title: string }>;
 }
+
+/** Which per-device preference gates the push (`task` also covers orchestrators and automations). */
+export type PushKind = 'task' | 'ci';
 
 function markdownToPlainText(input: string): string {
   return input
@@ -100,11 +105,11 @@ export function getVapidPublicKey(): string | null {
   return getVapidKeys()?.publicKey ?? null;
 }
 
-export async function sendPushToAll(payload: PushPayload): Promise<void> {
+export async function sendPushToAll(payload: PushPayload, kind: PushKind = 'task'): Promise<void> {
   if (!ensureConfigured()) {
     return;
   }
-  const subscriptions = await db.listPushSubscriptions();
+  const subscriptions = await db.listPushSubscriptions(kind);
   if (subscriptions.length === 0) {
     return;
   }
@@ -115,7 +120,8 @@ export async function sendPushToAll(payload: PushPayload): Promise<void> {
     tag: payload.tag,
     url: payload.url ?? '/',
     icon: '/favicon.ico',
-    badge: payload.badge ?? '/notification-badge.png'
+    badge: payload.badge ?? '/notification-badge.png',
+    ...(payload.actions && { actions: payload.actions })
   });
 
   await Promise.all(

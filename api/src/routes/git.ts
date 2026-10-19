@@ -20,6 +20,7 @@ import {
   runOneShotAgentText
 } from '../classes/oneShotAgentText';
 import { parseGitLog } from '../classes/gitLog';
+import { markCiWatchPushed } from '../classes/ciWatcher';
 import { resolveWorkspaceAbsolutePath } from '../classes/workspacePaths';
 
 const execFileAsync = promisify(execFile);
@@ -142,7 +143,7 @@ async function gitOutput(cwd: string, args: string[], env?: Record<string, strin
   return stdout.trim();
 }
 
-async function maybeGitOutput(
+export async function maybeGitOutput(
   cwd: string,
   args: string[],
   fallback: string,
@@ -166,7 +167,7 @@ async function ensureBranchName(cwd: string, branch: string): Promise<void> {
 }
 
 /** Prefer origin; otherwise the first configured remote. */
-async function resolvePushRemote(cwd: string): Promise<string> {
+export async function resolvePushRemote(cwd: string): Promise<string> {
   const remotesRaw = await maybeGitOutput(cwd, ['remote'], '');
   const remotes = remotesRaw
     .split('\n')
@@ -177,7 +178,7 @@ async function resolvePushRemote(cwd: string): Promise<string> {
   return remotes[0];
 }
 
-async function resolveWorkspaceGitContext(
+export async function resolveWorkspaceGitContext(
   workspaceId: string,
   repo = ''
 ): Promise<WorkspaceGitContext | null> {
@@ -199,7 +200,7 @@ async function resolveWorkspaceGitContext(
   };
 }
 
-async function getBranchMeta(cwd: string): Promise<{
+export async function getBranchMeta(cwd: string): Promise<{
   currentBranch: string;
   upstreamBranch: string | null;
   aheadCount: number;
@@ -932,6 +933,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
           env: gitEnv(context.workspace),
           timeout: 30_000
         });
+        markCiWatchPushed(request.params.workspaceId, context.repo);
         return { output: (stdout + '\n' + stderr).trim() };
       } catch (err) {
         return reply.code(400).send({ error: gitErrorMessage(err) });

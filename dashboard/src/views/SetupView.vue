@@ -416,7 +416,7 @@ const toggleNotifications = async (): Promise<void> => {
   bNotifications.value = enabling;
   setNotificationsEnabled(enabling);
   try {
-    await syncPushSubscription(enabling);
+    await syncPushSubscription();
   } catch {
     // ignore push registration failures
   }

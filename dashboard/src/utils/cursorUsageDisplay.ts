@@ -1,19 +1,21 @@
 /**
- * Format Cursor org pooled-usage cents for Settings / session header.
+ * Format Cursor account usage (cents from usage-summary) for Settings / session header.
  */
 
 export function formatUsdFromCents(cents: number): string {
   return `US$${(cents / 100).toFixed(2)}`;
 }
 
-export function formatPooledUsageBar(opts: {
+export function formatUsageBar(opts: {
   usedCents: number;
-  limitCents: number;
+  limitCents: number | null;
 }): string {
-  return `${formatUsdFromCents(opts.usedCents)} / ${formatUsdFromCents(opts.limitCents)}`;
+  const used = formatUsdFromCents(opts.usedCents);
+  if (opts.limitCents == null) return used;
+  return `${used} / ${formatUsdFromCents(opts.limitCents)}`;
 }
 
-export function formatPooledRemainingLabel(remainingCents: number): string {
+export function formatRemainingLabel(remainingCents: number): string {
   return `Remaining: ${formatUsdFromCents(remainingCents)}`;
 }
 

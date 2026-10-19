@@ -94,6 +94,9 @@ Optional features include **scheduled automations**, **role templates**, and **b
 - **Status**: Per-repo file status, ahead counts, etc.
 - **Diffs**, **commit**, **push/pull/fetch**, **branch checkout/create**, and **discard**.
 - **Commit history**: `GET .../log` lists recent commits; `GET .../show` returns a patch. The Git pane has a Changes / History toggle.
+- **Gitea / Forgejo CI** (optional): Configure server URL + access token in **Settings → Git** (`forge.json` in the config dir, or env `FORGE_URL` + `FORGE_TOKEN`); **Test connection** checks `/api/v1/version` + `/api/v1/user` and detects Gitea vs Forgejo. Each workspace's forge repo is detected from its git remote, with an optional `owner/name` override in the workspace dialog (`forgeRepo`). The Git tab branch card shows CI for the checked-out branch: running runs, up to 3 queued (oldest first, plus a count), and the last finished build; the session header shows a compact CI badge. Data comes from the Actions runs API, falling back to combined commit statuses (Woodpecker, Drone, older Gitea). Upstream calls are cached ~10–30s server-side.
+- **Fix failed build**: In a session, **Fix failed build with agent** builds a prompt with the run link, failed job/step names and the tail of each failed job log (Gitea `actions/jobs/:id/logs`; Forgejo falls back to the run link) and drops it into the composer for review.
+- Routes: `GET|PUT|DELETE /api/forge/settings`, `POST /api/forge/test`, `GET /api/forge/workspace/:id/repo`, `GET /api/forge/workspace/:id/ci?repo=&sessionId=`, `POST /api/forge/workspace/:id/ci/runs/:runId/fix-prompt?repo=`.
 
 ---
 
@@ -147,7 +150,7 @@ Optional features include **scheduled automations**, **role templates**, and **b
 ## 13. Agent authentication
 
 - **Cursor**: Status checks (`auth.json` or `cursor-agent status`); **login** creates a short-lived PTY session users can complete in the UI.
-- **Cursor org pooled usage** (Enterprise): Optional Organization API key + org id via **Settings → Integrations** (`~/.config/cursor/org-api.json`) or env `CURSOR_ORG_API_KEY` + `CURSOR_ORG_ID`. `GET /api/agent-auth/cursor/pooled-usage` calls Cursor `/organizations/pooled-usage` (cached ~1h). When available, Settings shows used/limit/remaining; session headers show `Remaining: US$…` when ACP does not report per-session cost.
+- **Cursor account usage**: When Cursor is logged in via `cursor-agent login`, `GET /api/agent-auth/cursor/usage` reads `~/.config/cursor/auth.json` and calls Cursor’s dashboard `usage-summary` endpoint (cached ~5m). Settings shows monthly used/limit/remaining; session headers show `Remaining: US$…` when ACP does not report per-session cost.
 - **Claude**: Status reflects stored token; **logout** clears stored credentials.
 
 ---
@@ -157,6 +160,8 @@ Optional features include **scheduled automations**, **role templates**, and **b
 - **Web Push** (VAPID): Keys are generated on first run and stored under the config directory (`vapid-keys.json`); clients can subscribe; subscriptions are stored per user.
 - **Public key** endpoint for the dashboard to register the service worker subscription.
 - Completion notifications deep-link to the **session**, **orchestrator**, or **automations** page. Orchestrator and automation finishes also send a push.
+- **Per-device preferences**: Each subscription stores `notifyTasks` (task/orchestrator/automation finishes) and `notifyCi`; **Settings → General** has separate switches for task and **CI build** notifications.
+- **CI build notifications**: A server-side watcher polls repos someone viewed in the last 6h (fast after a push from the Git tab, ~2 min otherwise) and pushes when a queued/running run finishes (passed, failed, cancelled). It only polls while at least one device has CI notifications enabled.
 
 ---
 

@@ -23,7 +23,7 @@ import router from '@/classes/router';
 import { settingsApi, setUnauthorizedHandler } from '@/classes/api';
 import { applyActiveTheme, stopAutoThemeWatcher } from '@/lib/themes';
 import { safeSetItem } from '@/lib/safeLocalStorage';
-import { isNotificationsEnabled, syncPushSubscription } from '@/lib/notifications';
+import { isCiNotificationsEnabled, isNotificationsEnabled, syncPushSubscription } from '@/lib/notifications';
 
 // -------------------------------------------------- Store --------------------------------------------------
 const auth = useAuthStore();
@@ -158,9 +158,9 @@ onMounted(async (): Promise<void> => {
   if (auth.bValidated) {
     await syncSettingsFromDb();
   }
-  if (isNotificationsEnabled()) {
+  if (isNotificationsEnabled() || isCiNotificationsEnabled()) {
     try {
-      await syncPushSubscription(true);
+      await syncPushSubscription();
     } catch {
       // ignore push registration failures
     }
