@@ -19,6 +19,36 @@ import {
   type CursorAuthCheck
 } from '../classes/agentError';
 import { hasAnyOpenCodeAuth, looksLikeOpenAiApiKey } from '../classes/openCodeProviders';
+import {
+  clearCursorOrgApiCredentials,
+  getCursorOrgApiStatus,
+  getCursorPooledUsage,
+  setCursorOrgApiCredentials
+} from '../classes/cursorOrgUsage';
+
+const cursorPooledUsageResponseSchema = Type.Object({
+  configured: Type.Boolean(),
+  available: Type.Boolean(),
+  source: Type.Optional(Type.Union([Type.Literal('env'), Type.Literal('file')])),
+  organizationId: Type.Optional(Type.String()),
+  pool: Type.Optional(
+    Type.Object({
+      limitCents: Type.Number(),
+      usedCents: Type.Number(),
+      remainingCents: Type.Number(),
+      contractStartDate: Type.Union([Type.String(), Type.Null()]),
+      contractEndDate: Type.Union([Type.String(), Type.Null()])
+    })
+  ),
+  error: Type.Optional(Type.String()),
+  fetchedAt: Type.Optional(Type.Number())
+});
+
+const cursorOrgApiStatusSchema = Type.Object({
+  configured: Type.Boolean(),
+  source: Type.Union([Type.Literal('env'), Type.Literal('file'), Type.Null()]),
+  organizationId: Type.Union([Type.String(), Type.Null()])
+});
 
 const CURSOR_AUTH_FILE = '.config/cursor/auth.json';
 // OpenCode stores provider credentials in its XDG data dir. `config.agentEnv()` sets
@@ -153,6 +183,62 @@ export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
       clearCursorAuthCache();
       return reply.code(204).send(null);
     }
+  );
+
+  // ─── Cursor Organization pooled usage (Enterprise Org API) ─────────────────
+  // Requires an Organization API key with `usage:*` (or `admin:*`) plus org id.
+  // Credentials: Settings UI file, or CURSOR_ORG_API_KEY + CURSOR_ORG_ID env.
+
+  fastifyInstance.get(
+    '/api/agent-auth/cursor/org-api',
+    {
+      preHandler: jwtPreHandler,
+      schema: { response: { 200: cursorOrgApiStatusSchema } }
+    },
+    async () => getCursorOrgApiStatus(config.configDir)
+  );
+
+  fastifyInstance.put(
+    '/api/agent-auth/cursor/org-api',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        body: Type.Object({
+          apiKey: Type.String({ minLength: 1 }),
+          organizationId: Type.String({ minLength: 1 })
+        }),
+        response: { 200: cursorOrgApiStatusSchema }
+      }
+    },
+    async (request) => {
+      const { apiKey, organizationId } = request.body as {
+        apiKey: string;
+        organizationId: string;
+      };
+      setCursorOrgApiCredentials(config.configDir, apiKey, organizationId);
+      return getCursorOrgApiStatus(config.configDir);
+    }
+  );
+
+  fastifyInstance.delete(
+    '/api/agent-auth/cursor/org-api',
+    {
+      preHandler: jwtPreHandler,
+      schema: { response: { 200: cursorOrgApiStatusSchema } }
+    },
+    async () => {
+      clearCursorOrgApiCredentials(config.configDir);
+      return getCursorOrgApiStatus(config.configDir);
+    }
+  );
+
+  fastifyInstance.get(
+    '/api/agent-auth/cursor/pooled-usage',
+    {
+      preHandler: jwtPreHandler,
+      schema: { response: { 200: cursorPooledUsageResponseSchema } }
+    },
+    async () => getCursorPooledUsage(config.configDir)
   );
 
   fastifyInstance.get(

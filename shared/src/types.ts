@@ -316,6 +316,31 @@ export interface WorkspaceUsageSummary {
 /** Token/cost totals for one session (sum of persisted usage turns). */
 export type SessionUsageSummary = WorkspaceUsageSummary;
 
+/** Cursor Enterprise organization pooled spend (from `/organizations/pooled-usage`). */
+export interface CursorPooledUsagePool {
+  limitCents: number;
+  usedCents: number;
+  remainingCents: number;
+  contractStartDate: string | null;
+  contractEndDate: string | null;
+}
+
+export interface CursorPooledUsageResponse {
+  configured: boolean;
+  available: boolean;
+  source?: 'env' | 'file';
+  organizationId?: string;
+  pool?: CursorPooledUsagePool;
+  error?: string;
+  fetchedAt?: number;
+}
+
+export interface CursorOrgApiStatus {
+  configured: boolean;
+  source: 'env' | 'file' | null;
+  organizationId: string | null;
+}
+
 /** Stored API key metadata. The plaintext token is only returned once, on create. */
 export interface ApiToken {
   id: string;

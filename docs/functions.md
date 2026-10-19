@@ -147,6 +147,7 @@ Optional features include **scheduled automations**, **role templates**, and **b
 ## 13. Agent authentication
 
 - **Cursor**: Status checks (`auth.json` or `cursor-agent status`); **login** creates a short-lived PTY session users can complete in the UI.
+- **Cursor org pooled usage** (Enterprise): Optional Organization API key + org id via **Settings → Integrations** (`~/.config/cursor/org-api.json`) or env `CURSOR_ORG_API_KEY` + `CURSOR_ORG_ID`. `GET /api/agent-auth/cursor/pooled-usage` calls Cursor `/organizations/pooled-usage` (cached ~1h). When available, Settings shows used/limit/remaining; session headers show `Remaining: US$…` when ACP does not report per-session cost.
 - **Claude**: Status reflects stored token; **logout** clears stored credentials.
 
 ---

@@ -10,9 +10,18 @@ import ModalHeader from '@/components/ModalHeader.vue';
 
 // classes
 import { agentAuthApi, apiErrorMessage, settingsApi, type CursorAuthStatus } from '@/classes/api';
+import {
+  formatPooledUsageBar,
+  formatUsdFromCents
+} from '@/utils/cursorPooledUsageDisplay';
 
 // types
-import type { OpenCodeProvider, OpenCodeProviderAdapter } from '@/@types/index';
+import type {
+  CursorOrgApiStatus,
+  CursorPooledUsageResponse,
+  OpenCodeProvider,
+  OpenCodeProviderAdapter
+} from '@/@types/index';
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const bCursorAuthenticated = ref<boolean>(false);
@@ -75,6 +84,17 @@ const bSavingVibeApiKey = ref<boolean>(false);
 const vibeApiKeyError = ref<string>('');
 const bDeletingVibeApiKey = ref<boolean>(false);
 
+// Cursor Organization pooled usage
+const cursorOrgApi = ref<CursorOrgApiStatus | null>(null);
+const cursorPooledUsage = ref<CursorPooledUsageResponse | null>(null);
+const bLoadingCursorOrg = ref<boolean>(false);
+const bShowCursorOrgModal = ref<boolean>(false);
+const bSavingCursorOrg = ref<boolean>(false);
+const bDeletingCursorOrg = ref<boolean>(false);
+const cursorOrgError = ref<string>('');
+const cursorOrgApiKeyInput = ref<string>('');
+const cursorOrgIdInput = ref<string>('');
+
 // -------------------------------------------------- Computed --------------------------------------------------
 const cursorAuthChipText = computed(() => {
   if (cursorAuthStatus.value === 'authenticated') return 'Authenticated';
@@ -100,6 +120,28 @@ const openCodeProviderCountLabel = computed(() => {
   }
   return `${authed}/${total} configured`;
 });
+
+const cursorPooledUsageLabel = computed(() => {
+  const pool = cursorPooledUsage.value?.pool;
+  if (!pool) return null;
+  return formatPooledUsageBar({ usedCents: pool.usedCents, limitCents: pool.limitCents });
+});
+
+const cursorPooledRemainingLabel = computed(() => {
+  const pool = cursorPooledUsage.value?.pool;
+  if (!pool) return null;
+  return formatUsdFromCents(pool.remainingCents);
+});
+
+const cursorPooledContractEndLabel = computed(() => {
+  const end = cursorPooledUsage.value?.pool?.contractEndDate;
+  if (!end) return null;
+  const d = new Date(end);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+});
+
+const bCursorOrgEnvLocked = computed(() => cursorOrgApi.value?.source === 'env');
 
 // -------------------------------------------------- Methods --------------------------------------------------
 const refreshAuthStatus = async (): Promise<void> => {
@@ -509,6 +551,71 @@ const loadVibeApiKeyStatus = async (): Promise<void> => {
   }
 };
 
+const loadCursorOrgUsage = async (): Promise<void> => {
+  bLoadingCursorOrg.value = true;
+  try {
+    const [statusRes, usageRes] = await Promise.all([
+      agentAuthApi.cursorOrgApiStatus(),
+      agentAuthApi.cursorPooledUsage()
+    ]);
+    cursorOrgApi.value = statusRes.data;
+    cursorPooledUsage.value = usageRes.data;
+  } catch {
+    cursorOrgApi.value = null;
+    cursorPooledUsage.value = null;
+  } finally {
+    bLoadingCursorOrg.value = false;
+  }
+};
+
+const openCursorOrgModal = (): void => {
+  cursorOrgError.value = '';
+  cursorOrgApiKeyInput.value = '';
+  cursorOrgIdInput.value = cursorOrgApi.value?.organizationId ?? '';
+  bShowCursorOrgModal.value = true;
+};
+
+const closeCursorOrgModal = (): void => {
+  bShowCursorOrgModal.value = false;
+  cursorOrgError.value = '';
+  cursorOrgApiKeyInput.value = '';
+  void loadCursorOrgUsage();
+};
+
+const saveCursorOrgApi = async (): Promise<void> => {
+  const apiKey = cursorOrgApiKeyInput.value.trim();
+  const organizationId = cursorOrgIdInput.value.trim();
+  cursorOrgError.value = '';
+  if (!apiKey || !organizationId) {
+    cursorOrgError.value = 'Enter both the Organization API key and organization ID.';
+    return;
+  }
+  bSavingCursorOrg.value = true;
+  try {
+    await agentAuthApi.setCursorOrgApi(apiKey, organizationId);
+    closeCursorOrgModal();
+  } catch (error) {
+    cursorOrgError.value = apiErrorMessage(error, 'Failed to save Organization API credentials.');
+  } finally {
+    bSavingCursorOrg.value = false;
+  }
+};
+
+const deleteCursorOrgApi = async (): Promise<void> => {
+  cursorOrgError.value = '';
+  bDeletingCursorOrg.value = true;
+  try {
+    await agentAuthApi.clearCursorOrgApi();
+    cursorOrgApi.value = { configured: false, source: null, organizationId: null };
+    cursorPooledUsage.value = { configured: false, available: false };
+    closeCursorOrgModal();
+  } catch (error) {
+    cursorOrgError.value = apiErrorMessage(error, 'Failed to remove Organization API credentials.');
+  } finally {
+    bDeletingCursorOrg.value = false;
+  }
+};
+
 const openVibeApiKeyModal = (): void => {
   vibeApiKeyError.value = '';
   bShowVibeApiKeyModal.value = true;
@@ -556,6 +663,7 @@ onMounted((): void => {
   refreshAuthStatus();
   loadVibeApiKeyStatus();
   loadOpenCodeProviders();
+  void loadCursorOrgUsage();
 });
 </script>
 
@@ -582,8 +690,31 @@ onMounted((): void => {
               <button v-else class="settings-btn" :disabled="bLoggingOutCursor" @click="logoutCursor">
                 <span v-if="bLoggingOutCursor" class="settings-spinner" />Logout
               </button>
+              <button
+                v-if="!bCursorOrgEnvLocked"
+                class="settings-btn"
+                :disabled="bLoadingCursorOrg"
+                @click="openCursorOrgModal"
+              >
+                {{ cursorOrgApi?.configured ? 'Update org usage API' : 'Set org usage API' }}
+              </button>
               <a href="https://cursor.com/dashboard?tab=spending" target="_blank" rel="noopener noreferrer" class="settings-auth-link">View account &amp; usage →</a>
             </div>
+            <p v-if="cursorPooledUsageLabel" class="settings-auth-card__usage">
+              Org pool {{ cursorPooledUsageLabel }}
+              <template v-if="cursorPooledRemainingLabel">
+                · Remaining {{ cursorPooledRemainingLabel }}
+              </template>
+              <template v-if="cursorPooledContractEndLabel">
+                · Until {{ cursorPooledContractEndLabel }}
+              </template>
+            </p>
+            <p v-else-if="cursorPooledUsage?.configured && cursorPooledUsage.error" class="settings-auth-card__error">
+              Org usage: {{ cursorPooledUsage.error }}
+            </p>
+            <p v-else-if="bCursorOrgEnvLocked" class="settings-auth-card__hint">
+              Org usage API configured via <code class="settings-mono-chip">CURSOR_ORG_API_KEY</code> / <code class="settings-mono-chip">CURSOR_ORG_ID</code>
+            </p>
             <p v-if="cursorAuthMessage" class="settings-auth-card__error">{{ cursorAuthMessage }}</p>
           </div>
           <div class="settings-auth-card">
@@ -702,6 +833,89 @@ onMounted((): void => {
           </div>
         </div>
   </div>
+
+    <!-- Cursor Organization API (pooled usage) -->
+    <BaseModal
+      :model-value="bShowCursorOrgModal"
+      labelledby="cursor-org-api-modal-title"
+      panel-class="max-w-md"
+      @update:model-value="(v: boolean) => { if (!v) closeCursorOrgModal(); }"
+    >
+      <ModalHeader
+        eyebrow="// cursor org usage"
+        title="Cursor Organization API"
+        title-id="cursor-org-api-modal-title"
+        @close="closeCursorOrgModal"
+      />
+      <div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+        <p class="text-sm text-text-muted">
+          Enterprise org pooled usage needs an Organization API key with
+          <code class="settings-mono-chip">usage:*</code>
+          (or
+          <code class="settings-mono-chip">admin:*</code>)
+          and the public organization id (e.g.
+          <code class="settings-mono-chip">org_…</code>).
+          Stored under
+          <code class="settings-mono-chip">~/.config/cursor/org-api.json</code>.
+        </p>
+        <div class="nc-field">
+          <label class="nc-field-label" for="cursor-org-api-key">Organization API key</label>
+          <input
+            id="cursor-org-api-key"
+            v-model="cursorOrgApiKeyInput"
+            type="password"
+            placeholder="crsr_…"
+            :disabled="bSavingCursorOrg || bDeletingCursorOrg"
+            autocomplete="off"
+          />
+        </div>
+        <div class="nc-field">
+          <label class="nc-field-label" for="cursor-org-id">Organization ID</label>
+          <input
+            id="cursor-org-id"
+            v-model="cursorOrgIdInput"
+            type="text"
+            placeholder="org_…"
+            :disabled="bSavingCursorOrg || bDeletingCursorOrg"
+            autocomplete="off"
+            @keydown.enter="saveCursorOrgApi"
+          />
+          <p v-if="cursorOrgError" class="nc-field-hint is-error">{{ cursorOrgError }}</p>
+        </div>
+        <p class="text-xs text-text-muted">
+          Or set
+          <code class="settings-mono-chip">CURSOR_ORG_API_KEY</code>
+          and
+          <code class="settings-mono-chip">CURSOR_ORG_ID</code>
+          on the server.
+        </p>
+      </div>
+      <div class="flex shrink-0 items-center justify-between gap-2 border-t border-fg/10 p-4">
+        <button
+          v-if="cursorOrgApi?.configured && cursorOrgApi.source === 'file'"
+          type="button"
+          class="settings-btn text-destructive"
+          :disabled="bSavingCursorOrg || bDeletingCursorOrg"
+          @click="deleteCursorOrgApi"
+        >
+          <span v-if="bDeletingCursorOrg" class="settings-spinner" />Remove
+        </button>
+        <div v-else />
+        <div class="flex items-center gap-2">
+          <button type="button" class="settings-btn" :disabled="bSavingCursorOrg || bDeletingCursorOrg" @click="closeCursorOrgModal">
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="settings-btn-primary"
+            :disabled="bSavingCursorOrg || bDeletingCursorOrg"
+            @click="saveCursorOrgApi"
+          >
+            <span v-if="bSavingCursorOrg" class="settings-spinner" />Save
+          </button>
+        </div>
+      </div>
+    </BaseModal>
 
     <!-- Codex API key modal -->
     <ApiKeyModal

@@ -35,7 +35,9 @@ import type {
   CreatedApiToken,
   SessionUsageTurn,
   SessionUsageSummary,
-  WorkspaceUsageSummary
+  WorkspaceUsageSummary,
+  CursorOrgApiStatus,
+  CursorPooledUsageResponse
 } from '@/@types/index';
 
 // ---------------------------------- HTTP ----------------------------------
@@ -392,6 +394,18 @@ export const agentAuthApi = {
   cursorLogin: (): ReturnType<typeof http.post<{ sessionId: string }>> =>
     http.post<{ sessionId: string }>('/agent-auth/cursor/login'),
   cursorLogout: (): ReturnType<typeof http.delete> => http.delete('/agent-auth/cursor/logout'),
+
+  cursorOrgApiStatus: (): ReturnType<typeof http.get<CursorOrgApiStatus>> =>
+    http.get<CursorOrgApiStatus>('/agent-auth/cursor/org-api'),
+  setCursorOrgApi: (
+    apiKey: string,
+    organizationId: string
+  ): ReturnType<typeof http.put<CursorOrgApiStatus>> =>
+    http.put<CursorOrgApiStatus>('/agent-auth/cursor/org-api', { apiKey, organizationId }),
+  clearCursorOrgApi: (): ReturnType<typeof http.delete<CursorOrgApiStatus>> =>
+    http.delete<CursorOrgApiStatus>('/agent-auth/cursor/org-api'),
+  cursorPooledUsage: (): ReturnType<typeof http.get<CursorPooledUsageResponse>> =>
+    http.get<CursorPooledUsageResponse>('/agent-auth/cursor/pooled-usage'),
 
   claudeStatus: (): ReturnType<typeof http.get<{ authenticated: boolean }>> =>
     http.get<{ authenticated: boolean }>('/agent-auth/claude/status'),

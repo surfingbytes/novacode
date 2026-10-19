@@ -42,3 +42,14 @@ Agents that emit ACP `usage_update` events persist a snapshot per turn.
 
 - `GET /api/workspaces/:workspaceId/sessions/:sessionId/usage` — `{ turns: SessionUsageTurn[], summary: SessionUsageSummary }`
 - `GET /api/workspaces/:workspaceId/usage` — workspace totals
+
+### Cursor organization pooled usage
+
+Enterprise orgs can surface Cursor’s pooled spend budget (used / limit / remaining):
+
+- `GET /api/agent-auth/cursor/org-api` — whether credentials are configured (`env` or `file`)
+- `PUT /api/agent-auth/cursor/org-api` — `{ apiKey, organizationId }` → store under `~/.config/cursor/org-api.json`
+- `DELETE /api/agent-auth/cursor/org-api` — clear file credentials (env still wins if set)
+- `GET /api/agent-auth/cursor/pooled-usage` — `{ configured, available, pool? }` from Cursor `POST /organizations/pooled-usage` (cached ~1 hour)
+
+Credentials may also be injected with `CURSOR_ORG_API_KEY` and `CURSOR_ORG_ID`. The Organization API key needs `usage:*` or `admin:*`.

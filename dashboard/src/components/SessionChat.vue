@@ -19,7 +19,15 @@ import EntityDetailHeader from '@/components/ui/EntityDetailHeader.vue';
 import BottomTabBar from '@/components/ui/BottomTabBar.vue';
 
 // classes
-import { sessionsApi, settingsApi, workspaceRulesApi, globalRulesApi, buildSessionTerminalWsUrl, apiErrorMessage } from '@/classes/api';
+import {
+  agentAuthApi,
+  sessionsApi,
+  settingsApi,
+  workspaceRulesApi,
+  globalRulesApi,
+  buildSessionTerminalWsUrl,
+  apiErrorMessage
+} from '@/classes/api';
 import { readFilesOpenPath, writeFilesOpenPath } from '@/lib/filesOpenPath';
 import { renderMermaidDiagrams } from '@/lib/mermaid';
 import { clearSessionPrompt, persistSessionPrompt, readSessionPrompt } from '@/lib/pendingSessionPrompt';
@@ -35,6 +43,11 @@ import {
 import { toWorkspaceRelativePath } from '@/utils/workspaceFilePath';
 import { setViewingSession } from '@/utils/sessionUnread';
 import { formatSessionCostLabel, resolveSessionCostAmount } from '@/utils/sessionUsageDisplay';
+import {
+  formatPooledRemainingLabel,
+  formatRulesSubtitleLabel,
+  formatRulesSubtitleTitle
+} from '@/utils/cursorPooledUsageDisplay';
 
 // composables
 import { useAgentOptions } from '@/composables/useAgentOptions';
@@ -196,6 +209,7 @@ const activeTab = ref<SessionTab>('chat');
 const filesOpenPath = ref<string | null>(readFilesOpenPath(props.workspaceId));
 const rulesCount = ref(0);
 const globalRulesCount = ref(0);
+const pooledRemainingCents = ref<number | null>(null);
 
 let mermaidRenderTimer: ReturnType<typeof setTimeout> | null = null;
 let fetchSessionSeq = 0;
@@ -558,21 +572,23 @@ const sessionCostLabel = computed(() => {
     streamingUsage.value?.cost?.currency ?? usageSummary.value?.costCurrency
   );
 });
-const rulesSubtitleLabel = computed(() => {
-  const parts: string[] = [];
-  if (rulesCount.value > 0) {
-    parts.push(`${rulesCount.value} workspace rule${rulesCount.value === 1 ? '' : 's'}`);
-  }
-  if (globalRulesCount.value > 0) {
-    parts.push(`${globalRulesCount.value} global rule${globalRulesCount.value === 1 ? '' : 's'}`);
-  }
-  return parts.length > 0 ? parts.join(' · ') : null;
-});
+const rulesSubtitleLabel = computed(() =>
+  formatRulesSubtitleLabel(rulesCount.value, globalRulesCount.value)
+);
+const rulesSubtitleTitle = computed(() =>
+  formatRulesSubtitleTitle(rulesCount.value, globalRulesCount.value)
+);
 const rulesSubtitleTo = computed(() => {
   if (rulesCount.value > 0) {
     return { name: 'workspace-rules' as const, params: { id: props.workspaceId } };
   }
   return { name: 'settings' as const, query: { tab: 'rules' } };
+});
+/** Org pooled remaining — used when ACP does not report per-session cost (typical for Cursor). */
+const pooledRemainingLabel = computed(() => {
+  if (sessionCostLabel.value != null) return null;
+  if (pooledRemainingCents.value == null) return null;
+  return formatPooledRemainingLabel(pooledRemainingCents.value);
 });
 
 function tabFromQuery(raw: unknown): SessionTab | null {
@@ -653,6 +669,16 @@ async function loadRulesCount(): Promise<void> {
     globalRulesCount.value = Array.isArray(data) ? data.length : 0;
   } catch {
     globalRulesCount.value = 0;
+  }
+}
+
+async function loadPooledRemaining(): Promise<void> {
+  try {
+    const { data } = await agentAuthApi.cursorPooledUsage();
+    pooledRemainingCents.value =
+      data.available && data.pool ? data.pool.remainingCents : null;
+  } catch {
+    pooledRemainingCents.value = null;
   }
 }
 const sessionTerminalWsUrl = computed(() =>
@@ -1014,6 +1040,7 @@ onMounted(async () => {
   // Fetch and socket run in parallel — the WS history frame must not wait on
   // the REST round-trip (a hung fetch would otherwise block chat + sending).
   void fetchSession();
+  void loadPooledRemaining();
   chatSocket.connect();
   if (initialCache?.messages.length) {
     void nextTick(() => chatListRef.value?.forceInitialScrollToBottom());
@@ -1104,10 +1131,15 @@ onUnmounted(() => {
           <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>
           <span class="shrink-0 tabular-nums" :title="sessionCostLabel">{{ sessionCostLabel }}</span>
         </template>
+        <template v-else-if="pooledRemainingLabel">
+          <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>
+          <span class="shrink-0 tabular-nums" :title="pooledRemainingLabel">{{ pooledRemainingLabel }}</span>
+        </template>
         <RouterLink
           v-if="rulesSubtitleLabel"
           :to="rulesSubtitleTo"
           class="md:hidden inline-flex items-center gap-1 min-w-0 hover:text-text-primary"
+          :title="rulesSubtitleTitle"
         >
           <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>
           <span class="truncate">{{ rulesSubtitleLabel }}</span>
@@ -1116,24 +1148,15 @@ onUnmounted(() => {
     </EntityDetailHeader>
 
     <div
-      v-if="(rulesCount > 0 || globalRulesCount > 0) && activeTab === 'chat'"
+      v-if="rulesSubtitleLabel && activeTab === 'chat'"
       class="hidden md:block px-4 md:px-6 py-1.5 border-b border-fg/10 shrink-0 text-[11px] text-text-muted"
     >
-      <span>Using </span>
       <RouterLink
-        v-if="rulesCount > 0"
-        :to="{ name: 'workspace-rules', params: { id: workspaceId } }"
+        :to="rulesSubtitleTo"
         class="hover:text-text-primary"
+        :title="rulesSubtitleTitle"
       >
-        {{ rulesCount }} workspace rule{{ rulesCount === 1 ? '' : 's' }}
-      </RouterLink>
-      <span v-if="rulesCount > 0 && globalRulesCount > 0"> · </span>
-      <RouterLink
-        v-if="globalRulesCount > 0"
-        :to="{ name: 'settings', query: { tab: 'rules' } }"
-        class="hover:text-text-primary"
-      >
-        {{ globalRulesCount }} global rule{{ globalRulesCount === 1 ? '' : 's' }}
+        {{ rulesSubtitleLabel }}
       </RouterLink>
     </div>
 
