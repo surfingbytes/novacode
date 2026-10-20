@@ -4,3 +4,4 @@ export * from './orchestratorPayload.js';
 export * from './oneShotAgent.js';
 export * from './planTitle.js';
 export * from './workspaceBrowseRoot.js';
+export * from './orchestratorPlanPrompt.js';

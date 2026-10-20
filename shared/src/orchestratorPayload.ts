@@ -102,7 +102,8 @@ export function cloneSubtasksForNewPlan(
         name: task.name,
         prompt: task.prompt,
         category: task.category ?? null,
-        ...(dependsOn.length > 0 ? { dependsOn } : {})
+        ...(dependsOn.length > 0 ? { dependsOn } : {}),
+        ...(task.kind ? { kind: task.kind } : {})
       };
     })
   };
@@ -210,11 +211,24 @@ function extractAssistantTextFromEvents(events: string[] | undefined): string {
   return text.trim();
 }
 
-export function buildStepPrompt(task: SubTask, payload: OrchestratorSubtasksPayload): string {
+/**
+ * Full prompt for one step: live spec (read when the step starts), plan notes,
+ * handoff notes from finished steps, then the step's own instruction.
+ */
+export function buildStepPrompt(
+  task: SubTask,
+  payload: OrchestratorSubtasksPayload,
+  spec?: string | null
+): string {
   const parts: string[] = [];
+  const specText = spec?.trim();
+  if (specText) {
+    parts.push(`## Spec\n\n${specText}`);
+  }
   const sc = payload.sharedContext?.trim();
-  if (sc) {
-    parts.push(`## Shared plan context (from orchestrator decomposition)\n\n${sc}`);
+  // Plans made before specs were live-linked stored the spec itself as shared context.
+  if (sc && sc !== specText) {
+    parts.push(`## Shared plan context\n\n${sc}`);
   }
   const hl = payload.handoffLog?.trim();
   if (hl) {
@@ -225,6 +239,22 @@ export function buildStepPrompt(task: SubTask, payload: OrchestratorSubtasksPayl
     return body;
   }
   return `${parts.join('\n\n---\n\n')}\n\n---\n\n## This step\n\n${body}`;
+}
+
+/**
+ * Steps that can start now: not run yet, every dependency done. Dependencies
+ * on later steps are ignored, same as `shouldSkipOrchestratorStep`.
+ */
+export function findRunnableSteps(subtasks: SubTask[]): number[] {
+  const out: number[] = [];
+  subtasks.forEach((task, index) => {
+    if (task.runResult) return;
+    const deps = normalizeDependsOn(task.dependsOn).filter((dep) => dep < index);
+    if (deps.every((dep) => subtasks[dep]?.runResult === 'done')) {
+      out.push(index);
+    }
+  });
+  return out;
 }
 
 export function summarizeStepHandoff(messages: ChatMessage[] | undefined): string {

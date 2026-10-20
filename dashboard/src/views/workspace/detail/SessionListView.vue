@@ -8,7 +8,6 @@ import ConfirmModal from '@/components/ConfirmModal.vue';
 import ContextMenu from '@/components/ContextMenu.vue';
 import SessionEditModal from '@/components/SessionEditModal.vue';
 import NewSessionModal from '@/components/NewSessionModal.vue';
-import NewOrchestratorModal from '@/components/NewOrchestratorModal.vue';
 import ListPageSkeleton from '@/components/ui/ListPageSkeleton.vue';
 import SessionListToolbar from './session-list/SessionListToolbar.vue';
 import SessionListGrid from './session-list/SessionListGrid.vue';
@@ -27,6 +26,7 @@ import { useOrchestratorsStore } from '@/stores/orchestrators';
 // classes
 import { apiErrorMessage, sessionsApi, orchestratorApi } from '@/classes/api';
 import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
+import { createPlanningSession, type NewOrchestratorOptions } from '@/lib/createPlanningSession';
 import { subtasksFromStoredJson } from '@/utils/orchestratorPayload';
 
 // composables
@@ -63,7 +63,7 @@ const sessionToDelete = ref<Session | null>(null);
 const bDeletingSession = ref(false);
 const sessionToEdit = ref<Session | null>(null);
 const bSavingEdit = ref(false);
-const bShowNewOrchestratorModal = ref(false);
+const newSessionInitialMode = ref<'session' | 'orchestrator'>('session');
 const viewMode = ref<'list' | 'grid'>(
   (safeGetItem('sessionsViewMode') as 'list' | 'grid') ?? 'list'
 );
@@ -446,47 +446,29 @@ const fetchOrchestrators = async (opts?: { silent?: boolean }): Promise<void> =>
 const createSession = async (payload: {
   name: string;
   tags?: string[] | null;
-  agentType?: AgentType;
-  approvalPolicy?: ApprovalPolicy;
+  agentType: AgentType;
+  modelSelection?: string | null;
+  approvalPolicy: ApprovalPolicy;
+  orchestrator?: NewOrchestratorOptions;
 }): Promise<void> => {
   if (!props.workspace || bSubmittingSession.value) return;
   bSubmittingSession.value = true;
   createSessionError.value = null;
   try {
-    const { data: newSession } = await sessionsApi.create(props.workspace.id, payload);
+    const { orchestrator, ...sessionPayload } = payload;
+    const sessionId = orchestrator
+      ? await createPlanningSession(props.workspace.id, { ...payload, orchestrator })
+      : (await sessionsApi.create(props.workspace.id, sessionPayload)).data.id;
     bShowNewSessionModal.value = false;
     await router.push({
       name: 'session',
-      params: { id: props.workspace.id, sessionId: newSession.id }
+      params: { id: props.workspace.id, sessionId }
     });
   } catch (error) {
     toastStore.error('Failed to create session');
     createSessionError.value = apiErrorMessage(error, 'Failed to create session');
   } finally {
     bSubmittingSession.value = false;
-  }
-};
-
-const bCreatingOrchestrator = ref(false);
-const createOrchestrator = async (payload: {
-  name: string;
-  tags?: string | null;
-  agentType?: AgentType;
-}): Promise<void> => {
-  if (!props.workspace || bCreatingOrchestrator.value) return;
-  bCreatingOrchestrator.value = true;
-  try {
-    const { data: newOrchestrator } = await orchestratorApi.create(props.workspace.id, payload);
-    orchestratorsStore.upsertOrchestrator(newOrchestrator);
-    bShowNewOrchestratorModal.value = false;
-    await router.push({
-      name: 'orchestrator',
-      params: { id: props.workspace.id, orchestratorId: newOrchestrator.id }
-    });
-  } catch {
-    toastStore.error('Failed to create orchestrator');
-  } finally {
-    bCreatingOrchestrator.value = false;
   }
 };
 
@@ -755,20 +737,19 @@ function consumeNewSessionQuery(): void {
   if (route.query.newSession !== '1') {
     return;
   }
-  ensureAgentCapabilitiesLoaded();
-  bShowNewSessionModal.value = true;
+  openNewSessionModal();
   const nextQuery = { ...route.query };
   delete nextQuery.newSession;
   void router.replace({ name: route.name as string, params: route.params, query: nextQuery });
 }
 
 function openNewSessionFromShortcut(): void {
-  ensureAgentCapabilitiesLoaded();
-  bShowNewSessionModal.value = true;
+  openNewSessionModal();
 }
 
-function openNewSessionModal(): void {
+function openNewSessionModal(mode: 'session' | 'orchestrator' = 'session'): void {
   ensureAgentCapabilitiesLoaded();
+  newSessionInitialMode.value = mode;
   bShowNewSessionModal.value = true;
 }
 
@@ -826,7 +807,7 @@ watch(
     :view-mode="viewMode"
     @update:view-mode="viewMode = $event"
     @new-session="openNewSessionModal"
-    @new-orchestrator="bShowNewOrchestratorModal = true"
+    @new-orchestrator="openNewSessionModal('orchestrator')"
   />
 
   <ListPageSkeleton
@@ -978,19 +959,9 @@ watch(
     :open-code-available="bOpenCodeAvailable"
     :codex-available="bCodexAvailable"
     :existing-tags="sessionTags"
+    allow-orchestrator
+    :initial-mode="newSessionInitialMode"
     @create="createSession"
-  />
-
-  <NewOrchestratorModal
-    v-model="bShowNewOrchestratorModal"
-    :loading="bCreatingOrchestrator"
-    :default-agent-type="(workspace && workspace.defaultAgentType) || null"
-    :claude-available="bClaudeAvailable"
-    :cursor-available="bCursorAvailable"
-    :mistral-vibe-available="bMistralVibeAvailable"
-    :open-code-available="bOpenCodeAvailable"
-    :codex-available="bCodexAvailable"
-    @create="createOrchestrator"
   />
 
   <ContextMenu

@@ -9,8 +9,8 @@ import { sessionSpecApi } from '@/classes/api';
 import type { SessionSpecStatus } from '@/@types/index';
 
 /**
- * Spec file + "create orchestrator from chat" job state per session.
- * Fetched on demand; job progress arrives over the sessions WebSocket as
+ * Spec file status per session. Fetched on demand; changes (e.g. the agent
+ * wrote the spec through the nova MCP) arrive over the sessions WebSocket as
  * `session-spec-status` frames (see workspaces store).
  */
 export const useSessionSpecsStore = defineStore('sessionSpecs', () => {
@@ -39,17 +39,11 @@ export const useSessionSpecsStore = defineStore('sessionSpecs', () => {
     return data.status;
   }
 
-  async function generateOrchestrator(workspaceId: string, sessionId: string): Promise<void> {
-    const { data } = await sessionSpecApi.generateOrchestrator(workspaceId, sessionId);
-    applyStatus(data.status);
-  }
-
   return {
     statusBySession,
     forSession,
     applyStatus,
     fetchSpec,
-    createSpec,
-    generateOrchestrator
+    createSpec
   };
 });

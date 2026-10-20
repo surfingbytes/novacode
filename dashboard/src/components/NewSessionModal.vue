@@ -8,15 +8,22 @@ import BaseModal from '@/components/BaseModal.vue';
 import TagChipsInput from '@/components/input/TagChipsInput.vue';
 import AgentModelPicker from '@/components/AgentModelPicker.vue';
 import ModalHeader from '@/components/ModalHeader.vue';
+import UiToggle from '@/components/ui/UiToggle.vue';
 
 // classes
 import { settingsApi } from '@/classes/api';
 
 // types
 import type { AgentModelOption, AgentType, ApprovalPolicy, LinkedPlanContext } from '@/@types/index';
+import type { NewOrchestratorOptions } from '@/lib/createPlanningSession';
 
 // utils
-import { agentSelectedStyle } from '@/utils/agentTypeMeta';
+import { agentSelectedStyle, agentTypeLabel } from '@/utils/agentTypeMeta';
+
+type NewSessionMode = 'session' | 'orchestrator';
+
+const AUTO_MODEL_OPTION: AgentModelOption = { id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto', fast: null };
+const MAX_PARALLEL_CHOICES = [1, 2, 3, 4, 5, 6, 8];
 
 const AGENT_FALLBACK_ORDER: AgentType[] = [
   'cursor-agent',
@@ -49,6 +56,9 @@ const props = defineProps<{
   error?: string | null;
   /** Tag suggestions from existing sessions in the workspace. */
   existingTags?: string[];
+  /** Offer the Session / Orchestrator switch (orchestrator = planning chat + linked plan). */
+  allowOrchestrator?: boolean;
+  initialMode?: NewSessionMode;
 }>();
 
 // -------------------------------------------------- Emits --------------------------------------------------
@@ -62,6 +72,8 @@ const emit = defineEmits<{
       modelSelection?: string | null;
       linkedPlanContext?: LinkedPlanContext | null;
       approvalPolicy: ApprovalPolicy;
+      /** Set in orchestrator mode: create a planning chat with a linked plan. */
+      orchestrator?: NewOrchestratorOptions;
     }
   ];
 }>();
@@ -76,6 +88,13 @@ const bLoadingModels = ref(false);
 const bTagsExpanded = ref(false);
 const bAdvancedExpanded = ref(false);
 const approvalPolicy = ref<ApprovalPolicy>('ask');
+const mode = ref<NewSessionMode>('session');
+const bSameWorkers = ref(true);
+const workerAgentType = ref<AgentType>('cursor-agent');
+const workerModelSelection = ref('');
+const workerModelOptions = ref<AgentModelOption[]>([]);
+const bLoadingWorkerModels = ref(false);
+const maxParallel = ref(3);
 
 // -------------------------------------------------- Computed --------------------------------------------------
 const availableAgents = computed(() => {
@@ -92,9 +111,17 @@ const GRID_COLS_CLASSES = ['grid-cols-1', 'grid-cols-1', 'grid-cols-2', 'grid-co
 const gridColsClass = computed(
   () => GRID_COLS_CLASSES[Math.min(availableAgents.value.length, GRID_COLS_CLASSES.length - 1)],
 );
-const modalTitle = computed(() => props.title ?? 'New session');
-const modalEyebrow = computed(() => (props.title ? `// ${props.title.toLowerCase()}` : '// new session'));
+const bOrchestratorMode = computed(() => mode.value === 'orchestrator');
+/** Orchestrator mode always picks the planning model up front. */
+const bShowModel = computed(() => props.showModelSelection === true || bOrchestratorMode.value);
+const modalTitle = computed(() => (bOrchestratorMode.value ? 'New orchestrator' : props.title ?? 'New session'));
+const modalEyebrow = computed(() => `// ${modalTitle.value.toLowerCase()}`);
 const createLabel = computed(() => props.submitLabel ?? 'Create');
+const modalHelperText = computed(() =>
+  bOrchestratorMode.value
+    ? 'Opens a planning chat. Describe the work there; the agent writes the spec and splits it into steps you run one by one or in parallel.'
+    : props.helperText
+);
 
 // -------------------------------------------------- Methods --------------------------------------------------
 function isAgentAvailable(agent: AgentType): boolean {
@@ -147,7 +174,16 @@ const onCreate = (): void => {
     ...(tags.length > 0 ? { tags } : {}),
     agentType: agentType.value,
     approvalPolicy: approvalPolicy.value,
-    ...(props.showModelSelection && modelSelection.value ? { modelSelection: modelSelection.value } : {})
+    ...(bShowModel.value && modelSelection.value ? { modelSelection: modelSelection.value } : {}),
+    ...(bOrchestratorMode.value
+      ? {
+          orchestrator: {
+            workerAgentType: bSameWorkers.value ? agentType.value : workerAgentType.value,
+            workerModel: bSameWorkers.value ? null : workerModelSelection.value || null,
+            maxParallel: maxParallel.value
+          }
+        }
+      : {})
   });
 };
 
@@ -157,24 +193,43 @@ function selectAgentType(agent: AgentType): void {
   }
 }
 
+async function fetchModelOptions(agent: AgentType): Promise<AgentModelOption[]> {
+  try {
+    const { data } = await settingsApi.getAgentOptions(agent);
+    return data.models.length > 0 ? data.models : [AUTO_MODEL_OPTION];
+  } catch {
+    return [AUTO_MODEL_OPTION];
+  }
+}
+
 async function loadModelOptions(): Promise<void> {
-  if (!props.showModelSelection) {
+  if (!bShowModel.value) {
     modelOptions.value = [];
     return;
   }
   bLoadingModels.value = true;
   try {
-    const { data } = await settingsApi.getAgentOptions(agentType.value);
-    modelOptions.value = data.models.length > 0
-      ? data.models
-      : [{ id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto', fast: null }];
+    modelOptions.value = await fetchModelOptions(agentType.value);
     if (modelSelection.value && !modelOptions.value.some((option) => option.id === modelSelection.value)) {
       modelSelection.value = '';
     }
-  } catch {
-    modelOptions.value = [{ id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto', fast: null }];
   } finally {
     bLoadingModels.value = false;
+  }
+}
+
+async function loadWorkerModelOptions(): Promise<void> {
+  bLoadingWorkerModels.value = true;
+  try {
+    workerModelOptions.value = await fetchModelOptions(workerAgentType.value);
+  } finally {
+    bLoadingWorkerModels.value = false;
+  }
+}
+
+function selectWorkerAgentType(agent: AgentType): void {
+  if (isAgentAvailable(agent)) {
+    workerAgentType.value = agent;
   }
 }
 
@@ -191,15 +246,40 @@ watch(
       bAdvancedExpanded.value = suggestedName.length > 0 || props.showModelSelection === true;
       agentType.value = computeInitialAgentType();
       modelSelection.value = props.defaultModelSelection ?? '';
+      mode.value = props.allowOrchestrator && props.initialMode === 'orchestrator' ? 'orchestrator' : 'session';
+      bSameWorkers.value = true;
+      workerAgentType.value = agentType.value;
+      workerModelSelection.value = '';
+      maxParallel.value = 3;
       void loadModelOptions();
     }
   }
 );
 
 watch(agentType, () => {
-  if (props.modelValue && props.showModelSelection) {
+  if (props.modelValue && bShowModel.value) {
     modelSelection.value = '';
     void loadModelOptions();
+  }
+});
+
+watch(mode, () => {
+  if (props.modelValue && bShowModel.value && modelOptions.value.length === 0) {
+    void loadModelOptions();
+  }
+});
+
+watch(bSameWorkers, (bSame) => {
+  if (!bSame) {
+    workerAgentType.value = agentType.value;
+    void loadWorkerModelOptions();
+  }
+});
+
+watch(workerAgentType, () => {
+  if (props.modelValue && !bSameWorkers.value) {
+    workerModelSelection.value = '';
+    void loadWorkerModelOptions();
   }
 });
 </script>
@@ -221,15 +301,38 @@ watch(agentType, () => {
           />
           <!-- Scrollable region: shrinks when the mobile keyboard reduces the viewport -->
           <div class="min-h-0 flex-1 overflow-y-auto">
-            <div v-if="helperText" class="px-6 pt-2">
-              <p class="text-xs text-text-muted">{{ helperText }}</p>
+            <div v-if="allowOrchestrator" class="px-6 pt-2">
+              <div
+                class="grid grid-cols-2 rounded-lg border border-fg/[0.12] bg-fg/[0.04] p-0.5 gap-1"
+                role="group"
+                aria-label="Session or orchestrator"
+              >
+                <button
+                  v-for="option in (['session', 'orchestrator'] as const)"
+                  :key="option"
+                  type="button"
+                  class="text-xs px-2 py-1.5 rounded-md border transition-colors"
+                  :class="
+                    mode === option
+                      ? 'border-fg/20 bg-fg/[0.1] text-text-primary'
+                      : 'border-transparent text-text-muted hover:text-text-primary hover:bg-fg/[0.06]'
+                  "
+                  :aria-pressed="mode === option"
+                  @click="mode = option"
+                >
+                  {{ option === 'session' ? 'Session' : 'Orchestrator' }}
+                </button>
+              </div>
+            </div>
+            <div v-if="modalHelperText" class="px-6 pt-2">
+              <p class="text-xs text-text-muted">{{ modalHelperText }}</p>
             </div>
 
-            <div class="px-6 flex flex-col gap-4 pb-5">
+            <div class="px-6 flex flex-col gap-4 pb-5 pt-2">
               <!-- Agent (ACP) selection -->
               <div class="nc-field">
                 <span class="nc-field-label">
-                  Agent
+                  {{ bOrchestratorMode ? 'Planning agent' : 'Agent' }}
                   <span class="normal-case opacity-60">(ACP)</span>
                 </span>
                 <div
@@ -272,6 +375,56 @@ watch(agentType, () => {
                   No agents available. Configure an ACP in Settings.
                 </p>
               </div>
+
+              <template v-if="bOrchestratorMode">
+                <div class="nc-field">
+                  <span class="nc-field-label">Planning model</span>
+                  <AgentModelPicker
+                    v-model="modelSelection"
+                    :agent-type="agentType"
+                    :model-options="modelOptions"
+                    :disabled="loading || bLoadingModels"
+                    variant="modal"
+                  />
+                </div>
+
+                <!-- Step agents: same as the planning chat unless changed -->
+                <div class="nc-field">
+                  <div class="flex items-center justify-between gap-3">
+                    <span class="nc-field-label">Workers use the same agent and model</span>
+                    <UiToggle v-model="bSameWorkers" aria-label="Workers use the same agent and model" />
+                  </div>
+                  <template v-if="!bSameWorkers">
+                    <div
+                      class="grid rounded-lg border border-fg/[0.12] bg-fg/[0.04] p-0.5 gap-1 mt-2"
+                      :class="gridColsClass"
+                      role="group"
+                      aria-label="Worker agent"
+                    >
+                      <button
+                        v-for="agent in availableAgents"
+                        :key="'worker-' + agent"
+                        type="button"
+                        class="min-w-0 truncate text-xs px-1 sm:px-2 py-1.5 rounded-md border border-transparent transition-colors text-text-muted hover:text-text-primary hover:bg-fg/[0.06]"
+                        :style="workerAgentType === agent ? agentSelectedStyle(agent) : {}"
+                        :title="agentTypeLabel(agent)"
+                        @click="selectWorkerAgentType(agent)"
+                      >
+                        {{ agentTypeLabel(agent) }}
+                      </button>
+                    </div>
+                    <div class="mt-2">
+                      <AgentModelPicker
+                        v-model="workerModelSelection"
+                        :agent-type="workerAgentType"
+                        :model-options="workerModelOptions"
+                        :disabled="loading || bLoadingWorkerModels"
+                        variant="modal"
+                      />
+                    </div>
+                  </template>
+                </div>
+              </template>
 
               <!-- Approval policy — compact segmented control (same row density as agent) -->
               <div class="nc-field">
@@ -375,7 +528,14 @@ watch(agentType, () => {
                     </div>
                   </div>
 
-                  <div v-if="showModelSelection" class="nc-field">
+                  <div v-if="bOrchestratorMode" class="nc-field">
+                    <label class="nc-field-label" for="new-session-max-parallel">Parallel steps at once</label>
+                    <select id="new-session-max-parallel" v-model.number="maxParallel">
+                      <option v-for="count in MAX_PARALLEL_CHOICES" :key="count" :value="count">{{ count }}</option>
+                    </select>
+                  </div>
+
+                  <div v-if="showModelSelection && !bOrchestratorMode" class="nc-field">
                     <span class="nc-field-label">Model</span>
                     <AgentModelPicker
                       v-model="modelSelection"

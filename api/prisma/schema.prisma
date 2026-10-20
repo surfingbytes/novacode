@@ -109,6 +109,8 @@ model Session {
   /** True when a run finished while no client was viewing this session. */
   unread      Boolean   @default(false)
   claudeLimitResetAt String? @map("claude_limit_reset_at")
+  /** Git worktree an orchestrator step runs in (parallel runs); null = workspace path. */
+  worktreePath String? @map("worktree_path")
 
   @@map("sessions")
 }
@@ -178,8 +180,14 @@ model Orchestrator {
   runCurrentStep  Int?      @map("run_current_step")
   runTotalSteps   Int?      @map("run_total_steps")
   runStartedAt    String?   @map("run_started_at")
-  /** Chat session this plan was generated from (spec → orchestrator). */
+  /** Planning chat session that owns this plan (writes it through the nova MCP). */
   sourceSessionId String?   @map("source_session_id")
+  /** Model for step sessions; null = the planning chat's model (or agent default). */
+  workerModel     String?   @map("worker_model")
+  /** Max steps running at once in parallel runs (each in its own git worktree). */
+  maxParallel     Int       @default(3) @map("max_parallel")
+  /** Mode of the current/last run: sequential | parallel. */
+  runMode         String?   @map("run_mode")
 
   @@index([sourceSessionId])
   @@map("orchestrators")

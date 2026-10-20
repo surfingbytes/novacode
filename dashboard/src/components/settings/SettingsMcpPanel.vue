@@ -35,6 +35,8 @@ const bCheckingMcpConnectivity = ref<boolean>(false);
 const mcpConnectivityResults = ref<Record<string, McpConnectivityCheckResult> | null>(null);
 const mcpConnectivityError = ref<string>('');
 const mcpAutoload = ref<McpAutoloadStatus | null>(null);
+const bNovaMcpEnabled = ref<boolean>(true);
+const bSavingNovaMcp = ref<boolean>(false);
 
 const applyAutoload = (autoload?: McpAutoloadStatus): void => {
   if (autoload) {
@@ -49,10 +51,26 @@ const loadMcpClients = async (): Promise<void> => {
     const response = await settingsApi.getMcpClients();
     mcpClients.value = response.data.servers;
     applyAutoload(response.data.autoload);
+    bNovaMcpEnabled.value = response.data.builtin?.nova.enabled ?? true;
   } catch {
     mcpClients.value = {};
   } finally {
     bLoadingMcpClients.value = false;
+  }
+};
+
+/** Nova's own MCP (spec + orchestrator tools); applies to the next agent turn. */
+const toggleNovaMcp = async (enabled: boolean): Promise<void> => {
+  bSavingNovaMcp.value = true;
+  const previous = bNovaMcpEnabled.value;
+  bNovaMcpEnabled.value = enabled;
+  try {
+    const { data } = await settingsApi.saveMcpBuiltin({ nova: { enabled } });
+    bNovaMcpEnabled.value = data.nova.enabled;
+  } catch {
+    bNovaMcpEnabled.value = previous;
+  } finally {
+    bSavingNovaMcp.value = false;
   }
 };
 
@@ -328,6 +346,31 @@ onMounted((): void => {
                   <span v-if="connectivityResult.error" class="text-destructive"> — {{ connectivityResult.error }}</span>
                 </span>
               </div>
+            </div>
+            <!-- Built-in: Nova's own MCP server -->
+            <div
+              class="flex items-center justify-between gap-4 py-3 border-b border-fg/[0.06]"
+              :class="{ 'opacity-55': !bNovaMcpEnabled }"
+            >
+              <div class="min-w-0">
+                <div class="flex items-center gap-2">
+                  <p class="text-sm font-medium text-text-primary truncate">nova</p>
+                  <span
+                    class="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded border bg-primary/10 text-primary border-primary/20"
+                  >
+                    built-in
+                  </span>
+                </div>
+                <p class="text-xs text-text-muted mt-0.5">
+                  Lets chat agents write the session spec and create orchestrator plans (all agents).
+                </p>
+              </div>
+              <UiToggle
+                :model-value="bNovaMcpEnabled"
+                :disabled="bSavingNovaMcp"
+                :aria-label="bNovaMcpEnabled ? 'Disable nova' : 'Enable nova'"
+                @update:model-value="toggleNovaMcp"
+              />
             </div>
             <div v-if="bLoadingMcpClients" class="text-sm text-text-muted py-4">Loading…</div>
             <div

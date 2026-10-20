@@ -11,6 +11,7 @@ import NewSessionModal from '@/components/NewSessionModal.vue';
 
 // classes
 import { apiErrorMessage, sessionsApi } from '@/classes/api';
+import { createPlanningSession, type NewOrchestratorOptions } from '@/lib/createPlanningSession';
 
 // lib
 import { setPendingSessionPrompt } from '@/lib/pendingSessionPrompt';
@@ -97,13 +98,26 @@ async function ensureWorkspaceLoaded(): Promise<void> {
 async function createSession(payload: {
   name: string;
   tags?: string[] | null;
-  agentType?: AgentType;
+  agentType: AgentType;
   modelSelection?: string | null;
-  approvalPolicy?: ApprovalPolicy;
+  approvalPolicy: ApprovalPolicy;
+  orchestrator?: NewOrchestratorOptions;
 }): Promise<void> {
   if (isSubmittingSession.value) return;
   isSubmittingSession.value = true;
   createSessionError.value = null;
+  if (payload.orchestrator) {
+    try {
+      const sessionId = await createPlanningSession(workspaceId.value, { ...payload, orchestrator: payload.orchestrator });
+      showNewSessionModal.value = false;
+      await router.push({ name: 'session', params: { id: workspaceId.value, sessionId } });
+    } catch (error) {
+      createSessionError.value = apiErrorMessage(error, 'Failed to create orchestrator');
+    } finally {
+      isSubmittingSession.value = false;
+    }
+    return;
+  }
   try {
     const { data: newSession } = await sessionsApi.create(workspaceId.value, {
       ...payload,
@@ -317,6 +331,7 @@ onUnmounted(() => {
     :open-code-available="openCodeAvailable"
     :codex-available="codexAvailable"
     :existing-tags="sessionTags"
+    :allow-orchestrator="!pendingPlanHandoff"
     @create="createSession"
   />
 </template>

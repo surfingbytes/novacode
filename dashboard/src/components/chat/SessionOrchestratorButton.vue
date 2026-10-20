@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /**
- * Split button in the session header: chat → spec → ready-to-run orchestrator.
- * Main action creates (or opens) the orchestrator; the chevron menu creates the
- * spec file only, opens the spec, or regenerates the plan from the chat.
+ * Split button in the session header: turns the chat into orchestrator mode.
+ * The main action asks the chat's own agent to write the spec and split the
+ * work into steps through the nova MCP (or opens the Orchestrator tab once a
+ * plan exists); the chevron menu updates the plan and opens/creates the spec.
  */
 // node_modules
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
-import { ChevronDown, Copy, FilePlus, FileText, LoaderCircle, RefreshCw, Workflow } from 'lucide-vue-next';
+import { ChevronDown, Copy, ExternalLink, FilePlus, FileText, RefreshCw, Workflow } from 'lucide-vue-next';
 
 // components
 import BaseModal from '@/components/BaseModal.vue';
@@ -21,31 +21,37 @@ import { useToastStore } from '@/stores/toasts';
 import { renderMd } from '@/utils/chatDisplayItems';
 import { isAxiosError } from 'axios';
 
-// types
-import type { SessionSpecJobState } from '@/@types/index';
-
 // -------------------------------------------------- Props --------------------------------------------------
 
 const props = defineProps<{
   workspaceId: string;
   sessionId: string;
-  /** Agent is replying right now — the spec turn cannot start. */
-  bBusy: boolean;
-  /** Chat has at least one finished turn with the agent. */
-  bHasConversation: boolean;
+  /** Id of the plan this chat owns, if any (may still be empty). */
+  orchestratorId: string | null;
+  /** The plan has steps — the main action opens it instead of asking for one. */
+  bHasSteps: boolean;
+}>();
+
+// -------------------------------------------------- Emits --------------------------------------------------
+
+const emit = defineEmits<{
+  /** Send the "plan as orchestrator" prompt into the chat. */
+  (e: 'plan'): void;
+  /** Show the Orchestrator tab. */
+  (e: 'open-plan'): void;
+  /** Open the orchestrator's full page. */
+  (e: 'open-page'): void;
 }>();
 
 // -------------------------------------------------- Stores --------------------------------------------------
 
 const specsStore = useSessionSpecsStore();
 const toastStore = useToastStore();
-const router = useRouter();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 
 const menuRef = ref<HTMLElement | null>(null);
 const bMenuOpen = ref(false);
-const bRequesting = ref(false);
 const bSpecModalOpen = ref(false);
 const specContent = ref<string | null>(null);
 const bSpecLoading = ref(false);
@@ -53,38 +59,14 @@ const bSpecLoading = ref(false);
 // -------------------------------------------------- Computed --------------------------------------------------
 
 const status = computed(() => specsStore.forSession(props.sessionId));
-const jobState = computed<SessionSpecJobState>(() => status.value?.job.state ?? 'idle');
-const bJobRunning = computed(() => jobState.value === 'writing-spec' || jobState.value === 'planning');
-const orchestratorId = computed(() => status.value?.orchestratorId ?? null);
-const bStale = computed(() => !!orchestratorId.value && !!status.value?.bChatNewerThanSpec);
-
-const generateBlockedReason = computed<string | null>(() => {
-  if (!props.bHasConversation) return 'Chat with the agent first';
-  if (props.bBusy) return 'Wait for the agent to finish replying';
-  return null;
-});
-
-const mainLabel = computed(() => {
-  if (jobState.value === 'writing-spec') return 'Writing spec…';
-  if (jobState.value === 'planning') return 'Planning…';
-  return orchestratorId.value ? 'Open orchestrator' : 'Create orchestrator';
-});
-
-const mainTitle = computed(() => {
-  if (jobState.value === 'writing-spec') return 'The agent is writing the spec from this chat';
-  if (jobState.value === 'planning') return 'Splitting the spec into orchestrator steps';
-  if (orchestratorId.value) {
-    return bStale.value
-      ? 'Open orchestrator — the chat changed since its spec was written (regenerate from the menu)'
-      : 'Open the orchestrator generated from this chat';
-  }
-  return generateBlockedReason.value ?? 'Agent writes the spec from this chat, then a ready-to-run orchestrator is created';
-});
-
-const bMainDisabled = computed(
-  () => bJobRunning.value || bRequesting.value || (!orchestratorId.value && !!generateBlockedReason.value)
+const bHasPlan = computed(() => !!props.orchestratorId);
+const bStale = computed(() => props.bHasSteps && !!status.value?.bChatNewerThanSpec);
+const mainLabel = computed(() => (props.bHasSteps ? 'Orchestrator' : 'Plan as orchestrator'));
+const mainTitle = computed(() =>
+  props.bHasSteps
+    ? 'Show the plan of this chat'
+    : 'The agent writes the spec and splits the agreed work into steps (Nova MCP)'
 );
-
 const renderedSpec = computed(() => renderMd(specContent.value ?? ''));
 
 // -------------------------------------------------- Methods --------------------------------------------------
@@ -101,37 +83,19 @@ async function loadStatus(): Promise<void> {
   try {
     await specsStore.fetchSpec(props.workspaceId, props.sessionId);
   } catch {
-    // header control only — stay hidden-ish (default label) on failure
+    // header control only — works without the spec status
   }
-}
-
-async function startGenerate(): Promise<void> {
-  bMenuOpen.value = false;
-  if (generateBlockedReason.value) {
-    toastStore.info(generateBlockedReason.value);
-    return;
-  }
-  bRequesting.value = true;
-  try {
-    await specsStore.generateOrchestrator(props.workspaceId, props.sessionId);
-  } catch (err) {
-    toastStore.error(errorMessage(err, 'Failed to start generating the orchestrator'));
-  } finally {
-    bRequesting.value = false;
-  }
-}
-
-function openOrchestrator(): void {
-  if (!orchestratorId.value) return;
-  void router.push(`/workspace/${props.workspaceId}/orchestrator/${orchestratorId.value}`);
 }
 
 function onMainClick(): void {
-  if (orchestratorId.value) {
-    openOrchestrator();
-    return;
-  }
-  void startGenerate();
+  if (props.bHasSteps) emit('open-plan');
+  else emit('plan');
+}
+
+function runMenuAction(action: 'plan' | 'open-page'): void {
+  bMenuOpen.value = false;
+  if (action === 'plan') emit('plan');
+  else emit('open-page');
 }
 
 async function createSpecOnly(): Promise<void> {
@@ -192,17 +156,6 @@ watch(
   }
 );
 
-// Job finished while this chat is open: go straight to the new plan, or surface the failure.
-watch(jobState, (next, previous) => {
-  if (previous !== 'writing-spec' && previous !== 'planning') return;
-  if (next === 'idle' && orchestratorId.value) {
-    toastStore.success('Orchestrator ready');
-    openOrchestrator();
-  } else if (next === 'failed') {
-    toastStore.error(status.value?.job.error ?? 'Generating the orchestrator failed');
-  }
-});
-
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 
 onMounted(() => {
@@ -222,17 +175,15 @@ onBeforeUnmount(() => {
     <div class="inline-flex items-stretch h-9 rounded-lg border border-fg/10 overflow-hidden">
       <button
         type="button"
-        class="relative inline-flex items-center gap-1.5 px-2.5 text-sm text-text-muted hover:text-text-primary hover:bg-fg/[0.06] transition-colors disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-text-muted"
+        class="relative inline-flex items-center gap-1.5 px-2.5 text-sm text-text-muted hover:text-text-primary hover:bg-fg/[0.06] transition-colors"
         :title="mainTitle"
         :aria-label="mainLabel"
-        :disabled="bMainDisabled"
         @click="onMainClick"
       >
-        <LoaderCircle v-if="bJobRunning || bRequesting" :size="16" :stroke-width="1.8" class="animate-spin text-primary" aria-hidden="true" />
-        <Workflow v-else :size="16" :stroke-width="1.6" aria-hidden="true" />
+        <Workflow :size="16" :stroke-width="1.6" aria-hidden="true" />
         <span class="hidden xl:inline whitespace-nowrap">{{ mainLabel }}</span>
         <span
-          v-if="bStale && !bJobRunning"
+          v-if="bStale"
           class="absolute top-1.5 right-1 w-1.5 h-1.5 rounded-full bg-warning"
           aria-hidden="true"
         />
@@ -242,8 +193,8 @@ onBeforeUnmount(() => {
         class="inline-flex items-center justify-center w-7 border-l border-fg/10 text-text-muted hover:text-text-primary hover:bg-fg/[0.06] transition-colors"
         aria-haspopup="true"
         :aria-expanded="bMenuOpen"
-        title="Spec options"
-        aria-label="Spec options"
+        title="Orchestrator and spec options"
+        aria-label="Orchestrator and spec options"
         @click.stop="bMenuOpen = !bMenuOpen"
       >
         <ChevronDown :size="14" :stroke-width="1.8" aria-hidden="true" />
@@ -256,12 +207,29 @@ onBeforeUnmount(() => {
       role="menu"
       @click.stop
     >
-      <p
-        v-if="jobState === 'failed' && status?.job.error"
-        class="px-3 py-2 text-xs text-destructive border-b border-border mb-1"
-      >
-        Last attempt failed: {{ status.job.error }}
-      </p>
+      <template v-if="bHasPlan">
+        <button
+          v-if="bHasSteps"
+          type="button"
+          class="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-text-primary hover:bg-fg/[0.06] transition-colors"
+          role="menuitem"
+          title="Ask the agent to update the spec and the steps from this chat"
+          @click="runMenuAction('plan')"
+        >
+          <RefreshCw :size="14" :stroke-width="1.6" class="shrink-0" aria-hidden="true" />
+          <span class="flex-1">Update plan from chat</span>
+          <span v-if="bStale" class="text-[11px] text-warning">chat changed</span>
+        </button>
+        <button
+          type="button"
+          class="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-text-primary hover:bg-fg/[0.06] transition-colors"
+          role="menuitem"
+          @click="runMenuAction('open-page')"
+        >
+          <ExternalLink :size="14" :stroke-width="1.6" class="shrink-0" aria-hidden="true" />
+          Open orchestrator page
+        </button>
+      </template>
       <button
         v-if="!status?.exists"
         type="button"
@@ -281,19 +249,6 @@ onBeforeUnmount(() => {
       >
         <FileText :size="14" :stroke-width="1.6" class="shrink-0" aria-hidden="true" />
         Open spec
-      </button>
-      <button
-        v-if="orchestratorId"
-        type="button"
-        class="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-text-primary hover:bg-fg/[0.06] transition-colors disabled:opacity-50"
-        role="menuitem"
-        :disabled="bJobRunning || bRequesting"
-        :title="generateBlockedReason ?? 'Agent updates the spec from this chat, then a new orchestrator is created'"
-        @click="startGenerate"
-      >
-        <RefreshCw :size="14" :stroke-width="1.6" class="shrink-0" aria-hidden="true" />
-        <span class="flex-1">Regenerate from chat</span>
-        <span v-if="bStale" class="text-[11px] text-warning">chat changed</span>
       </button>
     </div>
 
@@ -315,8 +270,8 @@ onBeforeUnmount(() => {
         <div v-if="bSpecLoading" class="py-6 text-sm text-text-muted">Loading…</div>
         <template v-else>
           <p v-if="!status?.hasContent" class="mb-3 text-sm text-text-muted">
-            The spec is empty. Ask the agent in this chat to write something to the spec, or use
-            <strong>Create orchestrator</strong> to have it write the full spec.
+            The spec is empty. Ask the agent in this chat to write the spec, or use
+            <strong>Plan as orchestrator</strong> to have it write the spec and the steps.
           </p>
           <div class="chat-markdown text-sm text-text-primary" v-html="renderedSpec" />
         </template>

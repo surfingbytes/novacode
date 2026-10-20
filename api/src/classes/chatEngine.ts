@@ -1,6 +1,7 @@
 // node_modules
 import { randomUUID } from 'node:crypto';
 import { extname } from 'node:path';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type {
   RequestPermissionRequest,
@@ -13,6 +14,7 @@ import { config } from './config';
 import { getGlobalRulesDir } from './globalRules';
 import { buildAgentRulesPrefix } from './ruleFiles';
 import { isPathUnderBrowseRoot, resolveWorkspaceAbsolutePath } from './workspacePaths';
+import { isUnderWorktreesRoot } from './gitWorktrees';
 import { runClaudeAcp, cancelClaudeAcp } from './claudeAcp';
 import { runVibeAcp, cancelVibeAcp } from './vibeAcp';
 import { runCursorAcp, cancelCursorAcp } from './cursorAcp';
@@ -741,8 +743,12 @@ export async function dispatchPrompt(
 
   const { attachments, textPaths } = await resolvePromptAttachments(imagePaths);
   const effectiveText = textPaths.length > 0 ? `${text}\n\n${textPaths.join('\n')}` : text;
-  const workspacePath = resolveWorkspaceAbsolutePath(workspace.path);
-  if (!isPathUnderBrowseRoot(workspacePath)) {
+  // Parallel orchestrator steps run in their own git worktree (under /config/worktrees).
+  const worktreePath = session.worktreePath && isUnderWorktreesRoot(session.worktreePath) && existsSync(session.worktreePath)
+    ? session.worktreePath
+    : null;
+  const workspacePath = worktreePath ?? resolveWorkspaceAbsolutePath(workspace.path);
+  if (!worktreePath && !isPathUnderBrowseRoot(workspacePath)) {
     // User message is already persisted — do not put the queue item back.
     return { error: 'Invalid workspace path', requeue: false };
   }

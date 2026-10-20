@@ -22,6 +22,7 @@ import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
 
 // classes
 import { agentAuthApi, apiErrorMessage, sessionsApi, settingsApi } from '@/classes/api';
+import { createPlanningSession, type NewOrchestratorOptions } from '@/lib/createPlanningSession';
 
 // types
 import type { AgentType, ApprovalPolicy, Workspace } from '@/@types/index';
@@ -210,20 +211,25 @@ const openNewSession = (workspace: Workspace): void => {
 const createSession = async (payload: {
   name: string;
   tags?: string[] | null;
-  agentType?: AgentType;
-  approvalPolicy?: ApprovalPolicy;
+  agentType: AgentType;
+  modelSelection?: string | null;
+  approvalPolicy: ApprovalPolicy;
+  orchestrator?: NewOrchestratorOptions;
 }): Promise<void> => {
   const workspace = newSessionWorkspace.value;
   if (!workspace || bSubmittingSession.value) return;
   bSubmittingSession.value = true;
   createSessionError.value = null;
   try {
-    const { data: newSession } = await sessionsApi.create(workspace.id, payload);
+    const { orchestrator, ...sessionPayload } = payload;
+    const sessionId = orchestrator
+      ? await createPlanningSession(workspace.id, { ...payload, orchestrator })
+      : (await sessionsApi.create(workspace.id, sessionPayload)).data.id;
     bShowNewSessionModal.value = false;
     newSessionWorkspace.value = undefined;
     await router.push({
       name: 'session',
-      params: { id: workspace.id, sessionId: newSession.id }
+      params: { id: workspace.id, sessionId }
     });
   } catch (error) {
     createSessionError.value = apiErrorMessage(error, 'Failed to create session');
@@ -626,6 +632,7 @@ onMounted((): void => {
     :open-code-available="openCodeAvailable"
     :codex-available="codexAvailable"
     :existing-tags="newSessionTags"
+    allow-orchestrator
     @create="createSession"
   />
 

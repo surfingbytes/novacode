@@ -636,6 +636,11 @@ export const db = {
     return row;
   },
 
+  /** Point a session at a git worktree (orchestrator parallel step) or back at the workspace (null). */
+  async setSessionWorktreePath(id: string, worktreePath: string | null): Promise<void> {
+    await _prisma.session.updateMany({ where: { id }, data: { worktreePath } });
+  },
+
   /**
    * Toggle the unread flag without bumping updatedAt (read/unread should not
    * reshuffle session lists). Returns undefined when the row is missing or
@@ -963,6 +968,8 @@ export const db = {
     tags?: string | null;
     agentType?: string;
     sourceSessionId?: string | null;
+    workerModel?: string | null;
+    maxParallel?: number;
   }): Promise<Orchestrator> {
     const id = randomUUID();
     const createdAt = new Date().toISOString();
@@ -977,7 +984,9 @@ export const db = {
         workspaceId: data.workspaceId,
         createdAt,
         archived: false,
-        sourceSessionId: data.sourceSessionId ?? null
+        sourceSessionId: data.sourceSessionId ?? null,
+        workerModel: data.workerModel ?? null,
+        ...(data.maxParallel !== undefined && { maxParallel: data.maxParallel })
       }
     });
   },
@@ -1005,6 +1014,11 @@ export const db = {
       runCurrentStep?: number | null;
       runTotalSteps?: number | null;
       runStartedAt?: string | null;
+      runMode?: string | null;
+      agentType?: string;
+      workerModel?: string | null;
+      maxParallel?: number;
+      sourceSessionId?: string | null;
     }
   ): Promise<Orchestrator | undefined> {
     const existing = await _prisma.orchestrator.findUnique({ where: { id } });
@@ -1021,7 +1035,12 @@ export const db = {
       ...('runStatus' in patch && { runStatus: patch.runStatus }),
       ...('runCurrentStep' in patch && { runCurrentStep: patch.runCurrentStep }),
       ...('runTotalSteps' in patch && { runTotalSteps: patch.runTotalSteps }),
-      ...('runStartedAt' in patch && { runStartedAt: patch.runStartedAt })
+      ...('runStartedAt' in patch && { runStartedAt: patch.runStartedAt }),
+      ...('runMode' in patch && { runMode: patch.runMode }),
+      ...(patch.agentType !== undefined && { agentType: patch.agentType }),
+      ...('workerModel' in patch && { workerModel: patch.workerModel }),
+      ...(patch.maxParallel !== undefined && { maxParallel: patch.maxParallel }),
+      ...('sourceSessionId' in patch && { sourceSessionId: patch.sourceSessionId })
     };
     return _prisma.orchestrator.update({
       where: { id },

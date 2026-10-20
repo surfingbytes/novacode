@@ -23,9 +23,15 @@ export interface SubTask {
   sessionId?: string | null;
   /** 0-based indexes of steps that must succeed before this step runs. */
   dependsOn?: number[];
-  /** Last run outcome for this step. */
-  runResult?: 'done' | 'failed' | 'skipped';
+  /** Run state for this step ('running' while its session works). */
+  runResult?: 'running' | 'done' | 'failed' | 'skipped';
+  /** Why the step failed or what happened while merging it (parallel runs). */
+  runNote?: string | null;
+  /** 'verify' marks the auto-added final "check against spec" step. */
+  kind?: 'verify';
 }
+
+export type OrchestratorRunMode = 'sequential' | 'parallel';
 
 /** Stored in `subtasksJson` as JSON object with `subtasks` array (legacy: raw array only). */
 export interface OrchestratorSubtasksPayload {
@@ -50,14 +56,16 @@ export interface Orchestrator {
   runCurrentStep?: number | null;
   runTotalSteps?: number | null;
   runStartedAt?: string | null;
-  /** Chat session this plan was generated from (spec → orchestrator). */
+  /** Planning chat that owns this plan; its agent edits it through the nova MCP. */
   sourceSessionId?: string | null;
+  /** Model for step sessions (agent type is `agentType`); null = planning chat's model. */
+  workerModel?: string | null;
+  /** Max steps at once in parallel runs. */
+  maxParallel?: number;
+  runMode?: OrchestratorRunMode | string | null;
 }
 
-// ---------------------------------- Session spec (chat → orchestrator) ----------------------------------
-
-/** Background "create orchestrator from chat" job phase for one session. */
-export type SessionSpecJobState = 'idle' | 'writing-spec' | 'planning' | 'failed';
+// ---------------------------------- Session spec ----------------------------------
 
 export interface SessionSpecStatus {
   sessionId: string;
@@ -69,11 +77,10 @@ export interface SessionSpecStatus {
   path: string;
   /** ISO mtime of the spec file. */
   updatedAt: string | null;
-  /** Newest non-archived orchestrator generated from this session. */
+  /** Newest non-archived orchestrator planned in this session. */
   orchestratorId: string | null;
   /** Chat changed after the spec file was last written. */
   bChatNewerThanSpec: boolean;
-  job: { state: SessionSpecJobState; error?: string };
 }
 
 // ---------------------------------- Terminal WebSocket protocol ----------------------------------

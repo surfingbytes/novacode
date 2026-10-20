@@ -27,6 +27,7 @@ import {
   applyReachableMcpAutoload,
   getMcpAutoloadStatus
 } from '../classes/mcpServersForAcp';
+import { isNovaMcpEnabled, setNovaMcpEnabled } from '../classes/novaMcp';
 import { getCursorModels } from '../classes/cursorModels';
 import { getOpenCodeModels, clearOpenCodeModelsCache } from '../classes/openCodeModels';
 import { getAgentModels } from '../classes/agentModels';
@@ -681,10 +682,18 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     probedAt: Type.Union([Type.Number(), Type.Null()])
   });
 
+  /** Nova's own MCP server (spec + orchestrator tools); not stored in mcp-clients.json. */
+  const McpBuiltinSchema = Type.Object({
+    nova: Type.Object({ enabled: Type.Boolean() })
+  });
+
   const McpClientsResponseSchema = Type.Object({
     servers: Type.Record(Type.String(), McpClientServerSchema),
-    autoload: McpAutoloadStatusSchema
+    autoload: McpAutoloadStatusSchema,
+    builtin: McpBuiltinSchema
   });
+
+  const builtinMcpStatus = () => ({ nova: { enabled: isNovaMcpEnabled() } });
 
   fastifyInstance.get(
     '/api/settings/mcp-clients',
@@ -694,7 +703,24 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async () => {
       const servers = readMcpClients(config.configDir);
-      return { servers, autoload: getMcpAutoloadStatus() };
+      return { servers, autoload: getMcpAutoloadStatus(), builtin: builtinMcpStatus() };
+    }
+  );
+
+  // PUT /api/settings/mcp-builtin - turn Nova's own MCP server on/off for agents
+  fastifyInstance.put(
+    '/api/settings/mcp-builtin',
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        body: Type.Object({ nova: Type.Object({ enabled: Type.Boolean() }) }),
+        response: { 200: McpBuiltinSchema }
+      }
+    },
+    async (request) => {
+      const { nova } = request.body as { nova: { enabled: boolean } };
+      setNovaMcpEnabled(nova.enabled);
+      return builtinMcpStatus();
     }
   );
 
@@ -714,7 +740,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       const { servers } = request.body as { servers: Record<string, McpClientServerConfig> };
       writeMcpClients(config.configDir, servers);
       const autoload = await applyReachableMcpAutoload(config.configDir);
-      return { servers, autoload };
+      return { servers, autoload, builtin: builtinMcpStatus() };
     }
   );
 

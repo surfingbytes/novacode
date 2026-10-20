@@ -43,6 +43,17 @@ export const useOrchestratorsStore = defineStore('orchestrators', () => {
     return null;
   }
 
+  /** Newest non-archived plan whose planning chat is `sessionId`. */
+  function forPlannerSession(workspaceId: string, sessionId: string): Orchestrator | null {
+    const matches = forWorkspace(workspaceId).filter(
+      (orchestrator) => orchestrator.sourceSessionId === sessionId && !orchestrator.archived
+    );
+    if (matches.length === 0) {
+      return null;
+    }
+    return matches.reduce((newest, candidate) => (candidate.createdAt > newest.createdAt ? candidate : newest));
+  }
+
   function upsertOrchestrator(orchestrator: Orchestrator): void {
     const workspaceId = orchestrator.workspaceId;
     const list = [...(orchestratorsByWorkspace.value[workspaceId] ?? [])];
@@ -108,6 +119,7 @@ export const useOrchestratorsStore = defineStore('orchestrators', () => {
     // methods
     forWorkspace,
     byId,
+    forPlannerSession,
     upsertOrchestrator,
     removeOrchestrator,
     ensureFetched,

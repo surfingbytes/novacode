@@ -1,19 +1,18 @@
 <script setup lang="ts">
 // node_modules
-import { ref, computed, watch, onMounted, nextTick } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
+import { ChevronDown, MessageSquare } from 'lucide-vue-next';
 
 // components
 import BaseModal from '@/components/BaseModal.vue';
 import ModalHeader from '@/components/ModalHeader.vue';
+import AgentModelPicker from '@/components/AgentModelPicker.vue';
+import UiToggle from '@/components/ui/UiToggle.vue';
 
 // classes
-import { orchestratorApi } from '@/classes/api';
-import {
-  clearOrchestratorPrompt,
-  persistOrchestratorPrompt,
-  readOrchestratorPrompt
-} from '@/lib/pendingSessionPrompt';
+import { apiErrorMessage, orchestratorApi, settingsApi } from '@/classes/api';
+import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 import {
   normalizeDependsOn,
   parseOrchestratorSubtasksJson,
@@ -21,13 +20,22 @@ import {
   serializeOrchestratorSubtasksPayload
 } from '@/utils/orchestratorPayload';
 import { tagColorClass as categoryColorClass } from '@/utils/tagColors';
+import { agentTypeLabel } from '@/utils/agentTypeMeta';
 
 // stores
 import { useOrchestratorsStore } from '@/stores/orchestrators';
 import { useToastStore } from '@/stores/toasts';
+import { useWorkspacesStore } from '@/stores/workspaces';
 
 // types
-import type { Orchestrator, SubTask } from '@/@types/index';
+import type { AgentModelOption, AgentType, Orchestrator, OrchestratorRunMode, SubTask } from '@/@types/index';
+
+const RUN_MODE_STORAGE_KEY = 'nova:orchestrator:runMode';
+const AGENT_TYPES: AgentType[] = ['cursor-agent', 'claude', 'mistral-vibe', 'open-code', 'codex'];
+const MAX_PARALLEL_CHOICES = [1, 2, 3, 4, 5, 6, 8];
+const AUTO_MODEL_OPTION: AgentModelOption = { id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto', fast: null };
+
+type RunChoice = OrchestratorRunMode | 'next';
 
 // -------------------------------------------------- Props --------------------------------------------------
 
@@ -35,6 +43,16 @@ const props = defineProps<{
   workspaceId: string;
   orchestratorId: string;
   orchestrator: Orchestrator | null;
+  /** Shown as a tab inside the planning chat (no "open chat" navigation). */
+  bEmbedded?: boolean;
+}>();
+
+// -------------------------------------------------- Emits --------------------------------------------------
+
+const emit = defineEmits<{
+  (e: 'update:orchestrator', orchestrator: Orchestrator): void;
+  /** Embedded: switch back to the planning chat tab. */
+  (e: 'open-chat'): void;
 }>();
 
 // -------------------------------------------------- Store --------------------------------------------------
@@ -42,79 +60,95 @@ const props = defineProps<{
 const router = useRouter();
 const orchestratorsStore = useOrchestratorsStore();
 const toastStore = useToastStore();
+const workspacesStore = useWorkspacesStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 
-const userInput = ref('');
-const bDecomposing = ref(false);
 const bStartingRun = ref(false);
 const bStopping = ref(false);
 const bCloning = ref(false);
 const bSavingSubtasks = ref(false);
-const decomposeError = ref<string | null>(null);
-const decomposeLastAssistantContent = ref<string>('');
-const decomposeExpectedSchema = ref<string>('');
-const decomposeThinking = ref('');
-const decomposeThinkingEl = ref<HTMLElement | null>(null);
+const bSavingWorkers = ref(false);
+const bCreatingPlanner = ref(false);
 const runError = ref<string | null>(null);
 const editedSubtasks = ref<SubTask[]>([]);
 const bShowEditModal = ref(false);
 const editingTaskIndex = ref<number | null>(null);
 const editDraft = ref<SubTask>({ name: '', prompt: '', category: null });
+const bRunMenuOpen = ref(false);
+const preferredRunMode = ref<OrchestratorRunMode>(
+  safeGetItem(RUN_MODE_STORAGE_KEY) === 'parallel' ? 'parallel' : 'sequential'
+);
+const workerModelOptions = ref<AgentModelOption[]>([]);
+const bLoadingWorkerModels = ref(false);
 
 // -------------------------------------------------- Computed --------------------------------------------------
 
 const isRunning = computed(() => props.orchestrator?.runStatus === 'running');
 const canEdit = computed(() => !isRunning.value);
+const plannerSession = computed(() => {
+  const id = props.orchestrator?.sourceSessionId;
+  return id ? workspacesStore.allSessions.find((session) => session.id === id) ?? null : null;
+});
+const bHasPlanner = computed(() => !!props.orchestrator?.sourceSessionId);
+const workerAgentType = computed<AgentType>(() => (props.orchestrator?.agentType ?? 'cursor-agent') as AgentType);
+const bWorkersUsePlannerModel = computed(() => !props.orchestrator?.workerModel);
+const maxParallel = computed(() => props.orchestrator?.maxParallel ?? 3);
+
+const planPayload = computed(() => parseOrchestratorSubtasksJson(props.orchestrator?.subtasksJson));
+const subtasks = computed<SubTask[]>(() => planPayload.value?.subtasks ?? []);
+const sharedContextDisplay = computed(() => planPayload.value?.sharedContext?.trim() ?? '');
+const handoffLogDisplay = computed(() => planPayload.value?.handoffLog?.trim() ?? '');
+const failedStepCount = computed(() => subtasks.value.filter((task) => task.runResult === 'failed').length);
+const skippedStepCount = computed(() => subtasks.value.filter((task) => task.runResult === 'skipped').length);
+const runningStepCount = computed(() => subtasks.value.filter((task) => task.runResult === 'running').length);
+const finishedStepCount = computed(
+  () => subtasks.value.filter((task) => task.runResult && task.runResult !== 'running').length
+);
 
 const runProgress = computed(() => {
-  const o = props.orchestrator;
-  if (!o?.runStatus) {
-    return null;
-  }
-  const total = o.runTotalSteps ?? 0;
-  const current = o.runCurrentStep ?? 0;
-  if (o.runStatus === 'running') {
-    return { status: 'running' as const, completed: current, total };
-  }
-  if (o.runStatus === 'completed') {
-    return { status: 'completed' as const, completed: total, total };
-  }
-  if (o.runStatus === 'failed') {
-    return { status: 'failed' as const, completed: current, total };
-  }
-  if (o.runStatus === 'stopped') {
-    return { status: 'stopped' as const, completed: current, total };
+  const status = props.orchestrator?.runStatus;
+  if (status === 'running' || status === 'completed' || status === 'failed' || status === 'stopped') {
+    return { status, finished: finishedStepCount.value, running: runningStepCount.value, total: subtasks.value.length };
   }
   return null;
 });
 
-const planPayload = computed(() => parseOrchestratorSubtasksJson(props.orchestrator?.subtasksJson));
-
-const subtasks = computed<SubTask[]>(() => planPayload.value?.subtasks ?? []);
-
-const sharedContextDisplay = computed(() => planPayload.value?.sharedContext?.trim() ?? '');
-const handoffLogDisplay = computed(() => planPayload.value?.handoffLog?.trim() ?? '');
-const failedStepCount = computed(
-  () => subtasks.value.filter((task) => task.runResult === 'failed').length
-);
-const skippedStepCount = computed(
-  () => subtasks.value.filter((task) => task.runResult === 'skipped').length
-);
+const runChoices = computed<{ id: RunChoice; label: string; hint: string }[]>(() => [
+  { id: 'sequential', label: 'Run one by one', hint: 'Every step in the workspace, in order' },
+  {
+    id: 'parallel',
+    label: 'Run in parallel',
+    hint: `Up to ${maxParallel.value} at once, each in its own git worktree; merged back automatically`
+  },
+  { id: 'next', label: 'Run next step', hint: 'Only the first step that is ready' }
+]);
+const mainRunLabel = computed(() => (preferredRunMode.value === 'parallel' ? 'Run in parallel' : 'Run one by one'));
 
 // -------------------------------------------------- Watchers --------------------------------------------------
 
 watch(
   () => props.orchestrator?.subtasksJson,
   (json) => {
-    if (!json?.trim()) {
-      editedSubtasks.value = [];
-      return;
-    }
     const payload = parseOrchestratorSubtasksJson(json);
-    editedSubtasks.value = payload?.subtasks?.length
-      ? payload.subtasks.map((t) => ({ ...t }))
-      : [];
+    editedSubtasks.value = payload?.subtasks?.length ? payload.subtasks.map((t) => ({ ...t })) : [];
+  },
+  { immediate: true }
+);
+
+watch(
+  [workerAgentType, bWorkersUsePlannerModel],
+  async ([agent, bSame]) => {
+    if (bSame) return;
+    bLoadingWorkerModels.value = true;
+    try {
+      const { data } = await settingsApi.getAgentOptions(agent);
+      workerModelOptions.value = data.models.length > 0 ? data.models : [AUTO_MODEL_OPTION];
+    } catch {
+      workerModelOptions.value = [AUTO_MODEL_OPTION];
+    } finally {
+      bLoadingWorkerModels.value = false;
+    }
   },
   { immediate: true }
 );
@@ -142,33 +176,12 @@ const hasEdits = computed(() => {
 
 function taskStatus(index: number): 'idle' | 'active' | 'done' | 'failed' | 'skipped' {
   const task = editedSubtasks.value[index] ?? subtasks.value[index];
-  if (task?.runResult === 'failed') {
-    return 'failed';
+  if (task?.runResult === 'running') {
+    // A run interrupted by a restart leaves "running" behind.
+    return isRunning.value ? 'active' : 'failed';
   }
-  if (task?.runResult === 'skipped') {
-    return 'skipped';
-  }
-  if (task?.runResult === 'done') {
-    return 'done';
-  }
-  const o = props.orchestrator;
-  const total = subtasks.value.length;
-  if (!o || total === 0 || o.runStatus !== 'running') {
-    return 'idle';
-  }
-  const completedCount = o.runCurrentStep ?? 0;
-  const clampedTotal = o.runTotalSteps ?? total;
-  const clampedCompleted = Math.min(completedCount, clampedTotal);
-  const activeIndex = clampedCompleted >= clampedTotal ? clampedTotal - 1 : clampedCompleted;
-  if (index === activeIndex) {
-    return 'active';
-  }
-  return 'idle';
+  return task?.runResult ?? 'idle';
 }
-
-watch(userInput, (val) => {
-  persistOrchestratorPrompt(props.workspaceId, props.orchestratorId, val);
-});
 
 function openEditModal(index: number) {
   const task = editedSubtasks.value[index];
@@ -217,48 +230,6 @@ function saveEditFromModal() {
   saveSubtasks();
 }
 
-async function generateTasks() {
-  const msg = userInput.value.trim();
-  if (!msg || bDecomposing.value) {
-    return;
-  }
-  bDecomposing.value = true;
-  decomposeError.value = null;
-  decomposeLastAssistantContent.value = '';
-  decomposeExpectedSchema.value = '';
-  decomposeThinking.value = '';
-  try {
-    const data = await orchestratorApi.decomposeStream(
-      props.workspaceId,
-      props.orchestratorId,
-      { userMessage: msg },
-      {
-        onThinking(text) {
-          decomposeThinking.value += text;
-          nextTick(() => {
-            decomposeThinkingEl.value?.scrollTo({
-              top: decomposeThinkingEl.value.scrollHeight,
-              behavior: 'smooth'
-            });
-          });
-        }
-      }
-    );
-    if (data) {
-      orchestratorsStore.upsertOrchestrator(data);
-    }
-    clearOrchestratorPrompt(props.workspaceId, props.orchestratorId);
-    userInput.value = '';
-  } catch (e: unknown) {
-    const caughtError = e as Error & { lastAssistantContent?: string; expectedSchema?: string };
-    decomposeError.value = caughtError instanceof Error ? caughtError.message : 'Failed to generate tasks';
-    decomposeLastAssistantContent.value = caughtError.lastAssistantContent ?? '';
-    decomposeExpectedSchema.value = caughtError.expectedSchema ?? '';
-  } finally {
-    bDecomposing.value = false;
-  }
-}
-
 async function saveSubtasks() {
   if (!hasEdits.value || !props.orchestrator) {
     return;
@@ -275,7 +246,7 @@ async function saveSubtasks() {
       subtasksJson: serializeOrchestratorSubtasksPayload(nextPayload)
     });
     if (data) {
-      orchestratorsStore.upsertOrchestrator(data);
+      emit('update:orchestrator', data);
     }
   } catch {
     toastStore.error('Failed to save tasks');
@@ -284,22 +255,52 @@ async function saveSubtasks() {
   }
 }
 
-async function startTasks(startIndex = 0) {
+async function saveWorkers(patch: { agentType?: AgentType; workerModel?: string | null; maxParallel?: number }) {
+  bSavingWorkers.value = true;
+  try {
+    const { data } = await orchestratorApi.update(props.workspaceId, props.orchestratorId, patch);
+    if (data) {
+      emit('update:orchestrator', data);
+    }
+  } catch {
+    toastStore.error('Failed to save worker settings');
+  } finally {
+    bSavingWorkers.value = false;
+  }
+}
+
+function onWorkerAgentChange(event: Event): void {
+  const agent = (event.target as HTMLSelectElement).value as AgentType;
+  // The old model id belongs to the old agent.
+  void saveWorkers({ agentType: agent, workerModel: null });
+}
+
+function onSamePlannerModelToggle(bSame: boolean): void {
+  void saveWorkers({ workerModel: bSame ? null : 'auto' });
+}
+
+async function startRun(choice: RunChoice, opts: { startIndex?: number; onlyIndex?: number } = {}) {
+  bRunMenuOpen.value = false;
   if (subtasks.value.length === 0 || isRunning.value) {
     return;
+  }
+  if (choice !== 'next' && opts.onlyIndex === undefined && opts.startIndex === undefined) {
+    preferredRunMode.value = choice;
+    safeSetItem(RUN_MODE_STORAGE_KEY, choice);
   }
   runError.value = null;
   bStartingRun.value = true;
   try {
-    const { data } = await orchestratorApi.run(props.workspaceId, props.orchestratorId, {
-      startIndex
-    });
+    const body =
+      choice === 'next'
+        ? { next: true }
+        : { mode: choice, ...(opts.onlyIndex !== undefined ? { onlyIndex: opts.onlyIndex } : {}), ...(opts.startIndex !== undefined ? { startIndex: opts.startIndex } : {}) };
+    const { data } = await orchestratorApi.run(props.workspaceId, props.orchestratorId, body);
     if (data) {
-      orchestratorsStore.upsertOrchestrator(data);
+      emit('update:orchestrator', data);
     }
   } catch (e: unknown) {
-    const caughtError = e as { response?: { data?: { error?: string }; status?: number } };
-    runError.value = caughtError.response?.data?.error ?? (e instanceof Error ? e.message : 'Run failed');
+    runError.value = apiErrorMessage(e, 'Run failed');
   } finally {
     bStartingRun.value = false;
   }
@@ -314,12 +315,10 @@ async function stopTasks() {
   try {
     const { data } = await orchestratorApi.stop(props.workspaceId, props.orchestratorId);
     if (data) {
-      orchestratorsStore.upsertOrchestrator(data);
+      emit('update:orchestrator', data);
     }
   } catch (e: unknown) {
-    const caughtError = e as { response?: { data?: { error?: string }; status?: number } };
-    runError.value =
-      caughtError.response?.data?.error ?? (e instanceof Error ? e.message : 'Failed to stop run');
+    runError.value = apiErrorMessage(e, 'Failed to stop run');
   } finally {
     bStopping.value = false;
   }
@@ -351,6 +350,45 @@ function dependsOnLabel(task: SubTask): string {
   return deps.map((dep) => String(dep + 1)).join(', ');
 }
 
+function openStepSession(task: SubTask): void {
+  if (!task.sessionId) return;
+  void router.push({ name: 'session', params: { id: props.workspaceId, sessionId: task.sessionId } });
+}
+
+function openPlanningChat(): void {
+  if (props.bEmbedded) {
+    emit('open-chat');
+    return;
+  }
+  const sessionId = props.orchestrator?.sourceSessionId;
+  if (!sessionId) return;
+  void router.push({ name: 'session', params: { id: props.workspaceId, sessionId } });
+}
+
+async function startPlanningChat(): Promise<void> {
+  if (bCreatingPlanner.value) return;
+  bCreatingPlanner.value = true;
+  try {
+    const { data } = await orchestratorApi.createPlanner(props.workspaceId, props.orchestratorId);
+    emit('update:orchestrator', data);
+    if (data.sourceSessionId) {
+      await router.push({
+        name: 'session',
+        params: { id: props.workspaceId, sessionId: data.sourceSessionId },
+        query: { tab: 'orchestrator' }
+      });
+    }
+  } catch (e: unknown) {
+    toastStore.error(apiErrorMessage(e, 'Failed to start a planning chat'));
+  } finally {
+    bCreatingPlanner.value = false;
+  }
+}
+
+function closeRunMenu(): void {
+  bRunMenuOpen.value = false;
+}
+
 async function clonePlan() {
   if (bCloning.value) {
     return;
@@ -375,100 +413,125 @@ async function clonePlan() {
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 
 onMounted(() => {
-  const savedPrompt = readOrchestratorPrompt(props.workspaceId, props.orchestratorId);
-  if (savedPrompt != null) {
-    userInput.value = savedPrompt;
-  }
+  document.addEventListener('click', closeRunMenu);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', closeRunMenu);
 });
 </script>
 
 <template>
   <div class="flex-1 flex flex-col overflow-hidden min-h-0">
-    <!-- Conversation summary / messages could go here -->
     <div class="flex-1 overflow-y-auto px-4 md:px-6 py-4 space-y-4">
-      <!-- Prompt input: hidden while run is in progress -->
-      <template v-if="!isRunning">
-        <p class="text-sm text-text-muted">
-          Describe your goal below. The AI will break it into steps. You can edit the list and run
-          the steps in order.
+      <!-- Planning chat: where the plan is written and adjusted -->
+      <div class="rounded-xl border border-fg/15 bg-fg/[0.04] px-3 py-2.5 flex flex-wrap items-center gap-3">
+        <MessageSquare :size="16" :stroke-width="1.6" class="text-text-muted shrink-0" aria-hidden="true" />
+        <p class="text-sm text-text-muted flex-1 min-w-[12rem]">
+          <template v-if="bHasPlanner">
+            The planning chat<span v-if="plannerSession"> <strong class="text-text-primary font-medium">{{ plannerSession.name || 'Untitled session' }}</strong></span>
+            writes these steps and the spec every step reads. Ask it there to change the plan.
+          </template>
+          <template v-else>
+            This plan has no planning chat. Start one to have an agent write and adjust the steps.
+          </template>
         </p>
-        <div class="space-y-2">
-          <textarea
-            v-model="userInput"
-            placeholder="e.g. Add a login page with email/password and run the test suite"
-            rows="3"
-            class="w-full text-sm px-3 py-2 rounded-xl border border-fg/10 bg-fg/[0.04] text-text-primary placeholder-text-muted focus:outline-none focus:border-primary/50 resize-none"
-            :disabled="bDecomposing"
-          />
-          <div class="flex items-center gap-2">
-            <button
-              type="button"
-              @click="generateTasks"
-              :disabled="!userInput.trim() || bDecomposing"
-              class="px-4 py-2 text-sm font-medium btn-primary-solid rounded-lg disabled:opacity-40 transition-opacity flex items-center gap-2"
-            >
-              <span
-                v-if="bDecomposing"
-                class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"
-              />
-              {{ subtasks.length ? 'Update tasks' : 'Generate tasks' }}
-            </button>
-            <span v-if="decomposeError" class="text-xs text-destructive">{{ decomposeError }}</span>
-          </div>
-          <!-- Decompose failure debug: last assistant result + expected schema -->
-          <div
-            v-if="decomposeError && (decomposeLastAssistantContent || decomposeExpectedSchema)"
-            class="rounded-xl border border-amber-500/30 bg-amber-500/5 overflow-hidden space-y-2"
-          >
-            <div class="px-3 py-2 border-b border-fg/10 flex items-center gap-2">
-              <span class="text-sm font-medium text-amber-400">Debug: decomposition failed</span>
-            </div>
-            <div v-if="decomposeLastAssistantContent" class="px-3 py-2">
-              <p class="text-xs font-medium text-text-muted mb-1">Last assistant response (raw):</p>
-              <pre
-                class="text-xs text-text-muted max-h-40 overflow-y-auto whitespace-pre-wrap break-all font-mono bg-black/10 rounded p-2"
-                >{{ decomposeLastAssistantContent || '(empty)' }}</pre
-              >
-            </div>
-            <div v-if="decomposeExpectedSchema" class="px-3 py-2 border-t border-fg/10">
-              <p class="text-xs font-medium text-text-muted mb-1">Expected schema:</p>
-              <pre
-                class="text-xs text-text-muted max-h-32 overflow-y-auto whitespace-pre-wrap font-mono bg-black/10 rounded p-2"
-                >{{ decomposeExpectedSchema }}</pre
-              >
-            </div>
-          </div>
-        </div>
-      </template>
-
-      <!-- Live thinking output during decompose (thinking only, no tool calls) -->
-      <div
-        v-if="decomposeThinking.length > 0 || bDecomposing"
-        class="rounded-xl border border-fg/15 bg-fg/[0.04] overflow-hidden"
-      >
-        <div class="px-3 py-2 border-b border-fg/10 flex items-center gap-2">
-          <span
-            v-if="bDecomposing"
-            class="w-3.5 h-3.5 border-2 border-primary/40 border-t-primary rounded-full animate-spin shrink-0"
-          />
-          <span class="text-sm font-medium text-text-primary">Thinking</span>
-        </div>
-        <div
-          class="px-3 py-2 text-sm text-text-muted max-h-48 overflow-y-auto whitespace-pre-wrap break-words font-mono"
-          ref="decomposeThinkingEl"
+        <button
+          v-if="bHasPlanner && !bEmbedded"
+          type="button"
+          class="px-3 py-1.5 text-sm font-medium border border-fg/20 text-text-primary rounded-lg hover:bg-fg/[0.06] transition-colors"
+          @click="openPlanningChat"
         >
-          {{ decomposeThinking || (bDecomposing ? '…' : '') }}
+          Open planning chat
+        </button>
+        <button
+          v-else-if="bHasPlanner"
+          type="button"
+          class="px-3 py-1.5 text-sm font-medium border border-fg/20 text-text-primary rounded-lg hover:bg-fg/[0.06] transition-colors"
+          @click="openPlanningChat"
+        >
+          Back to chat
+        </button>
+        <button
+          v-else
+          type="button"
+          class="px-3 py-1.5 text-sm font-medium border border-fg/20 text-text-primary rounded-lg hover:bg-fg/[0.06] transition-colors disabled:opacity-60"
+          :disabled="bCreatingPlanner"
+          @click="startPlanningChat"
+        >
+          {{ bCreatingPlanner ? 'Starting…' : 'Start planning chat' }}
+        </button>
+      </div>
+
+      <!-- Workers: agent + model for the step sessions -->
+      <div class="rounded-xl border border-fg/15 overflow-hidden">
+        <div class="px-3 py-2 border-b border-fg/10 bg-fg/[0.04]">
+          <span class="text-sm font-medium text-text-primary">Workers</span>
+          <p class="text-xs text-text-muted mt-0.5">Agent and model of the step sessions.</p>
+        </div>
+        <div class="px-3 py-3 flex flex-col gap-3">
+          <div class="flex flex-wrap items-center gap-3">
+            <label class="text-xs text-text-muted w-28 shrink-0" for="orch-worker-agent">Agent</label>
+            <select
+              id="orch-worker-agent"
+              class="text-sm px-2 py-1.5 rounded-lg border border-fg/10 bg-fg/[0.04] text-text-primary"
+              :value="workerAgentType"
+              :disabled="!canEdit || bSavingWorkers"
+              @change="onWorkerAgentChange"
+            >
+              <option v-for="agent in AGENT_TYPES" :key="agent" :value="agent">{{ agentTypeLabel(agent) }}</option>
+            </select>
+          </div>
+          <div class="flex flex-wrap items-center gap-3">
+            <span class="text-xs text-text-muted w-28 shrink-0">Same model as planning chat</span>
+            <UiToggle
+              :model-value="bWorkersUsePlannerModel"
+              :disabled="!canEdit || bSavingWorkers"
+              aria-label="Workers use the planning chat's model"
+              @update:model-value="onSamePlannerModelToggle"
+            />
+          </div>
+          <div v-if="!bWorkersUsePlannerModel" class="flex flex-wrap items-center gap-3">
+            <span class="text-xs text-text-muted w-28 shrink-0">Model</span>
+            <div class="min-w-[14rem]">
+              <AgentModelPicker
+                :model-value="orchestrator?.workerModel ?? 'auto'"
+                :agent-type="workerAgentType"
+                :model-options="workerModelOptions"
+                :disabled="!canEdit || bSavingWorkers || bLoadingWorkerModels"
+                variant="modal"
+                @update:model-value="saveWorkers({ workerModel: $event })"
+              />
+            </div>
+          </div>
+          <div class="flex flex-wrap items-center gap-3">
+            <label class="text-xs text-text-muted w-28 shrink-0" for="orch-max-parallel">Parallel at once</label>
+            <select
+              id="orch-max-parallel"
+              class="text-sm px-2 py-1.5 rounded-lg border border-fg/10 bg-fg/[0.04] text-text-primary"
+              :value="maxParallel"
+              :disabled="!canEdit || bSavingWorkers"
+              @change="saveWorkers({ maxParallel: Number(($event.target as HTMLSelectElement).value) })"
+            >
+              <option v-for="count in MAX_PARALLEL_CHOICES" :key="count" :value="count">{{ count }}</option>
+            </select>
+          </div>
         </div>
       </div>
+
+      <p v-if="editedSubtasks.length === 0" class="text-sm text-text-muted">
+        No steps yet. Describe the work in the planning chat, then ask the agent to plan it as an orchestrator
+        (or use <strong>Plan as orchestrator</strong> in the chat header).
+      </p>
 
       <div
         v-if="sharedContextDisplay"
         class="rounded-xl border border-primary/25 bg-primary/5 overflow-hidden"
       >
         <div class="px-3 py-2 border-b border-fg/10">
-          <span class="text-sm font-medium text-text-primary">Shared plan context</span>
+          <span class="text-sm font-medium text-text-primary">Plan notes</span>
           <p class="text-xs text-text-muted mt-0.5">
-            Prepended to every step so later sessions see the same decisions and constraints.
+            Given to every step together with the planning chat's spec (read live when the step starts).
           </p>
         </div>
         <div
@@ -526,17 +589,32 @@ onMounted(() => {
                   task.name
                 }}</span>
                 <span
-                  v-if="task.runResult === 'skipped'"
+                  v-if="taskStatus(i) === 'active'"
+                  class="text-xs px-2 py-0.5 rounded-full border border-primary/40 text-primary shrink-0"
+                >
+                  Running
+                </span>
+                <span
+                  v-else-if="task.runResult === 'skipped'"
                   class="text-xs px-2 py-0.5 rounded-full border border-fg/20 text-text-muted shrink-0"
                 >
                   Skipped
                 </span>
                 <span
-                  v-else-if="task.runResult === 'failed'"
+                  v-else-if="taskStatus(i) === 'failed'"
                   class="text-xs px-2 py-0.5 rounded-full border border-destructive/40 text-destructive shrink-0"
                 >
                   Failed
                 </span>
+                <button
+                  v-if="task.sessionId"
+                  type="button"
+                  class="p-1.5 rounded text-text-muted hover:text-text-primary hover:bg-fg/10 transition-colors text-xs"
+                  title="Open this step's session"
+                  @click="openStepSession(task)"
+                >
+                  Session
+                </button>
                 <span
                   v-if="dependsOnLabel(task)"
                   class="text-xs text-text-muted shrink-0"
@@ -551,17 +629,28 @@ onMounted(() => {
                 >
                   {{ task.category }}
                 </span>
-                <button
-                  v-if="!isRunning && i > 0"
-                  type="button"
-                  class="p-1.5 rounded text-text-muted hover:text-text-primary hover:bg-fg/10 transition-colors text-xs"
-                  title="Run from this step"
-                  :disabled="bStartingRun"
-                  @click="startTasks(i)"
-                >
-                  Run from here
-                </button>
-                <template v-if="canEdit">
+                <template v-if="!isRunning">
+                  <button
+                    type="button"
+                    class="p-1.5 rounded text-text-muted hover:text-text-primary hover:bg-fg/10 transition-colors text-xs"
+                    title="Run only this step (in the workspace)"
+                    :disabled="bStartingRun"
+                    @click="startRun('sequential', { onlyIndex: i })"
+                  >
+                    Run step
+                  </button>
+                  <button
+                    v-if="i > 0"
+                    type="button"
+                    class="p-1.5 rounded text-text-muted hover:text-text-primary hover:bg-fg/10 transition-colors text-xs"
+                    title="Run this and the following steps one by one"
+                    :disabled="bStartingRun"
+                    @click="startRun('sequential', { startIndex: i })"
+                  >
+                    Run from here
+                  </button>
+                </template>
+                <template v-if="canEdit && task.kind !== 'verify'">
                   <button
                     type="button"
                     class="p-1.5 rounded text-text-muted hover:text-text-primary hover:bg-fg/10 transition-colors"
@@ -582,6 +671,13 @@ onMounted(() => {
               </div>
               <div class="px-3 py-2 text-sm text-text-muted bg-black/5 orch-card-inner">
                 <p class="whitespace-pre-wrap break-words">{{ task.prompt }}</p>
+                <p
+                  v-if="task.runNote"
+                  class="mt-2 text-xs whitespace-pre-wrap break-words"
+                  :class="taskStatus(i) === 'failed' ? 'text-destructive' : 'text-warning'"
+                >
+                  {{ task.runNote }}
+                </p>
               </div>
             </div>
             <div
@@ -708,7 +804,10 @@ onMounted(() => {
           <span
             class="inline-block w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin align-middle mr-1.5"
           />
-          Running step {{ (runProgress.completed ?? 0) + 1 }}/{{ runProgress.total }}
+          {{ orchestrator?.runMode === 'parallel' ? 'Running in parallel' : 'Running' }}:
+          {{ runProgress.finished }}/{{ runProgress.total }} finished<template v-if="runProgress.running"
+            >, {{ runProgress.running }} running</template
+          >
         </span>
         <span v-else-if="runProgress.status === 'completed'">
           Completed {{ runProgress.total }}/{{ runProgress.total }}
@@ -720,7 +819,7 @@ onMounted(() => {
           >
         </span>
         <span v-else>
-          Stopped at step {{ runProgress.completed + 1 }}/{{ runProgress.total }}
+          Stopped after {{ runProgress.finished }}/{{ runProgress.total }} steps
         </span>
       </div>
       <div v-if="runError" class="text-sm text-destructive">{{ runError }}</div>
@@ -760,19 +859,52 @@ onMounted(() => {
           <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" class="select-none shrink-0" aria-hidden="true"><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6"/></svg>
           {{ bStopping ? 'Stopping…' : 'Stop run' }}
         </button>
-        <button
-          v-else
-          type="button"
-          @click="startTasks(0)"
-          :disabled="subtasks.length === 0 || bStartingRun"
-          class="px-4 py-2.5 text-sm font-medium btn-primary-solid rounded-lg disabled:opacity-40 transition-opacity flex items-center gap-2"
-        >
-          <span
-            v-if="bStartingRun"
-            class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0"
-          />
-          {{ bStartingRun ? 'Starting…' : 'Start tasks' }}
-        </button>
+        <div v-else class="relative">
+          <div class="inline-flex items-stretch rounded-lg overflow-hidden btn-primary-solid">
+            <button
+              type="button"
+              class="px-4 py-2.5 text-sm font-medium disabled:opacity-40 transition-opacity flex items-center gap-2"
+              :disabled="subtasks.length === 0 || bStartingRun"
+              @click="startRun(preferredRunMode)"
+            >
+              <span
+                v-if="bStartingRun"
+                class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0"
+              />
+              {{ bStartingRun ? 'Starting…' : mainRunLabel }}
+            </button>
+            <button
+              type="button"
+              class="px-2 border-l border-white/20 disabled:opacity-40"
+              aria-haspopup="true"
+              :aria-expanded="bRunMenuOpen"
+              aria-label="Run options"
+              title="Run options"
+              :disabled="subtasks.length === 0 || bStartingRun"
+              @click.stop="bRunMenuOpen = !bRunMenuOpen"
+            >
+              <ChevronDown :size="14" :stroke-width="1.8" aria-hidden="true" />
+            </button>
+          </div>
+          <div
+            v-if="bRunMenuOpen"
+            class="absolute right-0 bottom-full mb-1 z-50 w-72 rounded-lg border border-border bg-surface py-1 shadow-lg"
+            role="menu"
+            @click.stop
+          >
+            <button
+              v-for="choice in runChoices"
+              :key="choice.id"
+              type="button"
+              class="w-full px-3 py-2 text-left hover:bg-fg/[0.06] transition-colors"
+              role="menuitem"
+              @click="startRun(choice.id)"
+            >
+              <span class="block text-sm text-text-primary">{{ choice.label }}</span>
+              <span class="block text-xs text-text-muted">{{ choice.hint }}</span>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </div>

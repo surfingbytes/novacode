@@ -30,6 +30,7 @@ import type { AcpSessionResponse } from './acpSessionHelpers';
 import { extractAgentErrorDetail, type AgentErrorDetail } from './agentError';
 import { logger, truncateLogText } from './logger';
 import { getConfiguredAcpMcpServers, mcpUnavailableNoticeEventLine } from './mcpServersForAcp';
+import { agentSupportsHttpMcp, novaMcpServerIfSession } from './novaMcp';
 import { createSubagentTranscriptWatcher } from './cursorSubagentTranscripts';
 
 export type AcpEventHandler = (line: string) => void;
@@ -1207,7 +1208,13 @@ export async function runAcpSubprocessPrompt(
       let sessionResponse: AcpSessionResponse;
       let resolvedModeId: string | undefined;
       let resolvedModelId: string | undefined;
-      const mcpServers = params.mcpServers ?? await getConfiguredAcpMcpServers(config.configDir);
+      // Explicit `mcpServers` (probes, one-shots) are used as-is; chat turns get the
+      // configured servers plus Nova's own MCP for this session.
+      let mcpServers = params.mcpServers ?? await getConfiguredAcpMcpServers(config.configDir);
+      if (!params.mcpServers) {
+        const nova = await novaMcpServerIfSession(novaSessionId, agentSupportsHttpMcp(initialized));
+        if (nova) mcpServers = [...mcpServers.filter((server) => server.name !== nova.name), nova];
+      }
 
       const newSession = async (servers: McpServer[]): Promise<NewSessionResponse> => {
         phase('session:new:start');

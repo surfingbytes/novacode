@@ -23,6 +23,7 @@ import type { AgentErrorDetail } from './agentError';
 import { logger } from './logger';
 import { config } from './config';
 import { getConfiguredAcpMcpServers } from './mcpServersForAcp';
+import { novaMcpServerIfSession } from './novaMcp';
 import { buildPromptContent, sessionResetNoticeEventLine } from './acpSubprocessRunner';
 import type { AcpPermissionHandler, AcpPromptAttachment, SessionConfigSyncHandler } from './acpSubprocessRunner';
 
@@ -249,7 +250,12 @@ export async function runClaudeAcp(
   }
 
   const agent = await getAgentForNovaSession(novaSessionId);
-  const mcpServers = await getConfiguredAcpMcpServers(config.configDir);
+  // claude-agent-acp supports HTTP MCP; Nova's server is skipped for one-shot runs (no DB session).
+  const configuredMcp = await getConfiguredAcpMcpServers(config.configDir);
+  const novaMcp = await novaMcpServerIfSession(novaSessionId, true);
+  const mcpServers = novaMcp
+    ? [...configuredMcp.filter((server) => server.name !== novaMcp.name), novaMcp]
+    : configuredMcp;
   let resolvedSessionId: string;
   let sessionResponse: AcpSessionResponse;
   /** True when a brand-new conversation was created (rules must be injected). */

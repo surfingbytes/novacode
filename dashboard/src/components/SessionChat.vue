@@ -10,7 +10,8 @@ import GitView from '@/components/workspace/GitView.vue';
 import AppTerminal from '@/components/AppTerminal.vue';
 import ConfirmModal from '@/components/ConfirmModal.vue';
 import SessionEditModal from '@/components/SessionEditModal.vue';
-import SessionSpecButton from '@/components/chat/SessionSpecButton.vue';
+import SessionOrchestratorButton from '@/components/chat/SessionOrchestratorButton.vue';
+import OrchestratorPanel from '@/components/OrchestratorPanel.vue';
 import ClaudeLimitPopup from '@/components/ClaudeLimitPopup.vue';
 import ChatMessageList from '@/components/chat/ChatMessageList.vue';
 import ChatComposer, { type PendingAttachment } from '@/components/chat/ChatComposer.vue';
@@ -65,11 +66,14 @@ import { useWorkspacesStore } from '@/stores/workspaces';
 import { useToastStore } from '@/stores/toasts';
 import { useAuthStore } from '@/stores/auth';
 import { useApiHealthStore } from '@/stores/apiHealth';
+import { useOrchestratorsStore } from '@/stores/orchestrators';
 
 // types
+import { buildPlanAsOrchestratorPrompt, subtasksFromStoredJson } from '@novacode/shared';
 import type {
   ApprovalPolicy,
   ChatMessage,
+  Orchestrator,
   LinkedPlanContext,
   Session,
   SessionUsageSummary,
@@ -109,6 +113,7 @@ const toastStore = useToastStore();
 const apiHealth = useApiHealthStore();
 const { bApiReachable, healthyPingCount } = storeToRefs(apiHealth);
 const auth = useAuthStore();
+const orchestratorsStore = useOrchestratorsStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 // Last-known snapshot for this session (chat + plan) — shown instantly while
@@ -208,7 +213,7 @@ function toggleToolOutput(callId: string): void {
   expandedToolOutputIds.value = next;
 }
 
-type SessionTab = 'chat' | 'terminal' | 'files' | 'git' | 'plan';
+type SessionTab = 'chat' | 'terminal' | 'files' | 'git' | 'plan' | 'orchestrator';
 const activeTab = ref<SessionTab>('chat');
 const filesOpenPath = ref<string | null>(readFilesOpenPath(props.workspaceId));
 const rulesCount = ref(0);
@@ -407,11 +412,6 @@ watch(
   }
 );
 
-/** Spec → orchestrator needs a conversation the agent can turn into a spec. */
-const bHasAssistantReply = computed(
-  () => !!session.value?.sessionId || messages.value.some((message) => message.role === 'assistant')
-);
-
 const liveBusySubagents = computed(() => {
   const fromStore = workspacesStore.allSessions.find(
     (storeSession) => storeSession.id === props.sessionId
@@ -544,6 +544,51 @@ function onUploadFiles(files: File[]): void {
   }
 }
 
+// -------------------------------------------------- Orchestrator mode --------------------------------------------------
+/** Plan this chat owns (its agent writes it through the nova MCP). */
+const plannedOrchestrator = computed<Orchestrator | null>(() =>
+  orchestratorsStore.forPlannerSession(props.workspaceId, props.sessionId)
+);
+const bPlanHasSteps = computed(() => subtasksFromStoredJson(plannedOrchestrator.value?.subtasksJson).length > 0);
+/** Set once the workspace's plans are loaded, so only plans created afterwards switch tabs. */
+const bOrchestratorsLoaded = ref(false);
+
+function loadPlannedOrchestrator(): void {
+  bOrchestratorsLoaded.value = false;
+  void orchestratorsStore.ensureFetched(props.workspaceId).finally(() => {
+    bOrchestratorsLoaded.value = true;
+  });
+}
+
+/** Ask the chat's agent to write the spec and the steps (nova MCP tools). */
+function planAsOrchestrator(): void {
+  activeTab.value = 'chat';
+  chatSocket.sendPrompt({
+    text: buildPlanAsOrchestratorPrompt(bPlanHasSteps.value),
+    model: modelSelection.value,
+    mode: displaySessionMode.value,
+    imagePaths: []
+  });
+}
+
+function openOrchestratorPage(): void {
+  if (!plannedOrchestrator.value) return;
+  void router.push({
+    name: 'orchestrator',
+    params: { id: props.workspaceId, orchestratorId: plannedOrchestrator.value.id }
+  });
+}
+
+// The agent just saved the first steps of this chat's plan: show it.
+watch(
+  () => [props.sessionId, bPlanHasSteps.value] as const,
+  ([sessionId, bHasSteps], [previousSessionId, bHadSteps]) => {
+    if (sessionId === previousSessionId && bHasSteps && !bHadSteps && bOrchestratorsLoaded.value) {
+      activeTab.value = 'orchestrator';
+    }
+  }
+);
+
 function onComposerSend(payload: { text: string; imagePaths: string[] }): void {
   clearSessionPrompt(props.workspaceId, props.sessionId);
   chatSocket.sendPrompt({
@@ -601,7 +646,7 @@ const pooledRemainingLabel = computed(() => {
 });
 
 function tabFromQuery(raw: unknown): SessionTab | null {
-  if (raw === 'chat' || raw === 'terminal' || raw === 'files' || raw === 'git' || raw === 'plan') {
+  if (raw === 'chat' || raw === 'terminal' || raw === 'files' || raw === 'git' || raw === 'plan' || raw === 'orchestrator') {
     return raw;
   }
   return null;
@@ -718,6 +763,7 @@ const sessionTerminalWsUrl = computed(() =>
 const sessionTabs = computed(() => [
   { id: 'chat', label: 'Chat' },
   { id: 'plan', label: 'Plan', bVisible: bShowPlanTab.value },
+  { id: 'orchestrator', label: 'Orchestrator', bVisible: !!plannedOrchestrator.value },
   { id: 'terminal', label: 'Terminal' },
   { id: 'files', label: 'Files' },
   { id: 'git', label: 'Git' }
@@ -964,6 +1010,7 @@ watch(
   () => props.workspaceId,
   (workspaceId) => {
     void loadRulesCount();
+    loadPlannedOrchestrator();
     const file = route.query.file;
     filesOpenPath.value =
       typeof file === 'string' && file.trim() ? file : readFilesOpenPath(workspaceId);
@@ -1157,11 +1204,14 @@ onUnmounted(() => {
         </button>
       </template>
       <template v-if="session && !session.archived" #actions-leading>
-        <SessionSpecButton
+        <SessionOrchestratorButton
           :workspace-id="workspaceId"
           :session-id="session.id"
-          :b-busy="bIsStreaming"
-          :b-has-conversation="bHasAssistantReply"
+          :orchestrator-id="plannedOrchestrator?.id ?? null"
+          :b-has-steps="bPlanHasSteps"
+          @plan="planAsOrchestrator"
+          @open-plan="activeTab = 'orchestrator'"
+          @open-page="openOrchestratorPage"
         />
       </template>
       <template #subtitle-trailing>
@@ -1384,6 +1434,16 @@ onUnmounted(() => {
           ({ plan, entry, index }) => planDocs.markPlanEntryDone(plan, entry, index)
         "
         @markdown-click="planDocs.onPlanMarkdownClick"
+      />
+
+      <OrchestratorPanel
+        v-if="activeTab === 'orchestrator' && plannedOrchestrator"
+        :workspace-id="workspaceId"
+        :orchestrator-id="plannedOrchestrator.id"
+        :orchestrator="plannedOrchestrator"
+        b-embedded
+        @update:orchestrator="orchestratorsStore.upsertOrchestrator"
+        @open-chat="activeTab = 'chat'"
       />
 
       <!-- Terminal -->

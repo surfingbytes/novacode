@@ -18,6 +18,7 @@ import type {
   Session,
   SessionSpecStatus,
   Orchestrator,
+  OrchestratorRunMode,
   RoleTemplate,
   WorkspaceRuleFileSummary,
   WorkspaceRuleFileContent,
@@ -260,9 +261,15 @@ export function apiErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+/** Nova's own MCP server (spec + orchestrator tools for chat agents). */
+export interface McpBuiltinStatus {
+  nova: { enabled: boolean };
+}
+
 interface McpClientsResponse {
   servers: Record<string, McpClientServer>;
   autoload: McpAutoloadStatus;
+  builtin: McpBuiltinStatus;
 }
 
 interface McpClientsCheckResponse {
@@ -368,6 +375,9 @@ export const settingsApi = {
     servers: Record<string, McpClientServer>
   ): ReturnType<typeof http.put<McpClientsResponse>> =>
     http.put<McpClientsResponse>('/settings/mcp-clients', { servers }),
+
+  saveMcpBuiltin: (builtin: McpBuiltinStatus): ReturnType<typeof http.put<McpBuiltinStatus>> =>
+    http.put<McpBuiltinStatus>('/settings/mcp-builtin', builtin),
 
   /** Dry-run: stdio spawn probe + HTTP GET; optional body validates unsaved servers */
   checkMcpClients: (
@@ -855,7 +865,7 @@ export const sessionsApi = {
   }
 };
 
-// ---------------------------------- Session spec (chat → orchestrator) ----------------------------------
+// ---------------------------------- Session spec ----------------------------------
 export interface SessionSpecResponse {
   status: SessionSpecStatus;
   content: string | null;
@@ -867,19 +877,18 @@ export const sessionSpecApi = {
 
   /** Create the (empty template) spec file only. */
   create: (workspaceId: string, sessionId: string): ReturnType<typeof http.post<SessionSpecResponse>> =>
-    http.post<SessionSpecResponse>(`/workspaces/${workspaceId}/sessions/${sessionId}/spec`),
-
-  /** Agent writes the spec from the chat, then a ready-to-run orchestrator is generated (background). */
-  generateOrchestrator: (
-    workspaceId: string,
-    sessionId: string
-  ): ReturnType<typeof http.post<{ status: SessionSpecStatus }>> =>
-    http.post<{ status: SessionSpecStatus }>(
-      `/workspaces/${workspaceId}/sessions/${sessionId}/spec/orchestrator`
-    )
+    http.post<SessionSpecResponse>(`/workspaces/${workspaceId}/sessions/${sessionId}/spec`)
 };
 
 // ---------------------------------- Orchestrator ----------------------------------
+export interface OrchestratorPlannerPayload {
+  agentType?: AgentType;
+  modelSelection?: string | null;
+  approvalPolicy?: ApprovalPolicy;
+  name?: string;
+  tags?: string[] | null;
+}
+
 export const orchestratorApi = {
   list: (workspaceId: string): ReturnType<typeof http.get<Orchestrator[]>> =>
     http.get<Orchestrator[]>(`/workspaces/${workspaceId}/orchestrators`),
@@ -892,10 +901,23 @@ export const orchestratorApi = {
     payload?: {
       name?: string;
       tags?: string | null;
+      /** Agent for the step sessions. */
       agentType?: AgentType;
+      workerModel?: string | null;
+      maxParallel?: number;
+      /** Also create the planning chat (linked as `sourceSessionId`). */
+      planner?: OrchestratorPlannerPayload;
     }
   ): ReturnType<typeof http.post<Orchestrator>> =>
     http.post<Orchestrator>(`/workspaces/${workspaceId}/orchestrators`, payload ?? {}),
+
+  /** Attach a new planning chat to an orchestrator that has none. */
+  createPlanner: (
+    workspaceId: string,
+    orchestratorId: string,
+    payload?: OrchestratorPlannerPayload
+  ): ReturnType<typeof http.post<Orchestrator>> =>
+    http.post<Orchestrator>(`/workspaces/${workspaceId}/orchestrators/${orchestratorId}/planner`, payload ?? {}),
 
   update: (
     workspaceId: string,
@@ -905,6 +927,9 @@ export const orchestratorApi = {
       tags?: string | null;
       subtasksJson?: string | null;
       archived?: boolean;
+      agentType?: AgentType;
+      workerModel?: string | null;
+      maxParallel?: number;
     }
   ): ReturnType<typeof http.patch<Orchestrator>> =>
     http.patch<Orchestrator>(`/workspaces/${workspaceId}/orchestrators/${orchestratorId}`, patch),
@@ -912,101 +937,10 @@ export const orchestratorApi = {
   remove: (workspaceId: string, orchestratorId: string): ReturnType<typeof http.delete> =>
     http.delete(`/workspaces/${workspaceId}/orchestrators/${orchestratorId}`),
 
-  decompose: (
-    workspaceId: string,
-    orchestratorId: string,
-    body: { userMessage: string }
-  ): ReturnType<typeof http.post<Orchestrator>> =>
-    http.post<Orchestrator>(
-      `/workspaces/${workspaceId}/orchestrators/${orchestratorId}/decompose`,
-      body
-    ),
-
-  /** Decompose with SSE stream; calls onThinking(text) for each thinking chunk, resolves with orchestrator on done. */
-  async decomposeStream(
-    workspaceId: string,
-    orchestratorId: string,
-    body: { userMessage: string },
-    opts: { onThinking: (text: string) => void }
-  ): Promise<Orchestrator | null> {
-    const baseURL = (import.meta.env.VITE_API_URL ?? location.origin + '/api').replace(/\/$/, '');
-    const token = safeGetItem('token');
-    const response = await fetch(
-      `${baseURL}/workspaces/${workspaceId}/orchestrators/${orchestratorId}/decompose`,
-      {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify(body)
-      }
-    );
-    if (!response.ok || !response.body) {
-      return null;
-    }
-    const reader = response.body.getReader();
-    const dec = new TextDecoder();
-    let buffer = '';
-    let orchestrator: Orchestrator | null = null;
-    let errorMsg: string | null = null;
-    let lastAssistantContent: string | undefined;
-    let expectedSchema: string | undefined;
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) {
-        break;
-      }
-      buffer += dec.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6)) as {
-              type: string;
-              text?: string;
-              orchestrator?: Orchestrator;
-              error?: string;
-              lastAssistantContent?: string;
-              expectedSchema?: string;
-            };
-            if (data.type === 'thinking' && typeof data.text === 'string') {
-              opts.onThinking(data.text);
-            } else if (data.type === 'done' && data.orchestrator) {
-              orchestrator = data.orchestrator as Orchestrator;
-            } else if (data.type === 'error') {
-              errorMsg = data.error ?? 'Decomposition failed';
-              if (data.lastAssistantContent !== undefined) {
-                lastAssistantContent = data.lastAssistantContent;
-              }
-              if (data.expectedSchema !== undefined) {
-                expectedSchema = data.expectedSchema;
-              }
-            }
-          } catch {
-            // skip malformed
-          }
-        }
-      }
-    }
-    if (errorMsg) {
-      const error = new Error(errorMsg) as Error & {
-        lastAssistantContent?: string;
-        expectedSchema?: string;
-      };
-      error.lastAssistantContent = lastAssistantContent;
-      error.expectedSchema = expectedSchema;
-      throw error;
-    }
-    return orchestrator;
-  },
-
   run: (
     workspaceId: string,
     orchestratorId: string,
-    body?: { startIndex?: number }
+    body?: { mode?: OrchestratorRunMode; startIndex?: number; onlyIndex?: number; next?: boolean }
   ): ReturnType<typeof http.post<Orchestrator>> =>
     http.post<Orchestrator>(
       `/workspaces/${workspaceId}/orchestrators/${orchestratorId}/run`,
