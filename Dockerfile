@@ -4,7 +4,7 @@
 # --ignore-scripts skips the root postinstall (it needs source + Prisma schema).
 # node-pty's install script is rebuilt explicitly so its native binary is present.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:24 AS deps
+FROM node:24-trixie AS deps
 
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -45,7 +45,7 @@ RUN --mount=type=cache,target=/root/.cache/prisma \
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 5: Runtime image
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:24
+FROM node:24-trixie
 
 # Keep build tools at runtime — node-pty's native addon needs them for the
 # platform-specific binary. Also install git, gosu (for entrypoint chown+drop),
