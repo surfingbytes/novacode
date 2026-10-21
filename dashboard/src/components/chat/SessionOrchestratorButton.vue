@@ -7,7 +7,7 @@
  */
 // node_modules
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { ChevronDown, Copy, ExternalLink, FilePlus, FileText, RefreshCw, Workflow } from 'lucide-vue-next';
+import { ChevronDown, Copy, ExternalLink, FileText, RefreshCw, Workflow } from 'lucide-vue-next';
 
 // components
 import BaseModal from '@/components/BaseModal.vue';
@@ -67,6 +67,9 @@ const mainTitle = computed(() =>
     ? 'Show the plan of this chat'
     : 'The agent writes the spec and splits the agreed work into steps (Nova MCP)'
 );
+/** The agent writes the spec through the nova MCP; until then there is nothing to open. */
+const bHasSpec = computed(() => !!status.value?.hasContent);
+const bHasMenu = computed(() => bHasPlan.value || bHasSpec.value);
 const renderedSpec = computed(() => renderMd(specContent.value ?? ''));
 
 // -------------------------------------------------- Methods --------------------------------------------------
@@ -96,16 +99,6 @@ function runMenuAction(action: 'plan' | 'open-page'): void {
   bMenuOpen.value = false;
   if (action === 'plan') emit('plan');
   else emit('open-page');
-}
-
-async function createSpecOnly(): Promise<void> {
-  bMenuOpen.value = false;
-  try {
-    await specsStore.createSpec(props.workspaceId, props.sessionId);
-    toastStore.success('Spec file created — ask the agent to write to the spec');
-  } catch (err) {
-    toastStore.error(errorMessage(err, 'Failed to create the spec file'));
-  }
 }
 
 async function openSpec(): Promise<void> {
@@ -189,6 +182,7 @@ onBeforeUnmount(() => {
         />
       </button>
       <button
+        v-if="bHasMenu"
         type="button"
         class="inline-flex items-center justify-center w-7 border-l border-fg/10 text-text-muted hover:text-text-primary hover:bg-fg/[0.06] transition-colors"
         aria-haspopup="true"
@@ -231,17 +225,7 @@ onBeforeUnmount(() => {
         </button>
       </template>
       <button
-        v-if="!status?.exists"
-        type="button"
-        class="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-text-primary hover:bg-fg/[0.06] transition-colors"
-        role="menuitem"
-        @click="createSpecOnly"
-      >
-        <FilePlus :size="14" :stroke-width="1.6" class="shrink-0" aria-hidden="true" />
-        Create spec file only
-      </button>
-      <button
-        v-else
+        v-if="bHasSpec"
         type="button"
         class="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-text-primary hover:bg-fg/[0.06] transition-colors"
         role="menuitem"
