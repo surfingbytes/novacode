@@ -11,9 +11,6 @@ import {
   getVibeApiKeyStatus,
   setVibeApiKey,
   writeGlobalGitConfig,
-  isClaudeAvailable,
-  isVibeCliAvailable,
-  isCodexAcpAvailable,
   readMcpClients,
   writeMcpClients,
   DEFAULT_PROMPT_IDLE_TIMEOUT_MS,
@@ -40,7 +37,7 @@ import {
   saveOpenCodeProvider
 } from '../classes/openCodeProviders';
 import { readSshKeyMaterial } from '../classes/sshKey';
-import { checkCursorAuth, openCodeAuthenticated, codexAuthenticated } from './agentAuth';
+import { checkCursorAuth, isAgentAuthenticated } from './agentAuth';
 
 // types
 import type { FastifyInstance } from 'fastify';
@@ -637,24 +634,16 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request) => {
       const user = await db.getUserById(request.jwtUser!.id);
-      // Claude is available via ACP when a token is stored; the ACP package is always present
-      const claudeAvailable = isClaudeAvailable(config.configDir) && !!user?.claudeToken;
+      const claudeToken = user?.claudeToken;
       const cursorAuth = checkCursorAuth();
-      const cursorAvailable =
-        cursorAuth.status === 'authenticated' || cursorAuth.status === 'timeout';
-      const vibeKeyOk = getVibeApiKeyStatus(config.configDir).configured;
-      const vibeCliOk = isVibeCliAvailable(config.configDir);
-      const openCodeAvailable = openCodeAuthenticated();
-      // Codex needs both the ACP binary (shipped in the image) and a stored API key
-      const codexAvailable = isCodexAcpAvailable(config.configDir) && codexAuthenticated();
       return {
-        cursorAvailable,
+        cursorAvailable: isAgentAuthenticated('cursor-agent', claudeToken),
         cursorStatus: cursorAuth.status,
         ...(cursorAuth.message ? { cursorStatusMessage: cursorAuth.message } : {}),
-        claudeAvailable,
-        mistralVibeAvailable: vibeCliOk && vibeKeyOk,
-        openCodeAvailable,
-        codexAvailable
+        claudeAvailable: isAgentAuthenticated('claude', claudeToken),
+        mistralVibeAvailable: isAgentAuthenticated('mistral-vibe', claudeToken),
+        openCodeAvailable: isAgentAuthenticated('open-code', claudeToken),
+        codexAvailable: isAgentAuthenticated('codex', claudeToken)
       };
     }
   );

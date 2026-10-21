@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   isOneShotAgentType,
   pickInexpensiveModel,
+  resolveAutomaticOneShotAgentType,
   resolveOneShotAgentType
 } from './oneShotAgent.js';
 
@@ -26,6 +27,35 @@ describe('resolveOneShotAgentType', () => {
 
   it('falls back to cursor-agent', () => {
     expect(resolveOneShotAgentType(undefined, 'nope')).toBe('cursor-agent');
+  });
+});
+
+describe('resolveAutomaticOneShotAgentType', () => {
+  const loggedIn =
+    (...agents: string[]) =>
+    (agentType: string): boolean =>
+      agents.includes(agentType);
+
+  it('keeps an explicit utility agent even when logged out', () => {
+    expect(resolveAutomaticOneShotAgentType('cursor-agent', ['claude'], loggedIn())).toBe(
+      'cursor-agent'
+    );
+  });
+
+  it('uses the first logged-in candidate', () => {
+    expect(
+      resolveAutomaticOneShotAgentType('', ['cursor-agent', 'codex'], loggedIn('codex', 'claude'))
+    ).toBe('codex');
+  });
+
+  it('skips a logged-out workspace default and prefers Claude', () => {
+    expect(
+      resolveAutomaticOneShotAgentType(null, ['cursor-agent'], loggedIn('open-code', 'claude'))
+    ).toBe('claude');
+  });
+
+  it('falls back to the first candidate when nothing is logged in', () => {
+    expect(resolveAutomaticOneShotAgentType(null, ['codex'], loggedIn())).toBe('codex');
   });
 });
 

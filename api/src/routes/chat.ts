@@ -14,10 +14,11 @@ import {
   buildSessionTitlePromptFromAssistant,
   cleanSessionTitle,
   extractFirstAssistantText,
-  resolveOneShotAgentType,
+  resolveAutomaticOneShotAgentType,
   resolveOneShotModel,
   runOneShotAgentText
 } from '../classes/oneShotAgentText';
+import { isAgentAuthenticated } from './agentAuth';
 import {
   getActiveSessionIds as _getActiveSessionIds,
   getActiveBusySubagents as _getActiveBusySubagents,
@@ -252,10 +253,10 @@ async function generateAndApplySessionTitle(
       return;
     }
     const user = await db.getFirstUser();
-    const agentType = resolveOneShotAgentType(
+    const agentType = resolveAutomaticOneShotAgentType(
       user?.utilityAgentType,
-      current.agentType,
-      workspace.defaultAgentType
+      [current.agentType, workspace.defaultAgentType],
+      (candidate) => isAgentAuthenticated(candidate, user?.claudeToken)
     );
     const cwd = resolveWorkspaceAbsolutePath(workspace.path);
     const model = resolveOneShotModel(user?.utilityModelSelection, agentType);

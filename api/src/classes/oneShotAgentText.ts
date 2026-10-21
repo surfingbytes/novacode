@@ -20,6 +20,7 @@ export { appendAssistantText } from './assistantText';
 export {
   ONE_SHOT_AGENT_TYPES,
   isOneShotAgentType,
+  resolveAutomaticOneShotAgentType,
   resolveOneShotAgentType
 } from '@novacode/shared';
 
@@ -127,6 +128,11 @@ export function cleanSessionTitle(raw: string): string {
     return '';
   }
   return truncateOnWordBoundary(collapsed, SESSION_TITLE_MAX_LENGTH);
+}
+
+/** Agent replied with a plan/quota notice instead of the requested text. */
+export function isPaywallText(raw: string): boolean {
+  return PAYWALL_TEXT_RE.test(raw);
 }
 
 export function cleanCommitMessage(raw: string): string {

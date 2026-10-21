@@ -15,10 +15,12 @@ import { sshEnvForGit } from '../classes/sshKey';
 import {
   buildCommitMessagePrompt,
   cleanCommitMessage,
-  resolveOneShotAgentType,
+  isPaywallText,
+  resolveAutomaticOneShotAgentType,
   resolveOneShotModel,
   runOneShotAgentText
 } from '../classes/oneShotAgentText';
+import { isAgentAuthenticated } from './agentAuth';
 import { parseGitLog } from '../classes/gitLog';
 import { markCiWatchPushed } from '../classes/ciWatcher';
 import { resolveWorkspaceAbsolutePath } from '../classes/workspacePaths';
@@ -526,9 +528,10 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         if (!diff) return reply.code(400).send({ error: 'No diff found for selected files' });
 
         const user = await db.getFirstUser();
-        const agentType = resolveOneShotAgentType(
+        const agentType = resolveAutomaticOneShotAgentType(
           user?.utilityAgentType,
-          context.workspace.defaultAgentType
+          [context.workspace.defaultAgentType],
+          (candidate) => isAgentAuthenticated(candidate, user?.claudeToken)
         );
         const raw = await runOneShotAgentText({
           agentType,
@@ -541,7 +544,10 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         });
         const message = cleanCommitMessage(raw);
         if (!message) {
-          return reply.code(400).send({ error: 'AI did not return a commit message' });
+          const error = isPaywallText(raw)
+            ? `${agentType}: ${raw.trim().split('\n')[0]}`
+            : `AI (${agentType}) did not return a commit message`;
+          return reply.code(400).send({ error });
         }
 
         return { message };

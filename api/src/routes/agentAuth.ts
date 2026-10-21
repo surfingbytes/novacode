@@ -8,7 +8,13 @@ import { spawnSync } from 'node:child_process';
 
 // classes
 import { jwtPreHandler } from '../classes/auth';
-import { config } from '../classes/config';
+import {
+  config,
+  getVibeApiKeyStatus,
+  isClaudeAvailable,
+  isCodexAcpAvailable,
+  isVibeCliAvailable
+} from '../classes/config';
 import { db } from '../classes/database';
 import { sessionManager } from '../classes/sessionManager';
 import {
@@ -23,6 +29,9 @@ import {
   clearCursorUsageSummaryCache,
   getCursorUsageSummary
 } from '../classes/cursorUsageSummary';
+
+// types
+import type { AgentType } from '../@types/index';
 
 const cursorUsageBucketSchema = Type.Object({
   enabled: Type.Boolean(),
@@ -382,5 +391,32 @@ export const codexAuthenticated = (): boolean => {
     return typeof token === 'string' && token.trim().length > 0;
   } catch {
     return false;
+  }
+};
+
+/** Whether an agent is installed and logged in (same rules as /api/settings/agent-capabilities). */
+export const isAgentAuthenticated = (
+  agentType: AgentType,
+  claudeToken: string | null | undefined
+): boolean => {
+  switch (agentType) {
+    case 'claude':
+      // Claude is available via ACP when a token is stored; the ACP package is always present
+      return isClaudeAvailable(config.configDir) && !!claudeToken;
+    case 'cursor-agent': {
+      const { status } = checkCursorAuth();
+      return status === 'authenticated' || status === 'timeout';
+    }
+    case 'open-code':
+      return openCodeAuthenticated();
+    case 'codex':
+      // Codex needs both the ACP binary (shipped in the image) and a stored API key
+      return isCodexAcpAvailable(config.configDir) && codexAuthenticated();
+    case 'mistral-vibe':
+      return (
+        isVibeCliAvailable(config.configDir) && getVibeApiKeyStatus(config.configDir).configured
+      );
+    default:
+      return false;
   }
 };

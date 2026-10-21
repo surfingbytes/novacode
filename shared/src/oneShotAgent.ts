@@ -22,6 +22,31 @@ export function resolveOneShotAgentType(...candidates: Array<string | null | und
   return 'cursor-agent';
 }
 
+/** Fallback order for automatic mode when no candidate agent is logged in. */
+const AUTOMATIC_FALLBACK_ORDER: readonly AgentType[] = [
+  'claude',
+  'codex',
+  'cursor-agent',
+  'open-code',
+  'mistral-vibe'
+];
+
+/**
+ * Explicit utility agent wins. Automatic mode skips logged-out agents: first logged-in
+ * candidate (session/workspace default), then any logged-in agent, Claude first.
+ */
+export function resolveAutomaticOneShotAgentType(
+  utilityAgentType: string | null | undefined,
+  candidates: Array<string | null | undefined>,
+  isAuthenticated: (agentType: AgentType) => boolean
+): AgentType {
+  if (isOneShotAgentType(utilityAgentType)) {
+    return utilityAgentType;
+  }
+  const ordered = [...candidates.filter(isOneShotAgentType), ...AUTOMATIC_FALLBACK_ORDER];
+  return ordered.find((agentType) => isAuthenticated(agentType)) ?? resolveOneShotAgentType(...candidates);
+}
+
 type InexpensiveModelOption = {
   id: string;
   label?: string;
