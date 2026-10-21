@@ -54,6 +54,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl bash jq sqlite3 postgresql-client gosu sudo openssh-client ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
+# Install GitHub CLI from the official apt repo (Debian's package lags behind)
+ARG GH_VERSION=2.103.0
+RUN mkdir -p -m 755 /etc/apt/keyrings \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+       -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+       > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y --no-install-recommends "gh=${GH_VERSION}" \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install Claude Code CLI globally so "Login to Claude" works in the app
 ARG CLAUDE_CODE_VERSION=2.1.285
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
