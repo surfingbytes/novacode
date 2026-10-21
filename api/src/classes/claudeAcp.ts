@@ -21,7 +21,7 @@ import type { AcpSessionResponse } from './acpSessionHelpers';
 import { extractAgentErrorDetail } from './agentError';
 import type { AgentErrorDetail } from './agentError';
 import { logger } from './logger';
-import { config } from './config';
+import { config, resolveClaudeAgentIdleTimeoutMs, resolvePromptIdleTimeoutMs } from './config';
 import { getConfiguredAcpMcpServers } from './mcpServersForAcp';
 import { novaMcpServerIfSession } from './novaMcp';
 import { buildPromptContent, sessionResetNoticeEventLine } from './acpSubprocessRunner';
@@ -41,6 +41,76 @@ const activePermissionHandlers = new Map<string, AcpPermissionHandler>();
 const agentsByNovaSession = new Map<string, any>();
 const novaByAcpSession = new Map<string, string>();
 const initializedNovaSessions = new Set<string>();
+
+// Each cached agent keeps a live `claude` CLI (plus one connection / child process per
+// configured MCP server) after its turn ends. Idle agents are disposed by a periodic
+// sweep and an LRU cap; the next turn resumes the conversation from disk.
+const MAX_LIVE_CLAUDE_AGENTS = 10;
+const IDLE_SWEEP_INTERVAL_MS = 60_000;
+const lastUsedByNovaSession = new Map<string, number>();
+const inFlightTurnsByNovaSession = new Map<string, number>();
+let idleSweepTimer: ReturnType<typeof setInterval> | null = null;
+
+function forgetNovaSession(novaSessionId: string): void {
+  agentsByNovaSession.delete(novaSessionId);
+  initializedNovaSessions.delete(novaSessionId);
+  lastUsedByNovaSession.delete(novaSessionId);
+  for (const [acpId, novaId] of novaByAcpSession.entries()) {
+    if (novaId === novaSessionId) novaByAcpSession.delete(acpId);
+  }
+}
+
+/**
+ * Release the agent's CLI subprocess and MCP connections. Uses dispose() (in-memory
+ * teardown only) — closeSession/deleteSession may delete the on-disk transcript.
+ */
+async function disposeAgent(novaSessionId: string, reason: string): Promise<void> {
+  const agent = agentsByNovaSession.get(novaSessionId);
+  forgetNovaSession(novaSessionId);
+  if (!agent) return;
+  logger.info({ novaSessionId, reason }, 'Disposing embedded Claude agent');
+  try {
+    await agent.dispose?.();
+  } catch (err) {
+    logger.debug({ err, novaSessionId }, 'Claude ACP dispose failed');
+  }
+}
+
+function isTurnInFlight(novaSessionId: string): boolean {
+  return (inFlightTurnsByNovaSession.get(novaSessionId) ?? 0) > 0;
+}
+
+function idleAgentsOldestFirst(): Array<[string, number]> {
+  return [...agentsByNovaSession.keys()]
+    .filter((id) => !isTurnInFlight(id))
+    .map((id): [string, number] => [id, lastUsedByNovaSession.get(id) ?? 0])
+    .sort((a, b) => a[1] - b[1]);
+}
+
+function sweepIdleAgents(): void {
+  const idleTimeoutMs = resolveClaudeAgentIdleTimeoutMs(config.configDir);
+  if (idleTimeoutMs <= 0) return;
+  const cutoff = Date.now() - idleTimeoutMs;
+  for (const [novaSessionId, lastUsed] of idleAgentsOldestFirst()) {
+    if (lastUsed > cutoff) break;
+    void disposeAgent(novaSessionId, 'idle');
+  }
+}
+
+function enforceAgentCap(): void {
+  let excess = agentsByNovaSession.size - MAX_LIVE_CLAUDE_AGENTS;
+  for (const [novaSessionId] of idleAgentsOldestFirst()) {
+    if (excess <= 0) break;
+    void disposeAgent(novaSessionId, 'cap');
+    excess--;
+  }
+}
+
+function ensureIdleSweep(): void {
+  if (idleSweepTimer) return;
+  idleSweepTimer = setInterval(sweepIdleAgents, IDLE_SWEEP_INTERVAL_MS);
+  idleSweepTimer.unref();
+}
 
 function emitClaudeConfigSync(
   sessionId: string,
@@ -143,12 +213,19 @@ async function loadClaudeAcpAgentCtor(): Promise<new (client: AgentSideConnectio
   return ClaudeAcpAgentCtor!;
 }
 
+/** Test hook: substitute a fake ClaudeAcpAgent class (skips the ESM import). */
+export function setClaudeAcpAgentCtorForTests(ctor: new (client: AgentSideConnection) => any): void { // eslint-disable-line @typescript-eslint/no-explicit-any
+  ClaudeAcpAgentCtor = ctor;
+}
+
 async function getAgentForNovaSession(novaSessionId: string): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
   let agent = agentsByNovaSession.get(novaSessionId);
   if (!agent) {
     const Ctor = await loadClaudeAcpAgentCtor();
     agent = new Ctor(acpClientProxy as unknown as AgentSideConnection);
     agentsByNovaSession.set(novaSessionId, agent);
+    ensureIdleSweep();
+    enforceAgentCap();
   }
   if (!initializedNovaSessions.has(novaSessionId)) {
     await agent.initialize({
@@ -230,6 +307,25 @@ export async function runClaudeAcp(
   onConfigSync?: SessionConfigSyncHandler,
   onRequestPermission?: AcpPermissionHandler
 ): Promise<RunClaudeAcpResult> {
+  const { novaSessionId } = params;
+  // marked before any await so the idle sweep / cap never disposes a starting turn
+  inFlightTurnsByNovaSession.set(novaSessionId, (inFlightTurnsByNovaSession.get(novaSessionId) ?? 0) + 1);
+  try {
+    return await runClaudeAcpTurn(params, onEvent, onConfigSync, onRequestPermission);
+  } finally {
+    const remaining = (inFlightTurnsByNovaSession.get(novaSessionId) ?? 1) - 1;
+    if (remaining > 0) inFlightTurnsByNovaSession.set(novaSessionId, remaining);
+    else inFlightTurnsByNovaSession.delete(novaSessionId);
+    if (agentsByNovaSession.has(novaSessionId)) lastUsedByNovaSession.set(novaSessionId, Date.now());
+  }
+}
+
+async function runClaudeAcpTurn(
+  params: RunClaudeAcpParams,
+  onEvent: AcpEventHandler,
+  onConfigSync?: SessionConfigSyncHandler,
+  onRequestPermission?: AcpPermissionHandler
+): Promise<RunClaudeAcpResult> {
   const {
     novaSessionId,
     acpSessionId,
@@ -299,10 +395,53 @@ export async function runClaudeAcp(
     emitClaudeConfigSync(resolvedSessionId, { modeId: resolvedModeId, modelId: model ?? resolvedModelId });
   }
 
+  // No-output watchdog (same setting as subprocess agents). Paused while a permission
+  // prompt waits on the user. Disposing the agent tears down the CLI, which makes the
+  // pending prompt() settle.
+  let bPromptIdleTimedOut = false;
+  let promptIdleTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingPermissions = 0;
+  const clearPromptIdleTimer = (): void => {
+    if (promptIdleTimer !== null) {
+      clearTimeout(promptIdleTimer);
+      promptIdleTimer = null;
+    }
+  };
+  const armPromptIdleTimer = (): void => {
+    clearPromptIdleTimer();
+    const timeoutMs = resolvePromptIdleTimeoutMs(config.configDir);
+    if (timeoutMs <= 0 || pendingPermissions > 0) return;
+    promptIdleTimer = setTimeout(() => {
+      bPromptIdleTimedOut = true;
+      logger.warn({ novaSessionId, timeoutMs }, 'Claude prompt idle timeout');
+      void disposeAgent(novaSessionId, 'prompt idle timeout');
+    }, timeoutMs);
+  };
+  const handleEvent: AcpEventHandler = (line) => {
+    armPromptIdleTimer();
+    onEvent(line);
+  };
+  const handlePermission: AcpPermissionHandler | undefined = onRequestPermission
+    ? async (request) => {
+        pendingPermissions++;
+        clearPromptIdleTimer();
+        try {
+          return await onRequestPermission(request);
+        } finally {
+          pendingPermissions--;
+          armPromptIdleTimer();
+        }
+      }
+    : undefined;
+
   onSessionId?.(resolvedSessionId);
-  activeHandlers.set(resolvedSessionId, onEvent);
+  activeHandlers.set(resolvedSessionId, handleEvent);
   if (onConfigSync) activeConfigSyncHandlers.set(resolvedSessionId, onConfigSync);
-  if (onRequestPermission) activePermissionHandlers.set(resolvedSessionId, onRequestPermission);
+  if (handlePermission) activePermissionHandlers.set(resolvedSessionId, handlePermission);
+  const idleTimeoutError = (): RunClaudeAcpResult => ({
+    acpSessionId: resolvedSessionId,
+    error: `Agent produced no output for ${Math.round(resolvePromptIdleTimeoutMs(config.configDir) / 1000)}s and was stopped.`,
+  });
   try {
     let finalPromptText = promptText;
     if (isFreshSession && params.getRulesPrefix) {
@@ -315,15 +454,19 @@ export async function runClaudeAcp(
         logger.warn({ err, sessionId: resolvedSessionId }, 'Failed to build rules prefix; prompting without rules');
       }
     }
+    armPromptIdleTimer();
     const resp = await agent.prompt({
       sessionId: resolvedSessionId,
       prompt: buildPromptContent(finalPromptText, params.attachments),
     });
+    if (bPromptIdleTimedOut) return idleTimeoutError();
     return { acpSessionId: resolvedSessionId, stopReason: resp.stopReason };
   } catch (err) {
+    if (bPromptIdleTimedOut) return idleTimeoutError();
     const errorDetail = extractAgentErrorDetail(err);
     return { acpSessionId: resolvedSessionId, error: errorDetail.message, errorDetail };
   } finally {
+    clearPromptIdleTimer();
     activeHandlers.delete(resolvedSessionId);
     activeConfigSyncHandlers.delete(resolvedSessionId);
     activePermissionHandlers.delete(resolvedSessionId);
@@ -360,10 +503,6 @@ export async function closeClaudeAcpForNovaSession(
   } catch (err) {
     logger.debug({ err, novaSessionId }, 'Claude ACP dispose failed');
   } finally {
-    agentsByNovaSession.delete(novaSessionId);
-    initializedNovaSessions.delete(novaSessionId);
-    for (const [acpId, novaId] of novaByAcpSession.entries()) {
-      if (novaId === novaSessionId) novaByAcpSession.delete(acpId);
-    }
+    forgetNovaSession(novaSessionId);
   }
 }

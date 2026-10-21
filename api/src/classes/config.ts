@@ -396,10 +396,19 @@ export function isOpenCodeAcpAvailable(configDir: string): boolean {
 export interface AgentRuntimeSettings {
   /** Idle timeout (ms) for a prompt that produces no output before the run is stopped; 0 disables. */
   promptIdleTimeoutMs?: number;
+  /** How long (ms) an embedded Claude agent (CLI + MCP children) may sit unused before it is disposed; 0 disables. */
+  claudeAgentIdleTimeoutMs?: number;
 }
 
 /** Default idle timeout for an agent prompt that produces no output (5 minutes). */
 export const DEFAULT_PROMPT_IDLE_TIMEOUT_MS = 300_000;
+
+/** Default idle time before an unused embedded Claude agent is disposed (15 minutes). */
+export const DEFAULT_CLAUDE_AGENT_IDLE_TIMEOUT_MS = 900_000;
+
+function nonNegativeMs(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
 
 const AGENT_RUNTIME_FILE = 'agent-runtime.json';
 
@@ -410,8 +419,13 @@ export function readAgentRuntimeSettings(configDir: string): AgentRuntimeSetting
     const raw = readFileSync(filePath, 'utf8');
     const data: unknown = JSON.parse(raw);
     if (!data || typeof data !== 'object' || Array.isArray(data)) return {};
-    const ms = (data as Record<string, unknown>).promptIdleTimeoutMs;
-    return typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 ? { promptIdleTimeoutMs: ms } : {};
+    const record = data as Record<string, unknown>;
+    const settings: AgentRuntimeSettings = {};
+    const promptIdleTimeoutMs = nonNegativeMs(record.promptIdleTimeoutMs);
+    if (promptIdleTimeoutMs !== undefined) settings.promptIdleTimeoutMs = promptIdleTimeoutMs;
+    const claudeAgentIdleTimeoutMs = nonNegativeMs(record.claudeAgentIdleTimeoutMs);
+    if (claudeAgentIdleTimeoutMs !== undefined) settings.claudeAgentIdleTimeoutMs = claudeAgentIdleTimeoutMs;
+    return settings;
   } catch {
     return {};
   }
@@ -426,6 +440,13 @@ export function resolvePromptIdleTimeoutMs(configDir: string): number {
   const raw = Number.parseInt(process.env['ACP_PROMPT_IDLE_TIMEOUT_MS'] ?? '', 10);
   if (Number.isFinite(raw)) return raw;
   return readAgentRuntimeSettings(configDir).promptIdleTimeoutMs ?? DEFAULT_PROMPT_IDLE_TIMEOUT_MS;
+}
+
+/** Effective embedded Claude agent idle timeout: CLAUDE_AGENT_IDLE_TIMEOUT_MS env > settings file > default. */
+export function resolveClaudeAgentIdleTimeoutMs(configDir: string): number {
+  const raw = Number.parseInt(process.env['CLAUDE_AGENT_IDLE_TIMEOUT_MS'] ?? '', 10);
+  if (Number.isFinite(raw)) return raw;
+  return readAgentRuntimeSettings(configDir).claudeAgentIdleTimeoutMs ?? DEFAULT_CLAUDE_AGENT_IDLE_TIMEOUT_MS;
 }
 
 // ── MCP client configuration (sync to Cursor & Claude) ──────────────────────
