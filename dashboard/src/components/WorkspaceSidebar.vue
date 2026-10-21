@@ -124,6 +124,10 @@ const items = computed<SidebarItem[]>(() => {
     const aFav = a.kind === 'session' && a.session.isFavorite ? 1 : 0;
     const bFav = b.kind === 'session' && b.session.isFavorite ? 1 : 0;
     if (bFav !== aFav) return bFav - aFav;
+    // Busy next, matching the nav sidebar's quick list
+    const aBusy = itemBusy(a) ? 1 : 0;
+    const bBusy = itemBusy(b) ? 1 : 0;
+    if (bBusy !== aBusy) return bBusy - aBusy;
     const aUpdated = a.kind === 'session' ? a.session.updatedAt : a.orchestrator.updatedAt;
     const bUpdated = b.kind === 'session' ? b.session.updatedAt : b.orchestrator.updatedAt;
     return new Date(bUpdated).getTime() - new Date(aUpdated).getTime();
@@ -170,6 +174,12 @@ const workspaceNameById = computed(() => {
 });
 
 // -------------------------------------------------- Methods --------------------------------------------------
+
+function itemBusy(item: SidebarItem): boolean {
+  return item.kind === 'session'
+    ? !!item.session.busy
+    : item.nestedSessions.some((s) => s.busy);
+}
 
 function orderedNestedSessions(orch: Orchestrator): Session[] {
   const tasks = subtasksFromStoredJson(orch.subtasksJson);

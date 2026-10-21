@@ -239,10 +239,14 @@ const combinedItems = computed<CombinedItem[]>(() => {
     nestedSessions: orderedNestedSessions(orchestrator)
   }));
   const merged: CombinedItem[] = [...sessionItems, ...orchestratorItems];
+  const itemBusy = (item: CombinedItem): boolean =>
+    item.kind === 'session' ? !!item.session.busy : item.nestedSessions.some((s) => s.busy);
   return merged.sort((a, b) => {
     const aFav = a.kind === 'session' && a.session.isFavorite ? 1 : 0;
     const bFav = b.kind === 'session' && b.session.isFavorite ? 1 : 0;
     if (bFav !== aFav) return bFav - aFav;
+    const busyDiff = (itemBusy(b) ? 1 : 0) - (itemBusy(a) ? 1 : 0);
+    if (busyDiff !== 0) return busyDiff;
     const aUpdated = a.kind === 'session' ? a.session.updatedAt : a.orchestrator.updatedAt;
     const bUpdated = b.kind === 'session' ? b.session.updatedAt : b.orchestrator.updatedAt;
     return new Date(bUpdated).getTime() - new Date(aUpdated).getTime();
