@@ -91,6 +91,41 @@ export function isApiUnreachableError(error: unknown): boolean {
   return GATEWAY_UNREACHABLE_STATUSES.has(error.response.status);
 }
 
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    /** Retry a non-GET request after a dropped connection (only for side-effect-free calls). */
+    retryOnNetworkError?: boolean;
+    /** Internal: retries already spent on dropped connections. */
+    networkRetryCount?: number;
+  }
+}
+
+/** Backoff for requests whose connection dropped before any response (browser/proxy blips). */
+const NETWORK_RETRY_DELAYS_MS = [400, 1500];
+
+/** Dropped connection with no response — not a timeout, cancel, or HTTP error status. */
+function isDroppedConnectionError(error: unknown): boolean {
+  if (!isAxiosError(error) || error.response !== undefined) {
+    return false;
+  }
+  if (error.code === 'ERR_CANCELED' || error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+    return false;
+  }
+  return true;
+}
+
+export function networkRetryDelayMs(error: unknown): number | null {
+  if (!isDroppedConnectionError(error) || !isAxiosError(error) || !error.config) {
+    return null;
+  }
+  const method = (error.config.method ?? 'get').toLowerCase();
+  const retryable = method === 'get' || method === 'head' || error.config.retryOnNetworkError === true;
+  if (!retryable) {
+    return null;
+  }
+  return NETWORK_RETRY_DELAYS_MS[error.config.networkRetryCount ?? 0] ?? null;
+}
+
 /** Confirm outages via /health so one slow request does not flash the banner. */
 let unreachableConfirmInFlight = false;
 
@@ -131,8 +166,18 @@ http.interceptors.response.use(
     touchApiReachability(true);
     return response;
   },
-  (error: unknown) => {
+  async (error: unknown) => {
     if (isAxiosError(error)) {
+      // A dropped connection on an idempotent call is usually a momentary blip:
+      // retry quietly before surfacing "Could not reach the server".
+      const retryDelayMs = networkRetryDelayMs(error);
+      if (retryDelayMs !== null && error.config) {
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+        return http.request({
+          ...error.config,
+          networkRetryCount: (error.config.networkRetryCount ?? 0) + 1
+        });
+      }
       if (isApiUnreachableError(error)) {
         // Do not flip the banner from a single timed-out call — confirm with /health.
         confirmApiUnreachable();
@@ -578,7 +623,7 @@ export const gitApi = {
       { files, repo },
       // Slightly above the API one-shot wall clock so the server can return a
       // real error instead of the browser reporting a bare Network Error.
-      { timeout: 50_000 }
+      { timeout: 50_000, retryOnNetworkError: true }
     ),
   push: (workspaceId: string, repo?: string): ReturnType<typeof http.post<{ output: string }>> =>
     http.post<{ output: string }>(`/git/workspace/${workspaceId}/push`, undefined, {
