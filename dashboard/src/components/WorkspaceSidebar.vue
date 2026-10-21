@@ -130,8 +130,11 @@ const items = computed<SidebarItem[]>(() => {
   });
 });
 
+// Skeleton only while nothing is on screen yet — a background refetch after a
+// reconnect must not blank a list the user is looking at.
 const bSidebarLoading = computed(
-  () => workspacesStore.bSessionsLoading || bOrchestratorsLoading.value
+  () =>
+    (workspacesStore.bSessionsLoading || bOrchestratorsLoading.value) && items.value.length === 0
 );
 
 const existingSessionTags = computed((): string[] => {

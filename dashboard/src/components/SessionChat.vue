@@ -1087,7 +1087,10 @@ watch(
 function retrySessionIfFailed(): void {
   if (bSessionFetchFailed || error.value) {
     void fetchSession();
+    return;
   }
+  // The session itself loaded but the agent catalog did not (flaky link).
+  agentOptions.retryAgentOptionsIfFailed();
 }
 
 // Retry session metadata when the API comes back after a transient outage. A

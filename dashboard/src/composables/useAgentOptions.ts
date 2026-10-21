@@ -54,6 +54,10 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
   const bModelsLoading = ref(false);
   const bModesLoading = ref(false);
   const bConfigLoading = ref(false);
+  /** Options came from a successful fetch for the current session (not a fallback). */
+  const bAgentOptionsLoaded = ref(false);
+  /** Last fetch failed and nothing usable is cached — retry when the API is back. */
+  const bAgentOptionsLoadFailed = ref(false);
   const bSavingModelSelection = ref(false);
   const bSavingSessionMode = ref(false);
   const bSavingSessionConfig = ref(false);
@@ -87,11 +91,13 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
   }
   const selectedModeIconName = computed(() => modeIconName(selectedModeOption.value.id));
 
-  // Don't warn while options are still loading — opening a chat restores the
-  // saved model id immediately, but modelOptions stays empty until the agent
-  // options request finishes (can take several seconds for cursor-agent).
+  // Only warn against a successfully fetched catalog — opening a chat restores
+  // the saved model id immediately, but modelOptions stays empty until the agent
+  // options request finishes (can take several seconds for cursor-agent), and a
+  // failed request on a flaky connection must not turn into "model not found".
   const bSelectedModelMissing = computed(
     () =>
+      bAgentOptionsLoaded.value &&
       !bModelsLoading.value &&
       !!modelSelection.value &&
       modelSelection.value !== 'auto' &&
@@ -113,14 +119,25 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
     }
   }
 
+  let loadAgentOptionsSeq = 0;
+
   async function loadAgentOptions(): Promise<void> {
     const agentType = ctx.session.value?.agentType;
     if (!agentType) return;
-    bModelsLoading.value = true;
-    bModesLoading.value = true;
-    bConfigLoading.value = true;
+    const seq = ++loadAgentOptionsSeq;
+    // A revalidation with a catalog already on screen must not disable the
+    // pickers (a hung request on a flaky link would lock them for seconds).
+    const bHasOptions = bAgentOptionsLoaded.value && modelOptions.value.length > 0;
+    if (!bHasOptions) {
+      bModelsLoading.value = true;
+      bModesLoading.value = true;
+      bConfigLoading.value = true;
+    }
     try {
       const { data } = await settingsApi.getAgentOptions(agentType);
+      if (seq !== loadAgentOptionsSeq) return;
+      bAgentOptionsLoaded.value = true;
+      bAgentOptionsLoadFailed.value = false;
       modelOptions.value =
         data.models.length > 0
           ? data.models
@@ -156,16 +173,32 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
         }
       }
     } catch {
-      modelOptions.value = [
-        { id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto', fast: null }
-      ];
-      modeOptions.value = [{ id: MODE_SENTINEL, label: 'Default' }];
-      agentConfigOptions.value = [];
-      thinkingOptions.value = null;
+      if (seq !== loadAgentOptionsSeq) return;
+      // Keep a previously loaded catalog — a transient failure must not shrink
+      // the list to "Auto" and flag the saved model as missing.
+      if (!bHasOptions) {
+        bAgentOptionsLoaded.value = false;
+        bAgentOptionsLoadFailed.value = true;
+        modelOptions.value = [
+          { id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto', fast: null }
+        ];
+        modeOptions.value = [{ id: MODE_SENTINEL, label: 'Default' }];
+        agentConfigOptions.value = [];
+        thinkingOptions.value = null;
+      }
     } finally {
-      bModelsLoading.value = false;
-      bModesLoading.value = false;
-      bConfigLoading.value = false;
+      if (seq === loadAgentOptionsSeq) {
+        bModelsLoading.value = false;
+        bModesLoading.value = false;
+        bConfigLoading.value = false;
+      }
+    }
+  }
+
+  /** Re-fetch options after the API comes back if the last attempt failed. */
+  function retryAgentOptionsIfFailed(): void {
+    if (bAgentOptionsLoadFailed.value) {
+      void loadAgentOptions();
     }
   }
 
@@ -339,6 +372,12 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
 
   /** Reset everything (session switch). */
   function resetAgentOptions(): void {
+    loadAgentOptionsSeq++;
+    bAgentOptionsLoaded.value = false;
+    bAgentOptionsLoadFailed.value = false;
+    bModelsLoading.value = false;
+    bModesLoading.value = false;
+    bConfigLoading.value = false;
     modelOptions.value = [];
     modeOptions.value = [];
     agentConfigOptions.value = [];
@@ -368,6 +407,8 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
     bSavingModelSelection,
     bSavingSessionMode,
     bSavingSessionConfig,
+    bAgentOptionsLoaded,
+    bAgentOptionsLoadFailed,
     displaySessionMode,
     selectedModeOption,
     selectedModeIconName,
@@ -375,6 +416,7 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
     bSelectedModelMissing,
     // methods
     loadAgentOptions,
+    retryAgentOptionsIfFailed,
     agentConfigDisplayValue,
     persistSessionConfig,
     onAgentConfigChange,

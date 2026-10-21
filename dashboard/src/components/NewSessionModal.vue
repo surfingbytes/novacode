@@ -53,6 +53,11 @@ const props = defineProps<{
   /** Whether OpenCode can be used (CLI on PATH and ACP server available). */
   codexAvailable?: boolean;
   openCodeAvailable?: boolean;
+  /**
+   * False while capabilities have never been fetched: the availability flags
+   * are placeholders then, so show "loading" instead of "no agents".
+   */
+  agentsLoaded?: boolean;
   error?: string | null;
   /** Tag suggestions from existing sessions in the workspace. */
   existingTags?: string[];
@@ -193,37 +198,66 @@ function selectAgentType(agent: AgentType): void {
   }
 }
 
-async function fetchModelOptions(agent: AgentType): Promise<AgentModelOption[]> {
+/** Resolves to null when the request fails so callers can keep a previous catalog. */
+async function fetchModelOptions(agent: AgentType): Promise<AgentModelOption[] | null> {
   try {
     const { data } = await settingsApi.getAgentOptions(agent);
     return data.models.length > 0 ? data.models : [AUTO_MODEL_OPTION];
   } catch {
-    return [AUTO_MODEL_OPTION];
+    return null;
   }
 }
+
+let modelOptionsAgent: AgentType | null = null;
+let workerModelOptionsAgent: AgentType | null = null;
 
 async function loadModelOptions(): Promise<void> {
   if (!bShowModel.value) {
     modelOptions.value = [];
+    modelOptionsAgent = null;
     return;
   }
+  const agent = agentType.value;
   bLoadingModels.value = true;
   try {
-    modelOptions.value = await fetchModelOptions(agentType.value);
+    const fetched = await fetchModelOptions(agent);
+    if (agent !== agentType.value) return;
+    if (fetched) {
+      modelOptions.value = fetched;
+      modelOptionsAgent = agent;
+    } else if (modelOptionsAgent !== agent || modelOptions.value.length === 0) {
+      // Nothing cached for this agent — fall back to Auto; a cached catalog for
+      // the same agent survives a flaky request untouched.
+      modelOptions.value = [AUTO_MODEL_OPTION];
+      modelOptionsAgent = agent;
+    }
     if (modelSelection.value && !modelOptions.value.some((option) => option.id === modelSelection.value)) {
       modelSelection.value = '';
     }
   } finally {
-    bLoadingModels.value = false;
+    if (agent === agentType.value) {
+      bLoadingModels.value = false;
+    }
   }
 }
 
 async function loadWorkerModelOptions(): Promise<void> {
+  const agent = workerAgentType.value;
   bLoadingWorkerModels.value = true;
   try {
-    workerModelOptions.value = await fetchModelOptions(workerAgentType.value);
+    const fetched = await fetchModelOptions(agent);
+    if (agent !== workerAgentType.value) return;
+    if (fetched) {
+      workerModelOptions.value = fetched;
+      workerModelOptionsAgent = agent;
+    } else if (workerModelOptionsAgent !== agent || workerModelOptions.value.length === 0) {
+      workerModelOptions.value = [AUTO_MODEL_OPTION];
+      workerModelOptionsAgent = agent;
+    }
   } finally {
-    bLoadingWorkerModels.value = false;
+    if (agent === workerAgentType.value) {
+      bLoadingWorkerModels.value = false;
+    }
   }
 }
 
@@ -371,7 +405,13 @@ watch(workerAgentType, () => {
                     }}
                   </button>
                 </div>
-                <p v-if="availableAgents.length === 0" class="text-[11px] text-warning">
+                <p
+                  v-if="availableAgents.length === 0 && agentsLoaded === false"
+                  class="text-[11px] text-text-muted"
+                >
+                  Loading agents…
+                </p>
+                <p v-else-if="availableAgents.length === 0" class="text-[11px] text-warning">
                   No agents available. Configure an ACP in Settings.
                 </p>
               </div>

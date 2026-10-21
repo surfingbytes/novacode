@@ -196,7 +196,11 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
   }
 
   const fetchAllSessions = async (): Promise<void> => {
-    bSessionsLoading.value = true;
+    // The loading flag drives the sidebar skeleton: only the first load may
+    // replace the list — a reconnect/refresh revalidates behind the data.
+    if (!sessionsInitialized) {
+      bSessionsLoading.value = true;
+    }
     try {
       const response = await withUnreachableRetry(() => sessionsApi.listAll());
       allSessions.value = response.data ?? [];

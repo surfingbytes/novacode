@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 import ThemeToggleButton from '@/components/ThemeToggleButton.vue';
+import ApiOfflineBanner from '@/components/ApiOfflineBanner.vue';
 
 defineProps<{
   sidebarOpen: boolean;
@@ -79,6 +80,8 @@ function userInitial(): string {
 
     <!-- Theme + account: desktop always; mobile only when top bar is visible -->
     <div class="topbar__actions" :class="{ 'topbar__actions--hide-mobile': hideOnMobile }">
+      <ApiOfflineBanner />
+
       <ThemeToggleButton />
 
       <div class="topbar__divider" aria-hidden="true" />

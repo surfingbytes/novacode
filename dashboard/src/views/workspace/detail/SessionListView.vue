@@ -90,6 +90,7 @@ const {
   mistralVibeAvailable: bMistralVibeAvailable,
   openCodeAvailable: bOpenCodeAvailable,
   codexAvailable: bCodexAvailable,
+  bCapabilitiesLoaded,
   ensureLoaded: ensureAgentCapabilitiesLoaded
 } = useAgentCapabilities();
 const activeFilter = ref<string | null>(null);
@@ -958,6 +959,7 @@ watch(
     :mistral-vibe-available="bMistralVibeAvailable"
     :open-code-available="bOpenCodeAvailable"
     :codex-available="bCodexAvailable"
+    :agents-loaded="bCapabilitiesLoaded"
     :existing-tags="sessionTags"
     allow-orchestrator
     :initial-mode="newSessionInitialMode"

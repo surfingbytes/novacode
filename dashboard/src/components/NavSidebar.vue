@@ -43,6 +43,7 @@ const {
   mistralVibeAvailable,
   openCodeAvailable,
   codexAvailable,
+  bCapabilitiesLoaded,
   ensureLoaded: ensureAgentCapabilitiesLoaded
 } = useAgentCapabilities();
 
@@ -520,6 +521,7 @@ onBeforeUnmount(() => {
     :mistral-vibe-available="mistralVibeAvailable"
     :open-code-available="openCodeAvailable"
     :codex-available="codexAvailable"
+    :agents-loaded="bCapabilitiesLoaded"
     :existing-tags="newSessionTags"
     allow-orchestrator
     @create="createSession"

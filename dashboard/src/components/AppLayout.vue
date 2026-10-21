@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router';
 import NavSidebar from '@/components/NavSidebar.vue';
 import NavTopBar from '@/components/NavTopBar.vue';
 import GlobalSearchModal from '@/components/GlobalSearchModal.vue';
+import ApiOfflineBanner from '@/components/ApiOfflineBanner.vue';
 import {
   APP_NAV_TOGGLE_KEY,
   FULL_HEIGHT_ROUTE_NAMES,
@@ -113,6 +114,12 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', handleKeyDown, tru
         @menu-click="toggleSidebar"
         @search-click="openSearchModal"
       />
+
+      <!-- Full-height routes hide the top bar below desktop; keep the offline
+           indicator visible there as a floating badge. -->
+      <div v-if="hideMobileTopBar" class="contents lg:hidden">
+        <ApiOfflineBanner floating />
+      </div>
 
       <main
         class="flex flex-1 flex-col min-h-0"

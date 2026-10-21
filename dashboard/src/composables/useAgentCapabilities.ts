@@ -16,8 +16,9 @@ const cursorAvailable = ref<boolean>(false);
 const mistralVibeAvailable = ref<boolean>(false);
 const openCodeAvailable = ref<boolean>(false);
 const codexAvailable = ref<boolean>(false);
+/** True once any fetch succeeded; the flags above are meaningless before that. */
+const bCapabilitiesLoaded = ref<boolean>(false);
 
-let bLoaded = false;
 let bLoading = false;
 let loadPromise: Promise<void> | null = null;
 
@@ -31,17 +32,10 @@ const loadAgentCapabilities = async (): Promise<void> => {
     mistralVibeAvailable.value = data.mistralVibeAvailable;
     openCodeAvailable.value = data.openCodeAvailable;
     codexAvailable.value = data.codexAvailable;
-    bLoaded = true;
+    bCapabilitiesLoaded.value = true;
   } catch {
-    // Keep any previously successful values — a transient outage should not
-    // wipe the agent picker empty until the next successful fetch.
-    if (!bLoaded) {
-      claudeAvailable.value = false;
-      cursorAvailable.value = false;
-      mistralVibeAvailable.value = false;
-      openCodeAvailable.value = false;
-      codexAvailable.value = false;
-    }
+    // Keep whatever we had — a transient outage (including a failed reconnect
+    // refresh) must not wipe the agent picker empty.
   }
 };
 
@@ -59,17 +53,17 @@ function startLoad(): Promise<void> {
 
 /** Fetch capabilities once (no-op while a load is in flight or already succeeded). */
 const ensureLoaded = (): void => {
-  if (bLoaded || bLoading) {
+  if (bCapabilitiesLoaded.value || bLoading) {
     return;
   }
   void startLoad();
 };
 
-/** Force a refresh (e.g. after API reconnect or when opening the new-session modal). */
-const reload = (): Promise<void> => {
-  bLoaded = false;
-  return startLoad();
-};
+/**
+ * Refresh in the background (e.g. after API reconnect). Previously loaded
+ * values stay in place until the new response lands — or stay if it fails.
+ */
+const reload = (): Promise<void> => startLoad();
 
 // -------------------------------------------------- Composable --------------------------------------------------
 
@@ -80,6 +74,7 @@ export function useAgentCapabilities() {
     mistralVibeAvailable,
     openCodeAvailable,
     codexAvailable,
+    bCapabilitiesLoaded,
     ensureLoaded,
     reload
   };
