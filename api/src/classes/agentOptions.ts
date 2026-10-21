@@ -10,7 +10,6 @@ import {
   PROTOCOL_VERSION,
 } from '@agentclientprotocol/sdk';
 import type {
-  AgentSideConnection,
   NewSessionResponse,
   RequestPermissionRequest,
   RequestPermissionResponse,
@@ -32,6 +31,7 @@ import { createSwrCache, readSwrDiskCache, writeSwrDiskCache } from './swrCache'
 import type { AgentType } from '../@types/index';
 import type { AgentModelOption } from './agentModels';
 import type { AgentModeOption } from './agentModes';
+import type { ClaudeAcpClient } from './claudeAcp';
 import type { AgentConfigOption, AgentConfigSelectOption } from './agentConfigOptions';
 
 const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
@@ -459,11 +459,8 @@ const claudeClientProxy = {
     autoApprovePermission(params),
   readTextFile: async (): Promise<{ content: string }> => ({ content: '' }),
   writeTextFile: async (): Promise<Record<string, never>> => ({}),
-  createTerminal: async (): Promise<never> => {
-    throw new Error('[agentOptions] createTerminal not supported during probe');
-  },
   extNotification: async (_method: string, _params: Record<string, unknown>): Promise<void> => {},
-} satisfies Partial<AgentSideConnection>;
+} satisfies Partial<ClaudeAcpClient>;
 
 // Keep this as a true dynamic import: the Claude ACP package is ESM-only.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -475,7 +472,7 @@ async function probeClaudeOptions(claudeToken?: string | null): Promise<Omit<Age
       process.env['CLAUDE_CODE_OAUTH_TOKEN'] = claudeToken;
     }
     const { ClaudeAcpAgent } = await esmImport('@agentclientprotocol/claude-agent-acp');
-    const agent = new ClaudeAcpAgent(claudeClientProxy as unknown as AgentSideConnection);
+    const agent = new ClaudeAcpAgent(claudeClientProxy as unknown as ClaudeAcpClient);
     await agent.initialize({
       protocolVersion: PROTOCOL_VERSION,
       clientInfo: { name: 'nova-code', version: '1.0.0' },

@@ -50,6 +50,8 @@ export function git(
     child.stderr.on('data', (chunk) => (stderr += chunk));
     child.on('error', (err) => resolvePromise({ code: -1, stdout, stderr: stderr || err.message }));
     child.on('close', (code) => resolvePromise({ code: code ?? -1, stdout, stderr }));
+    // git may exit without reading stdin; an unhandled EPIPE here would crash the process
+    child.stdin.on('error', () => {});
     child.stdin.end(opts.input ?? '');
   });
 }

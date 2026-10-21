@@ -2,7 +2,7 @@
 // @agentclientprotocol/claude-agent-acp is ESM-only. TypeScript (module: commonjs) compiles
 // import() → require(), which fails for ESM packages. We use a new Function('m','return import(m)')
 // wrapper so the import stays as a true ESM dynamic import at runtime. Types are import-type only.
-import type { AgentSideConnection } from '@agentclientprotocol/sdk';
+import type { ClaudeAcpAgent } from '@agentclientprotocol/claude-agent-acp';
 import { PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 import type {
   SessionNotification,
@@ -12,7 +12,6 @@ import type {
   ReadTextFileResponse,
   WriteTextFileRequest,
   WriteTextFileResponse,
-  CreateTerminalRequest,
 } from '@agentclientprotocol/sdk';
 
 // classes
@@ -26,6 +25,9 @@ import { getConfiguredAcpMcpServers } from './mcpServersForAcp';
 import { novaMcpServerIfSession } from './novaMcp';
 import { buildPromptContent, sessionResetNoticeEventLine } from './acpSubprocessRunner';
 import type { AcpPermissionHandler, AcpPromptAttachment, SessionConfigSyncHandler } from './acpSubprocessRunner';
+
+/** Client callbacks the embedded ClaudeAcpAgent invokes (SDK 2.0 removed AgentSideConnection). */
+export type ClaudeAcpClient = ConstructorParameters<typeof ClaudeAcpAgent>[0];
 
 export type AcpEventHandler = (line: string) => void;
 // Re-used by any ACP agent added later (Mistral, etc.).
@@ -170,7 +172,7 @@ async function handlePermissionRequest(
   return { outcome: { outcome: 'cancelled' } };
 }
 
-// Duck-typed ACP client proxy satisfying the AgentSideConnection interface at runtime.
+// Duck-typed ACP client proxy satisfying the ClaudeAcpClient interface at runtime.
 // Notifications are forwarded as raw JSON — the frontend parses them natively.
 const acpClientProxy = {
   sessionUpdate: async (notification: SessionNotification): Promise<void> => {
@@ -187,13 +189,10 @@ const acpClientProxy = {
   writeTextFile: async (_params: WriteTextFileRequest): Promise<WriteTextFileResponse> => {
     return {};
   },
-  createTerminal: async (_params: CreateTerminalRequest): Promise<never> => {
-    throw new Error('[claudeAcp] createTerminal not supported in embedded mode');
-  },
   // Claude ACP ≥0.84 sends `_auth/status_update` (and similar) via extNotification;
   // unknown methods are meant to be dropped silently by clients.
   extNotification: async (_method: string, _params: Record<string, unknown>): Promise<void> => {},
-} satisfies Partial<AgentSideConnection>;
+} satisfies Partial<ClaudeAcpClient>;
 
 // --------------------------------------------- Claude-specific agent ---------------------------------------------
 
@@ -203,9 +202,9 @@ const acpClientProxy = {
 const esmImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let ClaudeAcpAgentCtor: (new (client: AgentSideConnection) => any) | null = null;
+let ClaudeAcpAgentCtor: (new (client: ClaudeAcpClient) => any) | null = null;
 
-async function loadClaudeAcpAgentCtor(): Promise<new (client: AgentSideConnection) => any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+async function loadClaudeAcpAgentCtor(): Promise<new (client: ClaudeAcpClient) => any> { // eslint-disable-line @typescript-eslint/no-explicit-any
   if (!ClaudeAcpAgentCtor) {
     const mod = await esmImport('@agentclientprotocol/claude-agent-acp');
     ClaudeAcpAgentCtor = mod.ClaudeAcpAgent;
@@ -214,7 +213,7 @@ async function loadClaudeAcpAgentCtor(): Promise<new (client: AgentSideConnectio
 }
 
 /** Test hook: substitute a fake ClaudeAcpAgent class (skips the ESM import). */
-export function setClaudeAcpAgentCtorForTests(ctor: new (client: AgentSideConnection) => any): void { // eslint-disable-line @typescript-eslint/no-explicit-any
+export function setClaudeAcpAgentCtorForTests(ctor: new (client: ClaudeAcpClient) => any): void { // eslint-disable-line @typescript-eslint/no-explicit-any
   ClaudeAcpAgentCtor = ctor;
 }
 
@@ -222,7 +221,7 @@ async function getAgentForNovaSession(novaSessionId: string): Promise<any> { // 
   let agent = agentsByNovaSession.get(novaSessionId);
   if (!agent) {
     const Ctor = await loadClaudeAcpAgentCtor();
-    agent = new Ctor(acpClientProxy as unknown as AgentSideConnection);
+    agent = new Ctor(acpClientProxy as unknown as ClaudeAcpClient);
     agentsByNovaSession.set(novaSessionId, agent);
     ensureIdleSweep();
     enforceAgentCap();

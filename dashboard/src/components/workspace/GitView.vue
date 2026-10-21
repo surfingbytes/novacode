@@ -1042,7 +1042,7 @@ onUnmounted((): void => {
             title-id="git-actions-title"
             @close="bShowGitActions = false"
           />
-          <p class="px-6 pt-1 truncate font-mono text-xs text-text-muted">{{ activeRepo.currentBranch }}</p>
+          <p class="px-6 pt-1 truncate font-mono text-xs text-text-muted">{{ activeRepo?.currentBranch }}</p>
           <div class="px-3 pb-3">
             <button
               class="w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-text-primary hover:bg-fg/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1078,7 +1078,7 @@ onUnmounted((): void => {
               <span class="min-w-0">
                 <span class="block font-medium">Pull</span>
                 <span class="block text-xs text-text-muted">
-                  <template v-if="activeRepo.upstreamBranch">Fast-forward from upstream</template>
+                  <template v-if="activeRepo?.upstreamBranch">Fast-forward from upstream</template>
                   <template v-else>No upstream configured</template>
                 </span>
               </span>
@@ -1136,7 +1136,7 @@ onUnmounted((): void => {
             title-id="switch-branch-title"
             @close="bShowSwitchBranch = false"
           />
-          <p class="px-6 pt-1 text-xs text-text-muted">Current: <span class="font-mono">{{ activeRepo.currentBranch }}</span></p>
+          <p class="px-6 pt-1 text-xs text-text-muted">Current: <span class="font-mono">{{ activeRepo?.currentBranch }}</span></p>
           <div class="px-5 pb-3">
             <input
               v-model="branchSearch"
@@ -1203,7 +1203,7 @@ onUnmounted((): void => {
             title-id="create-branch-title"
             @close="bShowCreateBranch = false"
           />
-          <p class="px-6 pt-1 text-xs text-text-muted">From <span class="font-mono">{{ activeRepo.currentBranch }}</span></p>
+          <p class="px-6 pt-1 text-xs text-text-muted">From <span class="font-mono">{{ activeRepo?.currentBranch }}</span></p>
           <div class="px-5 pb-5">
             <label class="text-xs font-medium text-text-muted">Branch name</label>
             <input

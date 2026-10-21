@@ -65,6 +65,8 @@ export default defineConfig({
         ]
       },
       injectManifest: {
+        // 'es' (default) makes the plugin pass the deprecated rolldown inlineDynamicImports option
+        rollupFormat: 'iife',
         maximumFileSizeToCacheInBytes: 15 * 1024 * 1024
       }
     })
@@ -73,6 +75,9 @@ export default defineConfig({
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
     }
+  },
+  build: {
+    target: 'es2024'
   },
   server: {
     host: true,
