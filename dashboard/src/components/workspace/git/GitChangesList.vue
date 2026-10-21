@@ -11,6 +11,7 @@ import {
   Sparkles,
   Trash2
 } from 'lucide-vue-next';
+import { computed } from 'vue';
 
 import type { GitCommit, GitFile, GitRepoStatus } from '@/classes/api';
 import {
@@ -24,7 +25,7 @@ type GitActionBanner = { type: 'success' | 'error'; text: string; repo?: string 
 const selectedGitRepo = defineModel<string>('selectedGitRepo', { required: true });
 const commitMessage = defineModel<string>('commitMessage', { required: true });
 
-defineProps<{
+const props = defineProps<{
   bShowList: boolean;
   bWidePane: boolean;
   bSidePanelToggleVisible: boolean;
@@ -79,6 +80,14 @@ defineProps<{
 const emit = defineEmits<{
   'update:commitMessageForRepo': [repo: string, value: string];
 }>();
+
+/** All action feedback (commit, push, fetch, pull, branch, generate) rendered in one footer. */
+const visibleResults = computed(() =>
+  [props.gitActionResult, props.commitResult, props.pushResult].filter(
+    (r): r is NonNullable<GitActionBanner> =>
+      !!r && (props.repos.length <= 1 || !r.repo || r.repo === selectedGitRepo.value)
+  )
+);
 
 function onRepoCommitMessageInput(event: Event): void {
   const value = (event.target as HTMLTextAreaElement).value;
@@ -149,16 +158,6 @@ function onRepoCommitMessageInput(event: Event): void {
             </div>
           </div>
 
-          <p
-            v-if="
-              gitActionResult &&
-              (gitActionResult.repo === undefined || gitActionResult.repo === selectedGitRepo)
-            "
-            class="text-xs"
-            :class="gitActionResult.type === 'success' ? 'text-success' : 'text-destructive'"
-          >
-            {{ gitActionResult.text }}
-          </p>
           <slot name="branch-footer" />
         </div>
         <div class="flex items-center justify-between gap-2">
@@ -501,20 +500,6 @@ function onRepoCommitMessageInput(event: Event): void {
               Discard ({{ selectedFilesInActiveRepo.length }})
             </button>
           </div>
-          <p
-            v-if="commitResult"
-            class="text-xs"
-            :class="commitResult.type === 'success' ? 'text-success' : 'text-destructive'"
-          >
-            {{ commitResult.text }}
-          </p>
-          <p
-            v-if="pushResult"
-            class="text-xs"
-            :class="pushResult.type === 'success' ? 'text-success' : 'text-destructive'"
-          >
-            {{ pushResult.text }}
-          </p>
           <p v-if="hasMixedSelection" class="text-xs text-text-muted">
             Select files from a single repository for commit/push.
           </p>
@@ -637,24 +622,22 @@ function onRepoCommitMessageInput(event: Event): void {
               Discard ({{ selectedFilesInActiveRepo.length }})
             </button>
           </div>
-          <p
-            v-if="
-              commitResult &&
-              (!commitResult.repo || commitResult.repo === selectedGitRepo)
-            "
-            class="text-xs"
-            :class="commitResult.type === 'success' ? 'text-success' : 'text-destructive'"
-          >
-            {{ commitResult.text }}
-          </p>
-          <p
-            v-if="pushResult && (!pushResult.repo || pushResult.repo === selectedGitRepo)"
-            class="text-xs"
-            :class="pushResult.type === 'success' ? 'text-success' : 'text-destructive'"
-          >
-            {{ pushResult.text }}
-          </p>
         </template>
+      </div>
+
+      <div
+        v-if="visibleResults.length"
+        class="flex-shrink-0 px-3 pb-3 flex flex-col gap-1"
+        :class="{ 'border-t border-fg/[0.08] pt-3': !(!error && repos.length && listPane === 'changes') }"
+      >
+        <p
+          v-for="(r, i) in visibleResults"
+          :key="i"
+          class="text-xs"
+          :class="r.type === 'success' ? 'text-success' : 'text-destructive'"
+        >
+          {{ r.text }}
+        </p>
       </div>
     </div>
 </template>
