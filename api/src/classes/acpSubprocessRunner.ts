@@ -1351,6 +1351,9 @@ export async function runAcpSubprocessPrompt(
           sessionId: resolvedSessionId,
           prompt: buildPromptContent(finalPromptText, params.attachments),
         })) as { stopReason?: string };
+        // The SDK resolves responses synchronously but dispatches notifications through an
+        // async handler chain; let notifications received before the response finish first.
+        await new Promise((resolve) => setImmediate(resolve));
         phase('session:prompt:done');
         if (backgroundTaskIds.size > 0) {
           logger.debug(
