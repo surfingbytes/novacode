@@ -186,11 +186,12 @@ export function summarizeCiRuns(
   const lastCompleted =
     finished.find((run) => run.status !== 'skipped' && run.status !== 'unknown') ?? finished[0] ?? null;
   const running = scoped.filter((run) => run.status === 'running');
-  const queuedAll = scoped.filter((run) => run.status === 'queued').reverse();
+  const queuedAll = scoped.filter((run) => run.status === 'queued');
   return {
     lastCompleted,
     running,
-    queued: queuedAll.slice(0, CI_QUEUED_DISPLAY_LIMIT),
+    // Newest-first, but keep the runs next in line (the oldest) when capping.
+    queued: queuedAll.slice(-CI_QUEUED_DISPLAY_LIMIT),
     queuedTotal: queuedAll.length
   };
 }

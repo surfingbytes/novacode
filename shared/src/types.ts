@@ -449,7 +449,7 @@ export interface CiStatusResponse {
   source: 'actions' | 'commit-status' | null;
   lastCompleted: CiRun | null;
   running: CiRun[];
-  /** Oldest-first, capped at 3. */
+  /** Newest-first, capped at the 3 oldest (next in line). */
   queued: CiRun[];
   queuedTotal: number;
   error?: string;

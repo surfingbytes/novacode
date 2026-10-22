@@ -86,7 +86,7 @@ describe('run normalization', () => {
 });
 
 describe('summarizeCiRuns', () => {
-  it('splits running, oldest-first queue (max 3) and last finished on the branch', () => {
+  it('splits running, newest-first queue (next 3 in line) and last finished on the branch', () => {
     const runs = [
       run(9, 'queued'),
       run(8, 'queued'),
@@ -100,7 +100,7 @@ describe('summarizeCiRuns', () => {
     ];
     const summary = summarizeCiRuns(runs, 'main');
     expect(summary.running.map((r) => r.id)).toEqual([5]);
-    expect(summary.queued.map((r) => r.id)).toEqual([6, 7, 8]);
+    expect(summary.queued.map((r) => r.id)).toEqual([8, 7, 6]);
     expect(summary.queuedTotal).toBe(4);
     expect(summary.lastCompleted?.id).toBe(2);
   });

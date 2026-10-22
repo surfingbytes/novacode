@@ -85,14 +85,7 @@ function runTime(run: CiRun): string {
     <p v-if="status.error" class="mt-1 text-destructive break-words">{{ status.error }}</p>
 
     <ul v-else class="mt-1 space-y-1">
-      <li v-for="run in status.running" :key="`r-${run.id}`" class="flex items-center gap-1.5 min-w-0">
-        <LoaderCircle :size="13" :stroke-width="1.8" class="select-none flex-shrink-0 text-primary animate-spin" aria-hidden="true" />
-        <span class="flex-shrink-0 text-text-primary">Running {{ ciRunLabel(run) }}</span>
-        <span class="min-w-0 truncate text-text-muted">{{ run.title }}</span>
-        <a v-if="run.url" :href="run.url" target="_blank" rel="noopener noreferrer" class="ml-auto flex-shrink-0 text-text-muted hover:text-text-primary" title="Open run">
-          <ExternalLink :size="12" :stroke-width="1.6" aria-hidden="true" />
-        </a>
-      </li>
+      <li v-if="hiddenQueued > 0" class="pl-5 text-text-muted">+{{ hiddenQueued }} more queued</li>
       <li v-for="run in status.queued" :key="`q-${run.id}`" class="flex items-center gap-1.5 min-w-0">
         <Clock :size="13" :stroke-width="1.8" class="select-none flex-shrink-0 text-text-muted" aria-hidden="true" />
         <span class="flex-shrink-0 text-text-primary">Queued {{ ciRunLabel(run) }}</span>
@@ -101,7 +94,14 @@ function runTime(run: CiRun): string {
           <ExternalLink :size="12" :stroke-width="1.6" aria-hidden="true" />
         </a>
       </li>
-      <li v-if="hiddenQueued > 0" class="pl-5 text-text-muted">+{{ hiddenQueued }} more queued</li>
+      <li v-for="run in status.running" :key="`r-${run.id}`" class="flex items-center gap-1.5 min-w-0">
+        <LoaderCircle :size="13" :stroke-width="1.8" class="select-none flex-shrink-0 text-primary animate-spin" aria-hidden="true" />
+        <span class="flex-shrink-0 text-text-primary">Running {{ ciRunLabel(run) }}</span>
+        <span class="min-w-0 truncate text-text-muted">{{ run.title }}</span>
+        <a v-if="run.url" :href="run.url" target="_blank" rel="noopener noreferrer" class="ml-auto flex-shrink-0 text-text-muted hover:text-text-primary" title="Open run">
+          <ExternalLink :size="12" :stroke-width="1.6" aria-hidden="true" />
+        </a>
+      </li>
 
       <li v-if="status.lastCompleted" class="flex items-center gap-1.5 min-w-0">
         <CircleCheck v-if="status.lastCompleted.status === 'success'" :size="13" :stroke-width="1.8" class="select-none flex-shrink-0 text-success" aria-hidden="true" />
