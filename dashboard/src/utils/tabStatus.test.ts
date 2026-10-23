@@ -40,6 +40,20 @@ describe('countTabStatus', () => {
     expect(counts).toEqual({ running: 0, attention: 0 });
   });
 
+  it('counts each orchestrator once as running or attention', () => {
+    const counts = countTabStatus(
+      [],
+      unread,
+      [
+        { bRunning: true, bUnread: true },
+        { bRunning: false, bUnread: true },
+        { bRunning: false, bUnread: false },
+        { archived: true, bRunning: true, bUnread: true }
+      ]
+    );
+    expect(counts).toEqual({ running: 1, attention: 1 });
+  });
+
   it('drops sessions the unread predicate excludes', () => {
     const counts = countTabStatus([session({ id: 'a', unread: true })], () => false);
     expect(counts).toEqual({ running: 0, attention: 0 });

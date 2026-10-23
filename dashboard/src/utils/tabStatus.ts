@@ -14,9 +14,17 @@ export const BASE_TAB_TITLE = 'Nova Code';
 
 type CountableSession = Pick<Session, 'id' | 'archived' | 'busy' | 'unread'>;
 
+/** An orchestrator counts once, standing in for its hidden step chats. */
+export interface CountableOrchestrator {
+  archived?: boolean;
+  bRunning: boolean;
+  bUnread: boolean;
+}
+
 export function countTabStatus(
   sessions: CountableSession[],
-  isUnread: (session: { id: string; unread?: boolean }) => boolean
+  isUnread: (session: { id: string; unread?: boolean }) => boolean,
+  orchestrators: CountableOrchestrator[] = []
 ): TabStatusCounts {
   let running = 0;
   let attention = 0;
@@ -27,6 +35,16 @@ export function countTabStatus(
     if (session.busy) {
       running += 1;
     } else if (isUnread(session)) {
+      attention += 1;
+    }
+  }
+  for (const orchestrator of orchestrators) {
+    if (orchestrator.archived) {
+      continue;
+    }
+    if (orchestrator.bRunning) {
+      running += 1;
+    } else if (orchestrator.bUnread) {
       attention += 1;
     }
   }
