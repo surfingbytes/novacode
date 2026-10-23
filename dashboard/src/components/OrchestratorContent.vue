@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // node_modules
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onBeforeUnmount, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 
 // components
@@ -10,6 +10,7 @@ import GitView from '@/components/workspace/GitView.vue';
 import ConfirmModal from '@/components/ConfirmModal.vue';
 import PromptModal from '@/components/PromptModal.vue';
 import EntityDetailHeader from '@/components/ui/EntityDetailHeader.vue';
+import FavoriteButton from '@/components/ui/FavoriteButton.vue';
 import BottomTabBar from '@/components/ui/BottomTabBar.vue';
 
 // classes
@@ -19,6 +20,9 @@ import { orchestratorApi } from '@/classes/api';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { useToastStore } from '@/stores/toasts';
 import { useOrchestratorsStore } from '@/stores/orchestrators';
+
+// utils
+import { setViewingOrchestrator } from '@/utils/sessionUnread';
 
 // types
 import type { Orchestrator } from '@/@types/index';
@@ -110,6 +114,20 @@ async function toggleArchive(): Promise<void> {
   }
 }
 
+async function toggleFavorite(): Promise<void> {
+  if (!orchestrator.value || orchestrator.value.archived) {
+    return;
+  }
+  try {
+    const { data: updated } = await orchestratorApi.update(props.workspaceId, props.orchestratorId, {
+      isFavorite: !orchestrator.value.isFavorite,
+    });
+    orchestratorsStore.upsertOrchestrator(updated);
+  } catch {
+    toastStore.error('Failed to update favorite');
+  }
+}
+
 const bShowRenameModal = ref<boolean>(false);
 const bRenaming = ref<boolean>(false);
 
@@ -164,6 +182,22 @@ watch(
     fetchOrchestrator();
   },
 );
+
+// Opening the plan clears its "Done"; pushes that arrive while viewing are read at once (store).
+watch(
+  () => props.orchestratorId,
+  (orchestratorId) => {
+    setViewingOrchestrator(orchestratorId);
+    if (orchestratorId) {
+      void orchestratorsStore.markRead(props.workspaceId, orchestratorId);
+    }
+  },
+  { immediate: true },
+);
+
+onBeforeUnmount(() => {
+  setViewingOrchestrator(null);
+});
 </script>
 
 <template>
@@ -182,7 +216,11 @@ watch(
       @edit="openEditOrchestratorName"
       @archive="toggleArchive"
       @delete="bShowDeleteModal = true"
-    />
+    >
+      <template v-if="orchestrator && !orchestrator.archived" #title-trailing>
+        <FavoriteButton :b-favorite="!!orchestrator.isFavorite" @toggle="toggleFavorite" />
+      </template>
+    </EntityDetailHeader>
 
     <div
       v-if="error"

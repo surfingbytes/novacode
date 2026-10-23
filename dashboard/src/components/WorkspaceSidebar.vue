@@ -24,7 +24,7 @@ import { subtasksFromStoredJson } from '@/utils/orchestratorPayload';
 import { orchestratorProgress, type OrchestratorProgress } from '@/utils/orchestratorProgress';
 import { relativeTimeShort } from '@/utils/relativeTime';
 import { formatSessionSidebarPreview, previewFromMessageJson } from '@/utils/sessionListPreview';
-import { isSessionUnread } from '@/utils/sessionUnread';
+import { isOrchestratorUnread, isSessionUnread } from '@/utils/sessionUnread';
 import { sessionBusyLabel, sessionBusyTitle } from '@/utils/sessionBusyLabel';
 import { tagColorClass as categoryColorClass } from '@/utils/tagColors';
 import { workspaceColor } from '@/utils/workspaceColor';
@@ -129,8 +129,8 @@ const items = computed<SidebarItem[]>(() => {
 
   const list: SidebarItem[] = [...sessionItems, ...orchestratorItems];
   return list.sort((a, b) => {
-    const aFav = a.kind === 'session' && a.session.isFavorite ? 1 : 0;
-    const bFav = b.kind === 'session' && b.session.isFavorite ? 1 : 0;
+    const aFav = (a.kind === 'session' ? a.session.isFavorite : a.orchestrator.isFavorite) ? 1 : 0;
+    const bFav = (b.kind === 'session' ? b.session.isFavorite : b.orchestrator.isFavorite) ? 1 : 0;
     if (bFav !== aFav) return bFav - aFav;
     // Busy next, matching the nav sidebar's quick list
     const aBusy = itemBusy(a) ? 1 : 0;
@@ -272,6 +272,9 @@ function orchestratorContextItems(orch: Orchestrator): ContextMenuItem[] {
   const arch = orch.archived === true;
   return [
     { key: 'open', label: 'Open', icon: 'open_in_new' },
+    ...(arch
+      ? []
+      : [{ key: 'favorite', label: orch.isFavorite ? 'Remove favorite' : 'Add to favorites', icon: 'star' }]),
     { key: 'clone', label: 'Clone', icon: 'content_copy' },
     { key: 'archive', label: arch ? 'Unarchive' : 'Archive', icon: arch ? 'unarchive' : 'inventory_2' },
     { key: 'delete', label: 'Delete…', icon: 'delete', danger: true }
@@ -329,6 +332,17 @@ function onCtxPick(key: string): void {
       orchestrator,
       nestedSessions: orderedNestedSessions(orchestrator)
     });
+    return;
+  }
+  if (key === 'favorite') {
+    void orchestratorApi
+      .update(props.workspaceId, orchestrator.id, { isFavorite: !orchestrator.isFavorite })
+      .then(({ data: updatedOrchestrator }) => {
+        if (updatedOrchestrator) {
+          orchestratorsStore.upsertOrchestrator(updatedOrchestrator);
+        }
+      })
+      .catch(() => toastStore.error('Failed to update favorite'));
     return;
   }
   if (key === 'clone') {
@@ -608,6 +622,22 @@ watch(
                     <span class="truncate flex-1 min-w-0 text-sm font-medium text-text-primary">
                       {{ item.orchestrator.name || 'Untitled orchestrator' }}
                     </span>
+                    <svg
+                      v-if="item.orchestrator.isFavorite"
+                      class="text-primary shrink-0 self-center"
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                      stroke="currentColor"
+                      stroke-width="1.6"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      aria-label="Favorite"
+                      title="Favorite"
+                    >
+                      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z" />
+                    </svg>
                     <span class="text-[11px] text-text-muted shrink-0 whitespace-nowrap tabular-nums">
                       {{ relativeTimeShort(item.orchestrator.updatedAt) }}
                     </span>
@@ -629,6 +659,13 @@ watch(
                     :color="ringColor"
                   />
                   {{ orchestratorRowProgress(item.orchestrator).done }}/{{ orchestratorRowProgress(item.orchestrator).total }}
+                </span>
+                <span
+                  v-else-if="isOrchestratorUnread(item.orchestrator)"
+                  class="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0 self-center border border-primary/40 bg-primary/15 text-primary"
+                  title="Finished — unread"
+                >
+                  Done
                 </span>
               </button>
 

@@ -18,9 +18,9 @@ import {
   sessionUnreadDoneStyle,
   workspaceColor
 } from '@/utils/workspaceColor';
-import { isSessionUnread } from '@/utils/sessionUnread';
+import { isOrchestratorUnread, isSessionUnread } from '@/utils/sessionUnread';
 import { orchestratorProgress, type OrchestratorProgress } from '@/utils/orchestratorProgress';
-import type { AgentType, ApprovalPolicy, Session, Workspace } from '@/@types/index';
+import type { AgentType, ApprovalPolicy, Orchestrator, Session, Workspace } from '@/@types/index';
 
 const props = withDefaults(
   defineProps<{
@@ -105,35 +105,49 @@ const navItems = [
 
 const favoriteWorkspaces = computed(() => workspacesStore.favoriteWorkspaces);
 
-/** Planning chat id → progress of its plan (only plans that have steps). */
-const orchestratorProgressBySession = computed<Map<string, OrchestratorProgress>>(() => {
+type NavItem =
+  | { kind: 'session'; session: Session }
+  | { kind: 'orchestrator'; orchestrator: Orchestrator; progress: OrchestratorProgress };
+
+const navItems10 = computed<NavItem[]>(() => {
+  const byUpdatedDesc = (a: NavItem, b: NavItem) =>
+    new Date(navItemUpdatedAt(b)).getTime() - new Date(navItemUpdatedAt(a)).getTime();
   const sessionsById = new Map(workspacesStore.allSessions.map((s) => [s.id, s]));
-  const out = new Map<string, OrchestratorProgress>();
-  for (const [plannerId, orchestrator] of orchestratorsStore.byPlannerSessionId) {
-    const progress = orchestratorProgress(orchestrator, sessionsById, sessionsById.get(plannerId)?.busy);
-    if (progress.total > 0) {
-      out.set(plannerId, progress);
-    }
-  }
-  return out;
-});
-
-/** Busy, or the planning chat of a plan with any agent running. */
-function isRowBusy(session: Session): boolean {
-  return !!session.busy || !!orchestratorProgressBySession.value.get(session.id)?.bRunning;
-}
-
-const mergedQuickSessions = computed(() => {
-  const byUpdatedDesc = (a: { updatedAt: string }, b: { updatedAt: string }) =>
-    new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-  // Step sessions are represented by their plan's planning chat.
+  // Step sessions are represented by their orchestrator row.
   const stepIds = orchestratorsStore.stepSessionIds;
-  const visible = workspacesStore.allSessions.filter((s) => !s.archived && !stepIds.has(s.id));
-  const favorites = visible.filter((s) => s.isFavorite).sort(byUpdatedDesc);
-  const busyRest = visible.filter((s) => !s.isFavorite && isRowBusy(s)).sort(byUpdatedDesc);
-  const recentRest = visible.filter((s) => !s.isFavorite && !isRowBusy(s)).sort(byUpdatedDesc);
+  const sessionItems: NavItem[] = workspacesStore.allSessions
+    .filter((s) => !s.archived && !stepIds.has(s.id))
+    .map((session) => ({ kind: 'session', session }));
+  const orchestratorItems: NavItem[] = Object.values(orchestratorsStore.orchestratorsByWorkspace)
+    .flat()
+    .filter((o) => !o.archived)
+    .map((orchestrator) => ({
+      kind: 'orchestrator',
+      orchestrator,
+      progress: orchestratorProgress(orchestrator, sessionsById)
+    }));
+  const all = [...sessionItems, ...orchestratorItems];
+  const favorites = all.filter(isNavItemFavorite).sort(byUpdatedDesc);
+  const busyRest = all.filter((i) => !isNavItemFavorite(i) && isNavItemBusy(i)).sort(byUpdatedDesc);
+  const recentRest = all.filter((i) => !isNavItemFavorite(i) && !isNavItemBusy(i)).sort(byUpdatedDesc);
   return [...favorites, ...busyRest, ...recentRest].slice(0, 10);
 });
+
+function navItemUpdatedAt(item: NavItem): string {
+  return item.kind === 'session' ? item.session.updatedAt : item.orchestrator.updatedAt;
+}
+
+function isNavItemFavorite(item: NavItem): boolean {
+  return !!(item.kind === 'session' ? item.session.isFavorite : item.orchestrator.isFavorite);
+}
+
+function isOrchestratorDone(item: NavItem & { kind: 'orchestrator' }): boolean {
+  return isOrchestratorUnread(item.orchestrator) && !item.progress.bRunning;
+}
+
+function isNavItemBusy(item: NavItem): boolean {
+  return item.kind === 'session' ? !!item.session.busy : item.progress.bRunning;
+}
 
 const newSessionTags = computed((): string[] => {
   const workspaceId = newSessionWorkspace.value?.id;
@@ -381,98 +395,168 @@ onBeforeUnmount(() => {
     <div v-if="!bIsCollapsed" class="sidebar__section-label nc-eyebrow">// sessions</div>
 
     <div class="sidebar__sessions">
-      <div v-if="mergedQuickSessions.length === 0" class="sidebar__sessions-empty">
+      <div v-if="navItems10.length === 0" class="sidebar__sessions-empty">
         <template v-if="!bIsCollapsed">No active sessions</template>
       </div>
 
-      <RouterLink
-        v-for="session in mergedQuickSessions"
-        :key="'nav-' + session.id"
-        :to="{ name: 'session', params: { id: session.workspaceId, sessionId: session.id } }"
-        class="sidebar__session-item nc-row-hover"
-        :class="{ 'sidebar__session-item--unread': isSessionUnread(session) && !isRowBusy(session) }"
-        active-class="sidebar__session-item--active"
-        :title="
-          isSessionUnread(session) && !isRowBusy(session)
-            ? `${session.name || 'Untitled'} — finished, unread`
-            : bIsCollapsed
-              ? session.name
-              : undefined
-        "
-        @click="handleClose"
-      >
-        <OrchestratorProgressRing
-          v-if="orchestratorProgressBySession.get(session.id)?.bRunning"
-          :progress="orchestratorProgressBySession.get(session.id)!"
-          :color="workspaceColor(workspaceById(session.workspaceId))"
-        />
-        <svg
-          v-else-if="session.isFavorite"
-          class="sidebar__session-star"
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="currentColor"
-          stroke="currentColor"
-          stroke-width="1.6"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-label="Favorite"
-          title="Favorite"
-          :style="sessionFavoriteStarStyle(workspaceById(session.workspaceId), session.busy)"
+      <template v-for="item in navItems10" :key="item.kind === 'session' ? 'nav-' + item.session.id : 'nav-orch-' + item.orchestrator.id">
+        <RouterLink
+          v-if="item.kind === 'session'"
+          :to="{ name: 'session', params: { id: item.session.workspaceId, sessionId: item.session.id } }"
+          class="sidebar__session-item nc-row-hover"
+          :class="{ 'sidebar__session-item--unread': isSessionUnread(item.session) && !item.session.busy }"
+          active-class="sidebar__session-item--active"
+          :title="
+            isSessionUnread(item.session) && !item.session.busy
+              ? `${item.session.name || 'Untitled'} — finished, unread`
+              : bIsCollapsed
+                ? item.session.name
+                : undefined
+          "
+          @click="handleClose"
         >
-          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z" />
-        </svg>
-        <svg
-          v-else-if="bIsCollapsed && isSessionUnread(session) && !session.busy"
-          class="sidebar__session-done-icon"
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2.4"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-          :style="{ color: workspaceColor(workspaceById(session.workspaceId)) }"
-        >
-          <path d="M5 12l5 5L20 7" />
-        </svg>
-        <OrchestratorProgressRing
-          v-else-if="orchestratorProgressBySession.get(session.id)"
-          :progress="orchestratorProgressBySession.get(session.id)!"
-          :color="workspaceColor(workspaceById(session.workspaceId))"
-        />
-        <span
-          v-else
-          class="nc-status-dot"
-          :style="sessionStatusDotStyle(workspaceById(session.workspaceId), session.busy)"
-        />
-        <template v-if="!bIsCollapsed">
-          <div class="sidebar__session-info">
-            <div class="sidebar__session-name-row">
-              <div class="sidebar__session-name">
-                {{ session.name || 'Untitled' }}
+          <svg
+            v-if="item.session.isFavorite"
+            class="sidebar__session-star"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-label="Favorite"
+            title="Favorite"
+            :style="sessionFavoriteStarStyle(workspaceById(item.session.workspaceId), item.session.busy)"
+          >
+            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z" />
+          </svg>
+          <svg
+            v-else-if="bIsCollapsed && isSessionUnread(item.session) && !item.session.busy"
+            class="sidebar__session-done-icon"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            :style="{ color: workspaceColor(workspaceById(item.session.workspaceId)) }"
+          >
+            <path d="M5 12l5 5L20 7" />
+          </svg>
+          <span
+            v-else
+            class="nc-status-dot"
+            :style="sessionStatusDotStyle(workspaceById(item.session.workspaceId), item.session.busy)"
+          />
+          <template v-if="!bIsCollapsed">
+            <div class="sidebar__session-info">
+              <div class="sidebar__session-name-row">
+                <div class="sidebar__session-name">
+                  {{ item.session.name || 'Untitled' }}
+                </div>
+                <span
+                  v-if="isSessionUnread(item.session) && !item.session.busy"
+                  class="sidebar__session-done"
+                  title="Finished — unread"
+                  :style="sessionUnreadDoneStyle(workspaceById(item.session.workspaceId))"
+                >
+                  Done
+                </span>
               </div>
-              <span
-                v-if="isSessionUnread(session) && !isRowBusy(session)"
-                class="sidebar__session-done"
-                title="Finished — unread"
-                :style="sessionUnreadDoneStyle(workspaceById(session.workspaceId))"
-              >
-                Done
-              </span>
+              <div class="sidebar__session-path nc-mono">
+                <span :style="{ color: workspaceColor(workspaceById(item.session.workspaceId)) }">{{
+                  workspaceNameById(item.session.workspaceId)
+                }}</span>
+                <template v-if="item.session.agentType"> · {{ agentTypeShortLabel(item.session.agentType) }}</template>
+              </div>
             </div>
-            <div class="sidebar__session-path nc-mono">
-              <span :style="{ color: workspaceColor(workspaceById(session.workspaceId)) }">{{
-                workspaceNameById(session.workspaceId)
-              }}</span>
-              <template v-if="session.agentType"> · {{ agentTypeShortLabel(session.agentType) }}</template>
+          </template>
+        </RouterLink>
+
+        <RouterLink
+          v-else
+          :to="{ name: 'orchestrator', params: { id: item.orchestrator.workspaceId, orchestratorId: item.orchestrator.id } }"
+          class="sidebar__session-item nc-row-hover"
+          :class="{ 'sidebar__session-item--unread': isOrchestratorDone(item) }"
+          active-class="sidebar__session-item--active"
+          :title="
+            isOrchestratorDone(item)
+              ? `${item.orchestrator.name || 'Untitled orchestrator'} — finished, unread`
+              : bIsCollapsed
+                ? item.orchestrator.name || 'Untitled orchestrator'
+                : undefined
+          "
+          @click="handleClose"
+        >
+          <!-- Running shows progress even when starred; finished favorites get the star. -->
+          <svg
+            v-if="item.orchestrator.isFavorite && !item.progress.bRunning"
+            class="sidebar__session-star"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-label="Favorite"
+            title="Favorite"
+            :style="sessionFavoriteStarStyle(workspaceById(item.orchestrator.workspaceId), false)"
+          >
+            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z" />
+          </svg>
+          <svg
+            v-else-if="bIsCollapsed && isOrchestratorDone(item)"
+            class="sidebar__session-done-icon"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            :style="{ color: workspaceColor(workspaceById(item.orchestrator.workspaceId)) }"
+          >
+            <path d="M5 12l5 5L20 7" />
+          </svg>
+          <OrchestratorProgressRing
+            v-else
+            :progress="item.progress"
+            :color="workspaceColor(workspaceById(item.orchestrator.workspaceId))"
+          />
+          <template v-if="!bIsCollapsed">
+            <div class="sidebar__session-info">
+              <div class="sidebar__session-name-row">
+                <div class="sidebar__session-name">
+                  {{ item.orchestrator.name || 'Untitled orchestrator' }}
+                </div>
+                <span
+                  v-if="isOrchestratorDone(item)"
+                  class="sidebar__session-done"
+                  title="Finished — unread"
+                  :style="sessionUnreadDoneStyle(workspaceById(item.orchestrator.workspaceId))"
+                >
+                  Done
+                </span>
+              </div>
+              <div class="sidebar__session-path nc-mono">
+                <span :style="{ color: workspaceColor(workspaceById(item.orchestrator.workspaceId)) }">{{
+                  workspaceNameById(item.orchestrator.workspaceId)
+                }}</span>
+                · {{ item.progress.done }}/{{ item.progress.total }} steps
+              </div>
             </div>
-          </div>
-        </template>
-      </RouterLink>
+          </template>
+        </RouterLink>
+      </template>
     </div>
 
     <!-- Settings + Account + theme pinned -->

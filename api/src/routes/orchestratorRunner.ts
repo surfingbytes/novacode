@@ -34,9 +34,7 @@ import {
   unmergedFiles,
   worktreesRootDir
 } from '../classes/gitWorktrees';
-import { markSessionFinishedUnread } from '../classes/sessionUnread';
 import { updateOrchestratorAndBroadcast } from './orchestrator';
-import { hasChatSessionViewers } from './chat';
 
 // types
 import type { AgentType, ApprovalPolicy, OrchestratorRunMode, OrchestratorSubtasksPayload, SubTask } from '../@types/index';
@@ -79,13 +77,6 @@ export async function checkRunPreconditions(
 
 function finishedCount(subtasks: SubTask[]): number {
   return subtasks.filter((task) => task.runResult && task.runResult !== 'running').length;
-}
-
-/** Finished run: show "Done" on the planning chat (it stands for the plan in the nav sidebar). */
-function markPlannerFinishedUnread(plannerSessionId: string | undefined): void {
-  if (plannerSessionId) {
-    void markSessionFinishedUnread(plannerSessionId, hasChatSessionViewers(plannerSessionId)).catch(() => {});
-  }
 }
 
 async function readLiveSpec(workspaceId: string, plannerSessionId: string | null): Promise<string | null> {
@@ -388,12 +379,13 @@ export async function runOrchestrator(
     const runStatus = anyFailed ? 'failed' : bAllFinished ? 'completed' : null;
     await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
       runStatus,
+      // Full runs only: "Done" until the plan is opened (single-step reruns are watched).
+      ...(options.onlyIndex === undefined && runStatus !== null && { unread: true }),
       runCurrentStep: finishedCount(subtasks),
       runTotalSteps: total,
       subtasksJson: serializeSubtasksPayload(payload)
     });
     if (options.onlyIndex !== undefined) return;
-    markPlannerFinishedUnread(planner?.id);
     void sendPushToAll({
       title: anyFailed ? `Plan failed: ${orchestrator.name || 'task plan'}` : `Plan completed: ${orchestrator.name || 'task plan'}`,
       body: anyFailed
@@ -413,11 +405,11 @@ export async function runOrchestrator(
     await persistChain.catch(() => {});
     await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
       runStatus: 'failed',
+      unread: true,
       runCurrentStep: finishedCount(subtasks),
       runTotalSteps: total,
       subtasksJson: serializeSubtasksPayload(payload)
     });
-    markPlannerFinishedUnread(planner?.id);
     void sendPushToAll({
       title: `Plan failed: ${orchestrator.name || 'task plan'}`,
       body: 'The run stopped because of an unexpected error',

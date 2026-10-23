@@ -1037,19 +1037,26 @@ export const db = {
       verifyAgentType?: string | null;
       verifyModel?: string | null;
       sourceSessionId?: string | null;
+      isFavorite?: boolean;
+      unread?: boolean;
     }
   ): Promise<Orchestrator | undefined> {
     const existing = await _prisma.orchestrator.findUnique({ where: { id } });
     if (!existing) {
       return undefined;
     }
+    const archived = 'archived' in patch ? patch.archived! : existing.archived;
+    // Starring / reading should not reshuffle lists by last-interaction date.
+    const bFlagOnly = Object.keys(patch).every((key) => key === 'isFavorite' || key === 'unread');
     const data = {
       name: patch.name ?? existing.name,
       messageJson: patch.messageJson ?? existing.messageJson,
       subtasksJson: 'subtasksJson' in patch ? patch.subtasksJson : existing.subtasksJson,
       tags: 'tags' in patch ? (patch.tags ?? null) : existing.tags,
-      archived: 'archived' in patch ? patch.archived! : existing.archived,
-      updatedAt: new Date().toISOString(),
+      archived,
+      isFavorite: archived ? false : (patch.isFavorite ?? existing.isFavorite),
+      ...(patch.unread !== undefined && { unread: patch.unread }),
+      updatedAt: bFlagOnly ? existing.updatedAt : new Date().toISOString(),
       ...('runStatus' in patch && { runStatus: patch.runStatus }),
       ...('runCurrentStep' in patch && { runCurrentStep: patch.runCurrentStep }),
       ...('runTotalSteps' in patch && { runTotalSteps: patch.runTotalSteps }),

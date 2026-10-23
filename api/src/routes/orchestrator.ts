@@ -206,10 +206,14 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         maxParallel?: number;
         verifyAgentType?: string | null;
         verifyModel?: string | null;
+        isFavorite?: boolean;
       };
       const orchestrator = await db.getOrchestrator(orchestratorId);
       if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
         return reply.status(404).send({ error: 'Orchestrator not found' });
+      }
+      if (body.isFavorite === true && (body.archived ?? orchestrator.archived)) {
+        return reply.status(400).send({ error: 'Archived orchestrators cannot be favorited' });
       }
       const mergedSubtasks =
         'subtasksJson' in body
@@ -217,7 +221,8 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
           : undefined;
 
       const updated = await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
-        name: body.name ?? orchestrator.name,
+        ...(body.name !== undefined && { name: body.name }),
+        ...(typeof body.isFavorite === 'boolean' && { isFavorite: body.isFavorite }),
         ...(mergedSubtasks !== undefined && { subtasksJson: mergedSubtasks }),
         ...('tags' in (request.body as object) && { tags: body.tags ?? null }),
         ...(typeof body.archived === 'boolean' ? { archived: body.archived } : {}),
@@ -227,6 +232,27 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         ...('verifyAgentType' in (request.body as object) && { verifyAgentType: parseAgentType(body.verifyAgentType) ?? null }),
         ...('verifyModel' in (request.body as object) && { verifyModel: body.verifyModel?.trim() || null })
       });
+      return reply.send(updated ?? orchestrator);
+    }
+  );
+
+  // POST /api/workspaces/:workspaceId/orchestrators/:orchestratorId/read — clear "Done"
+  fastify.post(
+    '/api/workspaces/:workspaceId/orchestrators/:orchestratorId/read',
+    { preHandler: jwtPreHandler },
+    async (request, reply) => {
+      const { workspaceId, orchestratorId } = request.params as {
+        workspaceId: string;
+        orchestratorId: string;
+      };
+      const orchestrator = await db.getOrchestrator(orchestratorId);
+      if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
+        return reply.status(404).send({ error: 'Orchestrator not found' });
+      }
+      if (!orchestrator.unread) {
+        return reply.send(orchestrator);
+      }
+      const updated = await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, { unread: false });
       return reply.send(updated ?? orchestrator);
     }
   );
@@ -370,6 +396,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
 
       await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
         runStatus: 'running',
+        unread: false,
         runMode: mode,
         runCurrentStep: subtasks.filter((task) => task.runResult).length,
         runTotalSteps: subtasks.length,

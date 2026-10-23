@@ -192,6 +192,9 @@ model Orchestrator {
   verifyAgentType String?   @map("verify_agent_type")
   /** Model for the final verify step; null = the planning chat's model (or agent default). */
   verifyModel     String?   @map("verify_model")
+  isFavorite      Boolean   @default(false) @map("is_favorite")
+  /** Run finished and nobody opened the plan since. */
+  unread          Boolean   @default(false)
 
   @@index([sourceSessionId])
   @@map("orchestrators")

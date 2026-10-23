@@ -6,6 +6,7 @@ import { computed, ref } from 'vue';
 import { orchestratorApi } from '@/classes/api';
 import { forgetLocalStateForId } from '@/lib/sessionLocalState';
 import { subtasksFromStoredJson } from '@/utils/orchestratorPayload';
+import { isViewingOrchestrator } from '@/utils/sessionUnread';
 
 // types
 import type { Orchestrator, OrchestratorSummary } from '@/@types/index';
@@ -28,24 +29,6 @@ export const useOrchestratorsStore = defineStore('orchestrators', () => {
       list.some((orchestrator) => orchestrator.runStatus === 'running')
     )
   );
-
-  /** Planning chat id → its newest non-archived orchestrator, across all workspaces. */
-  const byPlannerSessionId = computed<Map<string, Orchestrator>>(() => {
-    const map = new Map<string, Orchestrator>();
-    for (const list of Object.values(orchestratorsByWorkspace.value)) {
-      for (const orchestrator of list) {
-        const plannerId = orchestrator.sourceSessionId;
-        if (!plannerId || orchestrator.archived) {
-          continue;
-        }
-        const existing = map.get(plannerId);
-        if (!existing || orchestrator.createdAt > existing.createdAt) {
-          map.set(plannerId, orchestrator);
-        }
-      }
-    }
-    return map;
-  });
 
   /** Sessions that ran a step of any orchestrator (the plan stands for them in the nav). */
   const stepSessionIds = computed<Set<string>>(() => {
@@ -102,6 +85,26 @@ export const useOrchestratorsStore = defineStore('orchestrators', () => {
       ...orchestratorsByWorkspace.value,
       [workspaceId]: list
     };
+    if (orchestrator.unread && isViewingOrchestrator(orchestrator.id)) {
+      void markRead(orchestrator.workspaceId, orchestrator.id);
+    }
+  }
+
+  /** Clear "Done" (optimistically; a later push corrects a failed persist). */
+  async function markRead(workspaceId: string, orchestratorId: string): Promise<void> {
+    const current = byId(orchestratorId);
+    if (current?.unread !== true) {
+      return;
+    }
+    const list = (orchestratorsByWorkspace.value[workspaceId] ?? []).map((orchestrator) =>
+      orchestrator.id === orchestratorId ? { ...orchestrator, unread: false } : orchestrator
+    );
+    orchestratorsByWorkspace.value = { ...orchestratorsByWorkspace.value, [workspaceId]: list };
+    try {
+      await orchestratorApi.markRead(workspaceId, orchestratorId);
+    } catch {
+      // the next snapshot / upsert corrects it
+    }
   }
 
   /**
@@ -170,7 +173,6 @@ export const useOrchestratorsStore = defineStore('orchestrators', () => {
     // data
     orchestratorsByWorkspace,
     anyRunning,
-    byPlannerSessionId,
     stepSessionIds,
     // methods
     forWorkspace,
@@ -178,6 +180,7 @@ export const useOrchestratorsStore = defineStore('orchestrators', () => {
     forPlannerSession,
     upsertOrchestrator,
     applySummaries,
+    markRead,
     removeOrchestrator,
     ensureFetched,
     fetchOne

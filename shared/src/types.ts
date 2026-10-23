@@ -67,6 +67,10 @@ export interface Orchestrator {
   /** Model for the final verify step; null = planning chat's model. */
   verifyModel?: string | null;
   runMode?: OrchestratorRunMode | string | null;
+  /** Omitted on older API responses; treat as false. */
+  isFavorite?: boolean;
+  /** Run finished and nobody opened the plan since. */
+  unread?: boolean;
 }
 
 /** Orchestrator without the planning chat (`GET /orchestrators`, sessions WS snapshot). */

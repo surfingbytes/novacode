@@ -986,12 +986,17 @@ export const orchestratorApi = {
       /** Final verify step; null = the planning chat's. */
       verifyAgentType?: AgentType | null;
       verifyModel?: string | null;
+      isFavorite?: boolean;
     }
   ): ReturnType<typeof http.patch<Orchestrator>> =>
     http.patch<Orchestrator>(`/workspaces/${workspaceId}/orchestrators/${orchestratorId}`, patch),
 
   remove: (workspaceId: string, orchestratorId: string): ReturnType<typeof http.delete> =>
     http.delete(`/workspaces/${workspaceId}/orchestrators/${orchestratorId}`),
+
+  /** Clear the finished-run "Done" badge. */
+  markRead: (workspaceId: string, orchestratorId: string): ReturnType<typeof http.post<Orchestrator>> =>
+    http.post<Orchestrator>(`/workspaces/${workspaceId}/orchestrators/${orchestratorId}/read`),
 
   run: (
     workspaceId: string,
