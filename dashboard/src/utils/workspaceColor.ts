@@ -14,6 +14,11 @@ export function workspaceColor(workspace: WorkspaceColorSource): string {
   return color ? color : 'var(--accent)';
 }
 
+/** Dimmed color every idle status icon (dot, star, orchestrator ring) uses, so they all match. */
+export function idleStatusColor(color: string): string {
+  return `color-mix(in oklab, ${color} 35%, transparent)`;
+}
+
 /**
  * Session status dot tinted with the workspace color: busy = full color with
  * glow, idle = dimmed. Finished/unread is a separate badge — never a glow,
@@ -31,7 +36,7 @@ export function sessionStatusDotStyle(
       boxShadow: `0 0 0 3px color-mix(in oklab, ${color} 20%, transparent)`
     };
   }
-  return { background: `color-mix(in oklab, ${color} 35%, transparent)` };
+  return { background: idleStatusColor(color) };
 }
 
 /**
@@ -50,7 +55,7 @@ export function sessionFavoriteStarStyle(
       filter: `drop-shadow(0 0 3px color-mix(in oklab, ${color} 45%, transparent))`
     };
   }
-  return { color: `color-mix(in oklab, ${color} 45%, transparent)` };
+  return { color: idleStatusColor(color) };
 }
 
 /**

@@ -2,6 +2,9 @@
 // node_modules
 import { computed } from 'vue';
 
+// utils
+import { idleStatusColor } from '@/utils/workspaceColor';
+
 // types
 import type { OrchestratorProgress } from '@/utils/orchestratorProgress';
 
@@ -29,9 +32,7 @@ interface Arc {
 }
 
 // -------------------------------------------------- Computed --------------------------------------------------
-const tint = computed(() =>
-  props.progress.bRunning ? props.color : `color-mix(in oklab, ${props.color} 45%, transparent)`
-);
+const tint = computed(() => (props.progress.bRunning ? props.color : idleStatusColor(props.color)));
 
 /** Arc lengths in percent of the circle (circle uses pathLength=100). */
 const arcs = computed<Arc[]>(() => {
@@ -55,6 +56,11 @@ const arcs = computed<Arc[]>(() => {
   push('waiting', waiting, 'var(--warn)', true);
   return out;
 });
+
+/** Bare ring (inactive or finished) matches the idle dot/star; behind arcs it stays fainter as a track. */
+const trackStroke = computed(() =>
+  arcs.value.length === 0 ? idleStatusColor(props.color) : `color-mix(in oklab, ${props.color} 22%, transparent)`
+);
 
 const glowStyle = computed(() =>
   props.progress.bRunning
@@ -89,7 +95,7 @@ const title = computed(() => {
       r="4.5"
       fill="none"
       stroke-width="2"
-      :stroke="`color-mix(in oklab, ${color} 22%, transparent)`"
+      :stroke="trackStroke"
     />
     <circle
       v-for="arc in arcs"
