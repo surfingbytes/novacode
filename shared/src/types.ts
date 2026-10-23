@@ -69,6 +69,9 @@ export interface Orchestrator {
   runMode?: OrchestratorRunMode | string | null;
 }
 
+/** Orchestrator without the planning chat (`GET /orchestrators`, sessions WS snapshot). */
+export type OrchestratorSummary = Omit<Orchestrator, 'messageJson'>;
+
 // ---------------------------------- Session spec ----------------------------------
 
 export interface SessionSpecStatus {

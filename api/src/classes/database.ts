@@ -957,6 +957,18 @@ export const db = {
     }) as Promise<OrchestratorWithCategory[]>;
   },
 
+  /**
+   * Non-archived orchestrators of every workspace for the nav sidebar, without
+   * the planning chat (`messageJson`), which can be large and isn't needed there.
+   */
+  async listOrchestratorSummaries(): Promise<Omit<OrchestratorWithCategory, 'messageJson'>[]> {
+    return _prisma.orchestrator.findMany({
+      where: { archived: false },
+      omit: { messageJson: true },
+      orderBy: { updatedAt: 'desc' }
+    });
+  },
+
   async getOrchestrator(id: string): Promise<OrchestratorWithCategory | undefined> {
     const row = await _prisma.orchestrator.findUnique({ where: { id } });
     return (row ?? undefined) as OrchestratorWithCategory | undefined;

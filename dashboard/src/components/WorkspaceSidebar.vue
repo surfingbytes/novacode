@@ -7,6 +7,7 @@ import { useRouter } from 'vue-router';
 import AgentSessionAvatar from '@/components/AgentSessionAvatar.vue';
 import ConfirmModal from '@/components/ConfirmModal.vue';
 import ContextMenu from '@/components/ContextMenu.vue';
+import OrchestratorProgressRing from '@/components/OrchestratorProgressRing.vue';
 import SessionEditModal from '@/components/SessionEditModal.vue';
 
 // stores
@@ -20,11 +21,13 @@ import type { ContextMenuItem } from '@/components/ContextMenu.vue';
 
 // utils
 import { subtasksFromStoredJson } from '@/utils/orchestratorPayload';
+import { orchestratorProgress, type OrchestratorProgress } from '@/utils/orchestratorProgress';
 import { relativeTimeShort } from '@/utils/relativeTime';
 import { formatSessionSidebarPreview, previewFromMessageJson } from '@/utils/sessionListPreview';
 import { isSessionUnread } from '@/utils/sessionUnread';
 import { sessionBusyLabel, sessionBusyTitle } from '@/utils/sessionBusyLabel';
 import { tagColorClass as categoryColorClass } from '@/utils/tagColors';
+import { workspaceColor } from '@/utils/workspaceColor';
 
 // classes
 import { orchestratorApi, sessionsApi } from '@/classes/api';
@@ -87,6 +90,11 @@ const bDeletingSession = ref(false);
 const bDeletingOrchestrator = ref(false);
 
 // -------------------------------------------------- Computed --------------------------------------------------
+
+const sessionsById = computed(() => new Map(workspacesStore.allSessions.map((s) => [s.id, s])));
+const ringColor = computed(() =>
+  workspaceColor(workspacesStore.workspaces.find((w) => w.id === props.workspaceId))
+);
 
 /** Session ids that appear as orchestrator step runs (nested under orchestrator, not top-level). */
 const sessionsAttachedToOrchestrators = computed(() => {
@@ -207,6 +215,10 @@ function sessionPreviewLine(session: Session): string {
   }
   const fromHistory = previewFromMessageJson(session.messageJson ?? null);
   return fromHistory ? formatSessionSidebarPreview(fromHistory.text, fromHistory.role) : '';
+}
+
+function orchestratorRowProgress(orch: Orchestrator): OrchestratorProgress {
+  return orchestratorProgress(orch, sessionsById.value);
 }
 
 function orchestratorPreviewLine(orch: Orchestrator): string {
@@ -609,13 +621,14 @@ watch(
                 </div>
 
                 <span
-                  v-if="item.orchestrator.runStatus === 'running'"
-                  class="inline-flex items-center gap-1.5 text-[11px] text-primary shrink-0 self-center"
+                  v-if="orchestratorRowProgress(item.orchestrator).bRunning"
+                  class="inline-flex items-center gap-1.5 text-[11px] text-primary shrink-0 self-center tabular-nums"
                 >
-                  <span
-                    class="w-3 h-3 border-2 border-primary/40 border-t-primary rounded-full animate-spin"
+                  <OrchestratorProgressRing
+                    :progress="orchestratorRowProgress(item.orchestrator)"
+                    :color="ringColor"
                   />
-                  Running
+                  {{ orchestratorRowProgress(item.orchestrator).done }}/{{ orchestratorRowProgress(item.orchestrator).total }}
                 </span>
               </button>
 

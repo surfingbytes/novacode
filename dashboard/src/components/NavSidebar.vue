@@ -3,8 +3,10 @@ import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { useToastStore } from '@/stores/toasts';
+import { useOrchestratorsStore } from '@/stores/orchestrators';
 import ThemeToggleButton from '@/components/ThemeToggleButton.vue';
 import NewSessionModal from '@/components/NewSessionModal.vue';
+import OrchestratorProgressRing from '@/components/OrchestratorProgressRing.vue';
 import { apiErrorMessage, sessionsApi } from '@/classes/api';
 import { createPlanningSession, type NewOrchestratorOptions } from '@/lib/createPlanningSession';
 import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
@@ -17,7 +19,8 @@ import {
   workspaceColor
 } from '@/utils/workspaceColor';
 import { isSessionUnread } from '@/utils/sessionUnread';
-import type { AgentType, ApprovalPolicy, Workspace } from '@/@types/index';
+import { orchestratorProgress, type OrchestratorProgress } from '@/utils/orchestratorProgress';
+import type { AgentType, ApprovalPolicy, Session, Workspace } from '@/@types/index';
 
 const props = withDefaults(
   defineProps<{
@@ -37,6 +40,7 @@ const route = useRoute();
 const router = useRouter();
 const workspacesStore = useWorkspacesStore();
 const toastStore = useToastStore();
+const orchestratorsStore = useOrchestratorsStore();
 const {
   claudeAvailable,
   cursorAvailable,
@@ -101,19 +105,33 @@ const navItems = [
 
 const favoriteWorkspaces = computed(() => workspacesStore.favoriteWorkspaces);
 
-const activeQuickSessions = computed(() => workspacesStore.activeBusySessions);
+/** Planning chat id → progress of its plan (only plans that have steps). */
+const orchestratorProgressBySession = computed<Map<string, OrchestratorProgress>>(() => {
+  const sessionsById = new Map(workspacesStore.allSessions.map((s) => [s.id, s]));
+  const out = new Map<string, OrchestratorProgress>();
+  for (const [plannerId, orchestrator] of orchestratorsStore.byPlannerSessionId) {
+    const progress = orchestratorProgress(orchestrator, sessionsById, sessionsById.get(plannerId)?.busy);
+    if (progress.total > 0) {
+      out.set(plannerId, progress);
+    }
+  }
+  return out;
+});
+
+/** Busy, or the planning chat of a plan with any agent running. */
+function isRowBusy(session: Session): boolean {
+  return !!session.busy || !!orchestratorProgressBySession.value.get(session.id)?.bRunning;
+}
+
 const mergedQuickSessions = computed(() => {
-  const activeIds = new Set(activeQuickSessions.value.map((s) => s.id));
   const byUpdatedDesc = (a: { updatedAt: string }, b: { updatedAt: string }) =>
     new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-  const favorites = workspacesStore.allSessions
-    .filter((s) => !s.archived && s.isFavorite)
-    .sort(byUpdatedDesc);
-  const favoriteIds = new Set(favorites.map((s) => s.id));
-  const busyRest = activeQuickSessions.value.filter((s) => !favoriteIds.has(s.id));
-  const recentRest = workspacesStore.allSessions
-    .filter((s) => !s.archived && !favoriteIds.has(s.id) && !activeIds.has(s.id))
-    .sort(byUpdatedDesc);
+  // Step sessions are represented by their plan's planning chat.
+  const stepIds = orchestratorsStore.stepSessionIds;
+  const visible = workspacesStore.allSessions.filter((s) => !s.archived && !stepIds.has(s.id));
+  const favorites = visible.filter((s) => s.isFavorite).sort(byUpdatedDesc);
+  const busyRest = visible.filter((s) => !s.isFavorite && isRowBusy(s)).sort(byUpdatedDesc);
+  const recentRest = visible.filter((s) => !s.isFavorite && !isRowBusy(s)).sort(byUpdatedDesc);
   return [...favorites, ...busyRest, ...recentRest].slice(0, 10);
 });
 
@@ -372,10 +390,10 @@ onBeforeUnmount(() => {
         :key="'nav-' + session.id"
         :to="{ name: 'session', params: { id: session.workspaceId, sessionId: session.id } }"
         class="sidebar__session-item nc-row-hover"
-        :class="{ 'sidebar__session-item--unread': isSessionUnread(session) && !session.busy }"
+        :class="{ 'sidebar__session-item--unread': isSessionUnread(session) && !isRowBusy(session) }"
         active-class="sidebar__session-item--active"
         :title="
-          isSessionUnread(session) && !session.busy
+          isSessionUnread(session) && !isRowBusy(session)
             ? `${session.name || 'Untitled'} — finished, unread`
             : bIsCollapsed
               ? session.name
@@ -383,8 +401,13 @@ onBeforeUnmount(() => {
         "
         @click="handleClose"
       >
+        <OrchestratorProgressRing
+          v-if="orchestratorProgressBySession.get(session.id)?.bRunning"
+          :progress="orchestratorProgressBySession.get(session.id)!"
+          :color="workspaceColor(workspaceById(session.workspaceId))"
+        />
         <svg
-          v-if="session.isFavorite"
+          v-else-if="session.isFavorite"
           class="sidebar__session-star"
           width="12"
           height="12"
@@ -416,6 +439,11 @@ onBeforeUnmount(() => {
         >
           <path d="M5 12l5 5L20 7" />
         </svg>
+        <OrchestratorProgressRing
+          v-else-if="orchestratorProgressBySession.get(session.id)"
+          :progress="orchestratorProgressBySession.get(session.id)!"
+          :color="workspaceColor(workspaceById(session.workspaceId))"
+        />
         <span
           v-else
           class="nc-status-dot"
@@ -428,7 +456,7 @@ onBeforeUnmount(() => {
                 {{ session.name || 'Untitled' }}
               </div>
               <span
-                v-if="isSessionUnread(session) && !session.busy"
+                v-if="isSessionUnread(session) && !isRowBusy(session)"
                 class="sidebar__session-done"
                 title="Finished — unread"
                 :style="sessionUnreadDoneStyle(workspaceById(session.workspaceId))"

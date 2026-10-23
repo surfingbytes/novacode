@@ -5,9 +5,10 @@ import { computed, ref } from 'vue';
 // classes
 import { orchestratorApi } from '@/classes/api';
 import { forgetLocalStateForId } from '@/lib/sessionLocalState';
+import { subtasksFromStoredJson } from '@/utils/orchestratorPayload';
 
 // types
-import type { Orchestrator } from '@/@types/index';
+import type { Orchestrator, OrchestratorSummary } from '@/@types/index';
 
 /**
  * Single source of truth for orchestrators.
@@ -27,6 +28,39 @@ export const useOrchestratorsStore = defineStore('orchestrators', () => {
       list.some((orchestrator) => orchestrator.runStatus === 'running')
     )
   );
+
+  /** Planning chat id → its newest non-archived orchestrator, across all workspaces. */
+  const byPlannerSessionId = computed<Map<string, Orchestrator>>(() => {
+    const map = new Map<string, Orchestrator>();
+    for (const list of Object.values(orchestratorsByWorkspace.value)) {
+      for (const orchestrator of list) {
+        const plannerId = orchestrator.sourceSessionId;
+        if (!plannerId || orchestrator.archived) {
+          continue;
+        }
+        const existing = map.get(plannerId);
+        if (!existing || orchestrator.createdAt > existing.createdAt) {
+          map.set(plannerId, orchestrator);
+        }
+      }
+    }
+    return map;
+  });
+
+  /** Sessions that ran a step of any orchestrator (the plan stands for them in the nav). */
+  const stepSessionIds = computed<Set<string>>(() => {
+    const ids = new Set<string>();
+    for (const list of Object.values(orchestratorsByWorkspace.value)) {
+      for (const orchestrator of list) {
+        for (const task of subtasksFromStoredJson(orchestrator.subtasksJson)) {
+          if (task.sessionId) {
+            ids.add(task.sessionId);
+          }
+        }
+      }
+    }
+    return ids;
+  });
 
   // -------------------------------------------------- Methods --------------------------------------------------
   function forWorkspace(workspaceId: string): Orchestrator[] {
@@ -68,6 +102,26 @@ export const useOrchestratorsStore = defineStore('orchestrators', () => {
       ...orchestratorsByWorkspace.value,
       [workspaceId]: list
     };
+  }
+
+  /**
+   * Merge the all-workspace list (no `messageJson`) from `GET /orchestrators` or the
+   * sessions WS snapshot. Keeps richer fields already loaded; doesn't mark workspaces
+   * fetched, so workspace views still load the full rows.
+   */
+  function applySummaries(summaries: OrchestratorSummary[]): void {
+    const next = { ...orchestratorsByWorkspace.value };
+    for (const summary of summaries) {
+      const list = [...(next[summary.workspaceId] ?? [])];
+      const index = list.findIndex((existing) => existing.id === summary.id);
+      if (index === -1) {
+        list.push({ messageJson: '', ...summary });
+      } else {
+        list[index] = { ...list[index], ...summary };
+      }
+      next[summary.workspaceId] = list;
+    }
+    orchestratorsByWorkspace.value = next;
   }
 
   function removeOrchestrator(orchestratorId: string, workspaceId?: string): void {
@@ -116,11 +170,14 @@ export const useOrchestratorsStore = defineStore('orchestrators', () => {
     // data
     orchestratorsByWorkspace,
     anyRunning,
+    byPlannerSessionId,
+    stepSessionIds,
     // methods
     forWorkspace,
     byId,
     forPlannerSession,
     upsertOrchestrator,
+    applySummaries,
     removeOrchestrator,
     ensureFetched,
     fetchOne

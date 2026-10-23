@@ -72,6 +72,11 @@ export async function updateOrchestratorAndBroadcast(
 }
 
 export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void> {
+  // GET /api/orchestrators — every workspace, without `messageJson` (nav sidebar)
+  fastify.get('/api/orchestrators', { preHandler: jwtPreHandler }, async (_request, reply) => {
+    return reply.send(await db.listOrchestratorSummaries());
+  });
+
   // GET /api/workspaces/:workspaceId/orchestrators
   fastify.get(
     '/api/workspaces/:workspaceId/orchestrators',

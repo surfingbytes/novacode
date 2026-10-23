@@ -271,7 +271,8 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
           busySubagents: getActiveBusySubagents(s.id),
         }));
       await db.enrichSessionListPreviews(allSessions);
-      sendJson(socket, { type: 'global-snapshot', sessions: allSessions });
+      const orchestrators = await db.listOrchestratorSummaries();
+      sendJson(socket, { type: 'global-snapshot', sessions: allSessions, orchestrators });
 
       socket.on('close', () => {
         wsClients.delete(socket);

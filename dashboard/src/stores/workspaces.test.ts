@@ -15,6 +15,9 @@ vi.mock('@/classes/api', () => ({
     listAll: vi.fn(),
     markRead: vi.fn()
   },
+  orchestratorApi: {
+    listAll: vi.fn(() => Promise.resolve({ data: [] }))
+  },
   buildSessionsWsUrl: () => 'ws://localhost/api/ws/sessions',
   isApiUnreachableError: (error: unknown) => (error as { unreachable?: boolean })?.unreachable === true
 }));
@@ -29,7 +32,8 @@ vi.mock('@/lib/wsClient', () => ({
 
 vi.mock('@/stores/orchestrators', () => ({
   useOrchestratorsStore: () => ({
-    upsertOrchestrator: vi.fn()
+    upsertOrchestrator: vi.fn(),
+    applySummaries: vi.fn()
   })
 }));
 

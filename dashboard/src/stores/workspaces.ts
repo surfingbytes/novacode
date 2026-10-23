@@ -3,7 +3,7 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
 // classes
-import { sessionsApi, workspaceApi, buildSessionsWsUrl, isApiUnreachableError } from '@/classes/api';
+import { orchestratorApi, sessionsApi, workspaceApi, buildSessionsWsUrl, isApiUnreachableError } from '@/classes/api';
 import { createManagedSocket, type ManagedSocket } from '@/lib/wsClient';
 
 // stores
@@ -19,6 +19,7 @@ import type {
   UpdateWorkspacePayload,
   Session,
   Orchestrator,
+  OrchestratorSummary,
   SessionSpecStatus
 } from '@/@types/index';
 
@@ -202,8 +203,13 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
       bSessionsLoading.value = true;
     }
     try {
+      const orchestratorsRequest = orchestratorApi.listAll().catch(() => null);
       const response = await withUnreachableRetry(() => sessionsApi.listAll());
       allSessions.value = response.data ?? [];
+      const orchestratorsResponse = await orchestratorsRequest;
+      if (orchestratorsResponse?.data) {
+        useOrchestratorsStore().applySummaries(orchestratorsResponse.data);
+      }
       bSessionsLoadFailed.value = false;
     } catch (error) {
       console.error('Failed to fetch sessions:', error);
@@ -224,7 +230,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
       onMessage: (data) => {
         try {
           const messagePayload = JSON.parse(data) as
-            | { type: 'global-snapshot'; sessions: Session[] }
+            | { type: 'global-snapshot'; sessions: Session[]; orchestrators?: OrchestratorSummary[] }
             | { type: 'session-upsert'; session: Session }
             | { type: 'session-deleted'; id: string; workspaceId?: string }
             | { type: 'busy-changed'; id: string; busy: boolean; busySubagents?: Session['busySubagents'] }
@@ -236,6 +242,9 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
 
           if (messagePayload.type === 'global-snapshot') {
             allSessions.value = messagePayload.sessions ?? [];
+            if (messagePayload.orchestrators) {
+              useOrchestratorsStore().applySummaries(messagePayload.orchestrators);
+            }
             bSessionsLoadFailed.value = false;
             sessionsInitialized = true;
           } else if (messagePayload.type === 'session-upsert') {

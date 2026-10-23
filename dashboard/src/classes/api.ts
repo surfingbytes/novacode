@@ -19,6 +19,7 @@ import type {
   SessionSpecStatus,
   Orchestrator,
   OrchestratorRunMode,
+  OrchestratorSummary,
   RoleTemplate,
   WorkspaceRuleFileSummary,
   WorkspaceRuleFileContent,
@@ -935,7 +936,11 @@ export interface OrchestratorPlannerPayload {
 }
 
 export const orchestratorApi = {
-  list: (workspaceId: string): ReturnType<typeof http.get<Orchestrator[]>> =>
+  /** Non-archived orchestrators of every workspace, without `messageJson` (nav sidebar). */
+  listAll: (): ReturnType<typeof http.get<OrchestratorSummary[]>> =>
+    http.get<OrchestratorSummary[]>('/orchestrators'),
+
+  list:(workspaceId: string): ReturnType<typeof http.get<Orchestrator[]>> =>
     http.get<Orchestrator[]>(`/workspaces/${workspaceId}/orchestrators`),
 
   get: (workspaceId: string, orchestratorId: string): ReturnType<typeof http.get<Orchestrator>> =>
