@@ -35,8 +35,9 @@ const tint = computed(() =>
 
 /** Arc lengths in percent of the circle (circle uses pathLength=100). */
 const arcs = computed<Arc[]>(() => {
-  const { total, done, failed, running, waiting } = props.progress;
-  if (total <= 0) {
+  const { total, done, failed, running, waiting, bRunning } = props.progress;
+  // A finished, idle run rests like an inactive one; the "Done" badge marks it until read.
+  if (total <= 0 || (!bRunning && done === total)) {
     return [];
   }
   const share = (count: number): number => (count / total) * 100;
