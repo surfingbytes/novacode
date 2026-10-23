@@ -105,6 +105,27 @@ describe('buildStepPrompt', () => {
     expect(out).toContain('## This step');
     expect(out.endsWith('do it')).toBe(true);
   });
+
+  const log = '### Step 1: A\n\nnotes a\n\n### Step 2: B\n\nnotes b\n\n### Step 3: C\n\nnotes c';
+  const payload = { sharedContext: '', handoffLog: log, subtasks: [] };
+
+  it('gives work steps no spec and only their dependencies\' handoff notes', () => {
+    const out = buildStepPrompt({ name: 'd', prompt: 'do it', dependsOn: [0, 2] }, payload, 'SPEC', 3);
+    expect(out).not.toContain('SPEC');
+    expect(out).toContain('notes a');
+    expect(out).not.toContain('notes b');
+    expect(out).toContain('notes c');
+  });
+
+  it('drops the handoff section for steps without dependencies', () => {
+    expect(buildStepPrompt({ name: 'd', prompt: 'do it' }, payload, 'SPEC', 3)).toBe('do it');
+  });
+
+  it('gives the verify step the spec and every handoff note', () => {
+    const out = buildStepPrompt({ name: 'v', prompt: 'check', kind: 'verify', dependsOn: [0] }, payload, 'SPEC', 3);
+    expect(out).toContain('## Spec\n\nSPEC');
+    expect(out).toContain('notes b');
+  });
 });
 
 describe('summarizeStepHandoff', () => {

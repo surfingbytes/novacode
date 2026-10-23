@@ -177,8 +177,8 @@ async function runStep(ctx: StepContext, index: number, worktreeCwd: string | nu
   if (worktreeCwd) await db.setSessionWorktreePath(session.id, worktreeCwd);
   await ctx.persist();
 
-  const spec = await readLiveSpec(ctx.workspaceId, ctx.plannerSessionId);
-  const stepPrompt = buildStepPrompt(task, ctx.payload, spec);
+  const spec = bVerify ? await readLiveSpec(ctx.workspaceId, ctx.plannerSessionId) : null;
+  const stepPrompt = buildStepPrompt(task, ctx.payload, spec, index);
   runningStepSessions.add(session.id);
   let result: { error?: string; messages?: ChatMessage[] };
   try {
@@ -296,8 +296,7 @@ async function runParallel(ctx: StepContext, repo: RepoInfo, maxParallel: number
     });
     if (created.error || !created.session) return false;
     await db.setSessionWorktreePath(created.session.id, join(integrationDir, repo.subdir));
-    const spec = await readLiveSpec(ctx.workspaceId, ctx.plannerSessionId);
-    const prompt = buildStepPrompt({ name: stepName, prompt: RESOLVE_CONFLICTS_PROMPT(stepName, files) }, ctx.payload, spec);
+    const prompt = buildStepPrompt({ name: stepName, prompt: RESOLVE_CONFLICTS_PROMPT(stepName, files) }, ctx.payload);
     await dispatchPromptAndWait({
       sessionId: created.session.id,
       text: prompt,

@@ -52,7 +52,7 @@ describe('sessionFavoriteStarStyle', () => {
 
   it('idle star uses the dimmed workspace color without a glow', () => {
     expect(sessionFavoriteStarStyle({ color: '#ff8800' }, false)).toEqual({
-      color: 'color-mix(in oklab, #ff8800 45%, transparent)'
+      color: 'color-mix(in oklab, #ff8800 35%, transparent)'
     });
     expect(sessionFavoriteStarStyle({ color: '#ff8800' }, false).filter).toBeUndefined();
   });

@@ -29,7 +29,7 @@ const STEP_SCHEMA = {
     prompt: {
       type: 'string',
       description:
-        'Full instruction for the step agent. It also receives the spec and handoff notes from finished steps, so say exactly what to do in this step.'
+        'Full, self-contained instruction for the step agent: its task, decisions affecting it, files it touches and exact contracts with other steps. It does NOT receive the spec, only plan notes and handoff notes from its dependsOn steps.'
     },
     category: { type: 'string', description: 'Optional label, e.g. setup, implementation, tests, docs.' },
     dependsOn: {
@@ -44,13 +44,13 @@ const STEP_SCHEMA = {
 export const NOVA_MCP_TOOLS: NovaMcpTool[] = [
   {
     name: 'spec_read',
-    description: "Read this chat's spec file (the agreed requirements every orchestrator step receives).",
+    description: "Read this chat's spec file (the agreed requirements the final verify step checks against).",
     inputSchema: { type: 'object', properties: {} }
   },
   {
     name: 'spec_write',
     description:
-      "Replace this chat's spec with the complete Markdown spec: goal and scope, agreed decisions, constraints, file paths and exact values, rejected alternatives, open questions, acceptance criteria. Orchestrator steps read it live when they start.",
+      "Replace this chat's spec with the complete Markdown spec: goal and scope, agreed decisions, constraints, file paths and exact values, rejected alternatives, open questions, acceptance criteria. The orchestrator's verify step reads it live when it starts; other steps don't get it.",
     inputSchema: {
       type: 'object',
       properties: { content: { type: 'string', description: 'Full spec in Markdown.' } },
@@ -73,7 +73,7 @@ export const NOVA_MCP_TOOLS: NovaMcpTool[] = [
         name: { type: 'string', description: 'Plan title, 3 to 8 words.' },
         notes: {
           type: 'string',
-          description: 'Optional extra context for every step that is not part of the spec (e.g. how the work is split).'
+          description: 'Optional short context every step gets (e.g. how the work is split). Not a place for the spec.'
         },
         steps: { type: 'array', items: STEP_SCHEMA, minItems: 1 }
       },

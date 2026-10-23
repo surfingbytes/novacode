@@ -218,18 +218,35 @@ function extractAssistantTextFromEvents(events: string[] | undefined): string {
   return text.trim();
 }
 
+/** Keep only the `### Step N:` handoff blocks whose step index is in `indexes`. */
+export function filterHandoffLog(log: string, indexes: number[]): string {
+  const wanted = new Set(indexes.map((index) => index + 1));
+  return log
+    .split(/\n(?=### Step \d+: )/)
+    .filter((block) => {
+      const match = /^### Step (\d+): /.exec(block.trim());
+      return match ? wanted.has(Number(match[1])) : false;
+    })
+    .map((block) => block.trim())
+    .join('\n\n');
+}
+
 /**
- * Full prompt for one step: live spec (read when the step starts), plan notes,
- * handoff notes from finished steps, then the step's own instruction.
+ * Full prompt for one step: plan notes, handoff notes, then the step's own
+ * instruction. Only the verify step gets the live spec and every handoff note;
+ * other steps get notes from their direct dependencies. Without `stepIndex`
+ * (merge-conflict sessions) all handoff notes are kept.
  */
 export function buildStepPrompt(
   task: SubTask,
   payload: OrchestratorSubtasksPayload,
-  spec?: string | null
+  spec?: string | null,
+  stepIndex?: number
 ): string {
   const parts: string[] = [];
+  const isVerify = task.kind === 'verify';
   const specText = spec?.trim();
-  if (specText) {
+  if (isVerify && specText) {
     parts.push(`## Spec\n\n${specText}`);
   }
   const sc = payload.sharedContext?.trim();
@@ -237,7 +254,10 @@ export function buildStepPrompt(
   if (sc && sc !== specText) {
     parts.push(`## Shared plan context\n\n${sc}`);
   }
-  const hl = payload.handoffLog?.trim();
+  let hl = payload.handoffLog?.trim();
+  if (hl && !isVerify && stepIndex !== undefined) {
+    hl = filterHandoffLog(hl, normalizeDependsOn(task.dependsOn).filter((dep) => dep < stepIndex));
+  }
   if (hl) {
     parts.push(`## Completed steps — handoff notes\n\n${hl}`);
   }
