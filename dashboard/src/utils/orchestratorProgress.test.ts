@@ -27,11 +27,12 @@ describe('orchestratorProgress', () => {
         { name: 'b', prompt: '', runResult: 'skipped' },
         { name: 'c', prompt: '', runResult: 'failed' },
         { name: 'd', prompt: '', runResult: 'running' },
+        { name: 'e', prompt: '', runResult: 'running', waitingQuestion: 'Apply the migration?' },
         { name: 'verify', prompt: '', kind: 'verify' }
       ], 'running'),
       new Map()
     );
-    expect(progress).toEqual({ total: 5, done: 2, failed: 1, running: 1, bRunning: true });
+    expect(progress).toEqual({ total: 6, done: 2, failed: 1, running: 1, waiting: 1, bRunning: true });
   });
 
   it('is running while any step session is busy, even after the run stopped', () => {

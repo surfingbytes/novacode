@@ -18,6 +18,7 @@ import { parseSubtasksPayloadString, serializeSubtasksPayload } from '../classes
 import { broadcastOrchestratorUpsert } from './ws';
 import { publishSpecStatus } from './sessionSpec';
 import { updateOrchestratorAndBroadcast } from './orchestrator';
+import { markStepNeedsInput } from './orchestratorRunner';
 
 // -------------------------------------------- Tools --------------------------------------------
 
@@ -78,6 +79,16 @@ export const NOVA_MCP_TOOLS: NovaMcpTool[] = [
       },
       required: ['steps']
     }
+  },
+  {
+    name: 'step_needs_input',
+    description:
+      "Only for an orchestrator step session: you can't finish this step without the user's answer. Call it with your question, then end your turn asking it. The plan holds this step and every step that depends on it, and notifies the user, until they reply in this chat.",
+    inputSchema: {
+      type: 'object',
+      properties: { question: { type: 'string', description: 'The question for the user, one or two sentences.' } },
+      required: ['question']
+    }
   }
 ];
 
@@ -105,6 +116,15 @@ async function callNovaTool(sessionId: string, name: string, args: Record<string
     const saved = await writeSessionSpec(workspaceId, sessionId, content);
     void publishSpecStatus(sessionId).catch(() => {});
     return ok(`Spec saved (${saved.path}).`);
+  }
+
+  if (name === 'step_needs_input') {
+    const question = typeof args.question === 'string' ? args.question.trim() : '';
+    if (!question) return fail('"question" must say what you need from the user.');
+    if (!markStepNeedsInput(sessionId, question)) {
+      return fail('This chat is not a running orchestrator step; just ask the user in your reply.');
+    }
+    return ok('The plan now waits for the user. End your turn with the question; their reply continues this step.');
   }
 
   const existing = await db.getLatestOrchestratorBySourceSession(sessionId);

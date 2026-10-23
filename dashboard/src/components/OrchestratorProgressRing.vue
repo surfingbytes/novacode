@@ -7,7 +7,7 @@ import type { OrchestratorProgress } from '@/utils/orchestratorProgress';
 
 /**
  * Orchestrator status in the sidebar dot slot: an arc per finished share of the
- * steps (failed in red, running ones pulsing). Lit with glow while running,
+ * steps (failed in red, running ones pulsing, ones waiting for the user in amber). Lit with glow while running,
  * dimmed when idle — same lighting as the session dot/star.
  */
 const props = withDefaults(
@@ -35,7 +35,7 @@ const tint = computed(() =>
 
 /** Arc lengths in percent of the circle (circle uses pathLength=100). */
 const arcs = computed<Arc[]>(() => {
-  const { total, done, failed, running } = props.progress;
+  const { total, done, failed, running, waiting } = props.progress;
   if (total <= 0) {
     return [];
   }
@@ -51,6 +51,7 @@ const arcs = computed<Arc[]>(() => {
   push('done', done, tint.value);
   push('failed', failed, 'var(--danger)');
   push('running', running, tint.value, true);
+  push('waiting', waiting, 'var(--warn)', true);
   return out;
 });
 
@@ -61,9 +62,10 @@ const glowStyle = computed(() =>
 );
 
 const title = computed(() => {
-  const { total, done, failed, running } = props.progress;
+  const { total, done, failed, running, waiting } = props.progress;
   const parts = [`${done}/${total} steps done`];
   if (running > 0) parts.push(`${running} running`);
+  if (waiting > 0) parts.push(`${waiting} waiting for your answer`);
   if (failed > 0) parts.push(`${failed} failed`);
   return `Orchestrator — ${parts.join(', ')}`;
 });

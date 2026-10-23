@@ -18,7 +18,7 @@ import {
 import { deleteSessionImages } from './images';
 import { broadcastOrchestratorUpsert, broadcastWorkspaceSessionsRefresh } from './ws';
 import { broadcastSessionListUpsert } from '../classes/sessionListBroadcast';
-import { checkRunPreconditions, runOrchestrator } from './orchestratorRunner';
+import { checkRunPreconditions, inFlightRunSteps, runOrchestrator } from './orchestratorRunner';
 
 // types
 import type { AgentType, ApprovalPolicy, OrchestratorRunMode } from '../@types/index';
@@ -346,6 +346,13 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       if (orchestrator.runStatus === 'running') {
         return reply.status(409).send({ error: 'Run already in progress' });
       }
+      const finishing = inFlightRunSteps(orchestratorId);
+      if (finishing) {
+        const steps = finishing.map((name) => `"${name}"`).join(', ');
+        return reply.status(409).send({
+          error: `The stopped run is still finishing ${steps || 'a step'}. Wait for it to end, or stop that step's agent in its session, then run again.`
+        });
+      }
 
       const payload = parseSubtasksPayloadString(orchestrator.subtasksJson);
       if (!payload?.subtasks.length) {
@@ -360,6 +367,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         delete subtasks[index].runResult;
         delete subtasks[index].sessionId;
         delete subtasks[index].runNote;
+        delete subtasks[index].waitingQuestion;
       };
 
       let onlyIndex = typeof body.onlyIndex === 'number' ? body.onlyIndex : undefined;

@@ -196,8 +196,15 @@ function extractAssistantTextFromEvents(events: string[] | undefined): string {
       const event = JSON.parse(line) as {
         type?: string;
         message?: { content?: Array<{ type?: string; text?: string }> };
+        update?: { sessionUpdate?: string; content?: { type?: string; text?: string } };
       };
-      if (event.type === 'assistant' && Array.isArray(event.message?.content)) {
+      const update = event.update;
+      if (update?.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text') {
+        text += update.content.text ?? '';
+      } else if (update?.sessionUpdate === 'tool_call') {
+        // ACP: keep only the text after the last tool call (the step's final report).
+        text = '';
+      } else if (event.type === 'assistant' && Array.isArray(event.message?.content)) {
         for (const block of event.message.content) {
           if (block.type === 'text' && typeof block.text === 'string') {
             text += block.text;

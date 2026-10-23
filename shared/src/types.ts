@@ -27,6 +27,8 @@ export interface SubTask {
   runResult?: 'running' | 'done' | 'failed' | 'skipped';
   /** Why the step failed or what happened while merging it (parallel runs). */
   runNote?: string | null;
+  /** Question the step's agent asked the user; the step waits for a reply in its session. */
+  waitingQuestion?: string | null;
   /** 'verify' marks the auto-added final "check against spec" step. */
   kind?: 'verify';
 }

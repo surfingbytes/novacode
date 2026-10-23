@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 
 // classes
 import {
+  summarizeStepHandoff,
   appendHandoff,
   buildStepPrompt,
   cloneSubtasksForNewPlan,
@@ -103,6 +104,17 @@ describe('buildStepPrompt', () => {
     expect(out).toContain('## Completed steps');
     expect(out).toContain('## This step');
     expect(out.endsWith('do it')).toBe(true);
+  });
+});
+
+describe('summarizeStepHandoff', () => {
+  const chunk = (text: string) =>
+    JSON.stringify({ sessionId: 's', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } } });
+  const toolCall = JSON.stringify({ sessionId: 's', update: { sessionUpdate: 'tool_call', title: 'Terminal' } });
+
+  it('keeps the ACP text after the last tool call', () => {
+    const events = [chunk('Looking around. '), toolCall, chunk('Step done: '), chunk('added the schema.')];
+    expect(summarizeStepHandoff([{ role: 'assistant', content: '', events, createdAt: '' }])).toBe('Step done: added the schema.');
   });
 });
 

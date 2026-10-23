@@ -108,6 +108,9 @@ const handoffLogDisplay = computed(() => planPayload.value?.handoffLog?.trim() ?
 const failedStepCount = computed(() => subtasks.value.filter((task) => task.runResult === 'failed').length);
 const skippedStepCount = computed(() => subtasks.value.filter((task) => task.runResult === 'skipped').length);
 const runningStepCount = computed(() => subtasks.value.filter((task) => task.runResult === 'running').length);
+const waitingStepCount = computed(() =>
+  isRunning.value ? subtasks.value.filter((task) => task.runResult === 'running' && task.waitingQuestion).length : 0
+);
 const finishedStepCount = computed(
   () => subtasks.value.filter((task) => task.runResult && task.runResult !== 'running').length
 );
@@ -197,13 +200,28 @@ const hasEdits = computed(() => {
 
 // -------------------------------------------------- Methods --------------------------------------------------
 
-function taskStatus(index: number): 'idle' | 'active' | 'done' | 'failed' | 'skipped' {
+function taskStatus(index: number): 'idle' | 'active' | 'waiting' | 'finishing' | 'done' | 'failed' | 'skipped' {
   const task = editedSubtasks.value[index] ?? subtasks.value[index];
   if (task?.runResult === 'running') {
-    // A run interrupted by a restart leaves "running" behind.
-    return isRunning.value ? 'active' : 'failed';
+    // After a stop the step's agent keeps working until its turn ends; a restart leaves "running" behind.
+    if (!isRunning.value) return isStepSessionBusy(task) ? 'finishing' : 'failed';
+    return task.waitingQuestion ? 'waiting' : 'active';
   }
   return task?.runResult ?? 'idle';
+}
+
+const STEP_CARD_CLASS: Record<ReturnType<typeof taskStatus>, string> = {
+  idle: 'border border-fg/15',
+  active: 'orch-active-border',
+  waiting: 'border border-warning/70',
+  finishing: 'border border-dashed border-primary/50',
+  done: 'border border-emerald-500/60',
+  failed: 'border border-destructive/60',
+  skipped: 'border border-dashed border-fg/25 opacity-70'
+};
+
+function isStepSessionBusy(task: SubTask): boolean {
+  return !!task.sessionId && !!workspacesStore.allSessions.find((session) => session.id === task.sessionId)?.busy;
 }
 
 function openEditModal(index: number) {
@@ -654,18 +672,7 @@ onBeforeUnmount(() => {
         <div class="flex flex-col gap-0">
           <template v-for="(task, i) in editedSubtasks" :key="'flow-' + i">
             <div
-              :class="[
-                'rounded-xl overflow-hidden',
-                taskStatus(i) === 'active'
-                  ? 'orch-active-border'
-                  : taskStatus(i) === 'done'
-                    ? 'border border-emerald-500/60'
-                    : taskStatus(i) === 'failed'
-                      ? 'border border-destructive/60'
-                      : taskStatus(i) === 'skipped'
-                        ? 'border border-dashed border-fg/25 opacity-70'
-                        : 'border border-fg/15'
-              ]"
+              :class="['rounded-xl overflow-hidden', STEP_CARD_CLASS[taskStatus(i)]]"
             >
               <div
                 class="px-3 py-2 border-b border-fg/10 flex items-center gap-2 bg-fg/[0.04] orch-card-inner"
@@ -684,6 +691,22 @@ onBeforeUnmount(() => {
                 >
                   Running
                 </span>
+                <span
+                  v-else-if="taskStatus(i) === 'finishing'"
+                  class="text-xs px-2 py-0.5 rounded-full border border-primary/30 text-primary/80 shrink-0"
+                  title="The run is stopped; this step's agent finishes its current turn"
+                >
+                  Finishing…
+                </span>
+                <button
+                  v-else-if="taskStatus(i) === 'waiting'"
+                  type="button"
+                  class="text-xs px-2 py-0.5 rounded-full border border-warning/50 text-warning hover:bg-warning/10 shrink-0"
+                  title="Answer in this step's session"
+                  @click="openStepSession(task)"
+                >
+                  Needs your input
+                </button>
                 <span
                   v-else-if="task.runResult === 'skipped'"
                   class="text-xs px-2 py-0.5 rounded-full border border-fg/20 text-text-muted shrink-0"
@@ -767,6 +790,12 @@ onBeforeUnmount(() => {
                   :class="taskStatus(i) === 'failed' ? 'text-destructive' : 'text-warning'"
                 >
                   {{ task.runNote }}
+                </p>
+                <p
+                  v-if="taskStatus(i) === 'waiting'"
+                  class="mt-2 text-xs whitespace-pre-wrap break-words text-warning"
+                >
+                  Waiting for your answer: {{ task.waitingQuestion }}
                 </p>
               </div>
             </div>
@@ -897,6 +926,8 @@ onBeforeUnmount(() => {
           {{ orchestrator?.runMode === 'parallel' ? 'Running in parallel' : 'Running' }}:
           {{ runProgress.finished }}/{{ runProgress.total }} finished<template v-if="runProgress.running"
             >, {{ runProgress.running }} running</template
+          ><template v-if="waitingStepCount"
+            >, {{ waitingStepCount }} waiting for your input</template
           >
         </span>
         <span v-else-if="runProgress.status === 'completed'">

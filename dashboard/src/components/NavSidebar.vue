@@ -539,7 +539,14 @@ onBeforeUnmount(() => {
                   {{ item.orchestrator.name || 'Untitled orchestrator' }}
                 </div>
                 <span
-                  v-if="isOrchestratorDone(item)"
+                  v-if="item.progress.waiting > 0"
+                  class="sidebar__session-done sidebar__session-input"
+                  title="A step waits for your answer"
+                >
+                  Input
+                </span>
+                <span
+                  v-else-if="isOrchestratorDone(item)"
                   class="sidebar__session-done"
                   title="Finished — unread"
                   :style="sessionUnreadDoneStyle(workspaceById(item.orchestrator.workspaceId))"
@@ -942,6 +949,12 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   padding: 1px 6px;
   line-height: 1.35;
+}
+
+.sidebar__session-input {
+  color: var(--warn);
+  border-color: color-mix(in oklab, var(--warn) 40%, transparent);
+  background: color-mix(in oklab, var(--warn) 14%, transparent);
 }
 
 .sidebar__session-done-icon {

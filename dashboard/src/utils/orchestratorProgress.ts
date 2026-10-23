@@ -11,6 +11,8 @@ export interface OrchestratorProgress {
   failed: number;
   /** Steps whose session works right now. */
   running: number;
+  /** Running steps that wait for the user's answer to their agent's question. */
+  waiting: number;
   /** The run is on, or any of its agents (steps or planning chat) is busy. */
   bRunning: boolean;
 }
@@ -25,12 +27,15 @@ export function orchestratorProgress(
   let done = 0;
   let failed = 0;
   let running = 0;
+  let waiting = 0;
   let bAnyStepBusy = false;
   for (const task of tasks) {
     if (task.runResult === 'done' || task.runResult === 'skipped') {
       done++;
     } else if (task.runResult === 'failed') {
       failed++;
+    } else if (task.runResult === 'running' && task.waitingQuestion && orchestrator.runStatus === 'running') {
+      waiting++;
     } else if (task.runResult === 'running') {
       running++;
     }
@@ -43,6 +48,7 @@ export function orchestratorProgress(
     done,
     failed,
     running,
+    waiting,
     bRunning: orchestrator.runStatus === 'running' || bAnyStepBusy || bPlannerBusy
   };
 }

@@ -190,7 +190,7 @@ export async function handleNovaMcpMessage(
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: NOVA_MCP_SERVER_NAME, title: 'Nova Code', version: '1.0.0' },
         instructions:
-          'Nova Code tools for this chat: write the chat spec and save the orchestrator plan the user runs from the Orchestrator tab. Use them when the user asks for a spec, a plan or an orchestrator.'
+          'Nova Code tools for this chat: write the chat spec and save the orchestrator plan the user runs from the Orchestrator tab. Use them when the user asks for a spec, a plan or an orchestrator. In an orchestrator step session, call step_needs_input before ending your turn with a question for the user.'
       });
     }
     case 'ping':

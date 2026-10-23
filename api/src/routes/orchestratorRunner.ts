@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { db, normalizeTagStringList } from '../classes/database';
 import { config } from '../classes/config';
 import { createSessionWithAgent } from '../classes/sessionService';
-import { dispatchPromptAndWait } from '../classes/chatEngine';
+import { dispatchPromptAndWait, isSessionBusy, subscribeBusy, unsubscribeBusy } from '../classes/chatEngine';
+import { isNovaMcpEnabled } from '../classes/novaMcp';
 import { readSessionSpec, specHasContent } from '../classes/sessionSpec';
 import { resolveWorkspaceAbsolutePath } from '../classes/workspacePaths';
 import { sendPushToAll } from '../classes/push';
@@ -37,10 +38,72 @@ import {
 import { updateOrchestratorAndBroadcast } from './orchestrator';
 
 // types
-import type { AgentType, ApprovalPolicy, OrchestratorRunMode, OrchestratorSubtasksPayload, SubTask } from '../@types/index';
+import type { AgentType, ApprovalPolicy, ChatMessage, OrchestratorRunMode, OrchestratorSubtasksPayload, SubTask } from '../@types/index';
 import type { RepoInfo } from '../classes/gitWorktrees';
 
 const STEP_TIMEOUT_MS = 60000_000;
+const STOP_POLL_MS = 5000;
+
+const STEP_NEEDS_INPUT_PROMPT = `## If you need the user
+
+You run as one step of an automated plan; later steps start as soon as your turn ends. If you cannot finish this step without an answer from the user, call the nova \`step_needs_input\` tool with your question, then end your turn with the question. The plan waits until the user replies here. Do not use it for questions you can decide yourself.`;
+
+/** Plans of runs still in flight, by orchestrator id (a stopped run lives on until its running steps end). */
+const activeRuns = new Map<string, OrchestratorSubtasksPayload>();
+
+/** Names of the steps a still-finishing earlier run works on, or null when no run is in flight. */
+export function inFlightRunSteps(orchestratorId: string): string[] | null {
+  const payload = activeRuns.get(orchestratorId);
+  return payload ? payload.subtasks.filter((task) => task.runResult === 'running').map((task) => task.name) : null;
+}
+
+/** Sessions of steps that are running now (only these may call step_needs_input). */
+const runningStepSessions = new Set<string>();
+/** Question a running step's agent asked during its current turn. */
+const stepQuestions = new Map<string, string>();
+
+/** Called by the nova `step_needs_input` tool; false when the session isn't a running step. */
+export function markStepNeedsInput(sessionId: string, question: string): boolean {
+  if (!runningStepSessions.has(sessionId)) return false;
+  stepQuestions.set(sessionId, question);
+  return true;
+}
+
+/**
+ * Wait until the user's reply turn in the step session finishes; resolves with
+ * the session's messages, or null when the run was stopped first.
+ */
+function waitForReplyTurn(
+  sessionId: string,
+  isStopped: () => Promise<boolean>
+): Promise<{ messages: ChatMessage[] } | null> {
+  return new Promise((resolve) => {
+    let bSawBusy = isSessionBusy(sessionId);
+    let bSettled = false;
+    const finish = (result: { messages: ChatMessage[] } | null): void => {
+      if (bSettled) return;
+      bSettled = true;
+      unsubscribeBusy(onBusy);
+      clearInterval(poll);
+      resolve(result);
+    };
+    const onBusy = (busySessionId: string, _workspaceId: string, bBusy: boolean): void => {
+      if (busySessionId !== sessionId) return;
+      if (bBusy) {
+        bSawBusy = true;
+      } else if (bSawBusy) {
+        void db.listSessionMessages(sessionId).then(
+          (messages) => finish({ messages }),
+          () => finish({ messages: [] })
+        );
+      }
+    };
+    const poll = setInterval(() => {
+      void isStopped().then((bStopped) => bStopped && !isSessionBusy(sessionId) && finish(null));
+    }, STOP_POLL_MS);
+    subscribeBusy(onBusy);
+  });
+}
 
 export interface OrchestratorRunOptions {
   mode: OrchestratorRunMode;
@@ -53,6 +116,7 @@ export interface OrchestratorRunOptions {
 interface StepContext {
   workspaceId: string;
   orchestratorId: string;
+  planName: string;
   payload: OrchestratorSubtasksPayload;
   workerAgentType: AgentType;
   workerModel: string | undefined;
@@ -90,6 +154,7 @@ async function runStep(ctx: StepContext, index: number, worktreeCwd: string | nu
   const task = ctx.payload.subtasks[index];
   task.runResult = 'running';
   task.runNote = null;
+  task.waitingQuestion = null;
   const bVerify = task.kind === 'verify';
   const agentType = bVerify ? ctx.verifyAgentType : ctx.workerAgentType;
   const model = bVerify ? ctx.verifyModel : ctx.workerModel;
@@ -113,13 +178,40 @@ async function runStep(ctx: StepContext, index: number, worktreeCwd: string | nu
   await ctx.persist();
 
   const spec = await readLiveSpec(ctx.workspaceId, ctx.plannerSessionId);
-  const result = await dispatchPromptAndWait({
-    sessionId: session.id,
-    text: buildStepPrompt(task, ctx.payload, spec),
-    model: session.modelSelection,
-    mode: session.sessionMode,
-    timeoutMs: STEP_TIMEOUT_MS
-  });
+  const stepPrompt = buildStepPrompt(task, ctx.payload, spec);
+  runningStepSessions.add(session.id);
+  let result: { error?: string; messages?: ChatMessage[] };
+  try {
+    result = await dispatchPromptAndWait({
+      sessionId: session.id,
+      text: isNovaMcpEnabled() ? `${stepPrompt}\n\n---\n\n${STEP_NEEDS_INPUT_PROMPT}` : stepPrompt,
+      model: session.modelSelection,
+      mode: session.sessionMode,
+      timeoutMs: STEP_TIMEOUT_MS
+    });
+    // The agent asked the user: hold the step (and its dependents) until a reply turn ends without a new question.
+    for (let question = stepQuestions.get(session.id); !result.error && question !== undefined; question = stepQuestions.get(session.id)) {
+      stepQuestions.delete(session.id);
+      task.waitingQuestion = question;
+      await ctx.persist();
+      void sendPushToAll({
+        title: `Input needed: ${ctx.planName}`,
+        body: `Step ${index + 1} "${task.name}": ${question}`,
+        tag: `orchestrator-step-${session.id}`,
+        url: `/workspace/${ctx.workspaceId}/session/${session.id}`
+      }).catch(() => {});
+      const reply = await waitForReplyTurn(session.id, ctx.isStopped);
+      task.waitingQuestion = null;
+      if (!reply) {
+        result = { error: 'Stopped while waiting for your answer' };
+        break;
+      }
+      result = reply;
+    }
+  } finally {
+    runningStepSessions.delete(session.id);
+    stepQuestions.delete(session.id);
+  }
   if (result.error) {
     task.runResult = 'failed';
     task.runNote = result.error;
@@ -311,6 +403,21 @@ export async function runOrchestrator(
   payload: OrchestratorSubtasksPayload,
   options: OrchestratorRunOptions
 ): Promise<void> {
+  // Set before the first await so the run route sees it right away.
+  activeRuns.set(orchestratorId, payload);
+  try {
+    await runOrchestratorSteps(workspaceId, orchestratorId, payload, options);
+  } finally {
+    activeRuns.delete(orchestratorId);
+  }
+}
+
+async function runOrchestratorSteps(
+  workspaceId: string,
+  orchestratorId: string,
+  payload: OrchestratorSubtasksPayload,
+  options: OrchestratorRunOptions
+): Promise<void> {
   const subtasks = payload.subtasks;
   const total = subtasks.length;
   const orchestrator = await db.getOrchestrator(orchestratorId);
@@ -331,6 +438,7 @@ export async function runOrchestrator(
   const ctx: StepContext = {
     workspaceId,
     orchestratorId,
+    planName: orchestrator.name || 'task plan',
     payload,
     workerAgentType,
     workerModel,
@@ -398,6 +506,7 @@ export async function runOrchestrator(
     logger.error({ err: error, orchestratorId }, 'Orchestrator run failed');
     for (const task of subtasks) {
       if (task.runResult === 'running') task.runResult = 'failed';
+      task.waitingQuestion = null;
     }
     const message = error instanceof Error ? error.message : String(error);
     const firstOpen = subtasks.find((task) => !task.runResult || task.runResult === 'failed');
