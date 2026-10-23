@@ -89,7 +89,8 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
 
   // POST /api/workspaces/:workspaceId/orchestrators
   // With `planner`, also creates the planning chat and links it (the usual flow);
-  // `agentType`/`workerModel` are for the step sessions.
+  // `agentType`/`workerModel` are for the step sessions, `verifyAgentType`/`verifyModel`
+  // for the final verify step (null = the planning chat's).
   fastify.post(
     '/api/workspaces/:workspaceId/orchestrators',
     { preHandler: jwtPreHandler },
@@ -101,6 +102,8 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         agentType?: string;
         workerModel?: string | null;
         maxParallel?: number;
+        verifyAgentType?: string | null;
+        verifyModel?: string | null;
         planner?: PlannerSessionInput;
       };
       const workspace = await db.getWorkspace(workspaceId);
@@ -127,7 +130,9 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
           parseAgentType(body.agentType) ?? plannerAgentType ?? (workspace.defaultAgentType as AgentType | null) ?? 'cursor-agent',
         sourceSessionId,
         workerModel: body.workerModel?.trim() || null,
-        maxParallel: parseMaxParallel(body.maxParallel)
+        maxParallel: parseMaxParallel(body.maxParallel),
+        verifyAgentType: parseAgentType(body.verifyAgentType) ?? null,
+        verifyModel: body.verifyModel?.trim() || null
       });
       broadcastOrchestratorUpsert(workspaceId, orchestrator);
       return reply.status(201).send(orchestrator);
@@ -194,6 +199,8 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         agentType?: string;
         workerModel?: string | null;
         maxParallel?: number;
+        verifyAgentType?: string | null;
+        verifyModel?: string | null;
       };
       const orchestrator = await db.getOrchestrator(orchestratorId);
       if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
@@ -211,7 +218,9 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         ...(typeof body.archived === 'boolean' ? { archived: body.archived } : {}),
         ...(parseAgentType(body.agentType) && { agentType: parseAgentType(body.agentType) }),
         ...('workerModel' in (request.body as object) && { workerModel: body.workerModel?.trim() || null }),
-        ...(parseMaxParallel(body.maxParallel) !== undefined && { maxParallel: parseMaxParallel(body.maxParallel) })
+        ...(parseMaxParallel(body.maxParallel) !== undefined && { maxParallel: parseMaxParallel(body.maxParallel) }),
+        ...('verifyAgentType' in (request.body as object) && { verifyAgentType: parseAgentType(body.verifyAgentType) ?? null }),
+        ...('verifyModel' in (request.body as object) && { verifyModel: body.verifyModel?.trim() || null })
       });
       return reply.send(updated ?? orchestrator);
     }
@@ -264,7 +273,9 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         tags: orchestrator.tags ?? null,
         agentType: orchestrator.agentType,
         workerModel: orchestrator.workerModel ?? null,
-        maxParallel: orchestrator.maxParallel
+        maxParallel: orchestrator.maxParallel,
+        verifyAgentType: orchestrator.verifyAgentType ?? null,
+        verifyModel: orchestrator.verifyModel ?? null
       });
       const clonedPayload = cloneSubtasksForNewPlan(orchestrator.subtasksJson);
       const updated = await updateOrchestratorAndBroadcast(workspaceId, cloned.id, {

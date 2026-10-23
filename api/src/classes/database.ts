@@ -970,6 +970,8 @@ export const db = {
     sourceSessionId?: string | null;
     workerModel?: string | null;
     maxParallel?: number;
+    verifyAgentType?: string | null;
+    verifyModel?: string | null;
   }): Promise<Orchestrator> {
     const id = randomUUID();
     const createdAt = new Date().toISOString();
@@ -986,6 +988,8 @@ export const db = {
         archived: false,
         sourceSessionId: data.sourceSessionId ?? null,
         workerModel: data.workerModel ?? null,
+        verifyAgentType: data.verifyAgentType ?? null,
+        verifyModel: data.verifyModel ?? null,
         ...(data.maxParallel !== undefined && { maxParallel: data.maxParallel })
       }
     });
@@ -1018,6 +1022,8 @@ export const db = {
       agentType?: string;
       workerModel?: string | null;
       maxParallel?: number;
+      verifyAgentType?: string | null;
+      verifyModel?: string | null;
       sourceSessionId?: string | null;
     }
   ): Promise<Orchestrator | undefined> {
@@ -1040,6 +1046,8 @@ export const db = {
       ...(patch.agentType !== undefined && { agentType: patch.agentType }),
       ...('workerModel' in patch && { workerModel: patch.workerModel }),
       ...(patch.maxParallel !== undefined && { maxParallel: patch.maxParallel }),
+      ...('verifyAgentType' in patch && { verifyAgentType: patch.verifyAgentType }),
+      ...('verifyModel' in patch && { verifyModel: patch.verifyModel }),
       ...('sourceSessionId' in patch && { sourceSessionId: patch.sourceSessionId })
     };
     return _prisma.orchestrator.update({

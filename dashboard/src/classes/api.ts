@@ -950,6 +950,9 @@ export const orchestratorApi = {
       agentType?: AgentType;
       workerModel?: string | null;
       maxParallel?: number;
+      /** Final verify step; null = the planning chat's. */
+      verifyAgentType?: AgentType | null;
+      verifyModel?: string | null;
       /** Also create the planning chat (linked as `sourceSessionId`). */
       planner?: OrchestratorPlannerPayload;
     }
@@ -975,6 +978,9 @@ export const orchestratorApi = {
       agentType?: AgentType;
       workerModel?: string | null;
       maxParallel?: number;
+      /** Final verify step; null = the planning chat's. */
+      verifyAgentType?: AgentType | null;
+      verifyModel?: string | null;
     }
   ): ReturnType<typeof http.patch<Orchestrator>> =>
     http.patch<Orchestrator>(`/workspaces/${workspaceId}/orchestrators/${orchestratorId}`, patch),

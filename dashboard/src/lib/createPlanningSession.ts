@@ -13,6 +13,9 @@ export interface NewOrchestratorOptions {
   /** null = the planning chat's model. */
   workerModel: string | null;
   maxParallel: number;
+  /** null = the planning chat's agent (and model). */
+  verifyAgentType: AgentType | null;
+  verifyModel: string | null;
 }
 
 /**
@@ -35,6 +38,8 @@ export async function createPlanningSession(
     agentType: payload.orchestrator.workerAgentType,
     workerModel: payload.orchestrator.workerModel,
     maxParallel: payload.orchestrator.maxParallel,
+    verifyAgentType: payload.orchestrator.verifyAgentType,
+    verifyModel: payload.orchestrator.verifyModel,
     planner: {
       agentType: payload.agentType,
       modelSelection: payload.modelSelection ?? null,

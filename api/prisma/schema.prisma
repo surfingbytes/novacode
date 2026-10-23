@@ -188,6 +188,10 @@ model Orchestrator {
   maxParallel     Int       @default(3) @map("max_parallel")
   /** Mode of the current/last run: sequential | parallel. */
   runMode         String?   @map("run_mode")
+  /** Agent for the final verify step; null = the planning chat's agent. */
+  verifyAgentType String?   @map("verify_agent_type")
+  /** Model for the final verify step; null = the planning chat's model (or agent default). */
+  verifyModel     String?   @map("verify_model")
 
   @@index([sourceSessionId])
   @@map("orchestrators")

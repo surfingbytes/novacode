@@ -100,6 +100,11 @@ const workerModelSelection = ref('');
 const workerModelOptions = ref<AgentModelOption[]>([]);
 const bLoadingWorkerModels = ref(false);
 const maxParallel = ref(3);
+const bSameVerify = ref(true);
+const verifyAgentType = ref<AgentType>('cursor-agent');
+const verifyModelSelection = ref('');
+const verifyModelOptions = ref<AgentModelOption[]>([]);
+const bLoadingVerifyModels = ref(false);
 
 // -------------------------------------------------- Computed --------------------------------------------------
 const availableAgents = computed(() => {
@@ -185,7 +190,9 @@ const onCreate = (): void => {
           orchestrator: {
             workerAgentType: bSameWorkers.value ? agentType.value : workerAgentType.value,
             workerModel: bSameWorkers.value ? null : workerModelSelection.value || null,
-            maxParallel: maxParallel.value
+            maxParallel: maxParallel.value,
+            verifyAgentType: bSameVerify.value ? null : verifyAgentType.value,
+            verifyModel: bSameVerify.value ? null : verifyModelSelection.value || null
           }
         }
       : {})
@@ -210,6 +217,7 @@ async function fetchModelOptions(agent: AgentType): Promise<AgentModelOption[] |
 
 let modelOptionsAgent: AgentType | null = null;
 let workerModelOptionsAgent: AgentType | null = null;
+let verifyModelOptionsAgent: AgentType | null = null;
 
 async function loadModelOptions(): Promise<void> {
   if (!bShowModel.value) {
@@ -267,6 +275,32 @@ function selectWorkerAgentType(agent: AgentType): void {
   }
 }
 
+async function loadVerifyModelOptions(): Promise<void> {
+  const agent = verifyAgentType.value;
+  bLoadingVerifyModels.value = true;
+  try {
+    const fetched = await fetchModelOptions(agent);
+    if (agent !== verifyAgentType.value) return;
+    if (fetched) {
+      verifyModelOptions.value = fetched;
+      verifyModelOptionsAgent = agent;
+    } else if (verifyModelOptionsAgent !== agent || verifyModelOptions.value.length === 0) {
+      verifyModelOptions.value = [AUTO_MODEL_OPTION];
+      verifyModelOptionsAgent = agent;
+    }
+  } finally {
+    if (agent === verifyAgentType.value) {
+      bLoadingVerifyModels.value = false;
+    }
+  }
+}
+
+function selectVerifyAgentType(agent: AgentType): void {
+  if (isAgentAvailable(agent)) {
+    verifyAgentType.value = agent;
+  }
+}
+
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 watch(
   () => props.modelValue,
@@ -285,6 +319,9 @@ watch(
       workerAgentType.value = agentType.value;
       workerModelSelection.value = '';
       maxParallel.value = 3;
+      bSameVerify.value = true;
+      verifyAgentType.value = agentType.value;
+      verifyModelSelection.value = '';
       void loadModelOptions();
     }
   }
@@ -314,6 +351,20 @@ watch(workerAgentType, () => {
   if (props.modelValue && !bSameWorkers.value) {
     workerModelSelection.value = '';
     void loadWorkerModelOptions();
+  }
+});
+
+watch(bSameVerify, (bSame) => {
+  if (!bSame) {
+    verifyAgentType.value = agentType.value;
+    void loadVerifyModelOptions();
+  }
+});
+
+watch(verifyAgentType, () => {
+  if (props.modelValue && !bSameVerify.value) {
+    verifyModelSelection.value = '';
+    void loadVerifyModelOptions();
   }
 });
 </script>
@@ -459,6 +510,43 @@ watch(workerAgentType, () => {
                         :agent-type="workerAgentType"
                         :model-options="workerModelOptions"
                         :disabled="loading || bLoadingWorkerModels"
+                        variant="modal"
+                      />
+                    </div>
+                  </template>
+                </div>
+
+                <!-- Final verify step: same as the planning chat unless changed -->
+                <div class="nc-field">
+                  <div class="flex items-center justify-between gap-3">
+                    <span class="nc-field-label">Verification uses the same agent and model</span>
+                    <UiToggle v-model="bSameVerify" aria-label="Verification uses the same agent and model" />
+                  </div>
+                  <template v-if="!bSameVerify">
+                    <div
+                      class="grid rounded-lg border border-fg/[0.12] bg-fg/[0.04] p-0.5 gap-1 mt-2"
+                      :class="gridColsClass"
+                      role="group"
+                      aria-label="Verification agent"
+                    >
+                      <button
+                        v-for="agent in availableAgents"
+                        :key="'verify-' + agent"
+                        type="button"
+                        class="min-w-0 truncate text-xs px-1 sm:px-2 py-1.5 rounded-md border border-transparent transition-colors text-text-muted hover:text-text-primary hover:bg-fg/[0.06]"
+                        :style="verifyAgentType === agent ? agentSelectedStyle(agent) : {}"
+                        :title="agentTypeLabel(agent)"
+                        @click="selectVerifyAgentType(agent)"
+                      >
+                        {{ agentTypeLabel(agent) }}
+                      </button>
+                    </div>
+                    <div class="mt-2">
+                      <AgentModelPicker
+                        v-model="verifyModelSelection"
+                        :agent-type="verifyAgentType"
+                        :model-options="verifyModelOptions"
+                        :disabled="loading || bLoadingVerifyModels"
                         variant="modal"
                       />
                     </div>

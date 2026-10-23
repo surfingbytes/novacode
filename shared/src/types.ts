@@ -62,6 +62,10 @@ export interface Orchestrator {
   workerModel?: string | null;
   /** Max steps at once in parallel runs. */
   maxParallel?: number;
+  /** Agent for the final verify step; null = planning chat's agent. */
+  verifyAgentType?: AgentType | null;
+  /** Model for the final verify step; null = planning chat's model. */
+  verifyModel?: string | null;
   runMode?: OrchestratorRunMode | string | null;
 }
 

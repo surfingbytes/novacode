@@ -118,6 +118,9 @@ async function callNovaTool(sessionId: string, name: string, args: Record<string
           id: existing.id,
           name: existing.name,
           workers: { agentType: existing.agentType, model: existing.workerModel ?? 'same as this chat' },
+          verification: existing.verifyAgentType
+            ? { agentType: existing.verifyAgentType, model: existing.verifyModel ?? 'same as this chat' }
+            : 'same as this chat',
           runStatus: existing.runStatus ?? 'not started',
           notes: payload?.sharedContext ?? '',
           steps: (payload?.subtasks ?? []).map((task, index) => ({

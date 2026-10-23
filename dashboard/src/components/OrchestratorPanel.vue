@@ -68,7 +68,7 @@ const bStartingRun = ref(false);
 const bStopping = ref(false);
 const bCloning = ref(false);
 const bSavingSubtasks = ref(false);
-const bSavingWorkers = ref(false);
+const bSavingSettings = ref(false);
 const bCreatingPlanner = ref(false);
 const runError = ref<string | null>(null);
 const editedSubtasks = ref<SubTask[]>([]);
@@ -81,6 +81,8 @@ const preferredRunMode = ref<OrchestratorRunMode>(
 );
 const workerModelOptions = ref<AgentModelOption[]>([]);
 const bLoadingWorkerModels = ref(false);
+const verifyModelOptions = ref<AgentModelOption[]>([]);
+const bLoadingVerifyModels = ref(false);
 
 // -------------------------------------------------- Computed --------------------------------------------------
 
@@ -94,6 +96,10 @@ const bHasPlanner = computed(() => !!props.orchestrator?.sourceSessionId);
 const workerAgentType = computed<AgentType>(() => (props.orchestrator?.agentType ?? 'cursor-agent') as AgentType);
 const bWorkersUsePlannerModel = computed(() => !props.orchestrator?.workerModel);
 const maxParallel = computed(() => props.orchestrator?.maxParallel ?? 3);
+const bVerifyUsesPlanner = computed(() => !props.orchestrator?.verifyAgentType);
+const verifyAgentType = computed<AgentType>(
+  () => (props.orchestrator?.verifyAgentType ?? plannerSession.value?.agentType ?? workerAgentType.value) as AgentType
+);
 
 const planPayload = computed(() => parseOrchestratorSubtasksJson(props.orchestrator?.subtasksJson));
 const subtasks = computed<SubTask[]>(() => planPayload.value?.subtasks ?? []);
@@ -148,6 +154,23 @@ watch(
       workerModelOptions.value = [AUTO_MODEL_OPTION];
     } finally {
       bLoadingWorkerModels.value = false;
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  [verifyAgentType, bVerifyUsesPlanner],
+  async ([agent, bSame]) => {
+    if (bSame) return;
+    bLoadingVerifyModels.value = true;
+    try {
+      const { data } = await settingsApi.getAgentOptions(agent);
+      verifyModelOptions.value = data.models.length > 0 ? data.models : [AUTO_MODEL_OPTION];
+    } catch {
+      verifyModelOptions.value = [AUTO_MODEL_OPTION];
+    } finally {
+      bLoadingVerifyModels.value = false;
     }
   },
   { immediate: true }
@@ -255,28 +278,49 @@ async function saveSubtasks() {
   }
 }
 
-async function saveWorkers(patch: { agentType?: AgentType; workerModel?: string | null; maxParallel?: number }) {
-  bSavingWorkers.value = true;
+async function saveRunSettings(patch: {
+  agentType?: AgentType;
+  workerModel?: string | null;
+  maxParallel?: number;
+  verifyAgentType?: AgentType | null;
+  verifyModel?: string | null;
+}) {
+  bSavingSettings.value = true;
   try {
     const { data } = await orchestratorApi.update(props.workspaceId, props.orchestratorId, patch);
     if (data) {
       emit('update:orchestrator', data);
     }
   } catch {
-    toastStore.error('Failed to save worker settings');
+    toastStore.error('Failed to save run settings');
   } finally {
-    bSavingWorkers.value = false;
+    bSavingSettings.value = false;
   }
 }
 
 function onWorkerAgentChange(event: Event): void {
   const agent = (event.target as HTMLSelectElement).value as AgentType;
   // The old model id belongs to the old agent.
-  void saveWorkers({ agentType: agent, workerModel: null });
+  void saveRunSettings({ agentType: agent, workerModel: null });
 }
 
 function onSamePlannerModelToggle(bSame: boolean): void {
-  void saveWorkers({ workerModel: bSame ? null : 'auto' });
+  void saveRunSettings({ workerModel: bSame ? null : 'auto' });
+}
+
+function onVerifyAgentChange(event: Event): void {
+  const agent = (event.target as HTMLSelectElement).value as AgentType;
+  void saveRunSettings({ verifyAgentType: agent, verifyModel: 'auto' });
+}
+
+function onVerifySamePlannerToggle(bSame: boolean): void {
+  // Turning it off starts from the planning chat's current agent and model.
+  const planner = plannerSession.value;
+  void saveRunSettings(
+    bSame
+      ? { verifyAgentType: null, verifyModel: null }
+      : { verifyAgentType: verifyAgentType.value, verifyModel: planner?.modelSelection || 'auto' }
+  );
 }
 
 async function startRun(choice: RunChoice, opts: { startIndex?: number; onlyIndex?: number } = {}) {
@@ -476,7 +520,7 @@ onBeforeUnmount(() => {
               id="orch-worker-agent"
               class="text-sm px-2 py-1.5 rounded-lg border border-fg/10 bg-fg/[0.04] text-text-primary"
               :value="workerAgentType"
-              :disabled="!canEdit || bSavingWorkers"
+              :disabled="!canEdit || bSavingSettings"
               @change="onWorkerAgentChange"
             >
               <option v-for="agent in AGENT_TYPES" :key="agent" :value="agent">{{ agentTypeLabel(agent) }}</option>
@@ -486,7 +530,7 @@ onBeforeUnmount(() => {
             <span class="text-xs text-text-muted w-28 shrink-0">Same model as planning chat</span>
             <UiToggle
               :model-value="bWorkersUsePlannerModel"
-              :disabled="!canEdit || bSavingWorkers"
+              :disabled="!canEdit || bSavingSettings"
               aria-label="Workers use the planning chat's model"
               @update:model-value="onSamePlannerModelToggle"
             />
@@ -498,9 +542,9 @@ onBeforeUnmount(() => {
                 :model-value="orchestrator?.workerModel ?? 'auto'"
                 :agent-type="workerAgentType"
                 :model-options="workerModelOptions"
-                :disabled="!canEdit || bSavingWorkers || bLoadingWorkerModels"
+                :disabled="!canEdit || bSavingSettings || bLoadingWorkerModels"
                 variant="modal"
-                @update:model-value="saveWorkers({ workerModel: $event })"
+                @update:model-value="saveRunSettings({ workerModel: $event })"
               />
             </div>
           </div>
@@ -510,12 +554,58 @@ onBeforeUnmount(() => {
               id="orch-max-parallel"
               class="text-sm px-2 py-1.5 rounded-lg border border-fg/10 bg-fg/[0.04] text-text-primary"
               :value="maxParallel"
-              :disabled="!canEdit || bSavingWorkers"
-              @change="saveWorkers({ maxParallel: Number(($event.target as HTMLSelectElement).value) })"
+              :disabled="!canEdit || bSavingSettings"
+              @change="saveRunSettings({ maxParallel: Number(($event.target as HTMLSelectElement).value) })"
             >
               <option v-for="count in MAX_PARALLEL_CHOICES" :key="count" :value="count">{{ count }}</option>
             </select>
           </div>
+        </div>
+      </div>
+
+      <!-- Verification: agent + model for the final "Verify against spec" step -->
+      <div class="rounded-xl border border-fg/15 overflow-hidden">
+        <div class="px-3 py-2 border-b border-fg/10 bg-fg/[0.04]">
+          <span class="text-sm font-medium text-text-primary">Verification</span>
+          <p class="text-xs text-text-muted mt-0.5">Agent and model of the final verify step.</p>
+        </div>
+        <div class="px-3 py-3 flex flex-col gap-3">
+          <div class="flex flex-wrap items-center gap-3">
+            <span class="text-xs text-text-muted w-28 shrink-0">Same as planning chat</span>
+            <UiToggle
+              :model-value="bVerifyUsesPlanner"
+              :disabled="!canEdit || bSavingSettings"
+              aria-label="Verification uses the planning chat's agent and model"
+              @update:model-value="onVerifySamePlannerToggle"
+            />
+          </div>
+          <template v-if="!bVerifyUsesPlanner">
+            <div class="flex flex-wrap items-center gap-3">
+              <label class="text-xs text-text-muted w-28 shrink-0" for="orch-verify-agent">Agent</label>
+              <select
+                id="orch-verify-agent"
+                class="text-sm px-2 py-1.5 rounded-lg border border-fg/10 bg-fg/[0.04] text-text-primary"
+                :value="verifyAgentType"
+                :disabled="!canEdit || bSavingSettings"
+                @change="onVerifyAgentChange"
+              >
+                <option v-for="agent in AGENT_TYPES" :key="agent" :value="agent">{{ agentTypeLabel(agent) }}</option>
+              </select>
+            </div>
+            <div class="flex flex-wrap items-center gap-3">
+              <span class="text-xs text-text-muted w-28 shrink-0">Model</span>
+              <div class="min-w-[14rem]">
+                <AgentModelPicker
+                  :model-value="orchestrator?.verifyModel ?? 'auto'"
+                  :agent-type="verifyAgentType"
+                  :model-options="verifyModelOptions"
+                  :disabled="!canEdit || bSavingSettings || bLoadingVerifyModels"
+                  variant="modal"
+                  @update:model-value="saveRunSettings({ verifyModel: $event })"
+                />
+              </div>
+            </div>
+          </template>
         </div>
       </div>
 

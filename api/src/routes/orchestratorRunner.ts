@@ -56,6 +56,8 @@ interface StepContext {
   payload: OrchestratorSubtasksPayload;
   workerAgentType: AgentType;
   workerModel: string | undefined;
+  verifyAgentType: AgentType;
+  verifyModel: string | undefined;
   approvalPolicy: string | undefined;
   plannerSessionId: string | null;
   gitEnv: Record<string, string>;
@@ -88,10 +90,13 @@ async function runStep(ctx: StepContext, index: number, worktreeCwd: string | nu
   const task = ctx.payload.subtasks[index];
   task.runResult = 'running';
   task.runNote = null;
+  const bVerify = task.kind === 'verify';
+  const agentType = bVerify ? ctx.verifyAgentType : ctx.workerAgentType;
+  const model = bVerify ? ctx.verifyModel : ctx.workerModel;
   const created = await createSessionWithAgent({
     workspaceId: ctx.workspaceId,
-    agentType: ctx.workerAgentType,
-    ...(ctx.workerModel ? { modelSelection: ctx.workerModel } : {}),
+    agentType,
+    ...(model ? { modelSelection: model } : {}),
     ...(ctx.approvalPolicy ? { approvalPolicy: ctx.approvalPolicy as ApprovalPolicy } : {}),
     name: task.name,
     tags: task.category && String(task.category).trim() ? normalizeTagStringList([task.category]) : null
@@ -313,12 +318,14 @@ export async function runOrchestrator(
   if (!orchestrator || !workspace) return;
 
   const planner = orchestrator.sourceSessionId ? await db.getSession(orchestrator.sourceSessionId) : undefined;
+  // The planning chat's model only fits when the session uses the same agent.
+  const plannerModelFor = (agentType: AgentType): string | undefined =>
+    (planner && planner.agentType === agentType ? planner.modelSelection : undefined) || undefined;
   const workerAgentType = orchestrator.agentType as AgentType;
-  // The planning chat's model only fits when the workers use the same agent.
-  const workerModel =
-    orchestrator.workerModel?.trim() ||
-    (planner && planner.agentType === workerAgentType ? planner.modelSelection : undefined) ||
-    undefined;
+  const workerModel = orchestrator.workerModel?.trim() || plannerModelFor(workerAgentType);
+  // Verification defaults to the planning chat's agent and model.
+  const verifyAgentType = (orchestrator.verifyAgentType || planner?.agentType || workerAgentType) as AgentType;
+  const verifyModel = orchestrator.verifyModel?.trim() || plannerModelFor(verifyAgentType);
 
   let persistChain: Promise<unknown> = Promise.resolve();
   const ctx: StepContext = {
@@ -327,6 +334,8 @@ export async function runOrchestrator(
     payload,
     workerAgentType,
     workerModel,
+    verifyAgentType,
+    verifyModel,
     approvalPolicy: planner?.approvalPolicy,
     plannerSessionId: planner?.id ?? null,
     gitEnv: config.agentEnv({
