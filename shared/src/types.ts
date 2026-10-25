@@ -336,6 +336,8 @@ export interface Session {
   busySubagents?: { running: number; total: number } | null;
   /** True when a run finished while no client was viewing this session. Omitted on older API responses. */
   unread?: boolean;
+  /** Orchestrator whose run created this session (step or merge chat); such chats are hidden from chat lists. */
+  orchestratorId?: string | null;
 }
 
 /** Token/cost snapshot reported by an agent (ACP `usage_update`). */

@@ -18,7 +18,7 @@ import {
 import { deleteSessionImages } from './images';
 import { broadcastOrchestratorUpsert, broadcastWorkspaceSessionsRefresh } from './ws';
 import { broadcastSessionListUpsert } from '../classes/sessionListBroadcast';
-import { checkRunPreconditions, inFlightRunSteps, runOrchestrator } from './orchestratorRunner';
+import { checkRunPreconditions, claimRunResume, finishRunResume, inFlightRunSteps, runOrchestrator } from './orchestratorRunner';
 
 // types
 import type { AgentType, ApprovalPolicy, OrchestratorRunMode } from '../@types/index';
@@ -270,7 +270,12 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
         return reply.status(404).send({ error: 'Orchestrator not found' });
       }
-      const stepSessionIds = collectStepSessionIdsFromSubtasksJson(orchestrator.subtasksJson);
+      const stepSessionIds = [
+        ...new Set([
+          ...collectStepSessionIdsFromSubtasksJson(orchestrator.subtasksJson),
+          ...(await db.listOrchestratorSessionIds(orchestratorId))
+        ])
+      ];
       if (stepSessionIds.length > 0) {
         await db.deleteManySessions(stepSessionIds, workspaceId);
         await Promise.all(stepSessionIds.map((id) => deleteSessionImages(id)));
@@ -331,6 +336,8 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         onlyIndex?: number;
         /** Run only the first step that is ready (dependencies done). */
         next?: boolean;
+        /** Parallel only: re-run every step, including finished ones. */
+        fresh?: boolean;
       };
       const mode: OrchestratorRunMode = body.mode === 'parallel' ? 'parallel' : 'sequential';
 
@@ -348,6 +355,19 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       }
       const finishing = inFlightRunSteps(orchestratorId);
       if (finishing) {
+        // A plain run of the same mode resumes the stopped run: free slots take the next steps.
+        const bPlainRun = !body.next && body.onlyIndex === undefined && !body.fresh && (mode === 'parallel' || !body.startIndex);
+        if (bPlainRun && claimRunResume(orchestratorId, mode)) {
+          try {
+            const updated = await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
+              runStatus: 'running',
+              unread: false
+            });
+            return reply.status(202).send(updated ?? orchestrator);
+          } finally {
+            finishRunResume(orchestratorId);
+          }
+        }
         const steps = finishing.map((name) => `"${name}"`).join(', ');
         return reply.status(409).send({
           error: `The stopped run is still finishing ${steps || 'a step'}. Wait for it to end, or stop that step's agent in its session, then run again.`
@@ -395,6 +415,15 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
 
       if (onlyIndex !== undefined) {
         clearResult(onlyIndex);
+      } else if (mode === 'parallel' && !body.fresh) {
+        // Keep finished steps (their work is already in the workspace); verification re-runs with the rest.
+        subtasks.forEach((task, index) => task.runResult !== 'done' && clearResult(index));
+        if (subtasks.some((task) => task.kind !== 'verify' && !task.runResult)) {
+          subtasks.forEach((task, index) => task.kind === 'verify' && clearResult(index));
+        }
+        if (subtasks.every((task) => task.runResult === 'done')) {
+          return reply.status(400).send({ error: 'Every step is done. Use "Run all again in parallel" to start over.' });
+        }
       } else if (mode === 'parallel' || startIndex === 0) {
         payload.handoffLog = '';
         subtasks.forEach((_, index) => clearResult(index));

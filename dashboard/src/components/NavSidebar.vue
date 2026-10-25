@@ -114,9 +114,8 @@ const navItems10 = computed<NavItem[]>(() => {
     new Date(navItemUpdatedAt(b)).getTime() - new Date(navItemUpdatedAt(a)).getTime();
   const sessionsById = new Map(workspacesStore.allSessions.map((s) => [s.id, s]));
   // Step sessions are represented by their orchestrator row.
-  const stepIds = orchestratorsStore.stepSessionIds;
   const sessionItems: NavItem[] = workspacesStore.allSessions
-    .filter((s) => !s.archived && !stepIds.has(s.id))
+    .filter((s) => !s.archived && !orchestratorsStore.isStepSession(s))
     .map((session) => ({ kind: 'session', session }));
   const orchestratorItems: NavItem[] = Object.values(orchestratorsStore.orchestratorsByWorkspace)
     .flat()

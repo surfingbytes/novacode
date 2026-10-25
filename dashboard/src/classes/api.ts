@@ -1001,7 +1001,7 @@ export const orchestratorApi = {
   run: (
     workspaceId: string,
     orchestratorId: string,
-    body?: { mode?: OrchestratorRunMode; startIndex?: number; onlyIndex?: number; next?: boolean }
+    body?: { mode?: OrchestratorRunMode; startIndex?: number; onlyIndex?: number; next?: boolean; fresh?: boolean }
   ): ReturnType<typeof http.post<Orchestrator>> =>
     http.post<Orchestrator>(
       `/workspaces/${workspaceId}/orchestrators/${orchestratorId}/run`,

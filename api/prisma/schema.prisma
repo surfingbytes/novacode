@@ -111,7 +111,10 @@ model Session {
   claudeLimitResetAt String? @map("claude_limit_reset_at")
   /** Git worktree an orchestrator step runs in (parallel runs); null = workspace path. */
   worktreePath String? @map("worktree_path")
+  /** Orchestrator whose run created this session (a step or merge chat); hidden from chat lists. */
+  orchestratorId String? @map("orchestrator_id")
 
+  @@index([orchestratorId])
   @@map("sessions")
 }
 

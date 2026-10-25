@@ -28,6 +28,8 @@ export interface CreateSessionWithAgentParams {
   sessionMode?: string | null;
   /** Optional tool-approval policy; defaults to ask. */
   approvalPolicy?: ApprovalPolicy | string | null;
+  /** Orchestrator whose run owns this session (step and merge chats). */
+  orchestratorId?: string | null;
 }
 
 export interface CreateSessionWithAgentResult {
@@ -73,6 +75,7 @@ export async function createSessionWithAgent(
     sessionMode,
     approvalPolicy,
     sessionConfigJson,
+    orchestratorId: params.orchestratorId ?? null,
   });
 
   // ACP agents create their backend session lazily on the first prompt. Cursor used

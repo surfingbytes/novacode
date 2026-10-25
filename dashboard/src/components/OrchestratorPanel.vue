@@ -35,7 +35,7 @@ const AGENT_TYPES: AgentType[] = ['cursor-agent', 'claude', 'mistral-vibe', 'ope
 const MAX_PARALLEL_CHOICES = [1, 2, 3, 4, 5, 6, 8];
 const AUTO_MODEL_OPTION: AgentModelOption = { id: 'auto', label: 'Auto', model: 'Auto', thinking: 'Auto', context: 'Auto', fast: null };
 
-type RunChoice = OrchestratorRunMode | 'next';
+type RunChoice = OrchestratorRunMode | 'parallel-fresh' | 'next';
 
 // -------------------------------------------------- Props --------------------------------------------------
 
@@ -128,8 +128,9 @@ const runChoices = computed<{ id: RunChoice; label: string; hint: string }[]>(()
   {
     id: 'parallel',
     label: 'Run in parallel',
-    hint: `Up to ${maxParallel.value} at once, each in its own git worktree; merged back automatically`
+    hint: `Up to ${maxParallel.value} at once, each in its own git worktree; merged back automatically. Done steps are kept`
   },
+  { id: 'parallel-fresh', label: 'Run all again in parallel', hint: 'Like Run in parallel, but done steps run again too' },
   { id: 'next', label: 'Run next step', hint: 'Only the first step that is ready' }
 ]);
 const mainRunLabel = computed(() => (preferredRunMode.value === 'parallel' ? 'Run in parallel' : 'Run one by one'));
@@ -346,17 +347,22 @@ async function startRun(choice: RunChoice, opts: { startIndex?: number; onlyInde
   if (subtasks.value.length === 0 || isRunning.value) {
     return;
   }
-  if (choice !== 'next' && opts.onlyIndex === undefined && opts.startIndex === undefined) {
-    preferredRunMode.value = choice;
-    safeSetItem(RUN_MODE_STORAGE_KEY, choice);
+  const mode: OrchestratorRunMode | null = choice === 'next' ? null : choice === 'parallel-fresh' ? 'parallel' : choice;
+  if (mode && opts.onlyIndex === undefined && opts.startIndex === undefined) {
+    preferredRunMode.value = mode;
+    safeSetItem(RUN_MODE_STORAGE_KEY, mode);
   }
   runError.value = null;
   bStartingRun.value = true;
   try {
-    const body =
-      choice === 'next'
-        ? { next: true }
-        : { mode: choice, ...(opts.onlyIndex !== undefined ? { onlyIndex: opts.onlyIndex } : {}), ...(opts.startIndex !== undefined ? { startIndex: opts.startIndex } : {}) };
+    const body = !mode
+      ? { next: true }
+      : {
+          mode,
+          ...(choice === 'parallel-fresh' ? { fresh: true } : {}),
+          ...(opts.onlyIndex !== undefined ? { onlyIndex: opts.onlyIndex } : {}),
+          ...(opts.startIndex !== undefined ? { startIndex: opts.startIndex } : {})
+        };
     const { data } = await orchestratorApi.run(props.workspaceId, props.orchestratorId, body);
     if (data) {
       emit('update:orchestrator', data);

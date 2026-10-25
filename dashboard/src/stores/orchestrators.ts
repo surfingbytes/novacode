@@ -9,7 +9,7 @@ import { subtasksFromStoredJson } from '@/utils/orchestratorPayload';
 import { isViewingOrchestrator } from '@/utils/sessionUnread';
 
 // types
-import type { Orchestrator, OrchestratorSummary } from '@/@types/index';
+import type { Orchestrator, OrchestratorSummary, Session } from '@/@types/index';
 
 /**
  * Single source of truth for orchestrators.
@@ -46,6 +46,11 @@ export const useOrchestratorsStore = defineStore('orchestrators', () => {
   });
 
   // -------------------------------------------------- Methods --------------------------------------------------
+  /** Step and merge chats of an orchestrator run (tagged on the session; older ones only appear in a plan's steps). */
+  function isStepSession(session: Pick<Session, 'id' | 'orchestratorId'>): boolean {
+    return Boolean(session.orchestratorId) || stepSessionIds.value.has(session.id);
+  }
+
   function forWorkspace(workspaceId: string): Orchestrator[] {
     return orchestratorsByWorkspace.value[workspaceId] ?? [];
   }
@@ -174,6 +179,7 @@ export const useOrchestratorsStore = defineStore('orchestrators', () => {
     orchestratorsByWorkspace,
     anyRunning,
     stepSessionIds,
+    isStepSession,
     // methods
     forWorkspace,
     byId,

@@ -517,6 +517,7 @@ export const db = {
     sessionMode?: string | null;
     approvalPolicy?: string | null;
     sessionConfigJson?: string | null;
+    orchestratorId?: string | null;
   }): Promise<Session> {
     const id = randomUUID();
     const createdAt = new Date().toISOString();
@@ -537,6 +538,7 @@ export const db = {
         sessionMode: data.sessionMode ?? 'default',
         approvalPolicy: data.approvalPolicy ?? 'ask',
         sessionConfigJson: data.sessionConfigJson ?? null,
+        orchestratorId: data.orchestratorId ?? null,
         workspaceId: data.workspaceId,
         createdAt
       }
@@ -1104,6 +1106,11 @@ export const db = {
     } catch {
       return false;
     }
+  },
+
+  async listOrchestratorSessionIds(orchestratorId: string): Promise<string[]> {
+    const rows = await _prisma.session.findMany({ where: { orchestratorId }, select: { id: true } });
+    return rows.map((row) => row.id);
   },
 
   async deleteManySessions(ids: string[], workspaceId: string): Promise<number> {

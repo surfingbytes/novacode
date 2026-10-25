@@ -48,13 +48,42 @@ const STEP_NEEDS_INPUT_PROMPT = `## If you need the user
 
 You run as one step of an automated plan; later steps start as soon as your turn ends. If you cannot finish this step without an answer from the user, call the nova \`step_needs_input\` tool with your question, then end your turn with the question. The plan waits until the user replies here. Do not use it for questions you can decide yourself.`;
 
-/** Plans of runs still in flight, by orchestrator id (a stopped run lives on until its running steps end). */
-const activeRuns = new Map<string, OrchestratorSubtasksPayload>();
+interface ActiveRun {
+  payload: OrchestratorSubtasksPayload;
+  options: OrchestratorRunOptions;
+  /** A stopped run can be resumed while it still schedules steps (it ends once nothing is left running). */
+  bResumable: boolean;
+  /** Set while the run route marks a stopped run as running again, so the run doesn't end meanwhile. */
+  bResumePending: boolean;
+  /** Wakes the parallel scheduler so a resumed run fills free slots right away. */
+  wake: () => void;
+}
+
+/** Runs still in flight, by orchestrator id (a stopped run lives on until its running steps end). */
+const activeRuns = new Map<string, ActiveRun>();
 
 /** Names of the steps a still-finishing earlier run works on, or null when no run is in flight. */
 export function inFlightRunSteps(orchestratorId: string): string[] | null {
-  const payload = activeRuns.get(orchestratorId);
-  return payload ? payload.subtasks.filter((task) => task.runResult === 'running').map((task) => task.name) : null;
+  const run = activeRuns.get(orchestratorId);
+  return run ? run.payload.subtasks.filter((task) => task.runResult === 'running').map((task) => task.name) : null;
+}
+
+/**
+ * Start resuming a stopped run that is still finishing, when it can take
+ * `mode` runs; the caller marks the plan running, then calls `finishRunResume`.
+ */
+export function claimRunResume(orchestratorId: string, mode: OrchestratorRunMode): boolean {
+  const run = activeRuns.get(orchestratorId);
+  if (!run || !run.bResumable || run.options.onlyIndex !== undefined || run.options.mode !== mode) return false;
+  run.bResumePending = true;
+  return true;
+}
+
+export function finishRunResume(orchestratorId: string): void {
+  const run = activeRuns.get(orchestratorId);
+  if (!run) return;
+  run.bResumePending = false;
+  run.wake();
 }
 
 /** Sessions of steps that are running now (only these may call step_needs_input). */
@@ -113,15 +142,22 @@ export interface OrchestratorRunOptions {
   onlyIndex?: number;
 }
 
+/** Run settings, read again whenever a step starts so changes made mid-run apply to the next step. */
+interface RunSettings {
+  workerAgentType: AgentType;
+  workerModel: string | undefined;
+  verifyAgentType: AgentType;
+  verifyModel: string | undefined;
+  maxParallel: number;
+}
+
 interface StepContext {
   workspaceId: string;
   orchestratorId: string;
   planName: string;
   payload: OrchestratorSubtasksPayload;
-  workerAgentType: AgentType;
-  workerModel: string | undefined;
-  verifyAgentType: AgentType;
-  verifyModel: string | undefined;
+  run: ActiveRun;
+  settings: () => Promise<RunSettings>;
   approvalPolicy: string | undefined;
   plannerSessionId: string | null;
   gitEnv: Record<string, string>;
@@ -156,13 +192,15 @@ async function runStep(ctx: StepContext, index: number, worktreeCwd: string | nu
   task.runNote = null;
   task.waitingQuestion = null;
   const bVerify = task.kind === 'verify';
-  const agentType = bVerify ? ctx.verifyAgentType : ctx.workerAgentType;
-  const model = bVerify ? ctx.verifyModel : ctx.workerModel;
+  const settings = await ctx.settings();
+  const agentType = bVerify ? settings.verifyAgentType : settings.workerAgentType;
+  const model = bVerify ? settings.verifyModel : settings.workerModel;
   const created = await createSessionWithAgent({
     workspaceId: ctx.workspaceId,
     agentType,
     ...(model ? { modelSelection: model } : {}),
     ...(ctx.approvalPolicy ? { approvalPolicy: ctx.approvalPolicy as ApprovalPolicy } : {}),
+    orchestratorId: ctx.orchestratorId,
     name: task.name,
     tags: task.category && String(task.category).trim() ? normalizeTagStringList([task.category]) : null
   });
@@ -242,7 +280,10 @@ function skipBlockedSteps(subtasks: SubTask[]): boolean {
 async function runSequential(ctx: StepContext, startIndex: number): Promise<void> {
   const subtasks = ctx.payload.subtasks;
   for (let index = startIndex; index < subtasks.length; index++) {
-    if (await ctx.isStopped()) return;
+    if ((await ctx.isStopped()) && !ctx.run.bResumePending) {
+      ctx.run.bResumable = false;
+      return;
+    }
     if (shouldSkipOrchestratorStep(index, subtasks)) {
       subtasks[index].runResult = 'skipped';
       await ctx.persist();
@@ -268,7 +309,7 @@ Resolve every conflict so the result keeps the intent of BOTH sides (use the spe
  * finishes; afterwards the combined diff is applied to the workspace and the
  * verify step runs there.
  */
-async function runParallel(ctx: StepContext, repo: RepoInfo, maxParallel: number): Promise<void> {
+async function runParallel(ctx: StepContext, repo: RepoInfo): Promise<void> {
   const subtasks = ctx.payload.subtasks;
   const runRoot = join(worktreesRootDir(), ctx.orchestratorId);
   const integrationDir = join(runRoot, 'integration');
@@ -286,11 +327,13 @@ async function runParallel(ctx: StepContext, repo: RepoInfo, maxParallel: number
   };
 
   const resolveConflicts = async (stepName: string, files: string[]): Promise<boolean> => {
+    const { workerAgentType, workerModel } = await ctx.settings();
     const created = await createSessionWithAgent({
       workspaceId: ctx.workspaceId,
-      agentType: ctx.workerAgentType,
-      ...(ctx.workerModel ? { modelSelection: ctx.workerModel } : {}),
+      agentType: workerAgentType,
+      ...(workerModel ? { modelSelection: workerModel } : {}),
       ...(ctx.approvalPolicy ? { approvalPolicy: ctx.approvalPolicy as ApprovalPolicy } : {}),
+      orchestratorId: ctx.orchestratorId,
       name: `Resolve merge: ${stepName}`,
       tags: normalizeTagStringList(['merge'])
     });
@@ -348,7 +391,9 @@ async function runParallel(ctx: StepContext, repo: RepoInfo, maxParallel: number
   const running = new Map<number, Promise<void>>();
   for (;;) {
     if (skipBlockedSteps(subtasks)) await ctx.persist();
-    if (!(await ctx.isStopped())) {
+    const bStopped = await ctx.isStopped();
+    if (!bStopped) {
+      const { maxParallel } = await ctx.settings();
       const ready = findRunnableSteps(subtasks).filter((index) => !running.has(index) && !verifyIndexes.has(index));
       for (const index of ready.slice(0, Math.max(0, maxParallel - running.size))) {
         const promise = runWorktreeStep(index)
@@ -362,8 +407,16 @@ async function runParallel(ctx: StepContext, repo: RepoInfo, maxParallel: number
         running.set(index, promise);
       }
     }
-    if (running.size === 0) break;
-    await Promise.race(running.values());
+    if (running.size === 0) {
+      if (bStopped && ctx.run.bResumePending) continue;
+      // Nothing runs and nothing is ready (or the run was stopped): it can't be resumed any more.
+      ctx.run.bResumable = false;
+      break;
+    }
+    const woken = new Promise<void>((resolve) => {
+      ctx.run.wake = resolve;
+    });
+    await Promise.race([...running.values(), woken]);
   }
 
   // Apply whatever was merged, even after a stop, so finished work isn't stranded.
@@ -403,20 +456,23 @@ export async function runOrchestrator(
   options: OrchestratorRunOptions
 ): Promise<void> {
   // Set before the first await so the run route sees it right away.
-  activeRuns.set(orchestratorId, payload);
+  const run: ActiveRun = {
+    payload,
+    options,
+    bResumable: options.onlyIndex === undefined,
+    bResumePending: false,
+    wake: () => {}
+  };
+  activeRuns.set(orchestratorId, run);
   try {
-    await runOrchestratorSteps(workspaceId, orchestratorId, payload, options);
+    await runOrchestratorSteps(workspaceId, orchestratorId, run);
   } finally {
     activeRuns.delete(orchestratorId);
   }
 }
 
-async function runOrchestratorSteps(
-  workspaceId: string,
-  orchestratorId: string,
-  payload: OrchestratorSubtasksPayload,
-  options: OrchestratorRunOptions
-): Promise<void> {
+async function runOrchestratorSteps(workspaceId: string, orchestratorId: string, run: ActiveRun): Promise<void> {
+  const { payload, options } = run;
   const subtasks = payload.subtasks;
   const total = subtasks.length;
   const orchestrator = await db.getOrchestrator(orchestratorId);
@@ -427,11 +483,19 @@ async function runOrchestratorSteps(
   // The planning chat's model only fits when the session uses the same agent.
   const plannerModelFor = (agentType: AgentType): string | undefined =>
     (planner && planner.agentType === agentType ? planner.modelSelection : undefined) || undefined;
-  const workerAgentType = orchestrator.agentType as AgentType;
-  const workerModel = orchestrator.workerModel?.trim() || plannerModelFor(workerAgentType);
-  // Verification defaults to the planning chat's agent and model.
-  const verifyAgentType = (orchestrator.verifyAgentType || planner?.agentType || workerAgentType) as AgentType;
-  const verifyModel = orchestrator.verifyModel?.trim() || plannerModelFor(verifyAgentType);
+  const settings = async (): Promise<RunSettings> => {
+    const current = (await db.getOrchestrator(orchestratorId)) ?? orchestrator;
+    const workerAgentType = current.agentType as AgentType;
+    // Verification defaults to the planning chat's agent and model.
+    const verifyAgentType = (current.verifyAgentType || planner?.agentType || workerAgentType) as AgentType;
+    return {
+      workerAgentType,
+      workerModel: current.workerModel?.trim() || plannerModelFor(workerAgentType),
+      verifyAgentType,
+      verifyModel: current.verifyModel?.trim() || plannerModelFor(verifyAgentType),
+      maxParallel: Math.max(1, current.maxParallel ?? 3)
+    };
+  };
 
   let persistChain: Promise<unknown> = Promise.resolve();
   const ctx: StepContext = {
@@ -439,10 +503,8 @@ async function runOrchestratorSteps(
     orchestratorId,
     planName: orchestrator.name || 'task plan',
     payload,
-    workerAgentType,
-    workerModel,
-    verifyAgentType,
-    verifyModel,
+    run,
+    settings,
     approvalPolicy: planner?.approvalPolicy,
     plannerSessionId: planner?.id ?? null,
     gitEnv: config.agentEnv({
@@ -459,7 +521,7 @@ async function runOrchestratorSteps(
       );
       return persistChain.then(() => undefined);
     },
-    isStopped: async () => (await db.getOrchestrator(orchestratorId))?.runStatus !== 'running'
+    isStopped: async () => (await db.getOrchestrator(orchestratorId))?.runStatus !== 'running' && !run.bResumePending
   };
 
   try {
@@ -468,10 +530,11 @@ async function runOrchestratorSteps(
     } else if (options.mode === 'parallel') {
       const repo = await resolveRepo(resolveWorkspaceAbsolutePath(workspace.path));
       if ('error' in repo) throw new Error(repo.error);
-      await runParallel(ctx, repo, Math.max(1, orchestrator.maxParallel ?? 3));
+      await runParallel(ctx, repo);
     } else {
       await runSequential(ctx, options.startIndex ?? 0);
     }
+    run.bResumable = false;
     await persistChain;
 
     if (await ctx.isStopped()) {

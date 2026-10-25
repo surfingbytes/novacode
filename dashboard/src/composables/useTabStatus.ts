@@ -25,7 +25,6 @@ export function useTabStatus(): void {
   const counts = computed(() => {
     const sessions = workspacesStore.allSessions;
     const sessionsById = new Map(sessions.map((s) => [s.id, s]));
-    const stepIds = orchestratorsStore.stepSessionIds;
     const orchestrators = Object.values(orchestratorsStore.orchestratorsByWorkspace)
       .flat()
       .map((orchestrator) => ({
@@ -34,7 +33,7 @@ export function useTabStatus(): void {
         bUnread: isOrchestratorUnread(orchestrator)
       }));
     return countTabStatus(
-      sessions.filter((s) => !stepIds.has(s.id)),
+      sessions.filter((s) => !orchestratorsStore.isStepSession(s)),
       isSessionUnread,
       orchestrators
     );
