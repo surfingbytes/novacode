@@ -100,14 +100,17 @@ export function markStepNeedsInput(sessionId: string, question: string): boolean
 
 /**
  * Wait until the user's reply turn in the step session finishes; resolves with
- * the session's messages, or null when the run was stopped first.
+ * the session's messages, or null when the run was stopped first. `onReplyStart`
+ * runs once when the reply turn begins.
  */
 function waitForReplyTurn(
   sessionId: string,
-  isStopped: () => Promise<boolean>
+  isStopped: () => Promise<boolean>,
+  onReplyStart: () => void
 ): Promise<{ messages: ChatMessage[] } | null> {
   return new Promise((resolve) => {
     let bSawBusy = isSessionBusy(sessionId);
+    if (bSawBusy) onReplyStart();
     let bSettled = false;
     const finish = (result: { messages: ChatMessage[] } | null): void => {
       if (bSettled) return;
@@ -119,6 +122,7 @@ function waitForReplyTurn(
     const onBusy = (busySessionId: string, _workspaceId: string, bBusy: boolean): void => {
       if (busySessionId !== sessionId) return;
       if (bBusy) {
+        if (!bSawBusy) onReplyStart();
         bSawBusy = true;
       } else if (bSawBusy) {
         void db.listSessionMessages(sessionId).then(
@@ -238,7 +242,11 @@ async function runStep(ctx: StepContext, index: number, worktreeCwd: string | nu
         tag: `orchestrator-step-${session.id}`,
         url: `/workspace/${ctx.workspaceId}/session/${session.id}`
       }).catch(() => {});
-      const reply = await waitForReplyTurn(session.id, ctx.isStopped);
+      // The question is answered once the reply turn starts, not when it ends.
+      const reply = await waitForReplyTurn(session.id, ctx.isStopped, () => {
+        task.waitingQuestion = null;
+        void ctx.persist();
+      });
       task.waitingQuestion = null;
       if (!reply) {
         result = { error: 'Stopped while waiting for your answer' };
