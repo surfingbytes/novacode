@@ -37,6 +37,149 @@ const activeHandlers = new Map<string, AcpEventHandler>();
 const activeConfigSyncHandlers = new Map<string, SessionConfigSyncHandler>();
 const activePermissionHandlers = new Map<string, AcpPermissionHandler>();
 
+// --------------------------------------------- Follow-up work tracking ---------------------------------------------
+//
+// Claude Code keeps working after a prompt's result: background Bash commands and
+// subagents run on, and when one finishes it starts a model cycle on its own (the
+// `task-notification` follow-up) that streams its output outside any prompt. The
+// adapter reports that work through its `foreground` constructor option and, with
+// `emitRawSDKMessages`, the SDK's background task level signal. A turn stays open
+// until that work drains so the follow-up lands in the same assistant message
+// instead of being dropped.
+
+/** How long a turn waits, after the last sign of follow-up work, before ending. */
+const FOLLOWUP_GRACE_MS = 2_000;
+/** Upper bound on waiting for a task-notification follow-up to start streaming. */
+const FOLLOWUP_START_TIMEOUT_MS = 120_000;
+
+/** Session creation `_meta`: the raw SDK messages Nova needs to see follow-up work. */
+const CLAUDE_SESSION_META = {
+  claudeCode: {
+    emitRawSDKMessages: [
+      { type: 'system', subtype: 'background_tasks_changed' },
+      { type: 'user', origin: 'task-notification' },
+      { type: 'result' },
+    ],
+  },
+};
+
+interface SessionWork {
+  /** The adapter reports a turn or a self-started cycle running. */
+  foreground: boolean;
+  /** A task-notification follow-up was queued and has not produced output or a result yet. */
+  followupPendingSince: number | null;
+  /** Live background tasks (shells, subagents) from the SDK level signal, ambient ones excluded. */
+  liveTaskIds: Set<string>;
+  /** Every live task seen since the current turn started, for the running/total badge. */
+  seenTaskIds: Set<string>;
+  /** Stop reason of the last foreground work that ended. */
+  lastStopReason: string | undefined;
+  /** Set by cancel / dispose: a held turn ends at once. */
+  released: boolean;
+  waiters: Set<() => void>;
+}
+
+const workByAcpSession = new Map<string, SessionWork>();
+
+function getSessionWork(acpSessionId: string): SessionWork {
+  let work = workByAcpSession.get(acpSessionId);
+  if (!work) {
+    work = {
+      foreground: false,
+      followupPendingSince: null,
+      liveTaskIds: new Set(),
+      seenTaskIds: new Set(),
+      lastStopReason: undefined,
+      released: false,
+      waiters: new Set(),
+    };
+    workByAcpSession.set(acpSessionId, work);
+  }
+  return work;
+}
+
+function wakeSessionWork(work: SessionWork): void {
+  const waiters = [...work.waiters];
+  work.waiters.clear();
+  for (const wake of waiters) wake();
+}
+
+/** Whether Claude Code still has follow-up work in flight for this ACP session. */
+function hasFollowupWork(work: SessionWork): boolean {
+  if (work.released) return false;
+  if (work.foreground || work.liveTaskIds.size > 0) return true;
+  return (
+    work.followupPendingSince !== null &&
+    Date.now() - work.followupPendingSince < FOLLOWUP_START_TIMEOUT_MS
+  );
+}
+
+/** End any held turn for the session (cancel / dispose). */
+function releaseSessionWork(acpSessionId: string): void {
+  const work = workByAcpSession.get(acpSessionId);
+  if (!work) return;
+  work.released = true;
+  wakeSessionWork(work);
+}
+
+function emitBackgroundTaskCounts(acpSessionId: string, work: SessionWork): void {
+  const handler = activeHandlers.get(acpSessionId);
+  if (!handler || work.seenTaskIds.size === 0) return;
+  handler(
+    JSON.stringify({ type: 'background_tasks', running: work.liveTaskIds.size, total: work.seenTaskIds.size })
+  );
+}
+
+function makeForegroundEvents(acpSessionId: string): {
+  running: () => void;
+  awaitingUser: () => void;
+  ended: (outcome: { stopReason?: string }) => void;
+  failed: (error: unknown) => void;
+} {
+  const setForeground = (foreground: boolean, stopReason?: string): void => {
+    const work = getSessionWork(acpSessionId);
+    work.foreground = foreground;
+    if (foreground) work.followupPendingSince = null;
+    if (stopReason) work.lastStopReason = stopReason;
+    wakeSessionWork(work);
+  };
+  return {
+    running: () => setForeground(true),
+    awaitingUser: () => {},
+    ended: (outcome) => setForeground(false, outcome?.stopReason),
+    failed: () => setForeground(false),
+  };
+}
+
+/** Raw SDK messages (`_claude/sdkMessage`) that describe follow-up work. */
+function trackRawSdkMessage(acpSessionId: string, message: Record<string, unknown>): void {
+  const work = getSessionWork(acpSessionId);
+  if (message.type === 'system' && message.subtype === 'background_tasks_changed') {
+    const tasks = Array.isArray(message.tasks) ? (message.tasks as Array<Record<string, unknown>>) : [];
+    work.liveTaskIds = new Set(
+      tasks
+        .filter((task) => task.ambient !== true && typeof task.task_id === 'string')
+        .map((task) => task.task_id as string)
+    );
+    for (const id of work.liveTaskIds) work.seenTaskIds.add(id);
+    emitBackgroundTaskCounts(acpSessionId, work);
+    wakeSessionWork(work);
+    return;
+  }
+  if (message.type === 'user') {
+    const origin = message.origin as { kind?: string; subkind?: string } | undefined;
+    if (origin?.kind === 'task-notification' && !work.foreground) {
+      work.followupPendingSince = Date.now();
+      wakeSessionWork(work);
+    }
+    return;
+  }
+  if (message.type === 'result') {
+    work.followupPendingSince = null;
+    wakeSessionWork(work);
+  }
+}
+
 // One ClaudeAcpAgent per Nova session so parallel chats cannot share query/task
 // state inside a singleton agent (which previously made two sessions feel like one).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -58,7 +201,12 @@ function forgetNovaSession(novaSessionId: string): void {
   initializedNovaSessions.delete(novaSessionId);
   lastUsedByNovaSession.delete(novaSessionId);
   for (const [acpId, novaId] of novaByAcpSession.entries()) {
-    if (novaId === novaSessionId) novaByAcpSession.delete(acpId);
+    if (novaId === novaSessionId) {
+      novaByAcpSession.delete(acpId);
+      // The CLI is going away: nothing will report its background work ending.
+      releaseSessionWork(acpId);
+      workByAcpSession.delete(acpId);
+    }
   }
 }
 
@@ -190,8 +338,15 @@ const acpClientProxy = {
     return {};
   },
   // Claude ACP ≥0.84 sends `_auth/status_update` (and similar) via extNotification;
-  // unknown methods are meant to be dropped silently by clients.
-  extNotification: async (_method: string, _params: Record<string, unknown>): Promise<void> => {},
+  // unknown methods are meant to be dropped silently by clients. `_claude/sdkMessage`
+  // carries the raw SDK messages requested in CLAUDE_SESSION_META.
+  extNotification: async (method: string, params: Record<string, unknown>): Promise<void> => {
+    if (method !== '_claude/sdkMessage') return;
+    const sessionId = typeof params.sessionId === 'string' ? params.sessionId : null;
+    const message =
+      params.message && typeof params.message === 'object' ? (params.message as Record<string, unknown>) : null;
+    if (sessionId && message) trackRawSdkMessage(sessionId, message);
+  },
 } satisfies Partial<ClaudeAcpClient>;
 
 // --------------------------------------------- Claude-specific agent ---------------------------------------------
@@ -201,10 +356,16 @@ const acpClientProxy = {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const esmImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let ClaudeAcpAgentCtor: (new (client: ClaudeAcpClient) => any) | null = null;
+/** `ClaudeAcpAgent` constructor: client, optional logger, optional options (`foreground` reporter). */
+type ClaudeAcpAgentCtorType = new (
+  client: ClaudeAcpClient,
+  logger?: unknown,
+  options?: { foreground?: (sessionId: string) => ReturnType<typeof makeForegroundEvents> }
+) => any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
-async function loadClaudeAcpAgentCtor(): Promise<new (client: ClaudeAcpClient) => any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+let ClaudeAcpAgentCtor: ClaudeAcpAgentCtorType | null = null;
+
+async function loadClaudeAcpAgentCtor(): Promise<ClaudeAcpAgentCtorType> {
   if (!ClaudeAcpAgentCtor) {
     const mod = await esmImport('@agentclientprotocol/claude-agent-acp');
     ClaudeAcpAgentCtor = mod.ClaudeAcpAgent;
@@ -213,7 +374,7 @@ async function loadClaudeAcpAgentCtor(): Promise<new (client: ClaudeAcpClient) =
 }
 
 /** Test hook: substitute a fake ClaudeAcpAgent class (skips the ESM import). */
-export function setClaudeAcpAgentCtorForTests(ctor: new (client: ClaudeAcpClient) => any): void { // eslint-disable-line @typescript-eslint/no-explicit-any
+export function setClaudeAcpAgentCtorForTests(ctor: ClaudeAcpAgentCtorType): void {
   ClaudeAcpAgentCtor = ctor;
 }
 
@@ -221,7 +382,9 @@ async function getAgentForNovaSession(novaSessionId: string): Promise<any> { // 
   let agent = agentsByNovaSession.get(novaSessionId);
   if (!agent) {
     const Ctor = await loadClaudeAcpAgentCtor();
-    agent = new Ctor(acpClientProxy as unknown as ClaudeAcpClient);
+    agent = new Ctor(acpClientProxy as unknown as ClaudeAcpClient, undefined, {
+      foreground: makeForegroundEvents,
+    });
     agentsByNovaSession.set(novaSessionId, agent);
     ensureIdleSweep();
     enforceAgentCap();
@@ -356,18 +519,19 @@ async function runClaudeAcpTurn(
   /** True when a brand-new conversation was created (rules must be injected). */
   let isFreshSession = false;
 
+  const sessionParams = { cwd, mcpServers, _meta: CLAUDE_SESSION_META, ...extraDirs };
   if (!acpSessionId) {
-    const created = await agent.newSession({ cwd, mcpServers, ...extraDirs });
+    const created = await agent.newSession(sessionParams);
     sessionResponse = created;
     resolvedSessionId = created.sessionId;
     isFreshSession = true;
   } else {
     try {
-      sessionResponse = await agent.resumeSession({ sessionId: acpSessionId, cwd, mcpServers, ...extraDirs });
+      sessionResponse = await agent.resumeSession({ sessionId: acpSessionId, ...sessionParams });
       resolvedSessionId = acpSessionId;
     } catch {
       onEvent(sessionResetNoticeEventLine());
-      const created = await agent.newSession({ cwd, mcpServers, ...extraDirs });
+      const created = await agent.newSession(sessionParams);
       sessionResponse = created;
       resolvedSessionId = created.sessionId;
       isFreshSession = true;
@@ -453,13 +617,29 @@ async function runClaudeAcpTurn(
         logger.warn({ err, sessionId: resolvedSessionId }, 'Failed to build rules prefix; prompting without rules');
       }
     }
+    const work = getSessionWork(resolvedSessionId);
+    work.released = false;
+    work.lastStopReason = undefined;
+    work.followupPendingSince = null;
+    work.seenTaskIds = new Set(work.liveTaskIds);
     armPromptIdleTimer();
     const resp = await agent.prompt({
       sessionId: resolvedSessionId,
       prompt: buildPromptContent(finalPromptText, params.attachments),
     });
     if (bPromptIdleTimedOut) return idleTimeoutError();
-    return { acpSessionId: resolvedSessionId, stopReason: resp.stopReason };
+    let stopReason: string | undefined = resp.stopReason;
+    if (stopReason !== 'cancelled') {
+      const followup = await holdForFollowupWork(resolvedSessionId, work, {
+        clearPromptIdleTimer,
+        armPromptIdleTimer,
+        timedOut: () => bPromptIdleTimedOut,
+        novaSessionId,
+      });
+      if (bPromptIdleTimedOut) return idleTimeoutError();
+      if (followup) stopReason = work.lastStopReason ?? stopReason;
+    }
+    return { acpSessionId: resolvedSessionId, stopReason };
   } catch (err) {
     if (bPromptIdleTimedOut) return idleTimeoutError();
     const errorDetail = extractAgentErrorDetail(err);
@@ -472,7 +652,76 @@ async function runClaudeAcpTurn(
   }
 }
 
+/**
+ * Keep the turn open while Claude Code's follow-up work runs: background tasks
+ * still live, a task-notification follow-up queued, or a self-started cycle
+ * streaming. Returns once that work has been quiet for FOLLOWUP_GRACE_MS, or at
+ * once on cancel / dispose. The result says whether any follow-up ran.
+ */
+async function holdForFollowupWork(
+  acpSessionId: string,
+  work: SessionWork,
+  hooks: {
+    clearPromptIdleTimer: () => void;
+    armPromptIdleTimer: () => void;
+    timedOut: () => boolean;
+    novaSessionId: string;
+  }
+): Promise<boolean> {
+  let bHadFollowup = false;
+  let bLogged = false;
+  // The idle watchdog expects output; background tasks produce none until they
+  // end, so it only runs while a follow-up cycle streams. Armed on the transition
+  // only: re-arming on every re-check would keep it from ever firing.
+  let bWatchdogArmed = false;
+  hooks.clearPromptIdleTimer();
+  for (;;) {
+    if (work.released || hooks.timedOut()) return bHadFollowup;
+    const bBusy = hasFollowupWork(work);
+    if (bBusy && !bLogged) {
+      bLogged = true;
+      logger.info(
+        { novaSessionId: hooks.novaSessionId, acpSessionId, liveTasks: work.liveTaskIds.size, foreground: work.foreground },
+        'Claude turn held open for background work'
+      );
+    }
+    const bStreaming = bBusy && work.foreground;
+    if (bStreaming) bHadFollowup = true;
+    if (bStreaming !== bWatchdogArmed) {
+      bWatchdogArmed = bStreaming;
+      if (bStreaming) hooks.armPromptIdleTimer();
+      else hooks.clearPromptIdleTimer();
+    }
+    // A turn that never had background work cannot get a follow-up: end at once.
+    if (!bBusy && work.seenTaskIds.size === 0 && work.followupPendingSince === null && !bHadFollowup) {
+      return bHadFollowup;
+    }
+    // Busy: re-check on every change (and periodically, so a stale follow-up
+    // marker times out). Quiet: give a just-finished task's follow-up a moment
+    // to start before ending the turn.
+    const bChanged = await waitForWorkChange(work, FOLLOWUP_GRACE_MS);
+    if (!bBusy && !bChanged) return bHadFollowup;
+  }
+}
+
+/** Resolves true when the session's work state changes, false after `timeoutMs`. */
+function waitForWorkChange(work: SessionWork, timeoutMs: number): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const wake = (): void => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      work.waiters.delete(wake);
+      resolve(false);
+    }, timeoutMs);
+    work.waiters.add(wake);
+  });
+}
+
 export function cancelClaudeAcp(acpSessionId: string): void {
+  // A turn held open for background work has no prompt to interrupt; end it here.
+  releaseSessionWork(acpSessionId);
   const agent = findAgentForAcpSession(acpSessionId);
   agent?.cancel({ sessionId: acpSessionId }).catch(() => {});
 }

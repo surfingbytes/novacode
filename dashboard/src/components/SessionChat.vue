@@ -1351,7 +1351,7 @@ onUnmounted(() => {
           <span
             class="w-3 h-3 border-2 border-primary/40 border-t-primary rounded-full animate-spin shrink-0"
           />
-          Subagents {{ liveBusySubagents.running }}/{{ liveBusySubagents.total }} still running
+          Background tasks {{ liveBusySubagents.running }}/{{ liveBusySubagents.total }} still running
         </div>
 
         <ChatComposer

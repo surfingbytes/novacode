@@ -18,5 +18,5 @@ export function sessionBusyTitle(
   if (!subagents || subagents.total <= 0) {
     return 'Session is running';
   }
-  return `Session is running — ${subagents.running} of ${subagents.total} subagents still running`;
+  return `Session is running — ${subagents.running} of ${subagents.total} background tasks still running`;
 }

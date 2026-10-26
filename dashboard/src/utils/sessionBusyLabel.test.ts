@@ -16,7 +16,7 @@ describe('sessionBusyLabel', () => {
 describe('sessionBusyTitle', () => {
   it('describes subagent progress', () => {
     expect(sessionBusyTitle({ busySubagents: { running: 1, total: 2 } })).toBe(
-      'Session is running — 1 of 2 subagents still running'
+      'Session is running — 1 of 2 background tasks still running'
     );
   });
 });
