@@ -510,18 +510,27 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
           return;
         }
 
+        try {
+          await db.enqueueSessionQueueItem({
+            sessionId: id,
+            text,
+            model: clientMessage.model ?? session.modelSelection ?? 'auto',
+            mode: clientMessage.mode ?? session.sessionMode ?? 'default',
+            imagePaths
+          });
+        } catch (err) {
+          // Tell the client: it already shows the user turn and a spinner, so a
+          // silent failure looked like an agent that never started.
+          console.warn('[chat] failed to enqueue prompt:', err);
+          send(socket, { type: 'error', message: 'Failed to send prompt, please retry' });
+          return;
+        }
+        // Name only once the prompt is saved, so a failed send leaves no titled empty chat.
         void maybeNameUntitledSession(id, text, imagePaths);
-        await db.enqueueSessionQueueItem({
-          sessionId: id,
-          text,
-          model: clientMessage.model ?? session.modelSelection ?? 'auto',
-          mode: clientMessage.mode ?? session.sessionMode ?? 'default',
-          imagePaths
-        });
         await broadcastQueueUpdate(id);
         await tryProcessQueue(id);
       } catch (err) {
-        console.warn('[chat] malformed ws message from client:', err);
+        console.warn('[chat] failed to handle ws message from client:', err);
       }
     });
 

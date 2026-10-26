@@ -83,7 +83,7 @@ export function normalizeTagStringList(tags: unknown[]): string[] {
   return out;
 }
 
-function toChatQueueItem(row: {
+type QueueRow = {
   id: string;
   sessionId: string;
   text: string;
@@ -91,7 +91,13 @@ function toChatQueueItem(row: {
   mode: string;
   imagePaths: string | null;
   createdAt: string;
-}): ChatQueueItem {
+};
+
+/** RETURNING list mapping session_prompt_queue columns to QueueRow for raw queries. */
+const QUEUE_RETURNING = Prisma.sql`id, session_id AS "sessionId", text, model, session_mode AS "mode",
+  image_paths_json AS "imagePaths", created_at AS "createdAt"`;
+
+function toChatQueueItem(row: QueueRow): ChatQueueItem {
   return {
     id: row.id,
     sessionId: row.sessionId,
@@ -865,41 +871,31 @@ export const db = {
   }): Promise<ChatQueueItem> {
     const id = randomUUID();
     const createdAt = new Date().toISOString();
-    const created = await _prisma.$transaction(async (tx) => {
-      const max = await tx.sessionPromptQueue.aggregate({
-        where: { sessionId: data.sessionId },
-        _max: { position: true }
-      });
-      const position = (max._max.position ?? 0) + 1;
-      return tx.sessionPromptQueue.create({
-        data: {
-          id,
-          sessionId: data.sessionId,
-          text: data.text,
-          model: data.model,
-          mode: data.mode,
-          imagePaths: JSON.stringify(data.imagePaths ?? []),
-          position,
-          createdAt
-        }
-      });
-    });
-    return toChatQueueItem(created);
+    // Single statement, not an interactive transaction: under load the 5s
+    // interactive-transaction timeout expired on commit and the prompt was lost.
+    const rows = await _prisma.$queryRaw<QueueRow[]>`
+      INSERT INTO session_prompt_queue
+        (id, session_id, text, model, session_mode, image_paths_json, position, created_at)
+      SELECT ${id}, ${data.sessionId}, ${data.text}, ${data.model}, ${data.mode},
+        ${JSON.stringify(data.imagePaths ?? [])}, COALESCE(MAX(position), 0) + 1, ${createdAt}
+      FROM session_prompt_queue
+      WHERE session_id = ${data.sessionId}
+      RETURNING ${QUEUE_RETURNING}`;
+    return toChatQueueItem(rows[0]!);
   },
 
   async dequeueNextSessionQueueItem(sessionId: string): Promise<ChatQueueItem | undefined> {
-    const next = await _prisma.$transaction(async (tx) => {
-      const row = await tx.sessionPromptQueue.findFirst({
-        where: { sessionId },
-        orderBy: [{ position: 'asc' }, { createdAt: 'asc' }]
-      });
-      if (!row) {
-        return undefined;
-      }
-      await tx.sessionPromptQueue.delete({ where: { id: row.id } });
-      return row;
-    });
-    return next ? toChatQueueItem(next) : undefined;
+    const rows = await _prisma.$queryRaw<QueueRow[]>`
+      DELETE FROM session_prompt_queue
+      WHERE id = (
+        SELECT id FROM session_prompt_queue
+        WHERE session_id = ${sessionId}
+        ORDER BY position ASC, created_at ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+      )
+      RETURNING ${QUEUE_RETURNING}`;
+    return rows[0] ? toChatQueueItem(rows[0]) : undefined;
   },
 
   async deleteSessionQueueItem(sessionId: string, id: string): Promise<boolean> {
