@@ -258,6 +258,13 @@ const loadList = async (path: string, bForce = false): Promise<void> => {
     nextEntriesByPath[key] = response.data.entries;
     entriesByPath.value = nextEntriesByPath;
   } catch (error: unknown) {
+    // A missing subfolder (e.g. ancestor of a stale open path) just collapses; only root failures are errors.
+    if (key) {
+      const nextExpandedPaths = new Set(expandedPaths.value);
+      nextExpandedPaths.delete(key);
+      expandedPaths.value = nextExpandedPaths;
+      return;
+    }
     const errorWithMessage = error as { response?: { data?: { error?: string } }; message?: string };
     listError.value = errorWithMessage?.response?.data?.error ?? errorWithMessage?.message ?? 'Failed to list';
   } finally {
@@ -926,7 +933,7 @@ onUnmounted((): void => {
           {{ listError }}
         </div>
         <!-- w-max/min-w-full: rows size to the widest entry so long names scroll horizontally -->
-        <div v-else class="w-max min-w-full">
+        <div class="w-max min-w-full">
           <button
             v-for="{ entry, depth } in visibleEntries"
             :key="entry.path"
