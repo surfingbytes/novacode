@@ -63,6 +63,9 @@ export interface UseChatSocketContext {
   sessionName: () => string;
   workspaceName: () => string;
   onClaudeLimitDetected: (resetTime: string, resetTimeReadable: string) => void;
+  /** "Continue in new chat" finished: the new chat id, or the failure message. */
+  onHandoffReady?: (sessionId: string) => void;
+  onHandoffFailed?: (message: string) => void;
 }
 
 export function useChatSocket(ctx: UseChatSocketContext) {
@@ -340,6 +343,10 @@ export function useChatSocket(ctx: UseChatSocketContext) {
         setChatError('Server disconnected');
         streamingThinkingText.value = '';
         bIsStreaming.value = false;
+      } else if (msg.type === 'handoff-ready') {
+        if (msg.sessionId) ctx.onHandoffReady?.(msg.sessionId);
+      } else if (msg.type === 'handoff-failed') {
+        ctx.onHandoffFailed?.(msg.message ?? 'Failed to continue in new chat');
       } else if (msg.type === 'claude_limit_detected') {
         ctx.onClaudeLimitDetected(
           msg.resetTime ?? new Date().toISOString(),

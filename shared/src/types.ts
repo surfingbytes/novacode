@@ -251,7 +251,9 @@ export interface ChatWsServerMessage {
     | 'approval-requested'
     | 'approval-resolved'
     | 'question-requested'
-    | 'question-resolved';
+    | 'question-resolved'
+    | 'handoff-ready'
+    | 'handoff-failed';
   messages?: ChatMessage[];
   data?: string;
   message?: string;
@@ -271,6 +273,8 @@ export interface ChatWsServerMessage {
   };
   resetTime?: string;
   resetTimeReadable?: string;
+  /** handoff-ready: the new chat that continues this one. */
+  sessionId?: string;
 }
 
 // ---------------------------------- Entities ----------------------------------
@@ -338,6 +342,16 @@ export interface Session {
   unread?: boolean;
   /** Orchestrator whose run created this session (step or merge chat); such chats are hidden from chat lists. */
   orchestratorId?: string | null;
+  /** Set on chats started via "Continue in new chat": the source chat and its handoff summary. */
+  continuedFrom?: SessionHandoffSource | null;
+  /** Set on chats continued in a new chat: the id of that chat. */
+  continuedInSessionId?: string | null;
+}
+
+export interface SessionHandoffSource {
+  sessionId: string;
+  sessionName: string;
+  summary: string;
 }
 
 /** Token/cost snapshot reported by an agent (ACP `usage_update`). */

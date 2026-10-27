@@ -14,7 +14,9 @@ import {
   Lightbulb,
   ListChecks,
   ListTodo,
+  LoaderCircle,
   MessageSquare,
+  MessageSquarePlus,
   Shield,
   Wrench
 } from 'lucide-vue-next';
@@ -80,13 +82,19 @@ const props = withDefaults(
     bSavingApprovalPolicy: boolean;
     bMdUp: boolean;
     bUploadingImage: boolean;
+    /** Chat has history to hand off ("Continue in new chat"). */
+    bCanContinueInNewChat?: boolean;
+    /** Handoff summary is being written; the new chat opens when it's done. */
+    bHandoffPending?: boolean;
   }>(),
   {
     agentType: null,
     thinkingValue: null,
     approvalPolicy: 'ask',
     bSavingApprovalPolicy: false,
-    hideToolCalls: false
+    hideToolCalls: false,
+    bCanContinueInNewChat: false,
+    bHandoffPending: false
   }
 );
 
@@ -94,6 +102,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (e: 'send', payload: { text: string; imagePaths: string[] }): void;
+  (e: 'continueInNewChat', payload: { text: string; imagePaths: string[] }): void;
   (e: 'cancel'): void;
   (e: 'pushQueue', id: string): void;
   (e: 'deleteQueue', id: string): void;
@@ -121,6 +130,8 @@ const modeMenuRef = ref<HTMLElement | null>(null);
 const bModeMenuOpen = ref(false);
 const approvalMenuRef = ref<HTMLElement | null>(null);
 const bApprovalMenuOpen = ref(false);
+const sendMenuRef = ref<HTMLElement | null>(null);
+const bSendMenuOpen = ref(false);
 
 const approvalPolicyOptions: Array<{ id: ApprovalPolicy; label: string; description: string }> = [
   { id: 'ask', label: 'Ask', description: 'Prompt before tool actions' },
@@ -185,6 +196,23 @@ const bPrimaryDisabled = computed(() => {
   return !bHasDraft.value;
 });
 
+const bContinueInNewChatDisabled = computed(
+  () =>
+    !props.bWsConnected ||
+    props.bIsStreaming ||
+    props.bHandoffPending ||
+    !props.bCanContinueInNewChat ||
+    !bHasDraft.value
+);
+
+const continueInNewChatTitle = computed(() => {
+  if (props.bHandoffPending) return 'Writing handoff summary…';
+  if (!props.bCanContinueInNewChat) return 'Nothing to continue from yet';
+  if (props.bIsStreaming) return 'Wait for the agent to finish';
+  if (!bHasDraft.value) return 'Type the prompt for the new chat first';
+  return 'Summarize this chat and send the prompt to a new chat with the same agent and model';
+});
+
 const primaryActionLabel = computed(() => {
   if (bPrimaryIsStop.value) {
     return 'Stop generating';
@@ -211,6 +239,16 @@ function send(): void {
   promptText.value = '';
   pendingImages.value = [];
   nextTick(() => textareaEl.value?.focus());
+}
+
+function continueInNewChat(): void {
+  bSendMenuOpen.value = false;
+  if (bContinueInNewChatDisabled.value) return;
+  // The parent clears the draft once the handoff starts and restores it on failure.
+  emit('continueInNewChat', {
+    text: promptText.value.trim(),
+    imagePaths: pendingImages.value.map((img) => img.serverPath)
+  });
 }
 
 function onPrimaryClick(): void {
@@ -331,12 +369,17 @@ function handleDocumentClick(e: MouseEvent): void {
   if (bApprovalMenuOpen.value && approvalEl && !approvalEl.contains(e.target as Node)) {
     closeApprovalMenu();
   }
+  const sendMenuEl = sendMenuRef.value;
+  if (bSendMenuOpen.value && sendMenuEl && !sendMenuEl.contains(e.target as Node)) {
+    bSendMenuOpen.value = false;
+  }
 }
 
 function handleDocumentKeydown(e: KeyboardEvent): void {
   if (e.key !== 'Escape') return;
   if (bModeMenuOpen.value) closeModeMenu();
   if (bApprovalMenuOpen.value) closeApprovalMenu();
+  bSendMenuOpen.value = false;
 }
 
 // -------------------------------------------------- Textarea autosize --------------------------------------------------
@@ -670,48 +713,85 @@ defineExpose({
         class="hidden"
         @change="onFileChange"
       />
-      <button
-        type="button"
-        @click="onPrimaryClick"
-        :disabled="bPrimaryDisabled"
-        :aria-label="primaryActionLabel"
-        :title="primaryActionLabel"
-        class="button is-icon !h-[44px] !w-[44px] !min-w-[44px] shrink-0 !rounded-md !p-0"
-        :class="bPrimaryIsStop ? 'is-transparent !text-destructive hover:!bg-destructive/10' : 'is-primary'"
-      >
-        <svg
-          v-if="bPrimaryIsStop"
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.6"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          class="select-none"
-          aria-hidden="true"
+      <div ref="sendMenuRef" class="relative flex shrink-0">
+        <button
+          type="button"
+          @click="onPrimaryClick"
+          :disabled="bPrimaryDisabled"
+          :aria-label="primaryActionLabel"
+          :title="primaryActionLabel"
+          class="button is-icon !h-[44px] !w-[44px] !min-w-[44px] shrink-0 !rounded-md !rounded-r-none !p-0"
+          :class="bPrimaryIsStop ? 'is-transparent !text-destructive hover:!bg-destructive/10' : 'is-primary'"
         >
-          <circle cx="12" cy="12" r="10" />
-          <rect x="9" y="9" width="6" height="6" />
-        </svg>
-        <svg
-          v-else
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.6"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          class="select-none"
-          aria-hidden="true"
+          <svg
+            v-if="bPrimaryIsStop"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="select-none"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <rect x="9" y="9" width="6" height="6" />
+          </svg>
+          <svg
+            v-else
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="select-none"
+            aria-hidden="true"
+          >
+            <line x1="22" y1="2" x2="11" y2="13" />
+            <polygon points="22 2 15 22 11 13 2 9 22 2" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="button is-icon !h-[44px] !w-[22px] !min-w-[22px] shrink-0 !rounded-md !rounded-l-none !p-0 border-l border-black/15"
+          :class="bPrimaryIsStop ? 'is-transparent' : 'is-primary'"
+          :disabled="!bWsConnected"
+          :aria-expanded="bSendMenuOpen"
+          aria-haspopup="menu"
+          :aria-label="bHandoffPending ? 'Writing handoff summary…' : 'More send options'"
+          :title="bHandoffPending ? 'Writing handoff summary…' : 'More send options'"
+          @click.stop="bSendMenuOpen = !bSendMenuOpen"
         >
-          <line x1="22" y1="2" x2="11" y2="13" />
-          <polygon points="22 2 15 22 11 13 2 9 22 2" />
-        </svg>
-      </button>
+          <LoaderCircle v-if="bHandoffPending" :size="13" :stroke-width="2" class="animate-spin" aria-hidden="true" />
+          <ChevronDown v-else :size="14" :stroke-width="1.8" aria-hidden="true" />
+        </button>
+        <div
+          v-if="bSendMenuOpen"
+          class="absolute right-0 bottom-full z-50 mb-1 w-max max-w-[260px] overflow-hidden rounded-lg border border-border bg-surface py-1 shadow-lg"
+          role="menu"
+          @click.stop
+        >
+          <button
+            type="button"
+            class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-text-primary transition-colors hover:bg-fg/[0.08] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
+            role="menuitem"
+            :disabled="bContinueInNewChatDisabled"
+            :title="continueInNewChatTitle"
+            @click="continueInNewChat"
+          >
+            <MessageSquarePlus :size="14" :stroke-width="1.8" class="shrink-0 self-start mt-0.5 text-text-muted" aria-hidden="true" />
+            <span class="min-w-0">
+              <span class="block">Continue in new chat</span>
+              <span v-if="bContinueInNewChatDisabled" class="block text-xs text-text-muted">{{ continueInNewChatTitle }}</span>
+            </span>
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- Model / config controls -->

@@ -7,10 +7,11 @@ import {
   LINKED_PLAN_CONTEXT_CONFIG_KEY,
   serializeLinkedPlanContext
 } from './linkedPlanContext';
+import { HANDOFF_CONTEXT_CONFIG_KEY, serializeHandoffContext } from './sessionHandoff';
 
 // types
 import type { SessionModel as Session } from '../generated/client/models/Session';
-import type { AgentType, ApprovalPolicy } from '../@types/index';
+import type { AgentType, ApprovalPolicy, SessionHandoffSource } from '../@types/index';
 import type { LinkedPlanContext } from './linkedPlanContext';
 
 export interface CreateSessionWithAgentParams {
@@ -24,6 +25,8 @@ export interface CreateSessionWithAgentParams {
   modelSelection?: string | null;
   /** Optional backend-linked plan context to inject on the first prompt. */
   linkedPlanContext?: LinkedPlanContext | null;
+  /** Optional handoff note from the chat this one continues; injected on the first prompt. */
+  handoffContext?: SessionHandoffSource | null;
   /** Optional explicit session mode; plan handoffs default to agent. */
   sessionMode?: string | null;
   /** Optional tool-approval policy; defaults to ask. */
@@ -59,11 +62,14 @@ export async function createSessionWithAgent(
     ?? (params.linkedPlanContext ? 'agent' : undefined)
     ?? latestSameAgentSession?.sessionMode
     ?? MODE_SENTINEL;
-  const sessionConfigJson = params.linkedPlanContext
-    ? JSON.stringify({
-        [LINKED_PLAN_CONTEXT_CONFIG_KEY]: serializeLinkedPlanContext(params.linkedPlanContext),
-      })
-    : null;
+  const internalConfig: Record<string, string> = {};
+  if (params.linkedPlanContext) {
+    internalConfig[LINKED_PLAN_CONTEXT_CONFIG_KEY] = serializeLinkedPlanContext(params.linkedPlanContext);
+  }
+  if (params.handoffContext) {
+    internalConfig[HANDOFF_CONTEXT_CONFIG_KEY] = serializeHandoffContext(params.handoffContext);
+  }
+  const sessionConfigJson = Object.keys(internalConfig).length > 0 ? JSON.stringify(internalConfig) : null;
   const approvalPolicy = normalizeApprovalPolicy(params.approvalPolicy);
 
   const session = await db.createSession({

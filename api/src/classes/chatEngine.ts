@@ -39,7 +39,9 @@ import { classifyAgentError, type AgentErrorCode, type AgentErrorDetail } from '
 import {
   buildLinkedPlanContextPrefix,
   extractLinkedPlanContextFromConfig,
+  mergeInternalSessionConfig,
 } from './linkedPlanContext';
+import { buildHandoffContextPrefix, extractHandoffLinksFromConfig } from './sessionHandoff';
 import {
   claimClaudePlanForSession,
   claudePlanFileIdsFromEventLines,
@@ -775,9 +777,12 @@ export async function dispatchPrompt(
     }
   }
   const linkedPlanPrefix = currentMessages.length === 1
-    ? await buildLinkedPlanContextPrefix(linkedPlanContext, {
-        workspacePath: linkedPlanWorkspacePath,
-      })
+    ? [
+        buildHandoffContextPrefix(extractHandoffLinksFromConfig(session.sessionConfigJson).continuedFrom),
+        await buildLinkedPlanContextPrefix(linkedPlanContext, {
+          workspacePath: linkedPlanWorkspacePath,
+        }),
+      ].filter((part) => part.trim()).join('\n\n')
     : '';
   // Sessions with a spec file get its path every turn (it may be created mid-chat)
   // and the spec folder as an extra allowed directory, so edits need no approval.
@@ -869,7 +874,7 @@ export async function dispatchPrompt(
       const patch: {
         sessionMode?: string;
         modelSelection?: string;
-        sessionConfigJson?: string;
+        sessionConfigJson?: string | null;
       } = {};
       if (sync.modeId && sync.modeId !== sessionMode) {
         patch.sessionMode = sync.modeId;
@@ -878,8 +883,8 @@ export async function dispatchPrompt(
       // only echoes its startup default (it can't switch models at runtime), so persisting it would
       // silently overwrite the user's choice (e.g. turn "auto" into "composer-2.5-fast").
       if (sync.config && Object.keys(sync.config).length > 0) {
-        const merged = { ...sessionConfig, ...sync.config };
-        const mergedJson = JSON.stringify(merged);
+        // Keep internal __nova* keys (linked plan, handoff links) the agent never reports.
+        const mergedJson = mergeInternalSessionConfig(session.sessionConfigJson, { ...sessionConfig, ...sync.config });
         if (mergedJson !== session.sessionConfigJson) {
           patch.sessionConfigJson = mergedJson;
         }

@@ -336,7 +336,9 @@ const chatSocket = useChatSocket({
     bShowClaudeLimitPopup.value = true;
     claudeLimitResetTime.value = resetTime;
     claudeLimitResetTimeReadable.value = resetTimeReadable;
-  }
+  },
+  onHandoffReady: (newSessionId) => openHandoffTarget(newSessionId),
+  onHandoffFailed: (message) => failHandoff(message)
 });
 const {
   messages,
@@ -589,6 +591,70 @@ watch(
     }
   }
 );
+
+// -------------------------------------------------- Continue in new chat --------------------------------------------------
+const bHandoffPending = ref(false);
+/** Draft taken from the composer when the handoff started; put back if it fails. */
+let handoffDraft: { text: string; images: PendingAttachment[] } | null = null;
+
+const storeSession = computed(() =>
+  workspacesStore.allSessions.find((candidate) => candidate.id === props.sessionId)
+);
+const continuedFrom = computed(
+  () => storeSession.value?.continuedFrom ?? session.value?.continuedFrom ?? null
+);
+const continuedInSessionId = computed(
+  () => storeSession.value?.continuedInSessionId ?? session.value?.continuedInSessionId ?? null
+);
+const continuedInSessionName = computed(() => {
+  const id = continuedInSessionId.value;
+  if (!id) return '';
+  return workspacesStore.allSessions.find((candidate) => candidate.id === id)?.name?.trim() || 'Untitled session';
+});
+const bHandoffSummaryOpen = ref(false);
+
+async function onContinueInNewChat(payload: { text: string; imagePaths: string[] }): Promise<void> {
+  if (bHandoffPending.value) return;
+  bHandoffPending.value = true;
+  try {
+    await sessionsApi.continueInNewChat(props.workspaceId, props.sessionId, payload);
+    handoffDraft = { text: promptText.value, images: pendingImages.value };
+    promptText.value = '';
+    pendingImages.value = [];
+    clearSessionPrompt(props.workspaceId, props.sessionId);
+  } catch (err) {
+    bHandoffPending.value = false;
+    toastStore.error(apiErrorMessage(err, 'Failed to continue in new chat'));
+  }
+}
+
+function openHandoffTarget(newSessionId: string): void {
+  if (!bHandoffPending.value) return;
+  bHandoffPending.value = false;
+  handoffDraft = null;
+  void router.push({ name: 'session', params: { id: props.workspaceId, sessionId: newSessionId } });
+}
+
+function failHandoff(message: string): void {
+  if (!bHandoffPending.value) return;
+  bHandoffPending.value = false;
+  if (handoffDraft && !promptText.value.trim() && pendingImages.value.length === 0) {
+    promptText.value = handoffDraft.text;
+    pendingImages.value = handoffDraft.images;
+  }
+  handoffDraft = null;
+  toastStore.error(message);
+}
+
+// Fallback when the handoff-ready frame was missed (socket reconnect): the
+// session list upsert still links this chat to the new one.
+watch(continuedInSessionId, (id, previousId) => {
+  if (id && id !== previousId) openHandoffTarget(id);
+});
+
+function openContinuedSession(sessionId: string): void {
+  void router.push({ name: 'session', params: { id: props.workspaceId, sessionId } });
+}
 
 function onComposerSend(payload: { text: string; imagePaths: string[] }): void {
   clearSessionPrompt(props.workspaceId, props.sessionId);
@@ -1060,6 +1126,9 @@ watch(
     }
     bLoading.value = !cached;
     pendingImages.value = [];
+    bHandoffPending.value = false;
+    bHandoffSummaryOpen.value = false;
+    handoffDraft = null;
     agentOptions.resetAgentOptions();
     approvalPolicy.value = normalizeApprovalPolicy(cached?.session?.approvalPolicy);
     if (cached?.session) {
@@ -1259,6 +1328,48 @@ onUnmounted(() => {
           :class="bWidePane ? 'flex-row' : 'flex-col'"
         >
           <div class="flex-1 min-w-0 flex flex-col min-h-0">
+            <div
+              v-if="continuedFrom || continuedInSessionId"
+              class="mx-4 md:mx-6 mt-2 shrink-0 rounded-md border border-fg/10 bg-fg/[0.03] text-xs text-text-muted"
+            >
+              <div v-if="continuedFrom" class="flex items-center gap-2 px-3 py-1.5">
+                <span class="min-w-0 truncate">
+                  Continued from
+                  <button
+                    type="button"
+                    class="font-medium text-text-primary hover:underline"
+                    @click="openContinuedSession(continuedFrom.sessionId)"
+                  >{{ continuedFrom.sessionName.trim() || 'Untitled session' }}</button>
+                </span>
+                <button
+                  type="button"
+                  class="ml-auto shrink-0 hover:text-text-primary"
+                  :aria-expanded="bHandoffSummaryOpen"
+                  @click="bHandoffSummaryOpen = !bHandoffSummaryOpen"
+                >
+                  {{ bHandoffSummaryOpen ? 'Hide handoff' : 'Show handoff' }}
+                </button>
+              </div>
+              <div
+                v-if="continuedFrom && bHandoffSummaryOpen"
+                class="chat-markdown max-h-72 overflow-y-auto border-t border-fg/10 px-3 py-2 text-sm text-text-primary"
+                v-html="renderMdCached(continuedFrom.summary)"
+              />
+              <div
+                v-if="continuedInSessionId"
+                class="flex items-center gap-2 px-3 py-1.5"
+                :class="{ 'border-t border-fg/10': continuedFrom }"
+              >
+                <span class="min-w-0 truncate">
+                  Continued in
+                  <button
+                    type="button"
+                    class="font-medium text-text-primary hover:underline"
+                    @click="openContinuedSession(continuedInSessionId)"
+                  >{{ continuedInSessionName }}</button>
+                </span>
+              </div>
+            </div>
             <ChatMessageList
               ref="chatListRef"
               :b-loading="bLoading"
@@ -1385,7 +1496,10 @@ onUnmounted(() => {
           :b-saving-approval-policy="bSavingApprovalPolicy"
           :b-md-up="bChatInputMdUp"
           :b-uploading-image="bUploadingImage"
+          :b-can-continue-in-new-chat="messages.length > 0"
+          :b-handoff-pending="bHandoffPending"
           @send="onComposerSend"
+          @continue-in-new-chat="onContinueInNewChat"
           @cancel="chatSocket.cancelPrompt"
           @push-queue="chatSocket.pushQueuedPrompt"
           @delete-queue="chatSocket.deleteQueuedPrompt"

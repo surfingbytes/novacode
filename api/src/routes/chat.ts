@@ -3,10 +3,17 @@ import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 
 // classes
-import { rejectUnauthorizedWebSocket } from '../classes/auth';
+import { jwtPreHandler, rejectUnauthorizedWebSocket } from '../classes/auth';
+import { assistantTextFromEvents } from '../classes/assistantText';
 import { db } from '../classes/database';
 import { WS_ROUTE_RATE_LIMIT } from '../classes/rateLimits';
 import { broadcastSessionListUpsert } from '../classes/sessionListBroadcast';
+import {
+  HANDOFF_SUMMARY_PROMPT,
+  HANDOFF_TARGET_CONFIG_KEY,
+  setInternalConfigValue
+} from '../classes/sessionHandoff';
+import { createSessionWithAgent } from '../classes/sessionService';
 import { markSessionRead } from '../classes/sessionUnread';
 import { resolveWorkspaceAbsolutePath } from '../classes/workspacePaths';
 import {
@@ -34,6 +41,7 @@ import {
 
 // types
 import type {
+  AgentType,
   ChatMessage,
   ChatApprovalRequest,
   ChatQuestionRequest,
@@ -215,6 +223,81 @@ export async function runServerPromptInSession(opts: {
   return result;
 }
 
+const handoffsInFlight = new Set<string>();
+
+/**
+ * "Continue in new chat": the source chat's own agent writes a handoff note (a
+ * normal visible turn), then a new chat with the same agent/model/mode starts
+ * with that note as hidden first-prompt context and the user's prompt queued.
+ * Open source-chat sockets get handoff-ready / handoff-failed.
+ */
+async function continueInNewChat(opts: {
+  sessionId: string;
+  text: string;
+  imagePaths: string[];
+}): Promise<void> {
+  const { sessionId, text, imagePaths } = opts;
+  const fail = (message: string): void => {
+    broadcastChat(sessionId, { type: 'handoff-failed', message });
+  };
+  try {
+    const result = await runServerPromptInSession({ sessionId, text: HANDOFF_SUMMARY_PROMPT });
+    if (result.error) {
+      fail(`Handoff summary failed: ${result.error}`);
+      return;
+    }
+    const lastAssistant = [...(result.messages ?? [])].reverse().find((message) => message.role === 'assistant');
+    const summary = assistantTextFromEvents(lastAssistant?.events).trim();
+    if (!summary) {
+      fail('Handoff summary came back empty');
+      return;
+    }
+
+    const source = await db.getSession(sessionId);
+    if (!source) {
+      fail('Session not found');
+      return;
+    }
+    const created = await createSessionWithAgent({
+      workspaceId: source.workspaceId,
+      name: '',
+      tags: Array.isArray(source.tags) ? (source.tags as string[]) : null,
+      agentType: (source.agentType as AgentType | null) ?? undefined,
+      modelSelection: source.modelSelection,
+      sessionMode: source.sessionMode,
+      approvalPolicy: source.approvalPolicy,
+      handoffContext: { sessionId, sessionName: source.name, summary }
+    });
+    if (!created.session) {
+      fail(created.error ?? 'Failed to create chat');
+      return;
+    }
+    const target = created.session;
+    broadcastSessionListUpsert(target.workspaceId, target);
+
+    const linked = await db.updateSession(sessionId, {
+      sessionConfigJson: setInternalConfigValue(source.sessionConfigJson, HANDOFF_TARGET_CONFIG_KEY, target.id)
+    });
+    if (linked) broadcastSessionListUpsert(linked.workspaceId, linked);
+
+    await db.enqueueSessionQueueItem({
+      sessionId: target.id,
+      text,
+      model: target.modelSelection ?? 'auto',
+      mode: target.sessionMode ?? 'default',
+      imagePaths
+    });
+    void maybeNameUntitledSession(target.id, text, imagePaths);
+    broadcastChat(sessionId, { type: 'handoff-ready', sessionId: target.id });
+    await tryProcessQueue(target.id);
+  } catch (err) {
+    console.warn('[chat] continue in new chat failed:', err);
+    fail('Failed to continue in new chat');
+  } finally {
+    handoffsInFlight.delete(sessionId);
+  }
+}
+
 function paginateMessages(allMessages: ChatMessage[], offset: number): { messages: ChatMessage[]; hasMore: boolean } {
   const total = allMessages.length;
   const endIdx = Math.max(0, total - offset);
@@ -351,6 +434,38 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
       });
     });
   }
+
+  // POST /api/workspaces/:workspaceId/sessions/:sessionId/continue-in-new-chat
+  // Answers 202 at once: the summary turn can take minutes, completion is pushed
+  // to the source chat's sockets as handoff-ready / handoff-failed.
+  fastify.post(
+    '/api/workspaces/:workspaceId/sessions/:sessionId/continue-in-new-chat',
+    { preHandler: jwtPreHandler },
+    async (request, reply) => {
+      const { workspaceId, sessionId } = request.params as { workspaceId: string; sessionId: string };
+      const body = (request.body ?? {}) as { text?: unknown; imagePaths?: unknown };
+      const text = typeof body.text === 'string' ? body.text.trim() : '';
+      const imagePaths = Array.isArray(body.imagePaths)
+        ? body.imagePaths.filter((path): path is string => typeof path === 'string')
+        : [];
+      if (!text && imagePaths.length === 0) {
+        return reply.status(400).send({ error: 'Prompt is required' });
+      }
+      const session = await db.getSession(sessionId);
+      if (!session || session.workspaceId !== workspaceId) {
+        return reply.status(404).send({ error: 'Session not found' });
+      }
+      if (getActiveRun(sessionId) || handoffsInFlight.has(sessionId)) {
+        return reply.status(409).send({ error: 'Agent is busy' });
+      }
+      if ((await db.listSessionMessagesPage(sessionId, 0, 1)).messages.length === 0) {
+        return reply.status(400).send({ error: 'Nothing to continue from yet' });
+      }
+      handoffsInFlight.add(sessionId);
+      void continueInNewChat({ sessionId, text, imagePaths });
+      return reply.status(202).send({ ok: true });
+    }
+  );
 
   fastify.get(
     '/api/ws/chat/:id',

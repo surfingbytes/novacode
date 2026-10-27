@@ -1,5 +1,6 @@
+import { extractHandoffLinksFromConfig } from './sessionHandoff';
 import { parseSessionUsageJson } from './sessionUsage';
-import type { SessionUsageSnapshot } from '../@types/index';
+import type { SessionHandoffSource, SessionUsageSnapshot } from '../@types/index';
 
 /** API/WebSocket: session.tags stored as JSON array; expose as string[] | null. */
 export function normalizeSessionForApi<
@@ -10,6 +11,8 @@ export function normalizeSessionForApi<
   tags: string[] | null;
   sessionConfigJson: Record<string, string> | null;
   lastUsage: SessionUsageSnapshot | null;
+  continuedFrom: SessionHandoffSource | null;
+  continuedInSessionId: string | null;
 } {
   const raw = s.tags;
   let tags: string[] | null = null;
@@ -46,13 +49,16 @@ export function normalizeSessionForApi<
   }
 
   const lastUsage = parseSessionUsageJson(s.lastUsageJson);
+  const { continuedFrom, continuedInSessionId } = extractHandoffLinksFromConfig(s.sessionConfigJson);
   const { sessionConfigJson: _omitConfig, lastUsageJson: _omitUsage, ...rest } = s;
-  return { ...rest, tags, sessionConfigJson, lastUsage } as Omit<
+  return { ...rest, tags, sessionConfigJson, lastUsage, continuedFrom, continuedInSessionId } as Omit<
     T,
     'tags' | 'sessionConfigJson' | 'lastUsageJson'
   > & {
     tags: string[] | null;
     sessionConfigJson: Record<string, string> | null;
     lastUsage: SessionUsageSnapshot | null;
+    continuedFrom: SessionHandoffSource | null;
+    continuedInSessionId: string | null;
   };
 }

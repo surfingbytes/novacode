@@ -806,6 +806,17 @@ export const sessionsApi = {
       `/workspaces/${workspaceId}/sessions/${sessionId}/usage`
     ),
 
+  /** Starts the handoff; completion arrives on the chat socket (handoff-ready / handoff-failed). */
+  continueInNewChat: (
+    workspaceId: string,
+    sessionId: string,
+    payload: { text: string; imagePaths: string[] }
+  ): ReturnType<typeof http.post<{ ok: boolean }>> =>
+    http.post<{ ok: boolean }>(
+      `/workspaces/${workspaceId}/sessions/${sessionId}/continue-in-new-chat`,
+      payload
+    ),
+
   create: (
     workspaceId: string,
     payload: {
