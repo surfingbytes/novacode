@@ -25,6 +25,7 @@ import { normalizeSessionMode } from './sessionMode';
 import { normalizeApprovalPolicy } from './approvalPolicy';
 import { isPlanApprovalRequest, planMarkdownFromPermission } from './planApproval';
 import { planUpdateTargetIndex } from './sessionMessages';
+import { stripInlineImagesFromEventLine } from './chatEventImages';
 import type {
   AcpAskQuestionParams,
   AcpAskQuestionResponse,
@@ -123,7 +124,7 @@ export function getActiveRun(sessionId: string): ActiveRun | undefined {
 
 /**
  * Mirror a persisted plan edit into the active run's message list; the run
- * rewrites all session messages from that list when it finishes.
+ * rewrites this turn's rows from that list when it finishes.
  */
 export function appendPlanUpdateToActiveRun(sessionId: string, line: string): void {
   const run = activeRuns.get(sessionId);
@@ -723,6 +724,8 @@ export async function dispatchPrompt(
     createdAt: new Date().toISOString(),
   };
   currentMessages.push(userMessage);
+  // Earlier rows are already in the DB — saves only rewrite this turn's rows.
+  const userPosition = currentMessages.length - 1;
 
   const previewAfterUser = computeLastListPreview(currentMessages);
   try {
@@ -733,7 +736,7 @@ export async function dispatchPrompt(
             lastPreviewRole: previewAfterUser.lastPreviewRole,
           }
         : {}),
-    });
+    }, { fromPosition: userPosition });
     if (fresh) broadcastSessionListUpsert(fresh.workspaceId, fresh);
   } catch (err) {
     currentMessages.pop();
@@ -827,7 +830,8 @@ export async function dispatchPrompt(
     for (const sub of run.subscribers) fn(sub);
   };
 
-  const onEvent = (line: string) => {
+  const onEvent = (rawLine: string) => {
+    const line = stripInlineImagesFromEventLine(rawLine);
     const usage = parseUsageUpdateLine(line);
     if (usage) {
       run.lastUsage = usage;
@@ -1064,7 +1068,7 @@ export async function dispatchPrompt(
         ...(previewDone
           ? { lastPreviewText: previewDone.lastPreviewText, lastPreviewRole: previewDone.lastPreviewRole }
           : { lastPreviewText: null, lastPreviewRole: null }),
-      });
+      }, { fromPosition: userPosition });
       if (newAcpSessionId) {
         logger.debug({ sessionId, acpSessionId: newAcpSessionId }, 'ACP session ID saved');
       }

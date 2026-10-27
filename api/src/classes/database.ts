@@ -763,6 +763,14 @@ export const db = {
       lastPreviewText?: string | null;
       lastPreviewRole?: string | null;
       lastUsageJson?: string | null;
+    },
+    opts?: {
+      /**
+       * Rows before this position are already persisted and left untouched;
+       * rows from it on are replaced. Rewriting a whole long history every turn
+       * made the save outlast the transaction timeout and drop the turn.
+       */
+      fromPosition?: number;
     }
   ): Promise<Session | undefined> {
     const existing = await _prisma.session.findUnique({ where: { id: sessionId } });
@@ -770,13 +778,18 @@ export const db = {
       return undefined;
     }
 
-    const rows = messages.map((message, position) =>
-      chatMessageToRowData(sessionId, position, message, randomUUID())
-    );
+    const fromPosition = Math.max(0, Math.min(opts?.fromPosition ?? 0, messages.length));
+    const rows = messages
+      .slice(fromPosition)
+      .map((message, index) =>
+        chatMessageToRowData(sessionId, fromPosition + index, message, randomUUID())
+      );
     const MESSAGE_INSERT_BATCH = 100;
 
     await _prisma.$transaction(async (tx) => {
-      await tx.sessionMessage.deleteMany({ where: { sessionId } });
+      await tx.sessionMessage.deleteMany({
+        where: { sessionId, ...(fromPosition > 0 && { position: { gte: fromPosition } }) }
+      });
       for (let index = 0; index < rows.length; index += MESSAGE_INSERT_BATCH) {
         await tx.sessionMessage.createMany({
           data: rows.slice(index, index + MESSAGE_INSERT_BATCH)
@@ -792,7 +805,7 @@ export const db = {
           updatedAt: new Date().toISOString()
         }
       });
-    });
+    }, { timeout: 60_000 });
 
     const row = await _prisma.session.findUnique({ where: { id: sessionId } });
     return row ?? undefined;

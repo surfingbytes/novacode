@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 // node_modules
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // lib
 import { readSessionCache, removeSessionCache, writeSessionCache } from '@/lib/sessionCache';
@@ -44,6 +44,25 @@ describe('sessionCache', () => {
   beforeEach(() => {
     localStorage.clear();
   });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Simulate a storage quota: writes longer than maxLength throw. */
+  function limitStorageWrites(maxLength: number): void {
+    const original = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string
+    ) {
+      if (value.length > maxLength) {
+        throw new DOMException('quota', 'QuotaExceededError');
+      }
+      original.call(this, key, value);
+    });
+  }
 
   it('returns null when nothing is cached', () => {
     expect(readSessionCache('ws-1', 'session-1')).toBeNull();
@@ -175,6 +194,34 @@ describe('sessionCache', () => {
       'nova:sessionCache:ws-1:session-1',
       JSON.stringify({ version: 999, messages: [] })
     );
+    expect(readSessionCache('ws-1', 'session-1')).toBeNull();
+  });
+
+  it('shrinks the snapshot until it fits the quota', () => {
+    const big = 'x'.repeat(1000);
+    const messages = makeMessages(20).map((m) => ({ ...m, content: big }));
+    limitStorageWrites(5000);
+    writeSessionCache('ws-1', 'session-1', { session: null, messages, bHasMore: false });
+
+    const cached = readSessionCache('ws-1', 'session-1');
+    expect(cached?.messages).toHaveLength(3);
+    expect(cached?.messages.at(-1)?.createdAt).toBe(messages.at(-1)?.createdAt);
+  });
+
+  it('drops a stale snapshot when even the latest message does not fit', () => {
+    writeSessionCache('ws-1', 'session-1', {
+      session: null,
+      messages: makeMessages(2),
+      bHasMore: false
+    });
+    limitStorageWrites(5000);
+    const huge: ChatMessage = { role: 'assistant', content: 'x'.repeat(10_000), createdAt: 'now' };
+    writeSessionCache('ws-1', 'session-1', {
+      session: null,
+      messages: [...makeMessages(2), huge],
+      bHasMore: false
+    });
+
     expect(readSessionCache('ws-1', 'session-1')).toBeNull();
   });
 });

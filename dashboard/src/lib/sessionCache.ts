@@ -17,8 +17,8 @@ import type { ChatMessage, Session } from '@/@types/index';
 
 const CACHE_VERSION = 1;
 const KEY_PREFIX = 'nova:sessionCache:';
-const MAX_CACHED_MESSAGES = 50;
-const RETRY_CACHED_MESSAGES = 10;
+/** Message counts tried in order until the snapshot fits the storage quota. */
+const CACHED_MESSAGE_LIMITS = [50, 10, 3, 1];
 const MAX_CACHED_SESSIONS = 5;
 
 export interface SessionCacheSnapshot {
@@ -131,7 +131,7 @@ export function writeSessionCache(
     }),
     bHasMore
   };
-  for (const limit of [MAX_CACHED_MESSAGES, RETRY_CACHED_MESSAGES]) {
+  for (const limit of CACHED_MESSAGE_LIMITS) {
     const payload = { ...base, messages: base.messages.slice(-limit) };
     const serialized = JSON.stringify(payload);
     if (safeSetItem(key, serialized)) {
@@ -147,6 +147,9 @@ export function writeSessionCache(
       }
     }
   }
+  // Nothing fits (huge agent turns): drop the old snapshot rather than keep
+  // showing a stale one that ends before the latest reply.
+  safeRemoveItem(key);
 }
 
 export function removeSessionCache(workspaceId: string, sessionId: string): void {
