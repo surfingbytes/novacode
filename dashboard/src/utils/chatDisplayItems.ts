@@ -40,6 +40,8 @@ export interface DisplayItem {
   status?: 'running' | 'success' | 'rejected';
   locations?: Array<{ path: string; line?: number }>;
   toolOutput?: string;
+  /** Image file the tool returned (e.g. Read on a JPEG) — shown from disk on demand. */
+  toolImagePath?: string;
   // todos
   todoItems?: TodoDisplayItem[];
   todoDoneCount?: number;
@@ -576,6 +578,9 @@ export interface ProcessEventLineOptions {
 // ---------------------------------- Parser ----------------------------------
 
 export function createChatStreamParser(hooks: ChatStreamParserHooks = {}) {
+  /** First file path of each ACP tool call — Claude sends it only on the initial tool_call. */
+  const toolCallFilePaths = new Map<string, string>();
+
   /** Strip cursor-agent-acp elapsed suffix, e.g. "Doing the thing... (12s)" → "Doing the thing..." */
   function agentThoughtStatusBase(text: string): string {
     return text.replace(/\s\(\d+s\)\s*$/, '');
@@ -647,6 +652,9 @@ export function createChatStreamParser(hooks: ChatStreamParserHooks = {}) {
         upsertPlanMarkdown(items, planMarkdown, typeof update.title === 'string' ? update.title : undefined, opts?.sourceSessionId);
         return;
       }
+      const callLocations = update.locations as Array<{ path?: string }> | undefined;
+      const callPath = callLocations?.find((location) => location.path?.trim())?.path;
+      if (callPath) toolCallFilePaths.set(toolCallId, callPath);
       const kind = update.kind as string | undefined;
       items.push({
         kind: 'tool',
@@ -709,6 +717,11 @@ export function createChatStreamParser(hooks: ChatStreamParserHooks = {}) {
               .map((c) => c.content?.text ?? '')
               .join('') ?? '';
           if (text.trim()) item.toolOutput = text.trim();
+          const imagePath =
+            item.locations?.find((location) => location.path?.trim())?.path ?? toolCallFilePaths.get(toolCallId);
+          if (imagePath && rawContent?.some((c) => c.type === 'content' && c.content?.type === 'image')) {
+            item.toolImagePath = imagePath;
+          }
         }
       }
       return;

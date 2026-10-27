@@ -7,7 +7,10 @@
  */
 
 // node_modules
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
+
+// classes
+import { sessionsApi } from '@/classes/api';
 
 // components
 import {
@@ -32,6 +35,17 @@ const props = withDefaults(
 const visibleItems = computed(() =>
   props.hideToolCalls ? props.items.filter((item) => !isToolCallDisplayItem(item)) : props.items
 );
+
+/** Tool images whose file is gone (or outside the workspaces) — show a note instead. */
+const failedToolImagePaths = ref(new Set<string>());
+
+function imageToggleId(callId: string): string {
+  return `${callId}:image`;
+}
+
+function markToolImageFailed(path: string): void {
+  failedToolImagePaths.value = new Set(failedToolImagePaths.value).add(path);
+}
 
 // -------------------------------------------------- Emits --------------------------------------------------
 
@@ -307,6 +321,66 @@ const emit = defineEmits<{
             v-if="expandedToolOutputIds.has(item.callId!)"
             class="mt-1 text-[11px] font-mono text-text-muted/80 whitespace-pre-wrap break-words max-h-32 overflow-y-auto rounded bg-fg/[0.04] px-2 py-1"
             >{{ item.toolOutput }}</pre>
+        </div>
+        <!-- Tool image toggle (loaded from disk; no base64 is kept in history) -->
+        <div v-if="item.toolImagePath && item.callId" class="px-1">
+          <button
+            class="flex items-center gap-0.5 text-[11px] text-text-muted/50 hover:text-text-muted transition-colors"
+            @click="emit('toggleToolOutput', imageToggleId(item.callId!))"
+          >
+            <svg
+              v-if="expandedToolOutputIds.has(imageToggleId(item.callId!))"
+              width="10"
+              height="10"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="18 15 12 9 6 15" />
+            </svg>
+            <svg
+              v-else
+              width="10"
+              height="10"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+            image
+          </button>
+          <template v-if="expandedToolOutputIds.has(imageToggleId(item.callId!))">
+            <p
+              v-if="failedToolImagePaths.has(item.toolImagePath!)"
+              class="mt-1 text-[11px] text-text-muted/80"
+            >
+              Image is no longer available on disk.
+            </p>
+            <a
+              v-else
+              :href="sessionsApi.toolImageUrl(item.toolImagePath!)"
+              target="_blank"
+              rel="noopener"
+              class="block mt-1"
+            >
+              <img
+                :src="sessionsApi.toolImageUrl(item.toolImagePath!)"
+                :alt="item.toolImagePath"
+                loading="lazy"
+                class="max-h-64 max-w-full rounded border border-fg/10"
+                @error="markToolImageFailed(item.toolImagePath!)"
+              />
+            </a>
+          </template>
         </div>
       </div>
     </div>

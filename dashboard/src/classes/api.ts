@@ -908,6 +908,14 @@ export const sessionsApi = {
     const token = safeGetItem('token') ?? '';
     const url = `${base}/sessions/${sessionId}/images/${encodeURIComponent(filename)}`;
     return token ? `${url}?token=${encodeURIComponent(token)}` : url;
+  },
+
+  /** Image a tool read from disk (its base64 copy is not kept in chat history). */
+  toolImageUrl: (path: string): string => {
+    const base = (import.meta.env.VITE_API_URL ?? location.origin + '/api').replace(/\/$/, '');
+    const token = safeGetItem('token') ?? '';
+    const url = `${base}/files/tool-image?path=${encodeURIComponent(path)}`;
+    return token ? `${url}&token=${encodeURIComponent(token)}` : url;
   }
 };
 

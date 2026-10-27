@@ -7,10 +7,11 @@ import { dirname, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 
 // classes
-import { jwtPreHandler } from '../classes/auth';
+import { authenticateToken, extractRequestToken, jwtPreHandler } from '../classes/auth';
 import { db } from '../classes/database';
 import { isDotEntry, resolveInsideWorkspace } from '../classes/workspaceFs';
 import { resolveWorkspaceAbsolutePath } from '../classes/workspacePaths';
+import { resolveToolImagePath } from '../classes/toolImagePath';
 
 async function workspaceBase(
   workspaceId: string
@@ -322,6 +323,36 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to delete';
         return reply.code(400).send({ error: message });
+      }
+    }
+  );
+
+  // GET /api/files/tool-image?path= — image a tool read, shown on demand in the chat.
+  // Cookie (dashboard) or Bearer, with a query-token fallback for <img> URLs.
+  fastifyInstance.get(
+    '/api/files/tool-image',
+    {
+      schema: {
+        querystring: Type.Object({ path: Type.String({ minLength: 1 }), token: Type.Optional(Type.String()) })
+      }
+    },
+    async (request, reply) => {
+      const token = extractRequestToken(request) ?? request.query.token ?? '';
+      if (!(await authenticateToken(token))) {
+        return reply.code(401).send({ error: 'Unauthorized' });
+      }
+      const resolved = await resolveToolImagePath(request.query.path);
+      if ('error' in resolved) {
+        return reply.code(resolved.status).send({ error: resolved.error });
+      }
+      try {
+        const data = await readFile(resolved.absolutePath);
+        return reply
+          .header('Content-Type', resolved.contentType)
+          .header('Cache-Control', 'private, no-cache')
+          .send(data);
+      } catch {
+        return reply.code(404).send({ error: 'File not found' });
       }
     }
   );

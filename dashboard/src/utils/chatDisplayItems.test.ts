@@ -95,6 +95,63 @@ describe('ACP native events', () => {
     expect(items[0].toolOutput).toBe('ok');
   });
 
+  it('marks a tool image result with the path from the initial tool_call', () => {
+    const parser = createChatStreamParser();
+    const items: DisplayItem[] = [];
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 't1',
+          kind: 'read',
+          title: 'Read data/a.jpg',
+          locations: [{ path: '/opt/src/app/data/a.jpg', line: 1 }]
+        }
+      }),
+      items
+    );
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 't1',
+          status: 'completed',
+          content: [{ type: 'content', content: { type: 'image', data: '', mimeType: 'image/jpeg' } }]
+        }
+      }),
+      items
+    );
+    expect(items[0].toolImagePath).toBe('/opt/src/app/data/a.jpg');
+    expect(items[0].locations).toBeUndefined();
+  });
+
+  it('does not mark text tool results as images', () => {
+    const parser = createChatStreamParser();
+    const items: DisplayItem[] = [];
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: { sessionUpdate: 'tool_call', toolCallId: 't1', kind: 'read', locations: [{ path: '/x/a.ts' }] }
+      }),
+      items
+    );
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 't1',
+          status: 'completed',
+          content: [{ type: 'content', content: { type: 'text', text: 'code' } }]
+        }
+      }),
+      items
+    );
+    expect(items[0].toolImagePath).toBeUndefined();
+  });
+
   it('parses a todowrite tool_call (rawInput.todos) into a todos item with normalized statuses', () => {
     const parser = createChatStreamParser();
     const items: DisplayItem[] = [];
