@@ -33,6 +33,27 @@ describe('stripInlineImagesFromEventLine', () => {
     });
   });
 
+  it('removes base64 from the Claude Code tool response meta', () => {
+    const line = JSON.stringify({
+      update: {
+        _meta: {
+          claudeCode: {
+            toolName: 'Read',
+            toolResponse: { type: 'image', file: { base64: BIG, type: 'image/jpeg', originalSize: 1 } }
+          }
+        },
+        toolCallId: 't1',
+        sessionUpdate: 'tool_call_update'
+      }
+    });
+    const parsed = JSON.parse(stripInlineImagesFromEventLine(line));
+    expect(parsed.update._meta.claudeCode.toolResponse).toEqual({
+      type: 'image',
+      file: { base64: '', type: 'image/jpeg', originalSize: 1 },
+      omitted: true
+    });
+  });
+
   it('returns the same line when there is no image', () => {
     const line = JSON.stringify({ update: { sessionUpdate: 'agent_message_chunk', text: BIG } });
     expect(stripInlineImagesFromEventLine(line)).toBe(line);

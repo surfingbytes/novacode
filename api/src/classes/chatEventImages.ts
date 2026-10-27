@@ -42,6 +42,13 @@ function stripImageData(value: unknown): boolean {
       value.omitted = true;
       bChanged = true;
     }
+    // Claude Code tool response (_meta.claudeCode.toolResponse): { type: 'image', file: { base64, type } }
+    const file = value.file;
+    if (isRecord(file) && typeof file.base64 === 'string' && file.base64.length > MAX_KEPT_DATA_LENGTH) {
+      file.base64 = '';
+      value.omitted = true;
+      bChanged = true;
+    }
   }
   for (const child of Object.values(value)) {
     if (stripImageData(child)) bChanged = true;
