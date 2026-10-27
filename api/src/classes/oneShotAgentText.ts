@@ -39,16 +39,16 @@ const RULES_PREAMBLE_RE =
 const PAYWALL_TEXT_RE =
   /upgrade your plan|plan to continue|usage (?:limit|quota)|out of (?:extra )?requests|limit reached/i;
 
-export function resolveOneShotModel(
+export async function resolveOneShotModel(
   configured: string | null | undefined,
   agentType: AgentType
-): string {
+): Promise<string> {
   const trimmed = configured?.trim();
   if (trimmed) {
     return trimmed;
   }
   try {
-    return pickInexpensiveModel(getAgentModels(agentType).models);
+    return pickInexpensiveModel((await getAgentModels(agentType)).models);
   } catch {
     return 'auto';
   }

@@ -537,7 +537,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
           agentType,
           cwd: context.cwd,
           promptText: buildCommitMessagePrompt(diff),
-          model: resolveOneShotModel(user?.utilityModelSelection, agentType),
+          model: await resolveOneShotModel(user?.utilityModelSelection, agentType),
           claudeToken: user?.claudeToken ?? null,
           runIdPrefix: 'git-commit-message',
           denyTools: true

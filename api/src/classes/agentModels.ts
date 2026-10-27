@@ -1,5 +1,6 @@
 // node_modules
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import stripAnsi from 'strip-ansi';
 
 // classes
@@ -11,6 +12,7 @@ import { getOpenCodeModels } from './openCodeModels';
 import type { AgentType } from '../@types/index';
 
 const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
+const execFileAsync = promisify(execFile);
 const THINKING_VALUES = ['minimal', 'low', 'medium', 'high', 'max', 'xhigh', 'fast', 'none'];
 const CONTEXT_TOKEN_RE = /^\d+(?:\.\d+)?[km]$/i;
 
@@ -177,22 +179,29 @@ function commandForAgent(agentType: AgentType): { command: string; args: string[
   return null;
 }
 
-function getCliModels(agentType: AgentType): Array<{ id: string; label: string }> {
+/** Async on purpose: a spawnSync here froze the event loop for seconds on cache miss. */
+async function getCliModels(agentType: AgentType): Promise<Array<{ id: string; label: string }>> {
   const command = commandForAgent(agentType);
   if (!command) return [];
 
-  const result = spawnSync(command.command, command.args, {
-    encoding: 'utf8',
-    timeout: 15_000,
-    cwd: config.configDir,
-    env: { ...process.env, ...config.agentEnv() },
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-  const raw = [result.stdout, result.stderr].filter(Boolean).join('\n');
-  return result.status === 0 && raw ? parseFlatModelsOutput(raw) : [];
+  try {
+    const { stdout, stderr } = await execFileAsync(command.command, command.args, {
+      encoding: 'utf8',
+      timeout: 15_000,
+      cwd: config.configDir,
+      env: { ...process.env, ...config.agentEnv() }
+    });
+    const raw = [stdout, stderr].filter(Boolean).join('\n');
+    return raw ? parseFlatModelsOutput(raw) : [];
+  } catch {
+    // Non-zero exit, timeout or missing binary.
+    return [];
+  }
 }
 
-export function getAgentModels(agentType: AgentType): { models: AgentModelOption[]; fromCache: boolean } {
+export async function getAgentModels(
+  agentType: AgentType
+): Promise<{ models: AgentModelOption[]; fromCache: boolean }> {
   const now = Date.now();
   const cached = cache.get(agentType);
   if (cached && now - cached.fetchedAt < CACHE_TTL_MS) {
@@ -205,7 +214,7 @@ export function getAgentModels(agentType: AgentType): { models: AgentModelOption
   } else if (agentType === 'open-code') {
     rawModels = getOpenCodeModels().models;
   } else {
-    rawModels = getCliModels(agentType);
+    rawModels = await getCliModels(agentType);
   }
 
   const withAuto = rawModels.some((model) => model.id === 'auto')

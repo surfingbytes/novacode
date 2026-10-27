@@ -259,7 +259,7 @@ async function generateAndApplySessionTitle(
       (candidate) => isAgentAuthenticated(candidate, user?.claudeToken)
     );
     const cwd = resolveWorkspaceAbsolutePath(workspace.path);
-    const model = resolveOneShotModel(user?.utilityModelSelection, agentType);
+    const model = await resolveOneShotModel(user?.utilityModelSelection, agentType);
     const raw = await runOneShotAgentText({
       agentType,
       cwd,
