@@ -2,15 +2,15 @@
 import { join } from 'node:path';
 
 // classes
-import { db, normalizeTagStringList } from '../classes/database';
-import { config } from '../classes/config';
-import { createSessionWithAgent } from '../classes/sessionService';
-import { dispatchPromptAndWait, isSessionBusy, subscribeBusy, unsubscribeBusy } from '../classes/chatEngine';
-import { isNovaMcpEnabled } from '../classes/novaMcp';
-import { readSessionSpec, specHasContent } from '../classes/sessionSpec';
-import { resolveWorkspaceAbsolutePath } from '../classes/workspacePaths';
-import { sendPushToAll } from '../classes/push';
-import { logger } from '../classes/logger';
+import { db, normalizeTagStringList } from './database';
+import { config } from './config';
+import { createSessionWithAgent } from './sessionService';
+import { dispatchPromptAndWait, isSessionBusy, subscribeBusy, unsubscribeBusy } from './chatEngine';
+import { isNovaMcpEnabled } from './novaMcp';
+import { readSessionSpec, specHasContent } from './sessionSpec';
+import { resolveWorkspaceAbsolutePath } from './workspacePaths';
+import { sendPushToAll } from './push';
+import { logger } from './logger';
 import {
   appendHandoff,
   buildStepPrompt,
@@ -18,7 +18,7 @@ import {
   serializeSubtasksPayload,
   shouldSkipOrchestratorStep,
   summarizeStepHandoff
-} from '../classes/orchestratorPayload';
+} from './orchestratorPayload';
 import {
   abortMerge,
   addWorktree,
@@ -34,12 +34,12 @@ import {
   resolveRepo,
   unmergedFiles,
   worktreesRootDir
-} from '../classes/gitWorktrees';
-import { updateOrchestratorAndBroadcast } from './orchestrator';
+} from './gitWorktrees';
+import { updateOrchestratorAndBroadcast } from '../routes/orchestrator';
 
 // types
 import type { AgentType, ApprovalPolicy, ChatMessage, OrchestratorRunMode, OrchestratorSubtasksPayload, SubTask } from '../@types/index';
-import type { RepoInfo } from '../classes/gitWorktrees';
+import type { RepoInfo } from './gitWorktrees';
 
 const STEP_TIMEOUT_MS = 60000_000;
 const STOP_POLL_MS = 5000;

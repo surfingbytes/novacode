@@ -1,5 +1,7 @@
 // node_modules
 import type { FastifyInstance } from 'fastify';
+import { Type } from '@sinclair/typebox';
+import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { join, extname, basename } from 'node:path';
 import { existsSync } from 'node:fs';
@@ -11,6 +13,10 @@ import { db } from '../classes/database';
 import { config } from '../classes/config';
 
 // --------------------------------------------- Config ---------------------------------------------
+
+const SessionParamsSchema = Type.Object({ sessionId: Type.String() });
+const ImageParamsSchema = Type.Object({ sessionId: Type.String(), filename: Type.String() });
+const ImageQuerySchema = Type.Object({ token: Type.Optional(Type.String()) });
 
 const IMAGE_DIR = join(config.configDir, 'prompt-images');
 
@@ -162,13 +168,19 @@ export async function deleteSessionImages(sessionId: string): Promise<void> {
 // --------------------------------------------- Routes ---------------------------------------------
 
 export async function imageRoutes(fastify: FastifyInstance): Promise<void> {
+  const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
+
   // POST /api/sessions/:sessionId/images — upload a base64-encoded attachment.
   // Route-level bodyLimit: much larger than the global cap so videos fit (see config).
-  fastify.post(
+  fastifyInstance.post(
     '/api/sessions/:sessionId/images',
-    { preHandler: jwtPreHandler, bodyLimit: config.uploadBodyLimitBytes },
+    {
+      preHandler: jwtPreHandler,
+      bodyLimit: config.uploadBodyLimitBytes,
+      schema: { params: SessionParamsSchema }
+    },
     async (request, reply) => {
-      const { sessionId } = request.params as { sessionId: string };
+      const { sessionId } = request.params;
       const body = request.body as { data: string; mimeType: string; filename?: string };
 
       const session = await db.getSession(sessionId);
@@ -207,19 +219,16 @@ export async function imageRoutes(fastify: FastifyInstance): Promise<void> {
 
   // GET /api/sessions/:sessionId/images/:filename — serve an uploaded image.
   // Cookie (dashboard) or Bearer, with a query-token fallback for old <img> URLs.
-  fastify.get(
+  fastifyInstance.get(
     '/api/sessions/:sessionId/images/:filename',
+    { schema: { params: ImageParamsSchema, querystring: ImageQuerySchema } },
     async (request, reply) => {
-      const query = request.query as Record<string, string>;
-      const token = extractRequestToken(request) ?? query['token'] ?? '';
+      const token = extractRequestToken(request) ?? request.query.token ?? '';
       const user = await authenticateToken(token);
       if (!user) {
         return reply.status(401).send({ error: 'Unauthorized' });
       }
-      const { sessionId, filename } = request.params as {
-        sessionId: string;
-        filename: string;
-      };
+      const { sessionId, filename } = request.params;
 
       const dir = join(IMAGE_DIR, sessionId);
       if (!dir.startsWith(IMAGE_DIR + '/')) {

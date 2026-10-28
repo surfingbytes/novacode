@@ -8,12 +8,18 @@ import ModalHeader from '@/components/ModalHeader.vue';
 import UiToggle from '@/components/ui/UiToggle.vue';
 
 // classes
-import { settingsApi } from '@/classes/api';
+import { isGloballyToasted, settingsApi } from '@/classes/api';
+
+// stores
+import { useToastStore } from '@/stores/toasts';
 
 // types
 import type { McpClientServer, McpConnectivityCheckResult, McpAutoloadStatus } from '@/@types/index';
 
 const isMcpEnabled = (server: McpClientServer): boolean => server.enabled !== false;
+
+// -------------------------------------------------- Stores --------------------------------------------------
+const toastStore = useToastStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const mcpClients = ref<Record<string, McpClientServer>>({});
@@ -67,8 +73,9 @@ const toggleNovaMcp = async (enabled: boolean): Promise<void> => {
   try {
     const { data } = await settingsApi.saveMcpBuiltin({ nova: { enabled } });
     bNovaMcpEnabled.value = data.nova.enabled;
-  } catch {
+  } catch (err) {
     bNovaMcpEnabled.value = previous;
+    if (!isGloballyToasted(err)) toastStore.error('Update Nova MCP failed');
   } finally {
     bSavingNovaMcp.value = false;
   }
@@ -201,8 +208,8 @@ const deleteMcpClient = async (name: string): Promise<void> => {
     const response = await settingsApi.saveMcpClients(updated);
     mcpClients.value = response.data.servers;
     applyAutoload(response.data.autoload);
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Delete MCP server failed');
   } finally {
     bSavingMcpClients.value = false;
   }
@@ -222,8 +229,8 @@ const toggleMcpClientEnabled = async (name: string, enabled: boolean): Promise<v
     const response = await settingsApi.saveMcpClients(updated);
     mcpClients.value = response.data.servers;
     applyAutoload(response.data.autoload);
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Update MCP server failed');
   } finally {
     bSavingMcpClients.value = false;
   }

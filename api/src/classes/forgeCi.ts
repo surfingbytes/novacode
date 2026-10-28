@@ -202,6 +202,8 @@ export function summarizeCiRuns(
 export function cleanJobLog(log: string): string {
   return log
     .replace(/section_(?:start|end):\d+:[^\r\n]*\r?/g, '')
+    // ANSI escape sequences start with ESC (0x1b); matching it is the point of this regex
+    // eslint-disable-next-line no-control-regex
     .replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')
     .replace(/\r(?!\n)/g, '\n')
     .split('\n')

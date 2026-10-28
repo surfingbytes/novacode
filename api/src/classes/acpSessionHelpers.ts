@@ -1,11 +1,18 @@
+// node_modules
+import { methods } from '@agentclientprotocol/sdk';
 import type {
+  ClientContext,
   LoadSessionResponse,
   NewSessionResponse,
+  RequestPermissionRequest,
+  RequestPermissionResponse,
   SessionConfigOption,
   SessionConfigSelectGroup,
   SessionConfigSelectOption,
+  SessionNotification,
 } from '@agentclientprotocol/sdk';
 
+// classes
 import { logger } from './logger';
 
 export type AcpSessionResponse = NewSessionResponse | LoadSessionResponse;
@@ -199,4 +206,104 @@ export async function applySessionConfig(
       logger.warn({ err, sessionId, configId }, 'setSessionConfigOption failed (non-fatal)');
     }
   }
+}
+
+// ---- ACP client wiring ----
+
+export type AcpEventHandler = (line: string) => void;
+export type AcpPermissionHandler = (
+  params: RequestPermissionRequest
+) => RequestPermissionResponse | Promise<RequestPermissionResponse>;
+
+export type SessionConfigSyncHandler = (sync: {
+  modeId?: string;
+  modelId?: string;
+  config?: Record<string, string>;
+}) => void;
+
+export function autoApprovePermission(
+  params: RequestPermissionRequest
+): RequestPermissionResponse {
+  const allowOption = params.options.find(
+    (o) => o.kind === 'allow_once' || o.kind === 'allow_always'
+  );
+  if (allowOption) {
+    return { outcome: { outcome: 'selected', optionId: allowOption.optionId } };
+  }
+  return { outcome: { outcome: 'cancelled' } };
+}
+
+export function extractConfigSync(update: SessionNotification['update'], sync?: SessionConfigSyncHandler): void {
+  if (!sync) return;
+  if (update.sessionUpdate === 'current_mode_update') {
+    sync({ modeId: update.currentModeId });
+    return;
+  }
+  if (update.sessionUpdate === 'config_option_update') {
+    const modelOpt = update.configOptions.find((o) => o.category === 'model' || o.id === 'model');
+    if (modelOpt?.type === 'select' && 'currentValue' in modelOpt && typeof modelOpt.currentValue === 'string') {
+      sync({ modelId: modelOpt.currentValue });
+    }
+    const config: Record<string, string> = {};
+    for (const opt of update.configOptions) {
+      if (opt.type !== 'select') continue;
+      const cat = opt.category ?? opt.id;
+      if (cat === 'mode' || cat === 'model' || opt.id === 'mode' || opt.id === 'model') continue;
+      if ('currentValue' in opt && typeof opt.currentValue === 'string') {
+        config[opt.id] = opt.currentValue;
+      }
+    }
+    if (Object.keys(config).length > 0) {
+      sync({ config });
+    }
+  }
+}
+
+export function emitSessionConfigSync(
+  onEvent: AcpEventHandler,
+  sync: { modeId?: string; modelId?: string; config?: Record<string, string> }
+): void {
+  if (!sync.modeId && !sync.modelId && !sync.config) return;
+  onEvent(JSON.stringify({ type: 'session_config_sync', ...sync }));
+}
+
+export function handleSessionNotification(
+  notification: SessionNotification,
+  onEvent: AcpEventHandler,
+  onConfigSync?: SessionConfigSyncHandler
+): void {
+  extractConfigSync(notification.update, (sync) => {
+    onConfigSync?.(sync);
+    emitSessionConfigSync(onEvent, sync);
+  });
+  onEvent(JSON.stringify(notification));
+}
+
+export function acpAgent(ctx: ClientContext) {
+  return {
+    request: (method: string, params: unknown) => ctx.request(method, params as never),
+    notify: (method: string, params: unknown) => ctx.notify(method, params as never),
+    setSessionMode: (params: { sessionId: string; modeId: string }) =>
+      ctx.request(methods.agent.session.setMode, params),
+    setSessionConfigOption: (params: { sessionId: string; configId: string; value: string }) =>
+      ctx.request(methods.agent.session.setConfigOption, { ...params, type: 'select' as const }),
+    closeSession: (params: { sessionId: string }) => ctx.request(methods.agent.session.close, params),
+    deleteSession: (params: { sessionId: string }) => ctx.request(methods.agent.session.delete, params),
+    cancel: (params: { sessionId: string }) => ctx.notify(methods.agent.session.cancel, params),
+  };
+}
+
+// ---- Record helpers ----
+
+export function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+export function recordHasTrue(obj: Record<string, unknown> | null, keys: string[]): boolean {
+  if (!obj) return false;
+  for (const key of keys) {
+    if (obj[key] === true) return true;
+  }
+  return false;
 }

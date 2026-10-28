@@ -115,6 +115,7 @@ model Session {
   orchestratorId String? @map("orchestrator_id")
 
   @@index([orchestratorId])
+  @@index([workspaceId, archived, updatedAt(sort: Desc)], map: "idx_sessions_workspace_archived_updated")
   @@map("sessions")
 }
 

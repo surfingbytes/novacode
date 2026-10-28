@@ -1,5 +1,6 @@
 // node_modules
 import type { FastifyInstance } from 'fastify';
+import { Type, type Static } from '@sinclair/typebox';
 import type { WebSocket } from 'ws';
 
 // classes
@@ -400,6 +401,19 @@ async function maybeNameUntitledSessionFromAssistant(
   await generateAndApplySessionTitle(sessionId, buildSessionTitlePromptFromAssistant(assistantText));
 }
 
+// ---------------------------------- Schemas ----------------------------------
+const ContinueInNewChatParamsSchema = Type.Object({
+  workspaceId: Type.String(),
+  sessionId: Type.String()
+});
+
+const ContinueInNewChatBodySchema = Type.Object({
+  text: Type.Optional(Type.String()),
+  imagePaths: Type.Optional(Type.Array(Type.String()))
+});
+
+const ChatSocketParamsSchema = Type.Object({ id: Type.String() });
+
 // ---------------------------------- Routes ----------------------------------
 export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
   // Install once: give EVERY run (queue-dispatched, orchestrator, automation,
@@ -440,10 +454,13 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
   // to the source chat's sockets as handoff-ready / handoff-failed.
   fastify.post(
     '/api/workspaces/:workspaceId/sessions/:sessionId/continue-in-new-chat',
-    { preHandler: jwtPreHandler },
+    {
+      preHandler: jwtPreHandler,
+      schema: { params: ContinueInNewChatParamsSchema, body: ContinueInNewChatBodySchema }
+    },
     async (request, reply) => {
-      const { workspaceId, sessionId } = request.params as { workspaceId: string; sessionId: string };
-      const body = (request.body ?? {}) as { text?: unknown; imagePaths?: unknown };
+      const { workspaceId, sessionId } = request.params as Static<typeof ContinueInNewChatParamsSchema>;
+      const body = request.body as Static<typeof ContinueInNewChatBodySchema>;
       const text = typeof body.text === 'string' ? body.text.trim() : '';
       const imagePaths = Array.isArray(body.imagePaths)
         ? body.imagePaths.filter((path): path is string => typeof path === 'string')
@@ -469,13 +486,17 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.get(
     '/api/ws/chat/:id',
-    { websocket: true, config: { rateLimit: WS_ROUTE_RATE_LIMIT } },
+    {
+      websocket: true,
+      config: { rateLimit: WS_ROUTE_RATE_LIMIT },
+      schema: { params: ChatSocketParamsSchema }
+    },
     async (socket: WebSocket, request) => {
     if (await rejectUnauthorizedWebSocket(socket, request)) {
       return;
     }
 
-    const { id } = request.params as { id: string };
+    const { id } = request.params as Static<typeof ChatSocketParamsSchema>;
     const session = await db.getSession(id);
     if (!session) {
       socket.close(4004, 'Session not found');
@@ -490,10 +511,10 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
     if (!existingRun) {
       // Await DB before registering. Re-read once more so a run that started and
       // finished during the first fetch is not sent as a stale empty snapshot.
-      let pageResult = await db.listSessionMessagesPage(id, 0, HISTORY_PAGE_SIZE);
+      await db.listSessionMessagesPage(id, 0, HISTORY_PAGE_SIZE);
       existingRun = getActiveRun(id);
       if (!existingRun) {
-        pageResult = await db.listSessionMessagesPage(id, 0, HISTORY_PAGE_SIZE);
+        const pageResult = await db.listSessionMessagesPage(id, 0, HISTORY_PAGE_SIZE);
         queue = await loadQueue(id);
         existingRun = getActiveRun(id);
         if (!existingRun) {

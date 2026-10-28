@@ -229,16 +229,11 @@ async function withAcpSession<T>(
     request: (method: string, params?: unknown) => Promise<unknown>;
   }) => Promise<T>
 ): Promise<T> {
-  let proc: ChildProcess;
-  try {
-    proc = spawn(config.cursorCommand, ['acp'], {
-      cwd: config.configDir,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ...config.agentEnv() },
-    });
-  } catch (err) {
-    throw err;
-  }
+  const proc: ChildProcess = spawn(config.cursorCommand, ['acp'], {
+    cwd: config.configDir,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, ...config.agentEnv() },
+  });
 
   const killProc = () => {
     try {

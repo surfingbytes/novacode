@@ -1,6 +1,8 @@
 // node_modules
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
+import { Type } from '@sinclair/typebox';
+import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 
 // classes
 import { rejectUnauthorizedWebSocket } from '../classes/auth';
@@ -16,6 +18,10 @@ import { WS_ROUTE_RATE_LIMIT } from '../classes/rateLimits';
 
 // types
 import type { WsClientMessage, WsServerMessage } from '../@types/index';
+
+const SessionIdParamsSchema = Type.Object({ id: Type.String() });
+const TerminalParamsSchema = Type.Object({ workspaceId: Type.String(), sessionId: Type.String() });
+const WorkspaceParamsSchema = Type.Object({ workspaceId: Type.String() });
 
 const wsClients = new Set<WebSocket>();
 const workspaceSessionClients = new Map<string, Set<WebSocket>>();
@@ -83,6 +89,8 @@ export function broadcastServerShutdown(): void {
 }
 
 export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
+  const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
+
   // install busy hook once (broadcast busy state to workspace session list sockets)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const globalAny = globalThis as any;
@@ -108,13 +116,13 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
     });
   }
 
-  fastify.get('/api/ws/session/:id', { websocket: true, config: { rateLimit: WS_ROUTE_RATE_LIMIT } }, async (socket: WebSocket, request) => {
+  fastifyInstance.get('/api/ws/session/:id', { websocket: true, config: { rateLimit: WS_ROUTE_RATE_LIMIT }, schema: { params: SessionIdParamsSchema } }, async (socket: WebSocket, request) => {
     wsClients.add(socket);
     if (await rejectUnauthorizedWebSocket(socket, request)) {
       return;
     }
 
-    const { id } = request.params as { id: string };
+    const { id } = request.params;
     const live = sessionManager.get(id);
     if (!live) {
       socket.close(4004, 'Session not found');
@@ -170,19 +178,16 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
     });
   });
 
-  fastify.get(
+  fastifyInstance.get(
     '/api/ws/workspaces/:workspaceId/sessions/:sessionId/terminal',
-    { websocket: true, config: { rateLimit: WS_ROUTE_RATE_LIMIT } },
+    { websocket: true, config: { rateLimit: WS_ROUTE_RATE_LIMIT }, schema: { params: TerminalParamsSchema } },
     async (socket: WebSocket, request) => {
       wsClients.add(socket);
       if (await rejectUnauthorizedWebSocket(socket, request)) {
         return;
       }
 
-      const { workspaceId, sessionId } = request.params as {
-        workspaceId: string;
-        sessionId: string;
-      };
+      const { workspaceId, sessionId } = request.params;
       const [workspace, session] = await Promise.all([
         db.getWorkspace(workspaceId),
         db.getSession(sessionId)
@@ -243,7 +248,7 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  fastify.get(
+  fastifyInstance.get(
     '/api/ws/sessions',
     { websocket: true, config: { rateLimit: WS_ROUTE_RATE_LIMIT } },
     async (socket: WebSocket, request) => {
@@ -281,16 +286,16 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  fastify.get(
+  fastifyInstance.get(
     '/api/ws/workspaces/:workspaceId/sessions',
-    { websocket: true, config: { rateLimit: WS_ROUTE_RATE_LIMIT } },
+    { websocket: true, config: { rateLimit: WS_ROUTE_RATE_LIMIT }, schema: { params: WorkspaceParamsSchema } },
     async (socket: WebSocket, request) => {
       wsClients.add(socket);
       if (await rejectUnauthorizedWebSocket(socket, request)) {
         return;
       }
 
-      const { workspaceId } = request.params as { workspaceId: string };
+      const { workspaceId } = request.params;
       const workspace = await db.getWorkspace(workspaceId);
       if (!workspace) {
         socket.close(4004, 'Workspace not found');

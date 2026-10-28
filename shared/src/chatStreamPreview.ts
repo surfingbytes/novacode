@@ -32,10 +32,24 @@ export interface StreamDisplayItem {
   planEntries?: Array<{ content: string; status: string }>;
 }
 
+/**
+ * Minimal item shape the text-merge helpers need. Generic so the dashboard can
+ * pass its wider DisplayItem (extra kinds/fields) without casts.
+ */
+export interface TextMergeableItem {
+  kind: string;
+  text?: string;
+}
+
 // ---------------------------------- ACP helpers ----------------------------------
 
-/** Mirrors the dashboard parser: normalizes agent todo statuses to TODO_STATUS_*. */
-function normalizeTodoStatus(status: unknown): string {
+/**
+ * Normalizes todo statuses across agents to the canonical TODO_STATUS_* strings
+ * used by the todos row, done-counters and completion notifications. Cursor
+ * sends TODO_STATUS_* natively; ACP agents (e.g. Claude's TodoWrite) send
+ * lowercase 'pending' | 'in_progress' | 'completed' | 'cancelled'.
+ */
+export function normalizeTodoStatus(status: unknown): string {
   if (typeof status !== 'string' || !status.trim()) {
     return 'TODO_STATUS_PENDING';
   }
@@ -61,7 +75,7 @@ function normalizeTodoStatus(status: unknown): string {
  * `todos` array. Most adapters send structured objects; vibe-acp serializes
  * tool args/results with pydantic's model_dump_json(), i.e. a JSON *string*.
  */
-function todosCarrierFromRaw(raw: unknown): { todos?: unknown } | null {
+export function todosCarrierFromRaw(raw: unknown): { todos?: unknown } | null {
   if (!raw || typeof raw !== 'object') {
     if (typeof raw !== 'string' || !raw.includes('todos')) {
       return null;
@@ -79,11 +93,50 @@ function todosCarrierFromRaw(raw: unknown): { todos?: unknown } | null {
 }
 
 /**
- * Extracts a todo list from an ACP tool_call / tool_call_update payload when the
- * tool carries one (rawInput.todos / rawOutput.todos) — e.g. Claude's TodoWrite.
- * Returns null for non-todo tools.
+ * Normalizes raw agent todos into TodoDisplayItems. Text comes from `content`,
+ * falling back to `title` / `text`; entries without any text are dropped.
  */
-function todosFromAcpUpdate(update: Record<string, unknown>): TodoDisplayItem[] | null {
+export function normalizeTodoItems(rawTodos: unknown[]): TodoDisplayItem[] {
+  const items: TodoDisplayItem[] = [];
+  for (let index = 0; index < rawTodos.length; index++) {
+    const raw = rawTodos[index];
+    if (!raw || typeof raw !== 'object') {
+      continue;
+    }
+    const candidate = raw as {
+      id?: unknown;
+      content?: unknown;
+      title?: unknown;
+      text?: unknown;
+      status?: unknown;
+    };
+    let content = '';
+    for (const value of [candidate.content, candidate.title, candidate.text]) {
+      if (typeof value === 'string' && value.trim()) {
+        content = value;
+        break;
+      }
+    }
+    if (!content) {
+      continue;
+    }
+    items.push({
+      id: typeof candidate.id === 'string' && candidate.id ? candidate.id : `todo-${index}`,
+      content,
+      status: normalizeTodoStatus(candidate.status)
+    });
+  }
+  return items;
+}
+
+/**
+ * Extracts a todo list from an ACP tool_call / tool_call_update payload when the
+ * tool carries one (rawInput.todos on the initial call, rawInput/rawOutput on
+ * updates) — e.g. Claude's TodoWrite or any todowrite-style tool, detected
+ * name-agnostically. Returns null for non-todo tools so callers fall back to a
+ * generic tool row. An empty array means the agent cleared the list.
+ */
+export function todosFromAcpUpdate(update: Record<string, unknown>): TodoDisplayItem[] | null {
   const rawInput = todosCarrierFromRaw(update.rawInput);
   const rawOutput = todosCarrierFromRaw(update.rawOutput);
   const rawTodos = Array.isArray(rawInput?.todos)
@@ -94,27 +147,7 @@ function todosFromAcpUpdate(update: Record<string, unknown>): TodoDisplayItem[] 
   if (!rawTodos) {
     return null;
   }
-  const items: TodoDisplayItem[] = [];
-  for (let index = 0; index < rawTodos.length; index++) {
-    const raw = rawTodos[index];
-    if (!raw || typeof raw !== 'object') {
-      continue;
-    }
-    const candidate = raw as {
-      id?: unknown;
-      content?: unknown;
-      status?: unknown;
-    };
-    if (typeof candidate.content !== 'string' || !candidate.content.trim()) {
-      continue;
-    }
-    items.push({
-      id: typeof candidate.id === 'string' && candidate.id ? candidate.id : `todo-${index}`,
-      content: candidate.content,
-      status: normalizeTodoStatus(candidate.status)
-    });
-  }
-  return items;
+  return normalizeTodoItems(rawTodos);
 }
 
 function acpKindToToolName(kind: string | undefined): string {
@@ -255,7 +288,7 @@ const VIBE_TOOL_META: Record<string, { name: string }> = {
   delete_file: { name: 'Delete' }
 };
 
-function getToolSummary(toolCallName: string, toolCallObj: Record<string, unknown>): string {
+export function getToolSummary(toolCallName: string, toolCallObj: Record<string, unknown>): string {
   const call = (toolCallObj[toolCallName] ?? {}) as Record<string, unknown>;
   const args = (call.args ?? {}) as Record<string, unknown>;
   switch (toolCallName) {
@@ -300,7 +333,7 @@ function getToolSummary(toolCallName: string, toolCallObj: Record<string, unknow
   }
 }
 
-function isToolResultSuccess(toolCallObj: Record<string, unknown>): boolean {
+export function isToolResultSuccess(toolCallObj: Record<string, unknown>): boolean {
   const toolCallName = Object.keys(toolCallObj)[0];
   if (!toolCallName) {
     return false;
@@ -310,7 +343,35 @@ function isToolResultSuccess(toolCallObj: Record<string, unknown>): boolean {
   return 'success' in result;
 }
 
-// ---------------------------------- Shared merge helper ----------------------------------
+// ---------------------------------- Shared merge helpers ----------------------------------
+
+/**
+ * Stream providers mix cumulative snapshots with incremental deltas and may repeat boundary tokens
+ * (e.g. send "The shared" then " shared"). Merge without doubling identical or overlapping text.
+ */
+export function mergeStreamingTextChunks(previousText: string, incomingText: string): string {
+  if (!incomingText || incomingText === previousText) {
+    return previousText;
+  }
+  if (previousText.startsWith(incomingText)) {
+    return previousText;
+  }
+  if (incomingText.startsWith(previousText)) {
+    return incomingText;
+  }
+  if (previousText.endsWith(incomingText)) {
+    return previousText;
+  }
+  let overlap = 0;
+  const maxOverlap = Math.min(previousText.length, incomingText.length);
+  for (let len = maxOverlap; len > 0; len -= 1) {
+    if (previousText.endsWith(incomingText.slice(0, len))) {
+      overlap = len;
+      break;
+    }
+  }
+  return previousText + incomingText.slice(overlap);
+}
 
 /**
  * ACP `agent_message_chunk` content is a sequential increment — the reference
@@ -319,47 +380,28 @@ function isToolResultSuccess(toolCallObj: Record<string, unknown>): boolean {
  * are appended verbatim. The defensive merge below stays for legacy
  * cursor-style/Vibe events, whose payloads are cumulative snapshots.
  */
-function appendAssistantTextChunk(assistantText: string, items: StreamDisplayItem[]): void {
+export function appendAssistantTextChunk<T extends TextMergeableItem>(
+  assistantText: string,
+  items: T[]
+): void {
   const lastItem = items[items.length - 1];
   if (lastItem?.kind === 'text') {
     lastItem.text = (lastItem.text ?? '') + assistantText;
     return;
   }
-  items.push({ kind: 'text', text: assistantText });
+  items.push({ kind: 'text', text: assistantText } as T);
 }
 
-export function mergeAssistantTextIntoDisplayItems(
+export function mergeAssistantTextIntoDisplayItems<T extends TextMergeableItem>(
   assistantText: string,
-  items: StreamDisplayItem[]
+  items: T[]
 ): void {
   const lastItem = items[items.length - 1];
   if (lastItem?.kind === 'text') {
-    const previousText = lastItem.text ?? '';
-    if (!assistantText || assistantText === previousText) {
-      return;
-    }
-    if (previousText.startsWith(assistantText)) {
-      return;
-    }
-    if (assistantText.startsWith(previousText)) {
-      lastItem.text = assistantText;
-      return;
-    }
-    if (previousText.endsWith(assistantText)) {
-      return;
-    }
-    let overlap = 0;
-    const maxOverlap = Math.min(previousText.length, assistantText.length);
-    for (let len = maxOverlap; len > 0; len -= 1) {
-      if (previousText.endsWith(assistantText.slice(0, len))) {
-        overlap = len;
-        break;
-      }
-    }
-    lastItem.text = previousText + assistantText.slice(overlap);
+    lastItem.text = mergeStreamingTextChunks(lastItem.text ?? '', assistantText);
     return;
   }
-  items.push({ kind: 'text', text: assistantText });
+  items.push({ kind: 'text', text: assistantText } as T);
 }
 
 // ---------------------------------- Event line processor ----------------------------------

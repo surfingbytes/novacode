@@ -1,5 +1,7 @@
 // node_modules
 import type { FastifyInstance } from 'fastify';
+import { Type } from '@sinclair/typebox';
+import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 
 // classes
 import { db } from '../classes/database';
@@ -18,7 +20,7 @@ import { parseSubtasksPayloadString, serializeSubtasksPayload } from '../classes
 import { broadcastOrchestratorUpsert } from './ws';
 import { publishSpecStatus } from './sessionSpec';
 import { updateOrchestratorAndBroadcast } from './orchestrator';
-import { markStepNeedsInput } from './orchestratorRunner';
+import { markStepNeedsInput } from '../classes/orchestratorRunner';
 
 // -------------------------------------------- Tools --------------------------------------------
 
@@ -212,12 +214,26 @@ async function callNovaTool(sessionId: string, name: string, args: Record<string
 
 // -------------------------------------------- Route --------------------------------------------
 
+// Loose on purpose: the handler answers bad messages with JSON-RPC errors, and a typed `id`
+// union would let AJV coercion rewrite ids (e.g. 0 -> null turns a request into a notification).
+const JsonRpcRequestSchema = Type.Object({
+  jsonrpc: Type.Optional(Type.String()),
+  id: Type.Optional(Type.Unknown()),
+  method: Type.Optional(Type.String()),
+  params: Type.Optional(Type.Record(Type.String(), Type.Unknown()))
+});
+
+// Object first: AJV's array coercion would wrap a single message if the array branch came first.
+const JsonRpcBodySchema = Type.Union([JsonRpcRequestSchema, Type.Array(JsonRpcRequestSchema)]);
+
 /**
  * Nova's MCP endpoint (Streamable HTTP, stateless, JSON responses). Agents in
  * this container reach it on 127.0.0.1 with a per-session bearer token.
  */
 export async function novaMcpRoutes(fastify: FastifyInstance): Promise<void> {
-  fastify.post(NOVA_MCP_PATH, async (request, reply) => {
+  const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
+
+  fastifyInstance.post(NOVA_MCP_PATH, { schema: { body: JsonRpcBodySchema } }, async (request, reply) => {
     const sessionId = verifyNovaMcpToken(request.headers.authorization);
     if (!sessionId) return reply.status(401).send({ error: 'Invalid Nova MCP token' });
     if (!isNovaMcpEnabled()) return reply.status(403).send({ error: 'Nova MCP is turned off in Settings' });

@@ -1,5 +1,7 @@
 // node_modules
 import type { FastifyInstance } from 'fastify';
+import { Type, type Static } from '@sinclair/typebox';
+import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 
 // classes
 import { db } from '../classes/database';
@@ -18,10 +20,10 @@ import {
 import { deleteSessionImages } from './images';
 import { broadcastOrchestratorUpsert, broadcastWorkspaceSessionsRefresh } from './ws';
 import { broadcastSessionListUpsert } from '../classes/sessionListBroadcast';
-import { checkRunPreconditions, claimRunResume, finishRunResume, inFlightRunSteps, runOrchestrator } from './orchestratorRunner';
+import { checkRunPreconditions, claimRunResume, finishRunResume, inFlightRunSteps, runOrchestrator } from '../classes/orchestratorRunner';
 
 // types
-import type { AgentType, ApprovalPolicy, OrchestratorRunMode } from '../@types/index';
+import type { AgentType, OrchestratorRunMode } from '../@types/index';
 
 const AGENT_TYPES: AgentType[] = ['cursor-agent', 'claude', 'mistral-vibe', 'open-code', 'codex'];
 const MAX_PARALLEL_LIMIT = 8;
@@ -36,13 +38,55 @@ function parseMaxParallel(raw: unknown): number | undefined {
     : undefined;
 }
 
-interface PlannerSessionInput {
-  agentType?: string;
-  modelSelection?: string | null;
-  approvalPolicy?: ApprovalPolicy;
-  name?: string;
-  tags?: string[] | null;
-}
+// ---- Request schemas ----
+// Nullable unions list Null first: Fastify's AJV coerces types, and a String-first union turns null into ''.
+
+const WorkspaceParamsSchema = Type.Object({ workspaceId: Type.String() });
+
+const OrchestratorParamsSchema = Type.Object({ workspaceId: Type.String(), orchestratorId: Type.String() });
+
+const PlannerSessionSchema = Type.Object({
+  agentType: Type.Optional(Type.String()),
+  modelSelection: Type.Optional(Type.Union([Type.Null(), Type.String()])),
+  approvalPolicy: Type.Optional(Type.Union([Type.Literal('ask'), Type.Literal('allow_all')])),
+  name: Type.Optional(Type.String()),
+  tags: Type.Optional(Type.Union([Type.Null(), Type.Array(Type.String())]))
+});
+type PlannerSessionInput = Static<typeof PlannerSessionSchema>;
+
+const CreateOrchestratorBodySchema = Type.Object({
+  name: Type.Optional(Type.String()),
+  tags: Type.Optional(Type.Union([Type.Null(), Type.String()])),
+  agentType: Type.Optional(Type.String()),
+  workerModel: Type.Optional(Type.Union([Type.Null(), Type.String()])),
+  maxParallel: Type.Optional(Type.Number()),
+  verifyAgentType: Type.Optional(Type.Union([Type.Null(), Type.String()])),
+  verifyModel: Type.Optional(Type.Union([Type.Null(), Type.String()])),
+  planner: Type.Optional(PlannerSessionSchema)
+});
+
+const UpdateOrchestratorBodySchema = Type.Object({
+  name: Type.Optional(Type.String()),
+  subtasksJson: Type.Optional(Type.Union([Type.Null(), Type.String()])),
+  tags: Type.Optional(Type.Union([Type.Null(), Type.String()])),
+  archived: Type.Optional(Type.Boolean()),
+  agentType: Type.Optional(Type.String()),
+  workerModel: Type.Optional(Type.Union([Type.Null(), Type.String()])),
+  maxParallel: Type.Optional(Type.Number()),
+  verifyAgentType: Type.Optional(Type.Union([Type.Null(), Type.String()])),
+  verifyModel: Type.Optional(Type.Union([Type.Null(), Type.String()])),
+  isFavorite: Type.Optional(Type.Boolean())
+});
+
+const RunOrchestratorBodySchema = Type.Object({
+  mode: Type.Optional(Type.String()),
+  startIndex: Type.Optional(Type.Number()),
+  onlyIndex: Type.Optional(Type.Number()),
+  /** Run only the first step that is ready (dependencies done). */
+  next: Type.Optional(Type.Boolean()),
+  /** Parallel only: re-run every step, including finished ones. */
+  fresh: Type.Optional(Type.Boolean())
+});
 
 /** New planning chat for an orchestrator (its agent writes the plan through the nova MCP). */
 async function createPlannerSession(workspaceId: string, input: PlannerSessionInput, fallbackName: string) {
@@ -72,17 +116,22 @@ export async function updateOrchestratorAndBroadcast(
 }
 
 export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void> {
+  const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
+
   // GET /api/orchestrators — every workspace, without `messageJson` (nav sidebar)
-  fastify.get('/api/orchestrators', { preHandler: jwtPreHandler }, async (_request, reply) => {
+  fastifyInstance.get('/api/orchestrators', { preHandler: jwtPreHandler }, async (_request, reply) => {
     return reply.send(await db.listOrchestratorSummaries());
   });
 
   // GET /api/workspaces/:workspaceId/orchestrators
-  fastify.get(
+  fastifyInstance.get(
     '/api/workspaces/:workspaceId/orchestrators',
-    { preHandler: jwtPreHandler },
+    {
+      preHandler: jwtPreHandler,
+      schema: { params: WorkspaceParamsSchema }
+    },
     async (request, reply) => {
-      const { workspaceId } = request.params as { workspaceId: string };
+      const { workspaceId } = request.params;
       const workspace = await db.getWorkspace(workspaceId);
       if (!workspace) {
         return reply.status(404).send({ error: 'Workspace not found' });
@@ -96,21 +145,15 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
   // With `planner`, also creates the planning chat and links it (the usual flow);
   // `agentType`/`workerModel` are for the step sessions, `verifyAgentType`/`verifyModel`
   // for the final verify step (null = the planning chat's).
-  fastify.post(
+  fastifyInstance.post(
     '/api/workspaces/:workspaceId/orchestrators',
-    { preHandler: jwtPreHandler },
+    {
+      preHandler: jwtPreHandler,
+      schema: { params: WorkspaceParamsSchema, body: CreateOrchestratorBodySchema }
+    },
     async (request, reply) => {
-      const { workspaceId } = request.params as { workspaceId: string };
-      const body = request.body as {
-        name?: string;
-        tags?: string | null;
-        agentType?: string;
-        workerModel?: string | null;
-        maxParallel?: number;
-        verifyAgentType?: string | null;
-        verifyModel?: string | null;
-        planner?: PlannerSessionInput;
-      };
+      const { workspaceId } = request.params;
+      const body = request.body;
       const workspace = await db.getWorkspace(workspaceId);
       if (!workspace) {
         return reply.status(404).send({ error: 'Workspace not found' });
@@ -145,12 +188,15 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
   );
 
   // POST /api/workspaces/:workspaceId/orchestrators/:orchestratorId/planner — attach a new planning chat
-  fastify.post(
+  fastifyInstance.post(
     '/api/workspaces/:workspaceId/orchestrators/:orchestratorId/planner',
-    { preHandler: jwtPreHandler },
+    {
+      preHandler: jwtPreHandler,
+      schema: { params: OrchestratorParamsSchema, body: PlannerSessionSchema }
+    },
     async (request, reply) => {
-      const { workspaceId, orchestratorId } = request.params as { workspaceId: string; orchestratorId: string };
-      const body = (request.body ?? {}) as PlannerSessionInput;
+      const { workspaceId, orchestratorId } = request.params;
+      const body = request.body;
       const orchestrator = await db.getOrchestrator(orchestratorId);
       if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
         return reply.status(404).send({ error: 'Orchestrator not found' });
@@ -171,14 +217,14 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
   );
 
   // GET /api/workspaces/:workspaceId/orchestrators/:orchestratorId
-  fastify.get(
+  fastifyInstance.get(
     '/api/workspaces/:workspaceId/orchestrators/:orchestratorId',
-    { preHandler: jwtPreHandler },
+    {
+      preHandler: jwtPreHandler,
+      schema: { params: OrchestratorParamsSchema }
+    },
     async (request, reply) => {
-      const { workspaceId, orchestratorId } = request.params as {
-        workspaceId: string;
-        orchestratorId: string;
-      };
+      const { workspaceId, orchestratorId } = request.params;
       const orchestrator = await db.getOrchestrator(orchestratorId);
       if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
         return reply.status(404).send({ error: 'Orchestrator not found' });
@@ -188,26 +234,15 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
   );
 
   // PATCH /api/workspaces/:workspaceId/orchestrators/:orchestratorId
-  fastify.patch(
+  fastifyInstance.patch(
     '/api/workspaces/:workspaceId/orchestrators/:orchestratorId',
-    { preHandler: jwtPreHandler },
+    {
+      preHandler: jwtPreHandler,
+      schema: { params: OrchestratorParamsSchema, body: UpdateOrchestratorBodySchema }
+    },
     async (request, reply) => {
-      const { workspaceId, orchestratorId } = request.params as {
-        workspaceId: string;
-        orchestratorId: string;
-      };
-      const body = request.body as {
-        name?: string;
-        subtasksJson?: string | null;
-        tags?: string | null;
-        archived?: boolean;
-        agentType?: string;
-        workerModel?: string | null;
-        maxParallel?: number;
-        verifyAgentType?: string | null;
-        verifyModel?: string | null;
-        isFavorite?: boolean;
-      };
+      const { workspaceId, orchestratorId } = request.params;
+      const body = request.body;
       const orchestrator = await db.getOrchestrator(orchestratorId);
       if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
         return reply.status(404).send({ error: 'Orchestrator not found' });
@@ -224,27 +259,27 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         ...(body.name !== undefined && { name: body.name }),
         ...(typeof body.isFavorite === 'boolean' && { isFavorite: body.isFavorite }),
         ...(mergedSubtasks !== undefined && { subtasksJson: mergedSubtasks }),
-        ...('tags' in (request.body as object) && { tags: body.tags ?? null }),
+        ...('tags' in body && { tags: body.tags ?? null }),
         ...(typeof body.archived === 'boolean' ? { archived: body.archived } : {}),
         ...(parseAgentType(body.agentType) && { agentType: parseAgentType(body.agentType) }),
-        ...('workerModel' in (request.body as object) && { workerModel: body.workerModel?.trim() || null }),
+        ...('workerModel' in body && { workerModel: body.workerModel?.trim() || null }),
         ...(parseMaxParallel(body.maxParallel) !== undefined && { maxParallel: parseMaxParallel(body.maxParallel) }),
-        ...('verifyAgentType' in (request.body as object) && { verifyAgentType: parseAgentType(body.verifyAgentType) ?? null }),
-        ...('verifyModel' in (request.body as object) && { verifyModel: body.verifyModel?.trim() || null })
+        ...('verifyAgentType' in body && { verifyAgentType: parseAgentType(body.verifyAgentType) ?? null }),
+        ...('verifyModel' in body && { verifyModel: body.verifyModel?.trim() || null })
       });
       return reply.send(updated ?? orchestrator);
     }
   );
 
   // POST /api/workspaces/:workspaceId/orchestrators/:orchestratorId/read — clear "Done"
-  fastify.post(
+  fastifyInstance.post(
     '/api/workspaces/:workspaceId/orchestrators/:orchestratorId/read',
-    { preHandler: jwtPreHandler },
+    {
+      preHandler: jwtPreHandler,
+      schema: { params: OrchestratorParamsSchema }
+    },
     async (request, reply) => {
-      const { workspaceId, orchestratorId } = request.params as {
-        workspaceId: string;
-        orchestratorId: string;
-      };
+      const { workspaceId, orchestratorId } = request.params;
       const orchestrator = await db.getOrchestrator(orchestratorId);
       if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
         return reply.status(404).send({ error: 'Orchestrator not found' });
@@ -258,14 +293,14 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
   );
 
   // DELETE /api/workspaces/:workspaceId/orchestrators/:orchestratorId
-  fastify.delete(
+  fastifyInstance.delete(
     '/api/workspaces/:workspaceId/orchestrators/:orchestratorId',
-    { preHandler: jwtPreHandler },
+    {
+      preHandler: jwtPreHandler,
+      schema: { params: OrchestratorParamsSchema }
+    },
     async (request, reply) => {
-      const { workspaceId, orchestratorId } = request.params as {
-        workspaceId: string;
-        orchestratorId: string;
-      };
+      const { workspaceId, orchestratorId } = request.params;
       const orchestrator = await db.getOrchestrator(orchestratorId);
       if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
         return reply.status(404).send({ error: 'Orchestrator not found' });
@@ -287,14 +322,14 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
   );
 
   // POST /api/workspaces/:workspaceId/orchestrators/:orchestratorId/clone
-  fastify.post(
+  fastifyInstance.post(
     '/api/workspaces/:workspaceId/orchestrators/:orchestratorId/clone',
-    { preHandler: jwtPreHandler },
+    {
+      preHandler: jwtPreHandler,
+      schema: { params: OrchestratorParamsSchema }
+    },
     async (request, reply) => {
-      const { workspaceId, orchestratorId } = request.params as {
-        workspaceId: string;
-        orchestratorId: string;
-      };
+      const { workspaceId, orchestratorId } = request.params;
       const orchestrator = await db.getOrchestrator(orchestratorId);
       if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
         return reply.status(404).send({ error: 'Orchestrator not found' });
@@ -322,23 +357,16 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
   );
 
   // POST /api/workspaces/:workspaceId/orchestrators/:orchestratorId/run — start run in background, return 202
-  fastify.post(
+  fastifyInstance.post(
     '/api/workspaces/:workspaceId/orchestrators/:orchestratorId/run',
-    { preHandler: jwtPreHandler, config: { rateLimit: AGENT_ROUTE_RATE_LIMIT } },
+    {
+      preHandler: jwtPreHandler,
+      config: { rateLimit: AGENT_ROUTE_RATE_LIMIT },
+      schema: { params: OrchestratorParamsSchema, body: RunOrchestratorBodySchema }
+    },
     async (request, reply) => {
-      const { workspaceId, orchestratorId } = request.params as {
-        workspaceId: string;
-        orchestratorId: string;
-      };
-      const body = (request.body ?? {}) as {
-        mode?: OrchestratorRunMode;
-        startIndex?: number;
-        onlyIndex?: number;
-        /** Run only the first step that is ready (dependencies done). */
-        next?: boolean;
-        /** Parallel only: re-run every step, including finished ones. */
-        fresh?: boolean;
-      };
+      const { workspaceId, orchestratorId } = request.params;
+      const body = request.body;
       const mode: OrchestratorRunMode = body.mode === 'parallel' ? 'parallel' : 'sequential';
 
       const orchestrator = await db.getOrchestrator(orchestratorId);
@@ -449,14 +477,14 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
   );
 
   // POST /api/workspaces/:workspaceId/orchestrators/:orchestratorId/stop — request graceful stop
-  fastify.post(
+  fastifyInstance.post(
     '/api/workspaces/:workspaceId/orchestrators/:orchestratorId/stop',
-    { preHandler: jwtPreHandler },
+    {
+      preHandler: jwtPreHandler,
+      schema: { params: OrchestratorParamsSchema }
+    },
     async (request, reply) => {
-      const { workspaceId, orchestratorId } = request.params as {
-        workspaceId: string;
-        orchestratorId: string;
-      };
+      const { workspaceId, orchestratorId } = request.params;
 
       const orchestrator = await db.getOrchestrator(orchestratorId);
       if (!orchestrator || orchestrator.workspaceId !== workspaceId) {

@@ -5,7 +5,7 @@
  */
 
 // node_modules
-import type { FastifyRequest, FastifyReply } from 'fastify';
+import type { FastifyReply } from 'fastify';
 
 // --------------------------------------------- Types ---------------------------------------------
 

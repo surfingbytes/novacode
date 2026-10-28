@@ -87,7 +87,7 @@ async function request(
   }
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    let detail = '';
+    let detail: string;
     try {
       const parsed = JSON.parse(body) as { message?: unknown; error?: unknown };
       detail = typeof parsed.message === 'string' ? parsed.message : typeof parsed.error === 'string' ? parsed.error : '';

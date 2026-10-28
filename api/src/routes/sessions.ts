@@ -1,5 +1,7 @@
 // node_modules
 import { FastifyInstance } from 'fastify';
+import { Type, type Static } from '@sinclair/typebox';
+import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 
 // classes
 import { db, FavoriteLimitError, normalizeTagStringList } from '../classes/database';
@@ -32,6 +34,75 @@ import { markSessionRead } from '../classes/sessionUnread';
 // types
 import type { AgentType } from '../@types/index';
 import type { LinkedPlanContext } from '../classes/linkedPlanContext';
+
+// -------------------------------------------------- Schemas --------------------------------------------------
+
+// `type: [..., 'null']` instead of Type.Union: AJV coerces inside anyOf branches,
+// which would turn null into '' (or a tag string into a one-element array).
+const NullableString = Type.Unsafe<string | null>({ type: ['string', 'null'] });
+
+/** Tags arrive as a string list, a comma-separated string or null (see parseTagsFromBody). */
+const TagsSchema = Type.Union([NullableString, Type.Array(Type.String())]);
+
+const WorkspaceParamsSchema = Type.Object({ workspaceId: Type.String() });
+
+const SessionParamsSchema = Type.Object({
+  workspaceId: Type.String(),
+  sessionId: Type.String()
+});
+
+const PlanDocumentParamsSchema = Type.Object({
+  workspaceId: Type.String(),
+  sessionId: Type.String(),
+  planId: Type.String()
+});
+
+const CreateSessionBodySchema = Type.Object({
+  name: Type.Optional(Type.String()),
+  tags: Type.Optional(TagsSchema),
+  agentType: Type.Optional(Type.Unsafe<AgentType>(Type.String())),
+  modelSelection: Type.Optional(NullableString),
+  linkedPlanContext: Type.Optional(
+    Type.Unsafe<LinkedPlanContext | null>({ type: ['object', 'null'] })
+  ),
+  sessionMode: Type.Optional(NullableString),
+  approvalPolicy: Type.Optional(NullableString)
+});
+
+const UpdateSessionBodySchema = Type.Object({
+  name: Type.Optional(Type.String()),
+  tags: Type.Optional(TagsSchema),
+  archived: Type.Optional(Type.Boolean()),
+  isFavorite: Type.Optional(Type.Boolean()),
+  modelSelection: Type.Optional(Type.String()),
+  sessionMode: Type.Optional(Type.String()),
+  approvalPolicy: Type.Optional(Type.String()),
+  sessionConfigJson: Type.Optional(
+    Type.Union([Type.Null(), Type.Record(Type.String(), Type.String())])
+  )
+});
+
+const PlanUpdateBodySchema = Type.Object({
+  title: Type.Optional(Type.String()),
+  markdown: Type.Optional(Type.String()),
+  entries: Type.Optional(
+    Type.Array(
+      Type.Object({
+        content: Type.String(),
+        status: Type.String(),
+        priority: Type.Optional(Type.String())
+      })
+    )
+  ),
+  planId: Type.Optional(Type.String())
+});
+
+const BulkIdsBodySchema = Type.Object({ ids: Type.Array(Type.String()) });
+
+const BulkArchiveBodySchema = Type.Object({
+  ids: Type.Array(Type.String()),
+  archived: Type.Boolean()
+});
 
 // -------------------------------------------------- Helpers --------------------------------------------------
 
@@ -95,7 +166,9 @@ function parseTagsFromBody(body: unknown): string[] | null | undefined {
   return null;
 }
 
-export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
+export async function sessionsRoutes(fastifyBase: FastifyInstance): Promise<void> {
+  const fastify = fastifyBase.withTypeProvider<TypeBoxTypeProvider>();
+
   // -------------------------------------------------- Session listing --------------------------------------------------
 
   // GET /api/sessions
@@ -126,18 +199,13 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
   // POST /api/workspaces/:workspaceId/sessions
   fastify.post(
     '/api/workspaces/:workspaceId/sessions',
-    { preHandler: jwtPreHandler },
+    {
+      preHandler: jwtPreHandler,
+      schema: { params: WorkspaceParamsSchema, body: CreateSessionBodySchema }
+    },
     async (request, reply) => {
-      const { workspaceId } = request.params as { workspaceId: string };
-      const body = request.body as {
-        name?: string;
-        tags?: string[] | string | null;
-        agentType?: AgentType;
-        modelSelection?: string | null;
-        linkedPlanContext?: LinkedPlanContext | null;
-        sessionMode?: string | null;
-        approvalPolicy?: string | null;
-      };
+      const { workspaceId } = request.params;
+      const body = request.body as Static<typeof CreateSessionBodySchema>;
 
       const tagsParsed = parseTagsFromBody(request.body);
       const result = await createSessionWithAgent({
@@ -175,10 +243,16 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
   // GET /api/workspaces/:workspaceId/sessions
   fastify.get(
     '/api/workspaces/:workspaceId/sessions',
-    { preHandler: jwtPreHandler },
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        params: WorkspaceParamsSchema,
+        querystring: Type.Object({ archived: Type.Optional(Type.String()) })
+      }
+    },
     async (request, reply) => {
-      const { workspaceId } = request.params as { workspaceId: string };
-      const query = request.query as { archived?: string };
+      const { workspaceId } = request.params;
+      const query = request.query;
       const archived =
         query.archived === 'true' ? true : query.archived === 'false' ? false : undefined;
       const sessions = await db.listSessionsByWorkspace(workspaceId, { archived });
@@ -196,12 +270,9 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
   // GET /api/workspaces/:workspaceId/sessions/:sessionId
   fastify.get(
     '/api/workspaces/:workspaceId/sessions/:sessionId',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, schema: { params: SessionParamsSchema } },
     async (request, reply) => {
-      const { workspaceId, sessionId } = request.params as {
-        workspaceId: string;
-        sessionId: string;
-      };
+      const { workspaceId, sessionId } = request.params;
       const session = await db.getSession(sessionId);
       if (!session || session.workspaceId !== workspaceId) {
         return reply.status(404).send({ error: 'Session not found' });
@@ -220,9 +291,9 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
   // POST /api/sessions/:sessionId/read — mark a chat read (syncs to other devices)
   fastify.post(
     '/api/sessions/:sessionId/read',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, schema: { params: Type.Object({ sessionId: Type.String() }) } },
     async (request, reply) => {
-      const { sessionId } = request.params as { sessionId: string };
+      const { sessionId } = request.params;
       const session = await db.getSession(sessionId);
       if (!session) {
         return reply.status(404).send({ error: 'Session not found' });
@@ -235,12 +306,9 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
   // GET /api/workspaces/:workspaceId/sessions/:sessionId/usage
   fastify.get(
     '/api/workspaces/:workspaceId/sessions/:sessionId/usage',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, schema: { params: SessionParamsSchema } },
     async (request, reply) => {
-      const { workspaceId, sessionId } = request.params as {
-        workspaceId: string;
-        sessionId: string;
-      };
+      const { workspaceId, sessionId } = request.params;
       const session = await db.getSession(sessionId);
       if (!session || session.workspaceId !== workspaceId) {
         return reply.status(404).send({ error: 'Session not found' });
@@ -256,22 +324,13 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
   // PATCH /api/workspaces/:workspaceId/sessions/:sessionId
   fastify.patch(
     '/api/workspaces/:workspaceId/sessions/:sessionId',
-    { preHandler: jwtPreHandler },
+    {
+      preHandler: jwtPreHandler,
+      schema: { params: SessionParamsSchema, body: UpdateSessionBodySchema }
+    },
     async (request, reply) => {
-      const { workspaceId, sessionId } = request.params as {
-        workspaceId: string;
-        sessionId: string;
-      };
-      const body = request.body as {
-        name?: string;
-        tags?: string[] | string | null;
-        archived?: boolean;
-        isFavorite?: boolean;
-        modelSelection?: string;
-        sessionMode?: string;
-        approvalPolicy?: string;
-        sessionConfigJson?: Record<string, string> | null;
-      };
+      const { workspaceId, sessionId } = request.params;
+      const body = request.body as Static<typeof UpdateSessionBodySchema>;
       const session = await db.getSession(sessionId);
       if (!session || session.workspaceId !== workspaceId) {
         return reply.status(404).send({ error: 'Session not found' });
@@ -289,7 +348,7 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
       if (body.name !== undefined) {
         patch.name = body.name;
       }
-      if ('tags' in (request.body as object)) {
+      if ('tags' in body) {
         patch.tags = parseTagsFromBody(request.body) ?? null;
       }
       if (body.archived !== undefined) {
@@ -339,13 +398,9 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
   // DELETE /api/workspaces/:workspaceId/sessions/:sessionId/plan-documents/:planId
   fastify.delete(
     '/api/workspaces/:workspaceId/sessions/:sessionId/plan-documents/:planId',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, schema: { params: PlanDocumentParamsSchema } },
     async (request, reply) => {
-      const { workspaceId, sessionId, planId } = request.params as {
-        workspaceId: string;
-        sessionId: string;
-        planId: string;
-      };
+      const { workspaceId, sessionId, planId } = request.params;
       const session = await db.getSession(sessionId);
       if (!session || session.workspaceId !== workspaceId) {
         return reply.status(404).send({ error: 'Session not found' });
@@ -366,14 +421,16 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
   // PATCH /api/workspaces/:workspaceId/sessions/:sessionId/plan-documents/:planId
   fastify.patch(
     '/api/workspaces/:workspaceId/sessions/:sessionId/plan-documents/:planId',
-    { preHandler: jwtPreHandler },
+    {
+      preHandler: jwtPreHandler,
+      schema: {
+        params: PlanDocumentParamsSchema,
+        body: Type.Object({ markdown: Type.Optional(Type.String()) })
+      }
+    },
     async (request, reply) => {
-      const { workspaceId, sessionId, planId } = request.params as {
-        workspaceId: string;
-        sessionId: string;
-        planId: string;
-      };
-      const { markdown } = (request.body ?? {}) as { markdown?: string };
+      const { workspaceId, sessionId, planId } = request.params;
+      const { markdown } = request.body;
       if (typeof markdown !== 'string' || !markdown.trim()) {
         return reply.status(400).send({ error: 'markdown is required' });
       }
@@ -400,18 +457,13 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
   // how Claude ACP plan entry status updates are stored and replayed.
   fastify.post(
     '/api/workspaces/:workspaceId/sessions/:sessionId/plan-update',
-    { preHandler: jwtPreHandler },
+    {
+      preHandler: jwtPreHandler,
+      schema: { params: SessionParamsSchema, body: PlanUpdateBodySchema }
+    },
     async (request, reply) => {
-      const { workspaceId, sessionId } = request.params as {
-        workspaceId: string;
-        sessionId: string;
-      };
-      const body = (request.body ?? {}) as {
-        title?: string;
-        markdown?: string;
-        entries?: Array<{ content: string; status: string; priority?: string }>;
-        planId?: string;
-      };
+      const { workspaceId, sessionId } = request.params;
+      const body = request.body;
       const markdown = typeof body.markdown === 'string' ? body.markdown.trim() : '';
       const entries = Array.isArray(body.entries) ? body.entries : [];
       if (!markdown && entries.length === 0) {
@@ -476,10 +528,13 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
   // POST /api/workspaces/:workspaceId/sessions/bulk-delete
   fastify.post(
     '/api/workspaces/:workspaceId/sessions/bulk-delete',
-    { preHandler: jwtPreHandler },
+    {
+      preHandler: jwtPreHandler,
+      schema: { params: WorkspaceParamsSchema, body: BulkIdsBodySchema }
+    },
     async (request, reply) => {
-      const { workspaceId } = request.params as { workspaceId: string };
-      const { ids } = request.body as { ids: string[] };
+      const { workspaceId } = request.params;
+      const { ids } = request.body;
       if (!Array.isArray(ids) || ids.length === 0) {
         return reply.status(400).send({ error: 'ids must be a non-empty array' });
       }
@@ -499,10 +554,13 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
   // POST /api/workspaces/:workspaceId/sessions/bulk-archive
   fastify.post(
     '/api/workspaces/:workspaceId/sessions/bulk-archive',
-    { preHandler: jwtPreHandler },
+    {
+      preHandler: jwtPreHandler,
+      schema: { params: WorkspaceParamsSchema, body: BulkArchiveBodySchema }
+    },
     async (request, reply) => {
-      const { workspaceId } = request.params as { workspaceId: string };
-      const { ids, archived } = request.body as { ids: string[]; archived: boolean };
+      const { workspaceId } = request.params;
+      const { ids, archived } = request.body;
       if (!Array.isArray(ids) || ids.length === 0) {
         return reply.status(400).send({ error: 'ids must be a non-empty array' });
       }
@@ -517,12 +575,9 @@ export async function sessionsRoutes(fastify: FastifyInstance): Promise<void> {
   // DELETE /api/workspaces/:workspaceId/sessions/:sessionId
   fastify.delete(
     '/api/workspaces/:workspaceId/sessions/:sessionId',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, schema: { params: SessionParamsSchema } },
     async (request, reply) => {
-      const { workspaceId, sessionId } = request.params as {
-        workspaceId: string;
-        sessionId: string;
-      };
+      const { workspaceId, sessionId } = request.params;
       const session = await db.getSession(sessionId);
       if (!session || session.workspaceId !== workspaceId) {
         return reply.status(404).send({ error: 'Session not found' });

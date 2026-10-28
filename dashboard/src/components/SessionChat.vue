@@ -3,63 +3,50 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
-import { CircleCheck, CircleSlash, CircleX, Clock, LoaderCircle } from 'lucide-vue-next';
 // components
 import FilesView from '@/components/workspace/FilesComponent.vue';
 import GitView from '@/components/workspace/GitView.vue';
 import AppTerminal from '@/components/AppTerminal.vue';
-import ConfirmModal from '@/components/ConfirmModal.vue';
-import SessionEditModal from '@/components/SessionEditModal.vue';
-import SessionOrchestratorButton from '@/components/chat/SessionOrchestratorButton.vue';
 import OrchestratorPanel from '@/components/OrchestratorPanel.vue';
 import ClaudeLimitPopup from '@/components/ClaudeLimitPopup.vue';
+import ChatHandoffBanner from '@/components/chat/ChatHandoffBanner.vue';
 import ChatMessageList from '@/components/chat/ChatMessageList.vue';
-import ChatComposer, { type PendingAttachment } from '@/components/chat/ChatComposer.vue';
+import ChatComposer from '@/components/chat/ChatComposer.vue';
+import ChatStatusRows from '@/components/chat/ChatStatusRows.vue';
 import ChatTodoPanel from '@/components/chat/ChatTodoPanel.vue';
+import SessionChatHeader from '@/components/chat/SessionChatHeader.vue';
+import SessionChatModals from '@/components/chat/SessionChatModals.vue';
 import SessionPlanTab from '@/components/chat/SessionPlanTab.vue';
 import ImageLightbox from '@/components/chat/ImageLightbox.vue';
-import EntityDetailHeader from '@/components/ui/EntityDetailHeader.vue';
-import FavoriteButton from '@/components/ui/FavoriteButton.vue';
 import BottomTabBar from '@/components/ui/BottomTabBar.vue';
 
 // classes
-import {
-  agentAuthApi,
-  sessionsApi,
-  settingsApi,
-  workspaceRulesApi,
-  globalRulesApi,
-  buildSessionTerminalWsUrl,
-  apiErrorMessage
-} from '@/classes/api';
-import { readFilesOpenPath, writeFilesOpenPath } from '@/lib/filesOpenPath';
-import { renderMermaidDiagrams } from '@/lib/mermaid';
+import { buildSessionTerminalWsUrl } from '@/classes/api';
 import { clearSessionPrompt, persistSessionPrompt, readSessionPrompt } from '@/lib/pendingSessionPrompt';
-import { safeGetItem, safeRemoveItem, safeSetItem } from '@/lib/safeLocalStorage';
-import { readSessionCache, writeSessionCache } from '@/lib/sessionCache';
-import { sessionChatToMarkdown, sessionExportFilename } from '@/utils/sessionChatMarkdown';
-import {
-  getToolIconSvg,
-  parseHistoryEventsCached,
-  prepareDisplayItem,
-  renderMdCached
-} from '@/utils/chatDisplayItems';
-import { toWorkspaceRelativePath } from '@/utils/workspaceFilePath';
-import { setViewingSession } from '@/utils/sessionUnread';
-import { formatSessionCostLabel, resolveSessionCostAmount } from '@/utils/sessionUsageDisplay';
-import {
-  formatRemainingLabel,
-  formatRulesSubtitleLabel,
-  formatRulesSubtitleTitle
-} from '@/utils/cursorUsageDisplay';
-import { ciBadgeState, ciBadgeTitle } from '@/utils/ciStatusDisplay';
+import { readSessionCache } from '@/lib/sessionCache';
 
 // composables
 import { useAgentOptions } from '@/composables/useAgentOptions';
-import { useCiStatus } from '@/composables/useCiStatus';
+import { useApprovalPolicy } from '@/composables/useApprovalPolicy';
+import { useChatAttachments } from '@/composables/useChatAttachments';
+import { useChatDisplayItems } from '@/composables/useChatDisplayItems';
+import { useChatErrorAction } from '@/composables/useChatErrorAction';
+import { useChatInputBreakpoint } from '@/composables/useChatInputBreakpoint';
 import { useChatSocket } from '@/composables/useChatSocket';
+import { useChatViewToggles } from '@/composables/useChatViewToggles';
+import { useClaudeLimitPopup } from '@/composables/useClaudeLimitPopup';
+import { useMermaidRender } from '@/composables/useMermaidRender';
 import { usePaneLayout } from '@/composables/usePaneLayout';
-import { usePlanDocuments } from '@/composables/usePlanDocuments';
+import { usePlanDocuments, type StartPlanSessionPayload } from '@/composables/usePlanDocuments';
+import { useSessionActions } from '@/composables/useSessionActions';
+import { useSessionHandoff } from '@/composables/useSessionHandoff';
+import { useSessionHeaderInfo } from '@/composables/useSessionHeaderInfo';
+import { useSessionLoader } from '@/composables/useSessionLoader';
+import { useSessionOrchestrator } from '@/composables/useSessionOrchestrator';
+import { useSessionSnapshotCache } from '@/composables/useSessionSnapshotCache';
+import { tabFromQuery, useSessionTabs, type SessionTab } from '@/composables/useSessionTabs';
+import { useSessionUsage } from '@/composables/useSessionUsage';
+import { useStoreSessionSync } from '@/composables/useStoreSessionSync';
 import { useTodoList } from '@/composables/useTodoList';
 
 // stores
@@ -70,16 +57,7 @@ import { useApiHealthStore } from '@/stores/apiHealth';
 import { useOrchestratorsStore } from '@/stores/orchestrators';
 
 // types
-import { buildPlanAsOrchestratorPrompt, subtasksFromStoredJson } from '@novacode/shared';
-import type {
-  ApprovalPolicy,
-  ChatMessage,
-  Orchestrator,
-  LinkedPlanContext,
-  Session,
-  SessionUsageSummary,
-  SessionUsageTurn
-} from '@/@types/index';
+import type { Session } from '@/@types/index';
 
 // -------------------------------------------------- Props --------------------------------------------------
 const props = defineProps<{
@@ -93,17 +71,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'toggle-sidebar'): void;
   (e: 'new-session'): void;
-  (
-    e: 'start-plan-session',
-    payload: {
-      defaultName: string;
-      draftPrompt: string;
-      linkedPlanContext?: LinkedPlanContext;
-      defaultAgentType?: Session['agentType'];
-      defaultModelSelection?: string;
-      defaultSessionMode?: string;
-    }
-  ): void;
+  (e: 'start-plan-session', payload: StartPlanSessionPayload): void;
 }>();
 
 // -------------------------------------------------- Store --------------------------------------------------
@@ -122,123 +90,60 @@ const orchestratorsStore = useOrchestratorsStore();
 // stare at a skeleton for data the app already had.
 const initialCache = readSessionCache(props.workspaceId, props.sessionId);
 const session = ref<Session | null>(initialCache?.session ?? null);
-const usageTurns = ref<SessionUsageTurn[]>([]);
-const usageSummary = ref<SessionUsageSummary | null>(null);
-const bLoading = ref(!initialCache);
-const error = ref<string | null>(null);
-const bShowEditModal = ref(false);
-const bSavingEdit = ref(false);
-const bShowDeleteModal = ref(false);
-const bDeletingSession = ref(false);
-const bShowDeletePlanModal = ref(false);
-const bDeletingPlan = ref(false);
 const sessionChatRootRef = ref<HTMLElement | null>(null);
 const chatListRef = ref<InstanceType<typeof ChatMessageList> | null>(null);
 const composerRef = ref<InstanceType<typeof ChatComposer> | null>(null);
 const lightboxSrc = ref<string | null>(null);
 
-// Claude limit popup state
-const bShowClaudeLimitPopup = ref(false);
-const claudeLimitResetTime = ref('');
-const claudeLimitResetTimeReadable = ref('');
-const bClaudeAutoContinueEnabled = ref(false);
+const {
+  bShowClaudeLimitPopup,
+  claudeLimitResetTime,
+  claudeLimitResetTimeReadable,
+  bClaudeAutoContinueEnabled,
+  onClaudeLimitDetected,
+  handleAutoContinueUpdated,
+  loadClaudeAutoContinueSetting
+} = useClaudeLimitPopup();
 
-const HIDE_THINKING_LS_KEY = 'nova:chat:hideThinkingOutput';
-const HIDE_TOOL_CALLS_LS_KEY = 'nova:chat:hideToolCalls';
-const hideThinkingOutput = ref(readHideThinkingFromLs());
-const hideToolCalls = ref(readHideToolCallsFromLs());
-
-function readHideThinkingFromLs(): boolean {
-  return safeGetItem(HIDE_THINKING_LS_KEY) === '1';
-}
-
-function readHideToolCallsFromLs(): boolean {
-  return safeGetItem(HIDE_TOOL_CALLS_LS_KEY) === '1';
-}
-
-function persistChatToggle(key: string, checked: boolean): void {
-  if (checked) safeSetItem(key, '1');
-  else safeRemoveItem(key);
-}
-
-function onHideThinkingToggle(checked: boolean): void {
-  hideThinkingOutput.value = checked;
-  if (checked) chatSocket.streamingThinkingText.value = '';
-  persistChatToggle(HIDE_THINKING_LS_KEY, checked);
-}
-
-function onHideToolCallsToggle(checked: boolean): void {
-  hideToolCalls.value = checked;
-  persistChatToggle(HIDE_TOOL_CALLS_LS_KEY, checked);
-}
-
-const approvalPolicy = ref<ApprovalPolicy>('ask');
-const bSavingApprovalPolicy = ref(false);
-let approvalPolicySaveSeq = 0;
-
-function normalizeApprovalPolicy(value: string | null | undefined): ApprovalPolicy {
-  return value === 'allow_all' ? 'allow_all' : 'ask';
-}
-
-async function onApprovalPolicyChange(policy: ApprovalPolicy): Promise<void> {
-  if (!session.value || policy === approvalPolicy.value) return;
-  const seq = ++approvalPolicySaveSeq;
-  const prev = approvalPolicy.value;
-  const prevSession = session.value;
-  approvalPolicy.value = policy;
-  session.value = { ...session.value, approvalPolicy: policy };
-  bSavingApprovalPolicy.value = true;
-  try {
-    const { data: updated } = await sessionsApi.update(props.workspaceId, props.sessionId, {
-      approvalPolicy: policy
-    });
-    if (seq !== approvalPolicySaveSeq) return;
-    session.value = updated;
-    approvalPolicy.value = normalizeApprovalPolicy(updated.approvalPolicy);
-  } catch {
-    if (seq !== approvalPolicySaveSeq) return;
-    approvalPolicy.value = prev;
-    session.value = prevSession;
-    toastStore.error('Failed to update approval policy');
-  } finally {
-    if (seq === approvalPolicySaveSeq) bSavingApprovalPolicy.value = false;
+const {
+  hideThinkingOutput,
+  hideToolCalls,
+  expandedToolOutputIds,
+  onHideThinkingToggle,
+  onHideToolCallsToggle,
+  toggleToolOutput,
+  collapseAllToolOutputs
+} = useChatViewToggles({
+  onThinkingHidden: () => {
+    chatSocket.streamingThinkingText.value = '';
   }
-}
+});
 
-const expandedToolOutputIds = ref(new Set<string>());
+const { approvalPolicy, bSavingApprovalPolicy, applySessionApprovalPolicy, onApprovalPolicyChange } =
+  useApprovalPolicy({
+    workspaceId: () => props.workspaceId,
+    sessionId: () => props.sessionId,
+    session,
+    toastStore
+  });
 
-function toggleToolOutput(callId: string): void {
-  const next = new Set(expandedToolOutputIds.value);
-  if (next.has(callId)) next.delete(callId);
-  else next.add(callId);
-  expandedToolOutputIds.value = next;
-}
+const {
+  activeTab,
+  filesOpenPath,
+  applySessionQueryFromRoute,
+  syncSessionQuery,
+  openWorkspaceFile,
+  onFilesOpenPath
+} = useSessionTabs({
+  workspaceId: () => props.workspaceId,
+  workspacePath: () => workspacePath.value,
+  route,
+  router
+});
 
-type SessionTab = 'chat' | 'terminal' | 'files' | 'git' | 'plan' | 'orchestrator';
-const activeTab = ref<SessionTab>('chat');
-const filesOpenPath = ref<string | null>(readFilesOpenPath(props.workspaceId));
-const rulesCount = ref(0);
-const globalRulesCount = ref(0);
-const pooledRemainingCents = ref<number | null>(null);
-
-let mermaidRenderTimer: ReturnType<typeof setTimeout> | null = null;
-let fetchSessionSeq = 0;
-/** Last fetch failed — set even when a cached snapshot hides the error banner. */
-let bSessionFetchFailed = false;
 /** True while a cached snapshot is on screen and the first fresh history frame is pending. */
 let bCachedHistoryOnScreen = !!initialCache;
-
-function scheduleMermaidRender(): void {
-  if (mermaidRenderTimer !== null) {
-    clearTimeout(mermaidRenderTimer);
-  }
-  mermaidRenderTimer = setTimeout(() => {
-    mermaidRenderTimer = null;
-    void nextTick(() => {
-      void renderMermaidDiagrams(sessionChatRootRef.value);
-    });
-  }, 80);
-}
+const { scheduleMermaidRender } = useMermaidRender(sessionChatRootRef);
 
 // -------------------------------------------------- Agent options (model/mode/config) --------------------------------------------------
 const agentOptions = useAgentOptions({
@@ -278,7 +183,7 @@ const {
 // fetch model/mode options now instead of waiting on the session revalidation.
 if (initialCache?.session) {
   agentOptions.applyFetchedSession(initialCache.session);
-  approvalPolicy.value = normalizeApprovalPolicy(initialCache.session.approvalPolicy);
+  applySessionApprovalPolicy(initialCache.session.approvalPolicy);
   void loadAgentOptions();
 }
 
@@ -332,11 +237,7 @@ const chatSocket = useChatSocket({
   },
   sessionName: () => session.value?.name ?? 'Session',
   workspaceName: () => workspaceName.value,
-  onClaudeLimitDetected: (resetTime, resetTimeReadable) => {
-    bShowClaudeLimitPopup.value = true;
-    claudeLimitResetTime.value = resetTime;
-    claudeLimitResetTimeReadable.value = resetTimeReadable;
-  },
+  onClaudeLimitDetected,
   onHandoffReady: (newSessionId) => openHandoffTarget(newSessionId),
   onHandoffFailed: (message) => failHandoff(message)
 });
@@ -358,112 +259,24 @@ const {
   bWsReconnecting
 } = chatSocket;
 
-watch(
-  () => session.value?.lastUsage,
-  (usage) => {
-    if (usage && !bIsStreaming.value && streamingUsage.value == null) {
-      streamingUsage.value = usage;
-    }
-  },
-  { immediate: true }
-);
-
 // -------------------------------------------------- Session snapshot cache --------------------------------------------------
-let persistCacheTimer: ReturnType<typeof setTimeout> | null = null;
-let persistCacheAllowEmpty = false;
+const { scheduleSessionCachePersist, cancelSessionCachePersist, flushSessionCache } =
+  useSessionSnapshotCache({
+    workspaceId: () => props.workspaceId,
+    sessionId: () => props.sessionId,
+    session,
+    messages,
+    bHasMore
+  });
 
-function persistSessionCache(allowEmptyMessages = false): void {
-  writeSessionCache(
-    props.workspaceId,
-    props.sessionId,
-    {
-      session: session.value,
-      messages: messages.value,
-      bHasMore: bHasMore.value
-    },
-    { allowEmptyMessages }
-  );
-}
-
-function scheduleSessionCachePersist(allowEmptyMessages = false): void {
-  persistCacheAllowEmpty = persistCacheAllowEmpty || allowEmptyMessages;
-  if (persistCacheTimer !== null) {
-    clearTimeout(persistCacheTimer);
-  }
-  persistCacheTimer = setTimeout(() => {
-    persistCacheTimer = null;
-    const allow = persistCacheAllowEmpty;
-    persistCacheAllowEmpty = false;
-    persistSessionCache(allow);
-  }, 400);
-}
-
-watch(session, () => {
-  scheduleSessionCachePersist();
-});
-
-watch(
-  () => workspacesStore.allSessions.find((storeSession) => storeSession.id === props.sessionId)?.name,
-  (storeName) => {
-    if (!session.value || storeName === undefined) {
-      return;
-    }
-    if (session.value.name === storeName) {
-      return;
-    }
-    session.value = { ...session.value, name: storeName };
-  }
-);
-
-const liveBusySubagents = computed(() => {
-  const fromStore = workspacesStore.allSessions.find(
-    (storeSession) => storeSession.id === props.sessionId
-  )?.busySubagents;
-  if (fromStore && fromStore.total > 0) {
-    return fromStore;
-  }
-  return null;
+const { liveBusySubagents } = useStoreSessionSync({
+  sessionId: () => props.sessionId,
+  session,
+  workspacesStore
 });
 
 // -------------------------------------------------- Display items --------------------------------------------------
-interface DisplayChatMessage {
-  msg: ChatMessage;
-  key: string;
-  items: ReturnType<typeof prepareDisplayItem>[];
-  fallbackHtml: string;
-}
-
-const displayMessages = computed<DisplayChatMessage[]>(() =>
-  messages.value.map((msg, index) => {
-    const items =
-      msg.role === 'assistant'
-        ? parseHistoryEventsCached(msg.events ?? []).map(prepareDisplayItem)
-        : [];
-    let planIndex = 0;
-    for (const item of items) {
-      if (item.kind !== 'plan') continue;
-      item.planId = `${msg.createdAt}-${index}-plan-${planIndex}`;
-      planIndex += 1;
-    }
-    return {
-      msg,
-      key: `${msg.createdAt}-${index}`,
-      items,
-      fallbackHtml: items.length === 0 && msg.content ? renderMdCached(msg.content) : ''
-    };
-  })
-);
-
-const streamingDisplayItems = computed(() => {
-  const items = streamingItems.value.map(prepareDisplayItem);
-  let planIndex = 0;
-  for (const item of items) {
-    if (item.kind !== 'plan') continue;
-    item.planId = `live-plan-${planIndex}`;
-    planIndex += 1;
-  }
-  return items;
-});
+const { displayMessages, streamingDisplayItems } = useChatDisplayItems({ messages, streamingItems });
 
 // -------------------------------------------------- Plan documents --------------------------------------------------
 const planDocs = usePlanDocuments({
@@ -481,7 +294,6 @@ const planDocs = usePlanDocuments({
 const { selectedPlanId, planDocuments, selectedPlanDocument, bShowPlanTab } = planDocs;
 
 // -------------------------------------------------- Todo list panel --------------------------------------------------
-const todoChecklistSvg = getToolIconSvg('checklist');
 const { bWidePane } = usePaneLayout();
 const todoList = useTodoList({ displayMessages, streamingDisplayItems });
 const {
@@ -498,163 +310,56 @@ const {
 
 // -------------------------------------------------- Composer state --------------------------------------------------
 const promptText = ref<string>('');
-const pendingImages = ref<PendingAttachment[]>([]);
-const bUploadingImage = ref(false);
-const bChatInputMdUp = ref(false);
-let chatInputMql: MediaQueryList | null = null;
-
-function syncChatInputBreakpoint(): void {
-  bChatInputMdUp.value = chatInputMql?.matches ?? window.matchMedia('(min-width: 768px)').matches;
-}
-
-function uploadAttachmentFile(file: File): void {
-  const reader = new FileReader();
-  reader.onload = async (ev) => {
-    const dataUrl = ev.target?.result as string;
-    const base64 = dataUrl.split(',')[1];
-    const canPreviewLocally =
-      /^(image\/(png|jpeg|gif|webp))$/i.test(file.type) ||
-      /\.(png|jpe?g|gif|webp)$/i.test(file.name);
-    bUploadingImage.value = true;
-    try {
-      const mimeType = file.type || 'application/octet-stream';
-      const { data } = await sessionsApi.uploadImage(props.sessionId, base64, mimeType, file.name);
-      // Server may convert HEIC→JPEG; trust the stored filename for previewability.
-      const isImage = /\.(png|jpe?g|gif|webp)$/i.test(data.filename);
-      pendingImages.value.push({
-        filename: data.filename,
-        displayName: file.name,
-        dataUrl: isImage
-          ? canPreviewLocally
-            ? dataUrl
-            : sessionsApi.imageUrl(props.sessionId, data.filename)
-          : '',
-        serverPath: data.path,
-        isImage
-      });
-    } catch (error) {
-      chatSocket.setChatError(apiErrorMessage(error, 'Failed to upload file'));
-    } finally {
-      bUploadingImage.value = false;
-    }
-  };
-  reader.readAsDataURL(file);
-}
-
-function onUploadFiles(files: File[]): void {
-  for (const file of files) {
-    uploadAttachmentFile(file);
-  }
-}
+const { pendingImages, bUploadingImage, onUploadFiles } = useChatAttachments({
+  sessionId: () => props.sessionId,
+  onUploadError: (message) => chatSocket.setChatError(message)
+});
+const { bChatInputMdUp } = useChatInputBreakpoint();
 
 // -------------------------------------------------- Orchestrator mode --------------------------------------------------
-/** Plan this chat owns (its agent writes it through the nova MCP). */
-const plannedOrchestrator = computed<Orchestrator | null>(() =>
-  orchestratorsStore.forPlannerSession(props.workspaceId, props.sessionId)
-);
-const bPlanHasSteps = computed(() => subtasksFromStoredJson(plannedOrchestrator.value?.subtasksJson).length > 0);
-/** Set once the workspace's plans are loaded, so only plans created afterwards switch tabs. */
-const bOrchestratorsLoaded = ref(false);
-
-function loadPlannedOrchestrator(): void {
-  bOrchestratorsLoaded.value = false;
-  void orchestratorsStore.ensureFetched(props.workspaceId).finally(() => {
-    bOrchestratorsLoaded.value = true;
-  });
-}
-
-/** Ask the chat's agent to write the spec and the steps (nova MCP tools). */
-function planAsOrchestrator(): void {
-  activeTab.value = 'chat';
-  chatSocket.sendPrompt({
-    text: buildPlanAsOrchestratorPrompt(bPlanHasSteps.value),
-    model: modelSelection.value,
-    mode: displaySessionMode.value,
-    imagePaths: []
-  });
-}
-
-function openOrchestratorPage(): void {
-  if (!plannedOrchestrator.value) return;
-  void router.push({
-    name: 'orchestrator',
-    params: { id: props.workspaceId, orchestratorId: plannedOrchestrator.value.id }
-  });
-}
-
-// The agent just saved the first steps of this chat's plan: show it.
-watch(
-  () => [props.sessionId, bPlanHasSteps.value] as const,
-  ([sessionId, bHasSteps], [previousSessionId, bHadSteps]) => {
-    if (sessionId === previousSessionId && bHasSteps && !bHadSteps && bOrchestratorsLoaded.value) {
-      activeTab.value = 'orchestrator';
-    }
-  }
-);
+const {
+  plannedOrchestrator,
+  bPlanHasSteps,
+  loadPlannedOrchestrator,
+  planAsOrchestrator,
+  openOrchestratorPage
+} = useSessionOrchestrator({
+  workspaceId: () => props.workspaceId,
+  sessionId: () => props.sessionId,
+  router,
+  orchestratorsStore,
+  activeTab,
+  sendPrompt: (text) =>
+    chatSocket.sendPrompt({
+      text,
+      model: modelSelection.value,
+      mode: displaySessionMode.value,
+      imagePaths: []
+    })
+});
 
 // -------------------------------------------------- Continue in new chat --------------------------------------------------
-const bHandoffPending = ref(false);
-/** Draft taken from the composer when the handoff started; put back if it fails. */
-let handoffDraft: { text: string; images: PendingAttachment[] } | null = null;
-
-const storeSession = computed(() =>
-  workspacesStore.allSessions.find((candidate) => candidate.id === props.sessionId)
-);
-const continuedFrom = computed(
-  () => storeSession.value?.continuedFrom ?? session.value?.continuedFrom ?? null
-);
-const continuedInSessionId = computed(
-  () => storeSession.value?.continuedInSessionId ?? session.value?.continuedInSessionId ?? null
-);
-const continuedInSessionName = computed(() => {
-  const id = continuedInSessionId.value;
-  if (!id) return '';
-  return workspacesStore.allSessions.find((candidate) => candidate.id === id)?.name?.trim() || 'Untitled session';
+const {
+  bHandoffPending,
+  continuedFrom,
+  continuedInSessionId,
+  continuedInSessionName,
+  bHandoffSummaryOpen,
+  onContinueInNewChat,
+  openHandoffTarget,
+  failHandoff,
+  openContinuedSession,
+  resetHandoff
+} = useSessionHandoff({
+  workspaceId: () => props.workspaceId,
+  sessionId: () => props.sessionId,
+  session,
+  router,
+  workspacesStore,
+  toastStore,
+  promptText,
+  pendingImages
 });
-const bHandoffSummaryOpen = ref(false);
-
-async function onContinueInNewChat(payload: { text: string; imagePaths: string[] }): Promise<void> {
-  if (bHandoffPending.value) return;
-  bHandoffPending.value = true;
-  try {
-    await sessionsApi.continueInNewChat(props.workspaceId, props.sessionId, payload);
-    handoffDraft = { text: promptText.value, images: pendingImages.value };
-    promptText.value = '';
-    pendingImages.value = [];
-    clearSessionPrompt(props.workspaceId, props.sessionId);
-  } catch (err) {
-    bHandoffPending.value = false;
-    toastStore.error(apiErrorMessage(err, 'Failed to continue in new chat'));
-  }
-}
-
-function openHandoffTarget(newSessionId: string): void {
-  if (!bHandoffPending.value) return;
-  bHandoffPending.value = false;
-  handoffDraft = null;
-  void router.push({ name: 'session', params: { id: props.workspaceId, sessionId: newSessionId } });
-}
-
-function failHandoff(message: string): void {
-  if (!bHandoffPending.value) return;
-  bHandoffPending.value = false;
-  if (handoffDraft && !promptText.value.trim() && pendingImages.value.length === 0) {
-    promptText.value = handoffDraft.text;
-    pendingImages.value = handoffDraft.images;
-  }
-  handoffDraft = null;
-  toastStore.error(message);
-}
-
-// Fallback when the handoff-ready frame was missed (socket reconnect): the
-// session list upsert still links this chat to the new one.
-watch(continuedInSessionId, (id, previousId) => {
-  if (id && id !== previousId) openHandoffTarget(id);
-});
-
-function openContinuedSession(sessionId: string): void {
-  void router.push({ name: 'session', params: { id: props.workspaceId, sessionId } });
-}
 
 function onComposerSend(payload: { text: string; imagePaths: string[] }): void {
   clearSessionPrompt(props.workspaceId, props.sessionId);
@@ -667,162 +372,35 @@ function onComposerSend(payload: { text: string; imagePaths: string[] }): void {
 }
 
 // -------------------------------------------------- Computed --------------------------------------------------
-const workspaceName = computed(
-  () => workspacesStore.workspaces.find((w) => w.id === props.workspaceId)?.name ?? 'Workspace'
-);
-const workspacePath = computed(
-  () => workspacesStore.workspaces.find((w) => w.id === props.workspaceId)?.path ?? ''
-);
-const subtitleWorkspaces = computed(() =>
-  workspacesStore.workspaces
-    .filter((workspace) => !workspace.archived)
-    .map((workspace) => ({ id: workspace.id, name: workspace.name }))
-    .sort((left, right) => left.name.localeCompare(right.name))
-);
-const sessionCostLabel = computed(() => {
-  const amount = resolveSessionCostAmount({
-    persistedAmount: usageSummary.value?.costAmount,
-    liveAmount: streamingUsage.value?.cost?.amount,
-    bStreaming: bIsStreaming.value
+const { usageTurns, sessionCostLabel, pooledRemainingLabel, fetchUsageTurns, loadPooledRemaining, resetUsage } =
+  useSessionUsage({
+    workspaceId: () => props.workspaceId,
+    sessionId: () => props.sessionId,
+    session,
+    streamingUsage,
+    bIsStreaming
   });
-  if (amount == null) {
-    return null;
-  }
-  return formatSessionCostLabel(
-    amount,
-    streamingUsage.value?.cost?.currency ?? usageSummary.value?.costCurrency
-  );
-});
-const rulesSubtitleLabel = computed(() =>
-  formatRulesSubtitleLabel(rulesCount.value, globalRulesCount.value)
-);
-const rulesSubtitleTitle = computed(() =>
-  formatRulesSubtitleTitle(rulesCount.value, globalRulesCount.value)
-);
-const rulesSubtitleTo = computed(() => {
-  if (rulesCount.value > 0) {
-    return { name: 'workspace-rules' as const, params: { id: props.workspaceId } };
-  }
-  return { name: 'settings' as const, query: { tab: 'rules' } };
-});
-/** Account remaining — used when ACP does not report per-session cost (typical for Cursor). */
-const pooledRemainingLabel = computed(() => {
-  if (sessionCostLabel.value != null) return null;
-  if (pooledRemainingCents.value == null) return null;
-  return formatRemainingLabel(pooledRemainingCents.value);
+
+const {
+  workspaceName,
+  workspacePath,
+  subtitleWorkspaces,
+  rulesSubtitleLabel,
+  rulesSubtitleTitle,
+  rulesSubtitleTo,
+  headerCiState,
+  headerCiTitle,
+  sessionTagSuggestions,
+  onSelectWorkspace,
+  loadRulesCount
+} = useSessionHeaderInfo({
+  workspaceId: () => props.workspaceId,
+  sessionId: () => props.sessionId,
+  router,
+  workspacesStore,
+  bCiActive: () => activeTab.value !== 'git'
 });
 
-function tabFromQuery(raw: unknown): SessionTab | null {
-  if (raw === 'chat' || raw === 'terminal' || raw === 'files' || raw === 'git' || raw === 'plan' || raw === 'orchestrator') {
-    return raw;
-  }
-  return null;
-}
-
-function applySessionQueryFromRoute(): void {
-  const tab = tabFromQuery(route.query.tab);
-  if (tab && tab !== activeTab.value) {
-    activeTab.value = tab;
-  }
-  const file = route.query.file;
-  if (typeof file === 'string' && file.trim()) {
-    filesOpenPath.value = file;
-    writeFilesOpenPath(props.workspaceId, file);
-    if (!tab) {
-      activeTab.value = 'files';
-    }
-  } else if (!filesOpenPath.value) {
-    filesOpenPath.value = readFilesOpenPath(props.workspaceId);
-  }
-}
-
-function syncSessionQuery(): void {
-  const nextQuery: Record<string, string> = {};
-  if (activeTab.value !== 'chat') {
-    nextQuery.tab = activeTab.value;
-  }
-  if (activeTab.value === 'files' && filesOpenPath.value) {
-    nextQuery.file = filesOpenPath.value;
-  }
-  const currentTab = typeof route.query.tab === 'string' ? route.query.tab : '';
-  const currentFile = typeof route.query.file === 'string' ? route.query.file : '';
-  if ((nextQuery.tab ?? '') === currentTab && (nextQuery.file ?? '') === currentFile) {
-    return;
-  }
-  void router.replace({ query: nextQuery });
-}
-
-function openWorkspaceFile(rawPath: string): void {
-  const relative =
-    toWorkspaceRelativePath(rawPath, workspacePath.value) ??
-    rawPath.replace(/\\/g, '/').replace(/^\/+/, '');
-  if (!relative || relative.includes('*')) {
-    return;
-  }
-  filesOpenPath.value = relative;
-  writeFilesOpenPath(props.workspaceId, relative);
-  activeTab.value = 'files';
-  syncSessionQuery();
-}
-
-// Header CI badge for the workspace root repo; the Git tab shows the full breakdown.
-const { status: headerCiStatus } = useCiStatus({
-  workspaceId: computed(() => props.workspaceId),
-  repo: computed(() => ''),
-  sessionId: computed(() => props.sessionId),
-  active: computed(() => activeTab.value !== 'git')
-});
-const headerCiState = computed(() => ciBadgeState(headerCiStatus.value));
-const headerCiTitle = computed(() => ciBadgeTitle(headerCiStatus.value));
-
-/** "Fix failed build" from the Git tab: draft the prompt in the composer for review. */
-function onFixBuild(prompt: string): void {
-  const draft = promptText.value.trim();
-  promptText.value = draft ? `${draft}\n\n${prompt}` : prompt;
-  activeTab.value = 'chat';
-  void nextTick(() => {
-    composerRef.value?.resizeTextarea();
-    composerRef.value?.focus();
-  });
-}
-
-function onFilesOpenPath(path: string | null): void {
-  filesOpenPath.value = path;
-  writeFilesOpenPath(props.workspaceId, path);
-  syncSessionQuery();
-}
-
-function onSelectWorkspace(workspaceId: string): void {
-  if (workspaceId === props.workspaceId) {
-    return;
-  }
-  void router.push({ name: 'workspace-sessions', params: { id: workspaceId } });
-}
-
-async function loadRulesCount(): Promise<void> {
-  try {
-    const { data } = await workspaceRulesApi.list(props.workspaceId);
-    rulesCount.value = Array.isArray(data) ? data.length : 0;
-  } catch {
-    rulesCount.value = 0;
-  }
-  try {
-    const { data } = await globalRulesApi.list();
-    globalRulesCount.value = Array.isArray(data) ? data.length : 0;
-  } catch {
-    globalRulesCount.value = 0;
-  }
-}
-
-async function loadPooledRemaining(): Promise<void> {
-  try {
-    const { data } = await agentAuthApi.cursorUsage();
-    const remaining = data.available ? data.individual?.remainingCents : null;
-    pooledRemainingCents.value = remaining ?? null;
-  } catch {
-    pooledRemainingCents.value = null;
-  }
-}
 const sessionTerminalWsUrl = computed(() =>
   buildSessionTerminalWsUrl(props.workspaceId, props.sessionId)
 );
@@ -836,208 +414,71 @@ const sessionTabs = computed(() => [
   { id: 'git', label: 'Git' }
 ]);
 
-const chatErrorActionLabel = computed(() => {
-  if (chatErrorCode.value === 'auth_required') return 'Open Settings';
-  if (
-    (chatErrorCode.value === 'timeout' || chatErrorCode.value === 'rate_limited') &&
-    chatSocket.lastPromptRequest.value
-  ) {
-    return 'Try again';
-  }
-  return '';
-});
-
-/** Tags used in this workspace (for edit session autocomplete). */
-const sessionTagSuggestions = computed(() => {
-  const wid = props.workspaceId;
-  const all = workspacesStore.allSessions.filter((s) => s.workspaceId === wid);
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const s of all) {
-    const tags = s.tags;
-    if (!tags?.length) continue;
-    for (const t of tags) {
-      if (typeof t !== 'string' || !t.trim()) continue;
-      const k = t.trim().toLowerCase();
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push(t.trim());
-    }
-  }
-  return out.sort((a, b) => a.localeCompare(b));
+const { chatErrorActionLabel, handleChatErrorAction } = useChatErrorAction({
+  chatErrorCode,
+  lastPromptRequest: chatSocket.lastPromptRequest,
+  retryLastPrompt: chatSocket.retryLastPrompt,
+  modelSelection,
+  router
 });
 
 // -------------------------------------------------- Methods --------------------------------------------------
-function handleChatErrorAction(): void {
-  if (chatErrorCode.value === 'auth_required') {
-    router.push({ name: 'settings' });
-    return;
-  }
-  if (chatErrorCode.value === 'timeout' || chatErrorCode.value === 'rate_limited') {
-    chatSocket.retryLastPrompt(modelSelection.value);
-  }
+
+/** "Fix failed build" from the Git tab: draft the prompt in the composer for review. */
+function onFixBuild(prompt: string): void {
+  const draft = promptText.value.trim();
+  promptText.value = draft ? `${draft}\n\n${prompt}` : prompt;
+  activeTab.value = 'chat';
+  void nextTick(() => {
+    composerRef.value?.resizeTextarea();
+    composerRef.value?.focus();
+  });
 }
 
 // ── Session edit/delete/archive ──────────────────────────────────────────────
-function openEditModal(): void {
-  bShowEditModal.value = true;
-}
-
-function exportSessionMarkdown(): void {
-  const title = session.value?.name?.trim() || 'Untitled session';
-  const markdown = sessionChatToMarkdown(messages.value, {
-    title,
-    workspaceName: workspaceName.value
-  });
-  if (!markdown.includes('\n## ')) {
-    toastStore.info('Nothing to export yet');
-    return;
-  }
-  const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = sessionExportFilename(title);
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-  toastStore.success('Exported Markdown');
-}
-
-async function saveSessionEdit(payload: { name: string; tags?: string[] | null }): Promise<void> {
-  bSavingEdit.value = true;
-  try {
-    const { data: updated } = await sessionsApi.update(props.workspaceId, props.sessionId, payload);
-    session.value = updated;
-    bShowEditModal.value = false;
-  } catch {
-    toastStore.error('Failed to update session');
-  } finally {
-    bSavingEdit.value = false;
-  }
-}
-
-async function deleteSession(): Promise<void> {
-  bDeletingSession.value = true;
-  try {
-    await sessionsApi.remove(props.workspaceId, props.sessionId);
-    router.push({ name: 'workspace-sessions', params: { id: props.workspaceId } });
-  } catch {
-    toastStore.error('Failed to delete session');
-    bDeletingSession.value = false;
-    bShowDeleteModal.value = false;
-  }
-}
-
-async function deleteSelectedPlan(): Promise<void> {
-  const plan = selectedPlanDocument.value;
-  if (!plan) return;
-  bDeletingPlan.value = true;
-  try {
-    await planDocs.deletePlan(plan);
-    bShowDeletePlanModal.value = false;
-  } catch {
-    toastStore.error('Failed to delete plan');
-  } finally {
-    bDeletingPlan.value = false;
-  }
-}
-
-async function toggleArchive(): Promise<void> {
-  if (!session.value) return;
-  try {
-    const { data: updated } = await sessionsApi.update(props.workspaceId, props.sessionId, {
-      archived: !session.value.archived
-    });
-    session.value = updated;
-  } catch {
-    toastStore.error('Failed to toggle archive');
-  }
-}
-
-async function toggleFavorite(): Promise<void> {
-  if (!session.value || session.value.archived) return;
-  try {
-    const { data: updated } = await sessionsApi.update(props.workspaceId, props.sessionId, {
-      isFavorite: !session.value.isFavorite
-    });
-    session.value = updated;
-    workspacesStore.upsertSession(updated);
-  } catch (err: unknown) {
-    toastStore.error(apiErrorMessage(err, 'Failed to update favorite'));
-  }
-}
+const {
+  bShowEditModal,
+  bSavingEdit,
+  bShowDeleteModal,
+  bDeletingSession,
+  bShowDeletePlanModal,
+  bDeletingPlan,
+  openEditModal,
+  exportSessionMarkdown,
+  saveSessionEdit,
+  deleteSession,
+  deleteSelectedPlan,
+  toggleArchive,
+  toggleFavorite
+} = useSessionActions({
+  workspaceId: () => props.workspaceId,
+  sessionId: () => props.sessionId,
+  session,
+  messages,
+  workspaceName: () => workspaceName.value,
+  selectedPlanDocument,
+  deletePlan: (plan) => planDocs.deletePlan(plan),
+  router,
+  workspacesStore,
+  toastStore
+});
 
 // ── Session fetch ─────────────────────────────────────────────────────────────
-async function fetchSession(): Promise<boolean> {
-  const seq = ++fetchSessionSeq;
-  const workspaceId = props.workspaceId;
-  const sessionId = props.sessionId;
-  try {
-    // Keep any cached snapshot on screen while revalidating — the skeleton is
-    // only for when there is genuinely nothing to show.
-    if (!session.value) {
-      bLoading.value = true;
-    }
-    error.value = null;
-    const response = await sessionsApi.get(workspaceId, sessionId);
-    if (
-      seq !== fetchSessionSeq ||
-      workspaceId !== props.workspaceId ||
-      sessionId !== props.sessionId
-    ) {
-      return false;
-    }
-    session.value = response.data;
-    bSessionFetchFailed = false;
-    agentOptions.applyFetchedSession(response.data);
-    approvalPolicy.value = normalizeApprovalPolicy(response.data.approvalPolicy);
+const { bLoading, error, fetchSession } = useSessionLoader({
+  workspaceId: () => props.workspaceId,
+  sessionId: () => props.sessionId,
+  session,
+  bInitiallyLoading: !initialCache,
+  bApiReachable,
+  healthyPingCount,
+  onSessionFetched: (fetched) => {
+    agentOptions.applyFetchedSession(fetched);
+    applySessionApprovalPolicy(fetched.approvalPolicy);
     void loadAgentOptions();
     void fetchUsageTurns();
-    return true;
-  } catch (e) {
-    if (
-      seq !== fetchSessionSeq ||
-      workspaceId !== props.workspaceId ||
-      sessionId !== props.sessionId
-    ) {
-      return false;
-    }
-    bSessionFetchFailed = true;
-    if (!session.value) {
-      error.value = 'Failed to load session';
-    }
-    console.error('Failed to fetch session:', e);
-    return false;
-  } finally {
-    if (
-      seq === fetchSessionSeq &&
-      workspaceId === props.workspaceId &&
-      sessionId === props.sessionId
-    ) {
-      bLoading.value = false;
-    }
-  }
-}
-
-function handleAutoContinueUpdated(enabled: boolean): void {
-  bClaudeAutoContinueEnabled.value = enabled;
-}
-
-async function fetchUsageTurns(): Promise<void> {
-  try {
-    const response = await sessionsApi.listUsage(props.workspaceId, props.sessionId);
-    usageTurns.value = response.data.turns;
-    usageSummary.value = response.data.summary ?? null;
-    const latest = usageTurns.value[0];
-    if (latest && !bIsStreaming.value && streamingUsage.value == null) {
-      streamingUsage.value = latest;
-    }
-  } catch {
-    // Usage is optional; agents that never emit usage_update leave this empty.
-  }
-}
+  },
+  onRetryLoaded: () => agentOptions.retryAgentOptionsIfFailed()
+});
 
 // -------------------------------------------------- Watchers --------------------------------------------------
 watch(activeTab, (tab) => {
@@ -1056,31 +497,10 @@ watch(activeTab, (tab) => {
 });
 
 watch(
-  () => [route.query.tab, route.query.file],
-  () => {
-    applySessionQueryFromRoute();
-  }
-);
-
-watch(
-  () => props.sessionId,
-  (sessionId) => {
-    setViewingSession(sessionId);
-    if (sessionId) {
-      void workspacesStore.markSessionRead(sessionId);
-    }
-  },
-  { immediate: true }
-);
-
-watch(
   () => props.workspaceId,
-  (workspaceId) => {
+  () => {
     void loadRulesCount();
     loadPlannedOrchestrator();
-    const file = route.query.file;
-    filesOpenPath.value =
-      typeof file === 'string' && file.trim() ? file : readFilesOpenPath(workspaceId);
   },
   { immediate: true }
 );
@@ -1105,17 +525,13 @@ watch(
   () => props.sessionId,
   async (newId, oldId) => {
     if (!newId || newId === oldId) return;
-    if (persistCacheTimer !== null) {
-      clearTimeout(persistCacheTimer);
-      persistCacheTimer = null;
-    }
+    cancelSessionCachePersist();
     planDocs.resetPlanDocuments();
     // Close the old socket before reset so its late frames cannot land after clear.
     chatSocket.disconnect();
     chatSocket.resetChatState();
-    usageTurns.value = [];
-    usageSummary.value = null;
-    expandedToolOutputIds.value = new Set();
+    resetUsage();
+    collapseAllToolOutputs();
     const queryTab = tabFromQuery(route.query.tab);
     activeTab.value = queryTab ?? 'chat';
     const cached = readSessionCache(props.workspaceId, newId);
@@ -1126,11 +542,9 @@ watch(
     }
     bLoading.value = !cached;
     pendingImages.value = [];
-    bHandoffPending.value = false;
-    bHandoffSummaryOpen.value = false;
-    handoffDraft = null;
+    resetHandoff();
     agentOptions.resetAgentOptions();
-    approvalPolicy.value = normalizeApprovalPolicy(cached?.session?.approvalPolicy);
+    applySessionApprovalPolicy(cached?.session?.approvalPolicy);
     if (cached?.session) {
       agentOptions.applyFetchedSession(cached.session);
       void loadAgentOptions();
@@ -1154,36 +568,8 @@ watch(
   }
 );
 
-function retrySessionIfFailed(): void {
-  if (bSessionFetchFailed || error.value) {
-    void fetchSession();
-    return;
-  }
-  // The session itself loaded but the agent catalog did not (flaky link).
-  agentOptions.retryAgentOptionsIfFailed();
-}
-
-// Retry session metadata when the API comes back after a transient outage. A
-// healthy ping counts too: a failed fetch does not always flip the banner.
-watch([bApiReachable, healthyPingCount], ([reachable]) => {
-  if (reachable) {
-    retrySessionIfFailed();
-  }
-});
-
-function onDocumentVisibilityChange(): void {
-  if (document.visibilityState === 'visible') {
-    retrySessionIfFailed();
-  }
-}
-
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 onMounted(async () => {
-  chatInputMql = window.matchMedia('(min-width: 768px)');
-  syncChatInputBreakpoint();
-  chatInputMql.addEventListener('change', syncChatInputBreakpoint);
-  document.addEventListener('visibilitychange', onDocumentVisibilityChange);
-
   const savedPrompt = readSessionPrompt(props.workspaceId, props.sessionId);
   if (savedPrompt != null) promptText.value = savedPrompt;
 
@@ -1195,54 +581,37 @@ onMounted(async () => {
   if (initialCache?.messages.length) {
     void nextTick(() => chatListRef.value?.forceInitialScrollToBottom());
   }
-  try {
-    const { data } = await settingsApi.get();
-    if (typeof data.claudeAutoContinue === 'boolean') {
-      bClaudeAutoContinueEnabled.value = data.claudeAutoContinue;
-    }
-  } catch {
-    // keep defaults
-  }
+  await loadClaudeAutoContinueSetting();
   scheduleMermaidRender();
   applySessionQueryFromRoute();
 });
 
 onUnmounted(() => {
-  document.removeEventListener('visibilitychange', onDocumentVisibilityChange);
-  if (mermaidRenderTimer !== null) {
-    clearTimeout(mermaidRenderTimer);
-    mermaidRenderTimer = null;
-  }
-  if (persistCacheTimer !== null) {
-    clearTimeout(persistCacheTimer);
-    persistCacheTimer = null;
-  }
-  persistSessionCache(persistCacheAllowEmpty);
-  persistCacheAllowEmpty = false;
-  if (chatInputMql) {
-    chatInputMql.removeEventListener('change', syncChatInputBreakpoint);
-    chatInputMql = null;
-  }
+  flushSessionCache();
   planDocs.clearPlanDocumentsRefreshTimers();
   chatSocket.disconnect();
-  setViewingSession(null);
 });
 </script>
 
 <template>
   <div ref="sessionChatRootRef" class="flex-1 flex flex-col overflow-hidden">
     <!-- Header -->
-    <EntityDetailHeader
-      :title="session?.name?.trim() || 'Untitled session'"
-      :subtitle="workspaceName"
-      :subtitle-items="subtitleWorkspaces"
-      :current-subtitle-id="workspaceId"
-      :tags="session?.tags ?? []"
+    <SessionChatHeader
+      :session="session"
+      :workspace-id="workspaceId"
+      :workspace-name="workspaceName"
+      :subtitle-workspaces="subtitleWorkspaces"
       :b-loading="bLoading"
-      :archived="session?.archived ?? false"
       :b-show-sidebar-toggle="props.showSidebarToggle"
-      :show-new-session="true"
-      :show-export="true"
+      :planned-orchestrator-id="plannedOrchestrator?.id ?? null"
+      :b-plan-has-steps="bPlanHasSteps"
+      :header-ci-state="headerCiState"
+      :header-ci-title="headerCiTitle"
+      :session-cost-label="sessionCostLabel"
+      :pooled-remaining-label="pooledRemainingLabel"
+      :rules-subtitle-label="rulesSubtitleLabel"
+      :rules-subtitle-title="rulesSubtitleTitle"
+      :rules-subtitle-to="rulesSubtitleTo"
       @toggle-sidebar="emit('toggle-sidebar')"
       @new-session="emit('new-session')"
       @edit="openEditModal"
@@ -1250,58 +619,12 @@ onUnmounted(() => {
       @select-subtitle="onSelectWorkspace"
       @archive="toggleArchive"
       @delete="bShowDeleteModal = true"
-    >
-      <template v-if="session && !session.archived" #title-trailing>
-        <FavoriteButton :b-favorite="!!session.isFavorite" @toggle="toggleFavorite" />
-      </template>
-      <template v-if="session && !session.archived" #actions-leading>
-        <SessionOrchestratorButton
-          :workspace-id="workspaceId"
-          :session-id="session.id"
-          :orchestrator-id="plannedOrchestrator?.id ?? null"
-          :b-has-steps="bPlanHasSteps"
-          @plan="planAsOrchestrator"
-          @open-plan="activeTab = 'orchestrator'"
-          @open-page="openOrchestratorPage"
-        />
-      </template>
-      <template #subtitle-trailing>
-        <template v-if="headerCiState !== 'none'">
-          <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>
-          <button
-            type="button"
-            class="inline-flex shrink-0 items-center gap-1 hover:text-text-primary"
-            :title="headerCiTitle"
-            :aria-label="headerCiTitle"
-            @click="activeTab = 'git'"
-          >
-            <LoaderCircle v-if="headerCiState === 'running'" :size="12" :stroke-width="2" class="text-primary animate-spin" aria-hidden="true" />
-            <Clock v-else-if="headerCiState === 'queued'" :size="12" :stroke-width="2" aria-hidden="true" />
-            <CircleCheck v-else-if="headerCiState === 'success'" :size="12" :stroke-width="2" class="text-success" aria-hidden="true" />
-            <CircleX v-else-if="headerCiState === 'failure'" :size="12" :stroke-width="2" class="text-destructive" aria-hidden="true" />
-            <CircleSlash v-else :size="12" :stroke-width="2" aria-hidden="true" />
-            <span>CI</span>
-          </button>
-        </template>
-        <template v-if="sessionCostLabel">
-          <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>
-          <span class="shrink-0 tabular-nums" :title="sessionCostLabel">{{ sessionCostLabel }}</span>
-        </template>
-        <template v-else-if="pooledRemainingLabel">
-          <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>
-          <span class="shrink-0 tabular-nums" :title="pooledRemainingLabel">{{ pooledRemainingLabel }}</span>
-        </template>
-        <RouterLink
-          v-if="rulesSubtitleLabel"
-          :to="rulesSubtitleTo"
-          class="inline-flex items-center gap-1 min-w-0 hover:text-text-primary"
-          :title="rulesSubtitleTitle"
-        >
-          <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>
-          <span class="truncate">{{ rulesSubtitleLabel }}</span>
-        </RouterLink>
-      </template>
-    </EntityDetailHeader>
+      @toggle-favorite="toggleFavorite"
+      @plan="planAsOrchestrator"
+      @open-plan="activeTab = 'orchestrator'"
+      @open-page="openOrchestratorPage"
+      @open-git="activeTab = 'git'"
+    />
 
     <div
       v-if="error"
@@ -1328,48 +651,13 @@ onUnmounted(() => {
           :class="bWidePane ? 'flex-row' : 'flex-col'"
         >
           <div class="flex-1 min-w-0 flex flex-col min-h-0">
-            <div
-              v-if="continuedFrom || continuedInSessionId"
-              class="mx-4 md:mx-6 mt-2 shrink-0 rounded-md border border-fg/10 bg-fg/[0.03] text-xs text-text-muted"
-            >
-              <div v-if="continuedFrom" class="flex items-center gap-2 px-3 py-1.5">
-                <span class="min-w-0 truncate">
-                  Continued from
-                  <button
-                    type="button"
-                    class="font-medium text-text-primary hover:underline"
-                    @click="openContinuedSession(continuedFrom.sessionId)"
-                  >{{ continuedFrom.sessionName.trim() || 'Untitled session' }}</button>
-                </span>
-                <button
-                  type="button"
-                  class="ml-auto shrink-0 hover:text-text-primary"
-                  :aria-expanded="bHandoffSummaryOpen"
-                  @click="bHandoffSummaryOpen = !bHandoffSummaryOpen"
-                >
-                  {{ bHandoffSummaryOpen ? 'Hide handoff' : 'Show handoff' }}
-                </button>
-              </div>
-              <div
-                v-if="continuedFrom && bHandoffSummaryOpen"
-                class="chat-markdown max-h-72 overflow-y-auto border-t border-fg/10 px-3 py-2 text-sm text-text-primary"
-                v-html="renderMdCached(continuedFrom.summary)"
-              />
-              <div
-                v-if="continuedInSessionId"
-                class="flex items-center gap-2 px-3 py-1.5"
-                :class="{ 'border-t border-fg/10': continuedFrom }"
-              >
-                <span class="min-w-0 truncate">
-                  Continued in
-                  <button
-                    type="button"
-                    class="font-medium text-text-primary hover:underline"
-                    @click="openContinuedSession(continuedInSessionId)"
-                  >{{ continuedInSessionName }}</button>
-                </span>
-              </div>
-            </div>
+            <ChatHandoffBanner
+              v-model:b-summary-open="bHandoffSummaryOpen"
+              :continued-from="continuedFrom"
+              :continued-in-session-id="continuedInSessionId"
+              :continued-in-session-name="continuedInSessionName"
+              @open-session="openContinuedSession"
+            />
             <ChatMessageList
               ref="chatListRef"
               :b-loading="bLoading"
@@ -1428,42 +716,16 @@ onUnmounted(() => {
           />
         </div>
 
-        <!-- Connection indicator (initial connect and reconnects) -->
-        <div v-if="!bWsConnected" class="flex justify-center py-1.5 shrink-0">
-          <span class="text-xs text-text-muted flex items-center gap-1.5">
-            <span
-              class="w-3 h-3 border border-text-muted/40 border-t-text-muted rounded-full animate-spin inline-block"
-            ></span>
-            {{ bWsReconnecting ? 'Reconnecting…' : 'Connecting…' }}
-          </span>
-        </div>
-
-        <!-- Wide: reopen chip when the todo panel is closed -->
-        <div
-          v-if="bAnyTodos && bTodoPanelClosed && bWidePane"
-          class="flex justify-end px-4 pb-1 shrink-0"
-        >
-          <button
-            type="button"
-            class="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-fg/15 bg-fg/[0.02] text-xs text-text-muted hover:text-text-primary transition-colors"
-            @click="openTodoPanel"
-          >
-            <span class="select-none" v-html="todoChecklistSvg" />
-            Tasks {{ todoDoneCount }}/{{ todoItems.length }}
-          </button>
-        </div>
-
-        <div
-          v-if="bIsStreaming && liveBusySubagents"
-          class="flex items-center gap-2 px-4 pb-1 text-xs text-text-muted shrink-0"
-          role="status"
-          aria-live="polite"
-        >
-          <span
-            class="w-3 h-3 border-2 border-primary/40 border-t-primary rounded-full animate-spin shrink-0"
-          />
-          Background tasks {{ liveBusySubagents.running }}/{{ liveBusySubagents.total }} still running
-        </div>
+        <!-- Connection indicator, todo reopen chip, background tasks -->
+        <ChatStatusRows
+          :b-ws-connected="bWsConnected"
+          :b-ws-reconnecting="bWsReconnecting"
+          :b-show-todo-chip="bAnyTodos && bTodoPanelClosed && bWidePane"
+          :todo-done-count="todoDoneCount"
+          :todo-count="todoItems.length"
+          :busy-subagents="bIsStreaming ? liveBusySubagents : null"
+          @open-todo-panel="openTodoPanel"
+        />
 
         <ChatComposer
           ref="composerRef"
@@ -1577,36 +839,19 @@ onUnmounted(() => {
     />
 
     <!-- Modals -->
-    <SessionEditModal
-      v-model="bShowEditModal"
+    <SessionChatModals
+      v-model:b-show-edit-modal="bShowEditModal"
+      v-model:b-show-delete-modal="bShowDeleteModal"
+      v-model:b-show-delete-plan-modal="bShowDeletePlanModal"
       :session="session"
-      :loading="bSavingEdit"
+      :b-saving-edit="bSavingEdit"
       :existing-tags="sessionTagSuggestions"
-      @save="saveSessionEdit"
-    />
-
-    <ConfirmModal
-      v-model="bShowDeleteModal"
-      title="Delete session"
-      eyebrow="// delete session"
-      :description="`Delete '${session?.name ?? 'this session'}'? The chat history will be permanently removed.`"
-      confirm-label="Delete"
-      :loading="bDeletingSession"
-      @confirm="deleteSession"
-    />
-
-    <ConfirmModal
-      v-model="bShowDeletePlanModal"
-      title="Delete plan"
-      eyebrow="// delete plan"
-      :description="
-        selectedPlanDocument?.backendPlanId
-          ? `Delete '${selectedPlanDocument.title}'? The plan file will be permanently removed.`
-          : `Remove '${selectedPlanDocument?.title ?? 'this plan'}' from the Plan tab?`
-      "
-      confirm-label="Delete"
-      :loading="bDeletingPlan"
-      @confirm="deleteSelectedPlan"
+      :b-deleting-session="bDeletingSession"
+      :selected-plan-document="selectedPlanDocument"
+      :b-deleting-plan="bDeletingPlan"
+      @save-session="saveSessionEdit"
+      @delete-session="deleteSession"
+      @delete-plan="deleteSelectedPlan"
     />
 
     <ImageLightbox v-model="lightboxSrc" />

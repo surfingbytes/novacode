@@ -1,5 +1,7 @@
 // node_modules
 import type { FastifyInstance } from 'fastify';
+import { Type } from '@sinclair/typebox';
+import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 
 // classes
 import { db } from '../classes/database';
@@ -15,6 +17,8 @@ import { broadcastSessionSpecStatus } from './ws';
 
 // types
 import type { SessionSpecStatus } from '../@types/index';
+
+const SpecParamsSchema = Type.Object({ workspaceId: Type.String(), sessionId: Type.String() });
 
 interface SpecSession {
   id: string;
@@ -49,17 +53,18 @@ export async function publishSpecStatus(sessionId: string): Promise<void> {
 }
 
 export async function sessionSpecRoutes(fastify: FastifyInstance): Promise<void> {
+  const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
   const loadSession = async (workspaceId: string, sessionId: string) => {
     const session = await db.getSession(sessionId);
     return session && session.workspaceId === workspaceId ? session : null;
   };
 
   // GET /api/workspaces/:workspaceId/sessions/:sessionId/spec — status + file content
-  fastify.get(
+  fastifyInstance.get(
     '/api/workspaces/:workspaceId/sessions/:sessionId/spec',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, schema: { params: SpecParamsSchema } },
     async (request, reply) => {
-      const { workspaceId, sessionId } = request.params as { workspaceId: string; sessionId: string };
+      const { workspaceId, sessionId } = request.params;
       const session = await loadSession(workspaceId, sessionId);
       if (!session) return reply.status(404).send({ error: 'Session not found' });
       const [status, spec] = await Promise.all([
@@ -71,11 +76,11 @@ export async function sessionSpecRoutes(fastify: FastifyInstance): Promise<void>
   );
 
   // POST /api/workspaces/:workspaceId/sessions/:sessionId/spec — create the (template) spec file only
-  fastify.post(
+  fastifyInstance.post(
     '/api/workspaces/:workspaceId/sessions/:sessionId/spec',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, schema: { params: SpecParamsSchema } },
     async (request, reply) => {
-      const { workspaceId, sessionId } = request.params as { workspaceId: string; sessionId: string };
+      const { workspaceId, sessionId } = request.params;
       const session = await loadSession(workspaceId, sessionId);
       if (!session) return reply.status(404).send({ error: 'Session not found' });
       const spec = await ensureSessionSpec(workspaceId, sessionId, session.name);

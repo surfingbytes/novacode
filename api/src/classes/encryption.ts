@@ -1,8 +1,5 @@
 // node_modules
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
-
-// classes
-import { db } from './database';
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 
 const ALGO = 'aes-256-gcm';
 const IV_LEN = 12;

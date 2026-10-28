@@ -9,8 +9,11 @@ import BaseModal from '@/components/BaseModal.vue';
 import ModalHeader from '@/components/ModalHeader.vue';
 
 // classes
-import { agentAuthApi, apiErrorMessage, settingsApi, type CursorAuthStatus } from '@/classes/api';
+import { agentAuthApi, apiErrorMessage, isGloballyToasted, settingsApi, type CursorAuthStatus } from '@/classes/api';
 import { formatUsageBar, formatUsdFromCents } from '@/utils/cursorUsageDisplay';
+
+// stores
+import { useToastStore } from '@/stores/toasts';
 
 // types
 import type {
@@ -18,6 +21,9 @@ import type {
   OpenCodeProvider,
   OpenCodeProviderAdapter
 } from '@/@types/index';
+
+// -------------------------------------------------- Stores --------------------------------------------------
+const toastStore = useToastStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const bCursorAuthenticated = ref<boolean>(false);
@@ -146,27 +152,27 @@ const refreshAuthStatus = async (): Promise<void> => {
     const claudeResponse = await agentAuthApi.claudeStatus();
     bClaudeAuthenticated.value = claudeResponse.data.authenticated;
   } catch {
-    // ignore
+    // Best-effort status probe; the card just keeps its previous state.
   }
 
   try {
     const openCodeResponse = await agentAuthApi.openCodeStatus();
     bOpenCodeAuthenticated.value = openCodeResponse.data.authenticated;
   } catch {
-    // ignore
+    // Best-effort status probe; the card just keeps its previous state.
   }
   try {
     const codexResponse = await agentAuthApi.codexStatus();
     bCodexAuthenticated.value = codexResponse.data.authenticated;
   } catch {
-    // ignore
+    // Best-effort status probe; the card just keeps its previous state.
   }
 
   try {
     const capsResponse = await settingsApi.getAgentCapabilities();
     bOpenCodeAvailable.value = capsResponse.data.openCodeAvailable;
   } catch {
-    // ignore
+    // Optional capability probe; OpenCode stays hidden when unknown.
   }
 };
 
@@ -189,8 +195,8 @@ const startCursorLogin = async (): Promise<void> => {
     authCode.value = '';
     const response = await agentAuthApi.cursorLogin();
     authSessionId.value = response.data.sessionId;
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Cursor login failed');
   } finally {
     bStartingCursorLogin.value = false;
   }
@@ -203,8 +209,8 @@ const startClaudeLogin = async (): Promise<void> => {
     authCode.value = '';
     const response = await agentAuthApi.claudeLogin();
     authSessionId.value = response.data.sessionId;
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Claude login failed');
   } finally {
     bStartingClaudeLogin.value = false;
   }
@@ -217,8 +223,8 @@ const logoutCursor = async (): Promise<void> => {
     await refreshAuthStatus();
     cursorUsage.value = null;
     void loadCursorUsage();
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Cursor logout failed');
   } finally {
     bLoggingOutCursor.value = false;
   }
@@ -229,8 +235,8 @@ const logoutClaude = async (): Promise<void> => {
   try {
     await agentAuthApi.claudeLogout();
     await refreshAuthStatus();
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Claude logout failed');
   } finally {
     bLoggingOutClaude.value = false;
   }
@@ -277,8 +283,8 @@ const logoutOpenCode = async (): Promise<void> => {
   try {
     await agentAuthApi.openCodeLogout();
     await refreshAuthStatus();
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('OpenCode logout failed');
   } finally {
     bLoggingOutOpenCode.value = false;
   }
@@ -423,8 +429,8 @@ const deleteOpenCodeProvider = async (providerId: string): Promise<void> => {
     await settingsApi.deleteOpenCodeProvider(providerId);
     openCodeProviders.value = openCodeProviders.value.filter((provider) => provider.id !== providerId);
     await refreshAuthStatus();
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Delete provider failed');
   } finally {
     bSavingOpenCodeProvider.value = false;
   }
@@ -470,8 +476,8 @@ const logoutCodex = async (): Promise<void> => {
   try {
     await agentAuthApi.codexLogout();
     await refreshAuthStatus();
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Codex logout failed');
   } finally {
     bLoggingOutCodex.value = false;
   }

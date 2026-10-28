@@ -10,7 +10,6 @@ import type {
 
 // classes
 import { db } from './database';
-import { config } from './config';
 import { getGlobalRulesDir } from './globalRules';
 import { buildAgentRulesPrefix } from './ruleFiles';
 import { isPathUnderBrowseRoot, resolveWorkspaceAbsolutePath } from './workspacePaths';
@@ -1123,14 +1122,13 @@ export function dispatchPromptAndWait(opts: {
   return new Promise((resolve) => {
     const timeoutMs = opts.timeoutMs ?? 600_000; // 10 min default
     let settled = false;
-    let timeout: ReturnType<typeof setTimeout>;
     const finish = (result: { error?: string; errorCode?: AgentErrorCode; messages?: ChatMessage[] }): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
       resolve(result);
     };
-    timeout = setTimeout(() => {
+    const timeout = setTimeout(() => {
       cancelRun(opts.sessionId);
       const classifiedError = classifyAgentError('Run timed out', { agentLabel: 'Agent' });
       finish({ error: classifiedError.message, errorCode: classifiedError.code });

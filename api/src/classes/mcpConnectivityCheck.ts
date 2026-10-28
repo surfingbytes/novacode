@@ -34,6 +34,8 @@ function checkStdio(configDir: string, cfg: McpClientServerConfig): Promise<McpC
   return new Promise((resolve) => {
     let settled = false;
     let child: ChildProcess;
+    // `done` can run (spawn failure) before the timer is assigned below, so this cannot be a const
+    // eslint-disable-next-line prefer-const
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const done = (result: McpCheckResult): void => {

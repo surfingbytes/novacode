@@ -7,7 +7,7 @@ import { isOneShotAgentType, pickInexpensiveModel } from '@novacode/shared';
 import AgentModelPicker from '@/components/AgentModelPicker.vue';
 
 // classes
-import { settingsApi } from '@/classes/api';
+import { isGloballyToasted, settingsApi } from '@/classes/api';
 
 // lib
 import {
@@ -34,11 +34,17 @@ import {
 import { isSendOnEnter, setSendOnEnter } from '@/lib/sendOnEnter';
 import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 
+// stores
+import { useToastStore } from '@/stores/toasts';
+
 // types
 import type { AgentModelOption, AgentType } from '@/@types/index';
 
 // utils
 import { agentSelectedStyle, agentTypeLabel } from '@/utils/agentTypeMeta';
+
+// -------------------------------------------------- Stores --------------------------------------------------
+const toastStore = useToastStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const activeThemeId = ref<string>(
@@ -130,7 +136,7 @@ const toggleNotificationKind = async (kind: 'tasks' | 'ci'): Promise<void> => {
   try {
     await syncPushSubscription();
   } catch {
-    // ignore push registration failures
+    // Push is optional; the local notification toggle still applies without it.
   }
 };
 
@@ -144,8 +150,8 @@ const selectTheme = async (themeId: string): Promise<void> => {
   bSavingTheme.value = true;
   try {
     await settingsApi.update({ theme: themeId });
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Save theme failed');
   } finally {
     bSavingTheme.value = false;
   }
@@ -163,8 +169,8 @@ const selectDarkTheme = async (themeId: string): Promise<void> => {
   bSavingTheme.value = true;
   try {
     await settingsApi.update({ darkTheme: themeId });
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Save theme failed');
   } finally {
     bSavingTheme.value = false;
   }
@@ -182,8 +188,8 @@ const selectLightTheme = async (themeId: string): Promise<void> => {
   bSavingTheme.value = true;
   try {
     await settingsApi.update({ lightTheme: themeId });
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Save theme failed');
   } finally {
     bSavingTheme.value = false;
   }
@@ -202,8 +208,8 @@ const toggleAutoTheme = async (): Promise<void> => {
   bSavingTheme.value = true;
   try {
     await settingsApi.update({ autoTheme: bAutoTheme.value });
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Save theme failed');
   } finally {
     bSavingTheme.value = false;
   }
@@ -249,8 +255,8 @@ const saveUtilitySettings = async (): Promise<void> => {
       utilityAgentType: utilityAgentType.value,
       utilityModelSelection: utilityModelSelection.value
     });
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Save utility settings failed');
   } finally {
     bSavingUtility.value = false;
   }
@@ -307,8 +313,9 @@ const toggleClaudeAutoContinue = async (): Promise<void> => {
   bSavingClaudeAutoContinue.value = true;
   try {
     await settingsApi.update({ claudeAutoContinue: bClaudeAutoContinue.value });
-  } catch {
+  } catch (err) {
     bClaudeAutoContinue.value = !bClaudeAutoContinue.value;
+    if (!isGloballyToasted(err)) toastStore.error('Save auto-continue failed');
   } finally {
     bSavingClaudeAutoContinue.value = false;
   }
@@ -365,7 +372,7 @@ const loadSettings = async (): Promise<void> => {
       applyTheme(response.data.theme);
     }
   } catch {
-    // ignore
+    // Initial load; local/default values stay usable and 5xx is toasted globally.
   }
 };
 

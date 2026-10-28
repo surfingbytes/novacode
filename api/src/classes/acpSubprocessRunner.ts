@@ -6,73 +6,56 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import {
-  client,
-  methods,
-  ndJsonStream,
-  PROTOCOL_VERSION,
-} from '@agentclientprotocol/sdk';
+import { client, methods, ndJsonStream, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 import type {
   ClientContext,
   ContentBlock,
   LoadSessionResponse,
   McpServer,
   NewSessionResponse,
-  RequestPermissionRequest,
-  RequestPermissionResponse,
-  SessionNotification,
 } from '@agentclientprotocol/sdk';
 
 // classes
 import { config, resolvePromptIdleTimeoutMs } from './config';
-import { applySessionMode, applySessionModel, applySessionConfig, findConfigOptionByCategory } from './acpSessionHelpers';
-import type { AcpSessionResponse } from './acpSessionHelpers';
+import {
+  acpAgent,
+  applySessionMode,
+  applySessionModel,
+  applySessionConfig,
+  asRecord,
+  autoApprovePermission,
+  emitSessionConfigSync,
+  findConfigOptionByCategory,
+  handleSessionNotification,
+} from './acpSessionHelpers';
+import type {
+  AcpEventHandler,
+  AcpPermissionHandler,
+  AcpSessionResponse,
+  SessionConfigSyncHandler,
+} from './acpSessionHelpers';
+import { defaultAskQuestionResponse, parseAskQuestionParams } from './acpAskQuestion';
+import type { AcpAskQuestionHandler, AcpAskQuestionResponse } from './acpAskQuestion';
+import { nodeReadableToWeb, nodeWritableToWeb } from './acpStreams';
 import { extractAgentErrorDetail, type AgentErrorDetail } from './agentError';
+import {
+  emitCursorPlanRequest,
+  emitCursorTaskActivity,
+  isAcpTaskBackgroundLaunch,
+  isAcpTaskToolCall,
+} from './cursorPlanEvents';
+import type { CursorEventHandlerResolver } from './cursorPlanEvents';
+import { handleCursorUpdateTodos } from './cursorTodoEvents';
 import { logger, truncateLogText } from './logger';
 import { getConfiguredAcpMcpServers, mcpUnavailableNoticeEventLine } from './mcpServersForAcp';
 import { agentSupportsHttpMcp, novaMcpServerIfSession } from './novaMcp';
 import { createSubagentTranscriptWatcher } from './cursorSubagentTranscripts';
 
-export type AcpEventHandler = (line: string) => void;
-export type AcpPermissionHandler = (
-  params: RequestPermissionRequest
-) => RequestPermissionResponse | Promise<RequestPermissionResponse>;
-
-/** Cursor ACP cursor/ask_question request params. */
-export interface AcpAskQuestionParams {
-  toolCallId: string;
-  title?: string;
-  questions: Array<{
-    id: string;
-    prompt: string;
-    options: Array<{ id: string; label: string }>;
-    allowMultiple?: boolean;
-  }>;
-}
-
-/** Cursor ACP cursor/ask_question response. */
-export interface AcpAskQuestionResponse {
-  outcome:
-    | {
-        outcome: 'answered';
-        answers: Array<{
-          questionId: string;
-          selectedOptionIds: string[];
-        }>;
-      }
-    | { outcome: 'skipped'; reason?: string }
-    | { outcome: 'cancelled' };
-}
-
-export type AcpAskQuestionHandler = (
-  params: AcpAskQuestionParams
-) => AcpAskQuestionResponse | Promise<AcpAskQuestionResponse>;
-
-export type SessionConfigSyncHandler = (sync: {
-  modeId?: string;
-  modelId?: string;
-  config?: Record<string, string>;
-}) => void;
+// ---- Re-exports (public API kept on this module) ----
+export type { AcpEventHandler, AcpPermissionHandler, SessionConfigSyncHandler } from './acpSessionHelpers';
+export type { AcpAskQuestionHandler, AcpAskQuestionParams, AcpAskQuestionResponse } from './acpAskQuestion';
+export { isAcpTaskBackgroundLaunch, isAcpTaskToolCall } from './cursorPlanEvents';
+export { mergeCursorTodos } from './cursorTodoEvents';
 
 /**
  * An image attachment sent as a native ACP `image` content block. Only image/*
@@ -217,589 +200,6 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function autoApprovePermission(
-  params: RequestPermissionRequest
-): RequestPermissionResponse {
-  const allowOption = params.options.find(
-    (o) => o.kind === 'allow_once' || o.kind === 'allow_always'
-  );
-  if (allowOption) {
-    return { outcome: { outcome: 'selected', optionId: allowOption.optionId } };
-  }
-  return { outcome: { outcome: 'cancelled' } };
-}
-
-function nodeReadableToWeb(readable: NodeJS.ReadableStream): ReadableStream<Uint8Array> {
-  return new ReadableStream<Uint8Array>({
-    start(controller) {
-      // A killed subprocess races socket 'error'/'end' events against the consumer
-      // (ACP SDK) cancelling the stream — the controller throws on any transition
-      // after the first, so every controller call is best-effort.
-      readable.on('data', (chunk: Buffer | string) => {
-        try {
-          controller.enqueue(typeof chunk === 'string' ? Buffer.from(chunk) : new Uint8Array(chunk));
-        } catch {
-          // stream already closed/cancelled
-        }
-      });
-      readable.on('end', () => {
-        try {
-          controller.close();
-        } catch {
-          // stream already closed/cancelled
-        }
-      });
-      readable.on('error', (err) => {
-        try {
-          controller.error(err);
-        } catch {
-          // stream already closed/cancelled
-        }
-      });
-    },
-  });
-}
-
-function nodeWritableToWeb(writable: NodeJS.WritableStream): WritableStream<Uint8Array> {
-  return new WritableStream<Uint8Array>({
-    write(chunk) {
-      return new Promise<void>((resolve, reject) => {
-        writable.write(chunk, (err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      });
-    },
-    close() {
-      return new Promise<void>((resolve) => {
-        writable.end(resolve);
-      });
-    },
-  });
-}
-
-function extractConfigSync(update: SessionNotification['update'], sync?: SessionConfigSyncHandler): void {
-  if (!sync) return;
-  if (update.sessionUpdate === 'current_mode_update') {
-    sync({ modeId: update.currentModeId });
-    return;
-  }
-  if (update.sessionUpdate === 'config_option_update') {
-    const modelOpt = update.configOptions.find((o) => o.category === 'model' || o.id === 'model');
-    if (modelOpt?.type === 'select' && 'currentValue' in modelOpt && typeof modelOpt.currentValue === 'string') {
-      sync({ modelId: modelOpt.currentValue });
-    }
-    const config: Record<string, string> = {};
-    for (const opt of update.configOptions) {
-      if (opt.type !== 'select') continue;
-      const cat = opt.category ?? opt.id;
-      if (cat === 'mode' || cat === 'model' || opt.id === 'mode' || opt.id === 'model') continue;
-      if ('currentValue' in opt && typeof opt.currentValue === 'string') {
-        config[opt.id] = opt.currentValue;
-      }
-    }
-    if (Object.keys(config).length > 0) {
-      sync({ config });
-    }
-  }
-}
-
-function emitSessionConfigSync(
-  onEvent: AcpEventHandler,
-  sync: { modeId?: string; modelId?: string; config?: Record<string, string> }
-): void {
-  if (!sync.modeId && !sync.modelId && !sync.config) return;
-  onEvent(JSON.stringify({ type: 'session_config_sync', ...sync }));
-}
-
-function handleSessionNotification(
-  notification: SessionNotification,
-  onEvent: AcpEventHandler,
-  onConfigSync?: SessionConfigSyncHandler
-): void {
-  extractConfigSync(notification.update, (sync) => {
-    onConfigSync?.(sync);
-    emitSessionConfigSync(onEvent, sync);
-  });
-  onEvent(JSON.stringify(notification));
-}
-
-interface CursorPlanEntry {
-  content: string;
-  status: 'pending' | 'in_progress' | 'completed';
-}
-
-interface CursorPlanPayload {
-  title?: string;
-  markdown?: string;
-  entries: CursorPlanEntry[];
-}
-
-function normalizeCursorPlanStatus(status: unknown): CursorPlanEntry['status'] {
-  if (typeof status !== 'string') {
-    return 'pending';
-  }
-  const normalized = status.toLowerCase().replace(/^todo_status_/, '');
-  if (normalized === 'completed' || normalized === 'done') {
-    return 'completed';
-  }
-  if (normalized === 'in_progress' || normalized === 'in-progress' || normalized === 'running') {
-    return 'in_progress';
-  }
-  return 'pending';
-}
-
-function cursorPlanEntryFromUnknown(value: unknown): CursorPlanEntry | null {
-  if (typeof value === 'string') {
-    const content = value.trim();
-    return content ? { content, status: 'pending' } : null;
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return null;
-  }
-
-  const obj = value as Record<string, unknown>;
-  const rawContent = obj.content ?? obj.text ?? obj.title ?? obj.description ?? obj.name;
-  if (typeof rawContent !== 'string') {
-    return null;
-  }
-
-  const content = rawContent.trim();
-  if (!content) {
-    return null;
-  }
-
-  return {
-    content,
-    status: normalizeCursorPlanStatus(obj.status),
-  };
-}
-
-function stringProp(obj: Record<string, unknown>, keys: string[]): string | undefined {
-  for (const key of keys) {
-    const value = obj[key];
-    if (typeof value === 'string' && value.trim()) {
-      return value.trim();
-    }
-  }
-  return undefined;
-}
-
-function looksLikeRichPlanMarkdown(value: string): boolean {
-  const text = value.trim();
-  if (!text) return false;
-  const headingCount = (text.match(/^#{1,3}\s+/gm) ?? []).length;
-  const hasPlanSections =
-    /^#{1,3}\s+(goal|required order|step\s+\d+|implementation|validation|test plan)\b/im.test(text);
-  return headingCount >= 2 || (headingCount >= 1 && hasPlanSections);
-}
-
-function findRichPlanMarkdown(value: unknown, depth = 0): string | undefined {
-  if (depth > 5 || value == null) return undefined;
-  if (typeof value === 'string') {
-    return looksLikeRichPlanMarkdown(value) ? value.trim() : undefined;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = findRichPlanMarkdown(item, depth + 1);
-      if (found) return found;
-    }
-    return undefined;
-  }
-  if (typeof value !== 'object') return undefined;
-
-  const obj = value as Record<string, unknown>;
-  for (const key of ['markdown', 'content', 'text', 'description', 'body', 'planText', 'planMarkdown']) {
-    const found = findRichPlanMarkdown(obj[key], depth + 1);
-    if (found) return found;
-  }
-  for (const nested of Object.values(obj)) {
-    const found = findRichPlanMarkdown(nested, depth + 1);
-    if (found) return found;
-  }
-  return undefined;
-}
-
-function extractCursorPlanEntries(params: unknown): CursorPlanEntry[] {
-  if (typeof params === 'string' || Array.isArray(params)) {
-    const values = Array.isArray(params) ? params : [params];
-    return values
-      .map(cursorPlanEntryFromUnknown)
-      .filter((entry): entry is CursorPlanEntry => entry !== null);
-  }
-
-  if (!params || typeof params !== 'object') {
-    return [];
-  }
-
-  const obj = params as Record<string, unknown>;
-  for (const key of ['entries', 'steps', 'todos', 'items', 'plan']) {
-    const value = obj[key];
-    if (Array.isArray(value)) {
-      return value
-        .map(cursorPlanEntryFromUnknown)
-        .filter((entry): entry is CursorPlanEntry => entry !== null);
-    }
-  }
-
-  if (obj.plan && typeof obj.plan === 'object') {
-    const nestedEntries = extractCursorPlanEntries(obj.plan);
-    if (nestedEntries.length > 0) {
-      return nestedEntries;
-    }
-  }
-
-  const singleEntry = cursorPlanEntryFromUnknown(obj.plan ?? obj.content ?? obj.text ?? obj.title);
-  return singleEntry ? [singleEntry] : [];
-}
-
-function extractCursorPlanPayload(params: unknown): CursorPlanPayload {
-  let entries = extractCursorPlanEntries(params);
-  if (!params || typeof params !== 'object' || Array.isArray(params)) {
-    return {
-      markdown: typeof params === 'string' ? params.trim() : undefined,
-      entries,
-    };
-  }
-
-  const obj = params as Record<string, unknown>;
-  const nestedPlan = obj.plan && typeof obj.plan === 'object' && !Array.isArray(obj.plan)
-    ? (obj.plan as Record<string, unknown>)
-    : null;
-
-  const markdown =
-    stringProp(obj, ['markdown', 'content', 'text', 'description', 'body', 'planText', 'planMarkdown']) ??
-    (nestedPlan ? stringProp(nestedPlan, ['markdown', 'content', 'text', 'description', 'body', 'planText', 'planMarkdown']) : undefined) ??
-    findRichPlanMarkdown(params);
-  if (markdown && entries.length === 1 && entries[0]?.content === markdown) {
-    entries = [];
-  }
-
-  return {
-    title: stringProp(obj, ['title', 'name']) ?? (nestedPlan ? stringProp(nestedPlan, ['title', 'name']) : undefined),
-    markdown,
-    entries,
-  };
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  return value as Record<string, unknown>;
-}
-
-function recordHasTrue(obj: Record<string, unknown> | null, keys: string[]): boolean {
-  if (!obj) return false;
-  for (const key of keys) {
-    if (obj[key] === true) return true;
-  }
-  return false;
-}
-
-/**
- * Cursor ACP often emits Task tool_calls with empty `rawInput: {}`. Prefer title
- * (`Task: …`) and background flags over rawInput field names.
- */
-export function isAcpTaskToolCall(update: Record<string, unknown>): boolean {
-  const rawInput = asRecord(update.rawInput);
-  if (
-    rawInput?._toolName === 'task' ||
-    rawInput?.toolName === 'task' ||
-    rawInput?.name === 'task' ||
-    typeof rawInput?.agent_type === 'string' ||
-    typeof rawInput?.agentType === 'string' ||
-    typeof rawInput?.subagent_type === 'string' ||
-    typeof rawInput?.subagentType === 'string' ||
-    recordHasTrue(rawInput, ['run_in_background', 'runInBackground', 'is_background', 'isBackground'])
-  ) {
-    return true;
-  }
-  const title = typeof update.title === 'string' ? update.title.trim() : '';
-  return /^task\b/i.test(title);
-}
-
-export function isAcpTaskBackgroundLaunch(update: Record<string, unknown>): boolean {
-  return (
-    recordHasTrue(asRecord(update.rawOutput), ['isBackground', 'is_background']) ||
-    recordHasTrue(asRecord(update.rawInput), [
-      'run_in_background',
-      'runInBackground',
-      'is_background',
-      'isBackground',
-    ])
-  );
-}
-
-function emitCursorTaskActivity(
-  params: unknown,
-  getSessionId: () => string | null,
-  fallback?: () => AcpEventHandler | undefined
-): void {
-  const sessionId = getSessionId();
-  const handler = resolveEventHandler(sessionId, fallback);
-  if (!handler) return;
-
-  const payload =
-    params && typeof params === 'object' && !Array.isArray(params)
-      ? (params as Record<string, unknown>)
-      : {};
-  handler(
-    JSON.stringify({
-      type: 'cursor_task',
-      sessionId,
-      ...payload,
-    })
-  );
-}
-
-function emitCursorPlanRequest(
-  params: unknown,
-  getSessionId: () => string | null,
-  fallback?: () => AcpEventHandler | undefined
-): void {
-  const plan = extractCursorPlanPayload(params);
-  if (plan.entries.length === 0 && !plan.markdown) {
-    return;
-  }
-
-  const sessionId = getSessionId();
-  const handler = resolveEventHandler(sessionId, fallback);
-  if (!handler) {
-    return;
-  }
-
-  handler(
-    JSON.stringify({
-      sessionId,
-      update: {
-        sessionUpdate: 'plan',
-        entries: plan.entries,
-        title: plan.title,
-        markdown: plan.markdown,
-      },
-    })
-  );
-}
-
-/** Cursor ACP cursor/update_todos item. */
-interface CursorTodoItem {
-  id: string;
-  content: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
-}
-
-interface CursorUpdateTodosParams {
-  toolCallId: string;
-  todos: CursorTodoItem[];
-  merge: boolean;
-}
-
-/** Last accepted todos from cursor/update_todos, keyed by ACP session id (survives per-turn subprocess restarts). */
-const cursorTodoStateBySession = new Map<string, CursorTodoItem[]>();
-
-function normalizeCursorTodoStatus(status: unknown): CursorTodoItem['status'] {
-  if (typeof status !== 'string') return 'pending';
-  const normalized = status.toLowerCase().replace(/^todo_status_/, '').replace(/[\s-]+/g, '_');
-  if (normalized === 'completed' || normalized === 'done') return 'completed';
-  if (normalized === 'in_progress' || normalized === 'active' || normalized === 'running') {
-    return 'in_progress';
-  }
-  if (normalized === 'cancelled' || normalized === 'canceled') return 'cancelled';
-  return 'pending';
-}
-
-function parseCursorTodoItem(value: unknown): CursorTodoItem | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const obj = value as Record<string, unknown>;
-  if (typeof obj.id !== 'string' || !obj.id.trim()) return null;
-  const content =
-    typeof obj.content === 'string'
-      ? obj.content.trim()
-      : typeof obj.title === 'string'
-        ? obj.title.trim()
-        : typeof obj.text === 'string'
-          ? obj.text.trim()
-          : '';
-  if (!content) return null;
-  return {
-    id: obj.id,
-    content,
-    status: normalizeCursorTodoStatus(obj.status),
-  };
-}
-
-function parseCursorUpdateTodosParams(params: unknown): CursorUpdateTodosParams | null {
-  if (!params || typeof params !== 'object' || Array.isArray(params)) return null;
-  const obj = params as Record<string, unknown>;
-  if (typeof obj.toolCallId !== 'string' || !obj.toolCallId.trim()) return null;
-  if (!Array.isArray(obj.todos)) return null;
-
-  const todos: CursorTodoItem[] = [];
-  for (const raw of obj.todos) {
-    const item = parseCursorTodoItem(raw);
-    if (!item) return null;
-    todos.push(item);
-  }
-
-  return {
-    toolCallId: obj.toolCallId,
-    todos,
-    merge: obj.merge === true,
-  };
-}
-
-/** Apply Cursor merge semantics: replace when merge=false; upsert by id when merge=true. */
-export function mergeCursorTodos(
-  existing: CursorTodoItem[],
-  incoming: CursorTodoItem[],
-  merge: boolean
-): CursorTodoItem[] {
-  if (!merge) return incoming.map((todo) => ({ ...todo }));
-
-  const byId = new Map<string, CursorTodoItem>();
-  for (const todo of existing) {
-    byId.set(todo.id, { ...todo });
-  }
-  for (const todo of incoming) {
-    byId.set(todo.id, { ...todo });
-  }
-
-  const ordered: CursorTodoItem[] = [];
-  const seen = new Set<string>();
-  for (const todo of existing) {
-    const next = byId.get(todo.id);
-    if (!next || seen.has(todo.id)) continue;
-    ordered.push(next);
-    seen.add(todo.id);
-  }
-  for (const todo of incoming) {
-    if (seen.has(todo.id)) continue;
-    ordered.push({ ...todo });
-    seen.add(todo.id);
-  }
-  return ordered;
-}
-
-/**
- * Emit synthetic ACP tool_call(+update) events so dashboard/shared parsers surface
- * todos in the existing Tasks panel (latest todos display item wins).
- */
-function emitCursorTodosUpdate(
-  params: CursorUpdateTodosParams,
-  acceptedTodos: CursorTodoItem[],
-  getSessionId: () => string | null,
-  fallback?: () => AcpEventHandler | undefined
-): void {
-  const sessionId = getSessionId();
-  const handler = resolveEventHandler(sessionId, fallback);
-  if (!handler) return;
-
-  const rawInput = { todos: acceptedTodos };
-  handler(
-    JSON.stringify({
-      sessionId,
-      update: {
-        sessionUpdate: 'tool_call',
-        toolCallId: params.toolCallId,
-        title: 'Update Todos',
-        kind: 'other',
-        status: 'pending',
-        rawInput,
-      },
-    })
-  );
-  handler(
-    JSON.stringify({
-      sessionId,
-      update: {
-        sessionUpdate: 'tool_call_update',
-        toolCallId: params.toolCallId,
-        status: 'completed',
-        rawInput,
-      },
-    })
-  );
-}
-
-function handleCursorUpdateTodos(
-  params: unknown,
-  getSessionId: () => string | null,
-  fallback?: () => AcpEventHandler | undefined
-): {
-  outcome:
-    | { outcome: 'accepted'; todos: CursorTodoItem[] }
-    | { outcome: 'rejected'; reason: string }
-    | { outcome: 'cancelled' };
-} {
-  const parsed = parseCursorUpdateTodosParams(params);
-  if (!parsed) {
-    return {
-      outcome: { outcome: 'rejected', reason: 'Invalid update_todos request.' },
-    };
-  }
-
-  const sessionId = getSessionId();
-  const existing = sessionId ? (cursorTodoStateBySession.get(sessionId) ?? []) : [];
-  const acceptedTodos = mergeCursorTodos(existing, parsed.todos, parsed.merge);
-
-  if (sessionId) {
-    cursorTodoStateBySession.set(sessionId, acceptedTodos);
-  }
-
-  emitCursorTodosUpdate(parsed, acceptedTodos, getSessionId, fallback);
-
-  return {
-    outcome: {
-      outcome: 'accepted',
-      todos: acceptedTodos,
-    },
-  };
-}
-
-function parseAskQuestionParams(params: unknown): AcpAskQuestionParams | null {
-  if (!params || typeof params !== 'object' || Array.isArray(params)) return null;
-  const obj = params as Record<string, unknown>;
-  if (typeof obj.toolCallId !== 'string' || !obj.toolCallId.trim()) return null;
-  if (!Array.isArray(obj.questions) || obj.questions.length === 0) return null;
-
-  const questions: AcpAskQuestionParams['questions'] = [];
-  for (const raw of obj.questions) {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-    const q = raw as Record<string, unknown>;
-    if (typeof q.id !== 'string' || !q.id.trim()) return null;
-    if (typeof q.prompt !== 'string' || !q.prompt.trim()) return null;
-    if (!Array.isArray(q.options) || q.options.length === 0) return null;
-    const options: Array<{ id: string; label: string }> = [];
-    for (const rawOpt of q.options) {
-      if (!rawOpt || typeof rawOpt !== 'object' || Array.isArray(rawOpt)) return null;
-      const opt = rawOpt as Record<string, unknown>;
-      if (typeof opt.id !== 'string' || !opt.id.trim()) return null;
-      if (typeof opt.label !== 'string' || !opt.label.trim()) return null;
-      options.push({ id: opt.id, label: opt.label });
-    }
-    questions.push({
-      id: q.id,
-      prompt: q.prompt,
-      options,
-      allowMultiple: q.allowMultiple === true,
-    });
-  }
-
-  return {
-    toolCallId: obj.toolCallId,
-    title: typeof obj.title === 'string' && obj.title.trim() ? obj.title.trim() : undefined,
-    questions,
-  };
-}
-
-async function defaultAskQuestionResponse(): Promise<AcpAskQuestionResponse> {
-  return {
-    outcome: {
-      outcome: 'skipped',
-      reason: 'Nova Code does not support interactive questions yet.',
-    },
-  };
-}
-
 function buildClientApp(
   onConfigSync?: SessionConfigSyncHandler,
   cursorExtensions?: boolean,
@@ -808,7 +208,9 @@ function buildClientApp(
   onAskQuestion?: AcpAskQuestionHandler,
   fallbackEventHandler?: () => AcpEventHandler | undefined
 ) {
-  let app = client({ name: 'nova-code' })
+  const resolveCursorHandler: CursorEventHandlerResolver = (sessionId) =>
+    resolveEventHandler(sessionId, fallbackEventHandler);
+  const app = client({ name: 'nova-code' })
     .onNotification(methods.client.session.update, ({ params }) => {
       const handler = resolveEventHandler(params.sessionId, fallbackEventHandler);
       if (handler) {
@@ -838,21 +240,21 @@ function buildClientApp(
         return onAskQuestion(parsed);
       })
       .onRequest('cursor/create_plan', parseUnknown, async ({ params }: { params: unknown }) => {
-        emitCursorPlanRequest(params, getActiveSessionId, fallbackEventHandler);
+        emitCursorPlanRequest(params, getActiveSessionId, resolveCursorHandler);
         return { outcome: { outcome: 'accepted' } };
       })
       .onRequest('cursor/update_todos', parseUnknown, async ({ params }: { params: unknown }) =>
-        handleCursorUpdateTodos(params, getActiveSessionId, fallbackEventHandler)
+        handleCursorUpdateTodos(params, getActiveSessionId, resolveCursorHandler)
       )
       .onNotification('cursor/update_todos', parseUnknown, ({ params }: { params: unknown }) => {
-        handleCursorUpdateTodos(params, getActiveSessionId, fallbackEventHandler);
+        handleCursorUpdateTodos(params, getActiveSessionId, resolveCursorHandler);
       })
       .onRequest('cursor/task', parseUnknown, async ({ params }: { params: unknown }) => {
-        emitCursorTaskActivity(params, getActiveSessionId, fallbackEventHandler);
+        emitCursorTaskActivity(params, getActiveSessionId, resolveCursorHandler);
         return { outcome: { outcome: 'completed' } };
       })
       .onNotification('cursor/task', parseUnknown, ({ params }: { params: unknown }) => {
-        emitCursorTaskActivity(params, getActiveSessionId, fallbackEventHandler);
+        emitCursorTaskActivity(params, getActiveSessionId, resolveCursorHandler);
       })
       .onRequest('cursor/generate_image', parseUnknown, async () => ({
         outcome: { outcome: 'rejected', reason: 'Nova Code does not support image generation yet.' },
@@ -860,20 +262,6 @@ function buildClientApp(
   }
 
   return app;
-}
-
-function acpAgent(ctx: ClientContext) {
-  return {
-    request: (method: string, params: unknown) => ctx.request(method, params as never),
-    notify: (method: string, params: unknown) => ctx.notify(method, params as never),
-    setSessionMode: (params: { sessionId: string; modeId: string }) =>
-      ctx.request(methods.agent.session.setMode, params),
-    setSessionConfigOption: (params: { sessionId: string; configId: string; value: string }) =>
-      ctx.request(methods.agent.session.setConfigOption, { ...params, type: 'select' as const }),
-    closeSession: (params: { sessionId: string }) => ctx.request(methods.agent.session.close, params),
-    deleteSession: (params: { sessionId: string }) => ctx.request(methods.agent.session.delete, params),
-    cancel: (params: { sessionId: string }) => ctx.notify(methods.agent.session.cancel, params),
-  };
 }
 
 function createPhaseLogger(logTag: string, novaSessionId: string) {
@@ -1204,8 +592,6 @@ export async function runAcpSubprocessPrompt(
 
       const extraDirs = resolveAdditionalDirectories(params, initialized);
 
-      let resolvedSessionId: string;
-      let sessionResponse: AcpSessionResponse;
       let resolvedModeId: string | undefined;
       let resolvedModelId: string | undefined;
       // Explicit `mcpServers` (probes, one-shots) are used as-is; chat turns get the
@@ -1280,8 +666,8 @@ export async function runAcpSubprocessPrompt(
         opened = await loadOrCreateSession([]);
       }
 
-      sessionResponse = opened.response;
-      resolvedSessionId = opened.sessionId;
+      const sessionResponse = opened.response;
+      const resolvedSessionId = opened.sessionId;
 
       sessionIdForCancel = resolvedSessionId;
 

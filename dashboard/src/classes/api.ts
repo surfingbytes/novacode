@@ -5,6 +5,7 @@ import { safeGetItem } from '@/lib/safeLocalStorage';
 
 // stores
 import { useApiHealthStore } from '@/stores/apiHealth';
+import { useToastStore } from '@/stores/toasts';
 
 // types
 import type {
@@ -162,6 +163,39 @@ function isAuthFlowUrl(url: string | undefined): boolean {
   return url.includes('/auth/login') || url.includes('/auth/setup') || url.includes('/auth/validate') || url.includes('/auth/logout') || url.includes('/auth/login-options') || url.includes('/auth/needs-setup') || url.includes('/auth/oidc/');
 }
 
+/**
+ * Toast text for responses every caller should surface: 403 and 5xx. Gateway
+ * failures (502/503/504) are left to the unreachable banner. Returns null when
+ * the error needs no global toast.
+ */
+export function apiErrorToastMessage(error: unknown): string | null {
+  if (!isAxiosError(error) || !error.response || isApiUnreachableError(error)) {
+    return null;
+  }
+  const status = error.response.status;
+  if (status !== 403 && status < 500) {
+    return null;
+  }
+  const base = status === 403 ? 'Forbidden' : `Server error (${status})`;
+  const body: unknown = error.response.data;
+  const detail = body && typeof body === 'object' && 'error' in body ? (body as { error: unknown }).error : undefined;
+  return typeof detail === 'string' && detail ? `${base}: ${detail}` : base;
+}
+
+/** True when the response interceptor already toasted this error — callers skip their own toast. */
+export function isGloballyToasted(error: unknown): boolean {
+  return apiErrorToastMessage(error) !== null;
+}
+
+function toastApiError(error: unknown): void {
+  const message = apiErrorToastMessage(error);
+  // Store resolved lazily via the active Pinia — requests can fire before the app mounts.
+  const pinia = getActivePinia();
+  if (message && pinia) {
+    useToastStore(pinia).error(message);
+  }
+}
+
 http.interceptors.response.use(
   (response) => {
     touchApiReachability(true);
@@ -184,6 +218,8 @@ http.interceptors.response.use(
         confirmApiUnreachable();
       } else if (error.response?.status === 401 && !isAuthFlowUrl(error.config?.url)) {
         onUnauthorized?.();
+      } else {
+        toastApiError(error);
       }
     }
     return Promise.reject(error);

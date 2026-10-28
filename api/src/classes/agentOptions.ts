@@ -162,7 +162,7 @@ function prettifyId(id: string): string {
 }
 
 function parseConfiguredModelId(id: string): { baseId: string; config: Record<string, string> } | null {
-  const match = id.match(/^([^\[]+)\[([^\]]+)\]$/);
+  const match = id.match(/^([^[]+)\[([^\]]+)\]$/);
   if (!match) return null;
 
   const parsedConfig: Record<string, string> = {};

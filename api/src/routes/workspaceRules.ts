@@ -1,5 +1,7 @@
 // node_modules
 import type { FastifyInstance } from 'fastify';
+import { Type } from '@sinclair/typebox';
+import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 
 // classes
 import { jwtPreHandler } from '../classes/auth';
@@ -11,6 +13,11 @@ import {
   renameWorkspaceRuleFile,
   type WorkspaceRuleErrorCode
 } from '../classes/workspaceRules';
+
+const WorkspaceParamsSchema = Type.Object({ workspaceId: Type.String() });
+const RuleFileParamsSchema = Type.Object({ workspaceId: Type.String(), filename: Type.String() });
+const WriteBodySchema = Type.Object({ content: Type.String() });
+const RenameBodySchema = Type.Object({ newFilename: Type.String() });
 
 function mapErrorCodeToStatus(code: WorkspaceRuleErrorCode): number {
   switch (code) {
@@ -28,12 +35,14 @@ function mapErrorCodeToStatus(code: WorkspaceRuleErrorCode): number {
 }
 
 export async function workspaceRuleRoutes(fastify: FastifyInstance): Promise<void> {
+  const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
+
   // GET /api/workspaces/:workspaceId/rules
-  fastify.get(
+  fastifyInstance.get(
     '/api/workspaces/:workspaceId/rules',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, schema: { params: WorkspaceParamsSchema } },
     async (request, reply) => {
-      const { workspaceId } = request.params as { workspaceId: string };
+      const { workspaceId } = request.params;
       const result = await listWorkspaceRuleFiles(workspaceId);
       if (!result.ok) {
         const status = mapErrorCodeToStatus(result.code);
@@ -44,14 +53,11 @@ export async function workspaceRuleRoutes(fastify: FastifyInstance): Promise<voi
   );
 
   // GET /api/workspaces/:workspaceId/rules/:filename
-  fastify.get(
+  fastifyInstance.get(
     '/api/workspaces/:workspaceId/rules/:filename',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, schema: { params: RuleFileParamsSchema } },
     async (request, reply) => {
-      const { workspaceId, filename } = request.params as {
-        workspaceId: string;
-        filename: string;
-      };
+      const { workspaceId, filename } = request.params;
       const result = await readWorkspaceRuleFile(workspaceId, filename);
       if (!result.ok) {
         const status = mapErrorCodeToStatus(result.code);
@@ -62,19 +68,12 @@ export async function workspaceRuleRoutes(fastify: FastifyInstance): Promise<voi
   );
 
   // PUT /api/workspaces/:workspaceId/rules/:filename
-  fastify.put(
+  fastifyInstance.put(
     '/api/workspaces/:workspaceId/rules/:filename',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, schema: { params: RuleFileParamsSchema, body: WriteBodySchema } },
     async (request, reply) => {
-      const { workspaceId, filename } = request.params as {
-        workspaceId: string;
-        filename: string;
-      };
-      const body = request.body as { content?: unknown };
-      if (typeof body?.content !== 'string') {
-        return reply.status(400).send({ error: 'content is required and must be a string' });
-      }
-      const result = await writeWorkspaceRuleFile(workspaceId, filename, body.content);
+      const { workspaceId, filename } = request.params;
+      const result = await writeWorkspaceRuleFile(workspaceId, filename, request.body.content);
       if (!result.ok) {
         const status = mapErrorCodeToStatus(result.code);
         return reply.status(status).send({ error: result.message, code: result.code });
@@ -84,14 +83,11 @@ export async function workspaceRuleRoutes(fastify: FastifyInstance): Promise<voi
   );
 
   // DELETE /api/workspaces/:workspaceId/rules/:filename
-  fastify.delete(
+  fastifyInstance.delete(
     '/api/workspaces/:workspaceId/rules/:filename',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, schema: { params: RuleFileParamsSchema } },
     async (request, reply) => {
-      const { workspaceId, filename } = request.params as {
-        workspaceId: string;
-        filename: string;
-      };
+      const { workspaceId, filename } = request.params;
       const result = await deleteWorkspaceRuleFile(workspaceId, filename);
       if (!result.ok) {
         const status = mapErrorCodeToStatus(result.code);
@@ -102,19 +98,12 @@ export async function workspaceRuleRoutes(fastify: FastifyInstance): Promise<voi
   );
 
   // PATCH /api/workspaces/:workspaceId/rules/:filename (rename)
-  fastify.patch(
+  fastifyInstance.patch(
     '/api/workspaces/:workspaceId/rules/:filename',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, schema: { params: RuleFileParamsSchema, body: RenameBodySchema } },
     async (request, reply) => {
-      const { workspaceId, filename } = request.params as {
-        workspaceId: string;
-        filename: string;
-      };
-      const body = request.body as { newFilename?: unknown };
-      if (typeof body?.newFilename !== 'string') {
-        return reply.status(400).send({ error: 'newFilename is required and must be a string' });
-      }
-      const result = await renameWorkspaceRuleFile(workspaceId, filename, body.newFilename);
+      const { workspaceId, filename } = request.params;
+      const result = await renameWorkspaceRuleFile(workspaceId, filename, request.body.newFilename);
       if (!result.ok) {
         const status = mapErrorCodeToStatus(result.code);
         return reply.status(status).send({ error: result.message, code: result.code });

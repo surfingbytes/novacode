@@ -9,9 +9,10 @@ import BaseModal from '@/components/BaseModal.vue';
 
 // stores
 import { useAuthStore } from '@/stores/auth';
+import { useToastStore } from '@/stores/toasts';
 
 // api
-import { authApi, agentAuthApi, settingsApi } from '@/classes/api';
+import { authApi, agentAuthApi, isGloballyToasted, settingsApi } from '@/classes/api';
 
 
 // classes
@@ -29,6 +30,7 @@ import {
 // -------------------------------------------------- Store --------------------------------------------------
 const router = useRouter();
 const auth = useAuthStore();
+const toastStore = useToastStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const step = ref<1 | 2 | 3 | 4>(1);
@@ -148,31 +150,31 @@ const refreshAuthStatus = async (): Promise<void> => {
     const cursorResponse = await agentAuthApi.cursorStatus();
     bCursorAuthenticated.value = cursorResponse.data.authenticated;
   } catch {
-    // ignore
+    // Best-effort status probe; the agent card just shows not-connected.
   }
   try {
     const claudeResponse = await agentAuthApi.claudeStatus();
     bClaudeAuthenticated.value = claudeResponse.data.authenticated;
   } catch {
-    // ignore
+    // Best-effort status probe; the agent card just shows not-connected.
   }
   try {
     const vibeResponse = await settingsApi.getVibeApiKeyStatus();
     bVibeConfigured.value = vibeResponse.data.configured;
   } catch {
-    // ignore
+    // Best-effort status probe; the agent card just shows not-connected.
   }
   try {
     const openCodeResponse = await agentAuthApi.openCodeStatus();
     bOpenCodeAuthenticated.value = openCodeResponse.data.authenticated;
   } catch {
-    // ignore
+    // Best-effort status probe; the agent card just shows not-connected.
   }
   try {
     const codexResponse = await agentAuthApi.codexStatus();
     bCodexAuthenticated.value = codexResponse.data.authenticated;
   } catch {
-    // ignore
+    // Best-effort status probe; the agent card just shows not-connected.
   }
 };
 
@@ -184,8 +186,8 @@ const startCursorLogin = async (): Promise<void> => {
     authKind.value = 'cursor';
     const response = await agentAuthApi.cursorLogin();
     authSessionId.value = response.data.sessionId;
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Cursor login failed');
   } finally {
     bStartingCursorLogin.value = false;
   }
@@ -199,8 +201,8 @@ const startClaudeLogin = async (): Promise<void> => {
     authKind.value = 'claude';
     const response = await agentAuthApi.claudeLogin();
     authSessionId.value = response.data.sessionId;
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Claude login failed');
   } finally {
     bStartingClaudeLogin.value = false;
   }
@@ -211,8 +213,8 @@ const logoutCursor = async (): Promise<void> => {
   try {
     await agentAuthApi.cursorLogout();
     await refreshAuthStatus();
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Cursor logout failed');
   } finally {
     bLoggingOutCursor.value = false;
   }
@@ -223,8 +225,8 @@ const logoutClaude = async (): Promise<void> => {
   try {
     await agentAuthApi.claudeLogout();
     await refreshAuthStatus();
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Claude logout failed');
   } finally {
     bLoggingOutClaude.value = false;
   }
@@ -306,8 +308,8 @@ const clearVibeApiKey = async (): Promise<void> => {
   try {
     await settingsApi.clearVibeApiKey();
     await refreshAuthStatus();
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Remove API key failed');
   } finally {
     bClearingVibeKey.value = false;
   }
@@ -338,8 +340,8 @@ const clearOpenCodeApiKey = async (): Promise<void> => {
   try {
     await agentAuthApi.openCodeLogout();
     await refreshAuthStatus();
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Remove API key failed');
   } finally {
     bClearingOpenCodeKey.value = false;
   }
@@ -370,8 +372,8 @@ const clearCodexApiKey = async (): Promise<void> => {
   try {
     await agentAuthApi.codexLogout();
     await refreshAuthStatus();
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Remove API key failed');
   } finally {
     bClearingCodexKey.value = false;
   }
@@ -418,7 +420,7 @@ const toggleNotifications = async (): Promise<void> => {
   try {
     await syncPushSubscription();
   } catch {
-    // ignore push registration failures
+    // Push is optional; the local notification toggle still applies without it.
   }
 };
 

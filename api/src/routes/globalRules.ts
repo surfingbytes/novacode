@@ -1,5 +1,7 @@
 // node_modules
 import type { FastifyInstance } from 'fastify';
+import { Type } from '@sinclair/typebox';
+import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 
 // classes
 import { jwtPreHandler } from '../classes/auth';
@@ -11,6 +13,10 @@ import {
   writeGlobalRuleFile
 } from '../classes/globalRules';
 import type { RuleFileErrorCode } from '../classes/ruleFiles';
+
+const FilenameParamsSchema = Type.Object({ filename: Type.String() });
+const WriteBodySchema = Type.Object({ content: Type.String() });
+const RenameBodySchema = Type.Object({ newFilename: Type.String() });
 
 function mapErrorCodeToStatus(code: RuleFileErrorCode): number {
   switch (code) {
@@ -26,7 +32,9 @@ function mapErrorCodeToStatus(code: RuleFileErrorCode): number {
 }
 
 export async function globalRuleRoutes(fastify: FastifyInstance): Promise<void> {
-  fastify.get('/api/global-rules', { preHandler: jwtPreHandler }, async (_request, reply) => {
+  const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
+
+  fastifyInstance.get('/api/global-rules', { preHandler: jwtPreHandler }, async (_request, reply) => {
     const result = await listGlobalRuleFiles();
     if (!result.ok) {
       return reply.status(mapErrorCodeToStatus(result.code)).send({
@@ -37,11 +45,11 @@ export async function globalRuleRoutes(fastify: FastifyInstance): Promise<void> 
     return reply.send(result.value);
   });
 
-  fastify.get(
+  fastifyInstance.get(
     '/api/global-rules/:filename',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, schema: { params: FilenameParamsSchema } },
     async (request, reply) => {
-      const { filename } = request.params as { filename: string };
+      const { filename } = request.params;
       const result = await readGlobalRuleFile(filename);
       if (!result.ok) {
         return reply.status(mapErrorCodeToStatus(result.code)).send({
@@ -53,16 +61,12 @@ export async function globalRuleRoutes(fastify: FastifyInstance): Promise<void> 
     }
   );
 
-  fastify.put(
+  fastifyInstance.put(
     '/api/global-rules/:filename',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, schema: { params: FilenameParamsSchema, body: WriteBodySchema } },
     async (request, reply) => {
-      const { filename } = request.params as { filename: string };
-      const body = request.body as { content?: unknown };
-      if (typeof body?.content !== 'string') {
-        return reply.status(400).send({ error: 'content is required and must be a string' });
-      }
-      const result = await writeGlobalRuleFile(filename, body.content);
+      const { filename } = request.params;
+      const result = await writeGlobalRuleFile(filename, request.body.content);
       if (!result.ok) {
         return reply.status(mapErrorCodeToStatus(result.code)).send({
           error: result.message,
@@ -73,11 +77,11 @@ export async function globalRuleRoutes(fastify: FastifyInstance): Promise<void> 
     }
   );
 
-  fastify.delete(
+  fastifyInstance.delete(
     '/api/global-rules/:filename',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, schema: { params: FilenameParamsSchema } },
     async (request, reply) => {
-      const { filename } = request.params as { filename: string };
+      const { filename } = request.params;
       const result = await deleteGlobalRuleFile(filename);
       if (!result.ok) {
         return reply.status(mapErrorCodeToStatus(result.code)).send({
@@ -89,16 +93,12 @@ export async function globalRuleRoutes(fastify: FastifyInstance): Promise<void> 
     }
   );
 
-  fastify.patch(
+  fastifyInstance.patch(
     '/api/global-rules/:filename',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, schema: { params: FilenameParamsSchema, body: RenameBodySchema } },
     async (request, reply) => {
-      const { filename } = request.params as { filename: string };
-      const body = request.body as { newFilename?: unknown };
-      if (typeof body?.newFilename !== 'string') {
-        return reply.status(400).send({ error: 'newFilename is required and must be a string' });
-      }
-      const result = await renameGlobalRuleFile(filename, body.newFilename);
+      const { filename } = request.params;
+      const result = await renameGlobalRuleFile(filename, request.body.newFilename);
       if (!result.ok) {
         return reply.status(mapErrorCodeToStatus(result.code)).send({
           error: result.message,

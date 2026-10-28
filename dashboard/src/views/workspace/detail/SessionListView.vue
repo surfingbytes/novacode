@@ -24,7 +24,7 @@ import { useToastStore } from '@/stores/toasts';
 import { useOrchestratorsStore } from '@/stores/orchestrators';
 
 // classes
-import { apiErrorMessage, sessionsApi, orchestratorApi } from '@/classes/api';
+import { apiErrorMessage, isGloballyToasted, sessionsApi, orchestratorApi } from '@/classes/api';
 import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 import { createPlanningSession, type NewOrchestratorOptions } from '@/lib/createPlanningSession';
 import { subtasksFromStoredJson } from '@/utils/orchestratorPayload';
@@ -483,8 +483,8 @@ const deleteSession = async (): Promise<void> => {
   try {
     await sessionsApi.remove(props.workspace.id, sessionToDelete.value.id);
     sessionToDelete.value = null;
-  } catch {
-    toastStore.error('Failed to delete session');
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Failed to delete session');
   } finally {
     bDeletingSession.value = false;
   }
@@ -500,8 +500,8 @@ const deleteOrchestrator = async (): Promise<void> => {
     await orchestratorApi.remove(props.workspace.id, orchestratorToDelete.value.id);
     orchestratorsStore.removeOrchestrator(orchestratorToDelete.value.id, props.workspace.id);
     orchestratorToDelete.value = null;
-  } catch {
-    toastStore.error('Failed to delete orchestrator');
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Failed to delete orchestrator');
   } finally {
     bDeletingOrchestrator.value = false;
   }
@@ -539,8 +539,8 @@ const bulkDeleteCombined = async (): Promise<void> => {
       orchestratorSelectedIds.value = new Set();
     }
     bShowBulkDeleteCombined.value = false;
-  } catch {
-    toastStore.error('Failed to delete selection');
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Failed to delete selection');
   } finally {
     bBulkDeletingCombined.value = false;
   }
@@ -555,8 +555,8 @@ const saveEditSession = async (payload: {
   try {
     await sessionsApi.update(props.workspace.id, sessionToEdit.value.id, payload);
     sessionToEdit.value = null;
-  } catch {
-    toastStore.error('Failed to update session');
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Failed to update session');
   } finally {
     bSavingEdit.value = false;
   }
@@ -569,8 +569,8 @@ const toggleArchive = async (session: Session): Promise<void> => {
     await sessionsApi.update(props.workspace.id, session.id, {
       archived: nextArchived
     });
-  } catch {
-    toastStore.error('Failed to toggle archive');
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Failed to toggle archive');
   }
 };
 
@@ -583,8 +583,8 @@ const toggleArchiveOrchestrator = async (orchestrator: Orchestrator): Promise<vo
     });
     const idx = orchestrators.value.findIndex((o) => o.id === orchestrator.id);
     if (idx >= 0 && data) orchestrators.value[idx] = data;
-  } catch {
-    toastStore.error('Failed to toggle orchestrator archive');
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Failed to toggle orchestrator archive');
   }
 };
 
@@ -612,8 +612,8 @@ const onMultiselectArchive = async (): Promise<void> => {
     }
     selectedIds.value = new Set();
     orchestratorSelectedIds.value = new Set();
-  } catch {
-    toastStore.error('Failed to archive selection');
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Failed to archive selection');
   } finally {
     bBulkArchiving.value = false;
   }

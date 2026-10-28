@@ -12,7 +12,7 @@ import PageHeader from '@/components/layout/PageHeader.vue';
 import ListPageSkeleton from '@/components/ui/ListPageSkeleton.vue';
 
 // api
-import { automationsApi, workspaceApi } from '@/classes/api';
+import { automationsApi, isGloballyToasted, workspaceApi } from '@/classes/api';
 import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 
 // stores
@@ -119,8 +119,8 @@ async function fetchRuns(automationId: string): Promise<void> {
   try {
     const response = await automationsApi.listRuns(automationId, 50);
     runs.value = response.data ?? [];
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) toastStore.error('Load runs failed');
   } finally {
     bRunsLoading.value = false;
   }
@@ -139,13 +139,13 @@ function startPoll(): void {
           selectedAutomation.value = updated;
         }
       } catch {
-        /* ignore */
+        // Background poll; the next tick retries and the last good list stays shown.
       }
       try {
         const response = await automationsApi.listRuns(selectedAutomation.value.id, 50);
         runs.value = response.data ?? [];
       } catch {
-        /* ignore */
+        // Background poll; the next tick retries and the last good runs stay shown.
       }
     }
   }, 15_000);

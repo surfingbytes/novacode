@@ -50,7 +50,7 @@ function prettifyId(id: string): string {
 }
 
 function parseConfiguredModelId(id: string): { baseId: string; config: Record<string, string> } | null {
-  const match = id.match(/^([^\[]+)\[([^\]]+)\]$/);
+  const match = id.match(/^([^[]+)\[([^\]]+)\]$/);
   if (!match) return null;
 
   const config: Record<string, string> = {};
@@ -208,7 +208,7 @@ export async function getAgentModels(
     return { models: cached.models, fromCache: true };
   }
 
-  let rawModels: Array<{ id: string; label: string }> = [];
+  let rawModels: Array<{ id: string; label: string }>;
   if (agentType === 'cursor-agent') {
     rawModels = getCursorModels().models;
   } else if (agentType === 'open-code') {

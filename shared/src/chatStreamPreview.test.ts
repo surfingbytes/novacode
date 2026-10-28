@@ -2,7 +2,12 @@
 import { describe, it, expect } from 'vitest';
 
 // classes
-import { extractStreamNotificationPreview } from './chatStreamPreview.js';
+import {
+  appendAssistantTextChunk,
+  extractStreamNotificationPreview,
+  mergeAssistantTextIntoDisplayItems,
+  todosFromAcpUpdate
+} from './chatStreamPreview.js';
 
 // ---------------------------------- ACP native format ----------------------------------
 
@@ -257,5 +262,35 @@ describe('robustness', () => {
   it('ignores non-JSON lines and thinking events', () => {
     const events = ['not json', JSON.stringify({ type: 'thinking', content: 'hmm' })];
     expect(extractStreamNotificationPreview(events)).toBe('');
+  });
+});
+
+// ---------------------------------- Exported helpers ----------------------------------
+
+describe('todosFromAcpUpdate', () => {
+  it('falls back to title / text when a todo has no content', () => {
+    const todos = todosFromAcpUpdate({
+      rawInput: {
+        todos: [
+          { id: 'a', title: 'From title', status: 'in_progress' },
+          { text: 'From text', status: 'done' },
+          { content: '  ', status: 'pending' }
+        ]
+      }
+    });
+    expect(todos).toEqual([
+      { id: 'a', content: 'From title', status: 'TODO_STATUS_IN_PROGRESS' },
+      { id: 'todo-1', content: 'From text', status: 'TODO_STATUS_COMPLETED' }
+    ]);
+  });
+});
+
+describe('text merge helpers', () => {
+  it('accept wider item types than StreamDisplayItem', () => {
+    const items: Array<{ kind: 'text' | 'notice'; text?: string }> = [{ kind: 'notice' }];
+    mergeAssistantTextIntoDisplayItems('The shared', items);
+    mergeAssistantTextIntoDisplayItems(' shared state', items);
+    appendAssistantTextChunk('!', items);
+    expect(items).toEqual([{ kind: 'notice' }, { kind: 'text', text: 'The shared state!' }]);
   });
 });

@@ -1,13 +1,24 @@
 // node_modules
 import type { FastifyInstance } from 'fastify';
+import { Type } from '@sinclair/typebox';
+import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 
 // classes
 import { jwtPreHandler } from '../classes/auth';
 import { db } from '../classes/database';
 
+const TemplateParamsSchema = Type.Object({ templateId: Type.String() });
+const TemplateBodySchema = Type.Object({
+  name: Type.Optional(Type.String()),
+  description: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  content: Type.Optional(Type.String())
+});
+
 export async function roleTemplateRoutes(fastify: FastifyInstance): Promise<void> {
+  const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
+
   // GET /api/role-templates
-  fastify.get(
+  fastifyInstance.get(
     '/api/role-templates',
     { preHandler: jwtPreHandler },
     async (_request, reply) => {
@@ -17,15 +28,11 @@ export async function roleTemplateRoutes(fastify: FastifyInstance): Promise<void
   );
 
   // POST /api/role-templates
-  fastify.post(
+  fastifyInstance.post(
     '/api/role-templates',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, schema: { body: TemplateBodySchema } },
     async (request, reply) => {
-      const body = request.body as {
-        name?: string;
-        description?: string | null;
-        content?: string;
-      };
+      const body = request.body;
 
       const name = body.name?.trim();
       if (!name) {
@@ -54,22 +61,18 @@ export async function roleTemplateRoutes(fastify: FastifyInstance): Promise<void
   );
 
   // PATCH /api/role-templates/:templateId
-  fastify.patch(
+  fastifyInstance.patch(
     '/api/role-templates/:templateId',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, schema: { params: TemplateParamsSchema, body: TemplateBodySchema } },
     async (request, reply) => {
-      const { templateId } = request.params as { templateId: string };
+      const { templateId } = request.params;
 
       const existing = await db.getRoleTemplate(templateId);
       if (!existing) {
         return reply.status(404).send({ error: 'Role template not found' });
       }
 
-      const body = request.body as {
-        name?: string;
-        description?: string | null;
-        content?: string;
-      };
+      const body = request.body;
 
       if (body.name !== undefined) {
         const trimmedName = body.name.trim();
@@ -107,11 +110,11 @@ export async function roleTemplateRoutes(fastify: FastifyInstance): Promise<void
   );
 
   // DELETE /api/role-templates/:templateId
-  fastify.delete(
+  fastifyInstance.delete(
     '/api/role-templates/:templateId',
-    { preHandler: jwtPreHandler },
+    { preHandler: jwtPreHandler, schema: { params: TemplateParamsSchema } },
     async (request, reply) => {
-      const { templateId } = request.params as { templateId: string };
+      const { templateId } = request.params;
 
       const existing = await db.getRoleTemplate(templateId);
       if (!existing) {

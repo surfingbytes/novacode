@@ -325,7 +325,7 @@ export function repoPathForProvider(provider: ForgeProvider, path: string, conne
   let segments = path.split('/').filter(Boolean);
   if (provider === 'gitlab') {
     // Drop an install sub-path (`https://host/gitlab/group/project` → `group/project`).
-    let prefix: string[] = [];
+    let prefix: string[];
     try {
       prefix = connectionUrl ? new URL(connectionUrl).pathname.split('/').filter(Boolean) : [];
     } catch {
