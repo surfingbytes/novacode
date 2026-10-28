@@ -426,7 +426,7 @@ onMounted((): void => {
               />
               <button
                 type="button"
-                class="bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-3 py-2 rounded-lg transition-all"
+                class="bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed text-on-accent text-sm font-medium px-3 py-2 rounded-lg transition-all"
                 :disabled="bIdleTimeoutEnvOverride || bSavingIdleTimeout"
                 @click="saveIdleTimeout"
               >Save</button>

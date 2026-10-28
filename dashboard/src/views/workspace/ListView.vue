@@ -19,13 +19,13 @@ import { useToastStore } from '@/stores/toasts';
 
 // composables
 import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
+import { useCreateSession } from '@/composables/useCreateSession';
 
 // classes
-import { agentAuthApi, apiErrorMessage, sessionsApi, settingsApi } from '@/classes/api';
-import { createPlanningSession, type NewOrchestratorOptions } from '@/lib/createPlanningSession';
+import { agentAuthApi, apiErrorMessage, settingsApi } from '@/classes/api';
 
 // types
-import type { AgentType, ApprovalPolicy, Workspace } from '@/@types/index';
+import type { AgentType, Workspace } from '@/@types/index';
 import { DEFAULT_WORKSPACE_BROWSE_ROOT, MAX_FAVORITE_WORKSPACES } from '@/@types/index';
 
 // -------------------------------------------------- Store --------------------------------------------------
@@ -41,9 +41,20 @@ const {
   bCapabilitiesLoaded,
   ensureLoaded: ensureAgentCapabilitiesLoaded
 } = useAgentCapabilities();
+const {
+  bShowNewSession,
+  newSessionWorkspace,
+  newSessionTags,
+  bCreating,
+  createError,
+  openNewSession,
+  createSession
+} = useCreateSession();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const bShowWorkspaceModal = ref<boolean>(false);
+const bSavingWorkspace = ref<boolean>(false);
+const workspaceSaveError = ref<string | null>(null);
 const editingWorkspace = ref<Workspace | undefined>(undefined);
 const deletingId = ref<string | null>(null);
 const confirmingDeleteId = ref<string | null>(null);
@@ -59,10 +70,6 @@ const bHasGitCredentials = ref<boolean>(false);
 const newGroupNames = ref<string[]>([]);
 const bShowWorkspaceDeleteModal = ref<boolean>(false);
 const deletingWorkspace = ref<Workspace | undefined>(undefined);
-const bShowNewSessionModal = ref<boolean>(false);
-const newSessionWorkspace = ref<Workspace | undefined>(undefined);
-const bSubmittingSession = ref<boolean>(false);
-const createSessionError = ref<string | null>(null);
 const workspaceBrowseRoot = ref<string>(DEFAULT_WORKSPACE_BROWSE_ROOT);
 
 const bCtxMenuOpen = ref<boolean>(false);
@@ -165,26 +172,6 @@ const busyWorkspaceIds = computed(() => {
   return ids;
 });
 
-const newSessionTags = computed((): string[] => {
-  const workspaceId = newSessionWorkspace.value?.id;
-  if (!workspaceId) return [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const session of store.allSessions) {
-    if (session.workspaceId !== workspaceId) continue;
-    const tags = session.tags;
-    if (!tags?.length) continue;
-    for (const tag of tags) {
-      if (typeof tag !== 'string' || !tag.trim()) continue;
-      const key = tag.trim().toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(tag.trim());
-    }
-  }
-  return out.sort((a, b) => a.localeCompare(b));
-});
-
 // -------------------------------------------------- Methods --------------------------------------------------
 const openWorkspace = (id: string): void => {
   router.push(`/workspace/${id}`);
@@ -194,50 +181,14 @@ const workspaceHasBusySession = (id: string): boolean => busyWorkspaceIds.value.
 
 const openCreateWorkspace = (): void => {
   editingWorkspace.value = undefined;
+  workspaceSaveError.value = null;
   bShowWorkspaceModal.value = true;
 };
 
 const openEditWorkspace = (workspace: Workspace): void => {
   editingWorkspace.value = workspace;
+  workspaceSaveError.value = null;
   bShowWorkspaceModal.value = true;
-};
-
-const openNewSession = (workspace: Workspace): void => {
-  newSessionWorkspace.value = workspace;
-  createSessionError.value = null;
-  ensureAgentCapabilitiesLoaded();
-  bShowNewSessionModal.value = true;
-};
-
-const createSession = async (payload: {
-  name: string;
-  tags?: string[] | null;
-  agentType: AgentType;
-  modelSelection?: string | null;
-  approvalPolicy: ApprovalPolicy;
-  orchestrator?: NewOrchestratorOptions;
-}): Promise<void> => {
-  const workspace = newSessionWorkspace.value;
-  if (!workspace || bSubmittingSession.value) return;
-  bSubmittingSession.value = true;
-  createSessionError.value = null;
-  try {
-    const { orchestrator, ...sessionPayload } = payload;
-    const sessionId = orchestrator
-      ? await createPlanningSession(workspace.id, { ...payload, orchestrator })
-      : (await sessionsApi.create(workspace.id, sessionPayload)).data.id;
-    bShowNewSessionModal.value = false;
-    newSessionWorkspace.value = undefined;
-    await router.push({
-      name: 'session',
-      params: { id: workspace.id, sessionId }
-    });
-  } catch (error) {
-    createSessionError.value = apiErrorMessage(error, 'Failed to create session');
-    toastStore.error(createSessionError.value);
-  } finally {
-    bSubmittingSession.value = false;
-  }
 };
 
 const handleSaveWorkspace = async (payload: {
@@ -252,12 +203,23 @@ const handleSaveWorkspace = async (payload: {
   forgeConnectionId?: string | null;
   forgeRepo?: string | null;
 }): Promise<void> => {
-  if (editingWorkspace.value) {
-    await store.updateWorkspace(editingWorkspace.value.id, payload);
-  } else {
-    await store.createWorkspace(payload);
+  if (bSavingWorkspace.value) return;
+  const editing = editingWorkspace.value;
+  bSavingWorkspace.value = true;
+  workspaceSaveError.value = null;
+  try {
+    if (editing) {
+      await store.updateWorkspace(editing.id, payload);
+    } else {
+      await store.createWorkspace(payload);
+    }
+    bShowWorkspaceModal.value = false;
+    toastStore.success(editing ? 'Workspace saved' : 'Workspace created');
+  } catch (error) {
+    workspaceSaveError.value = apiErrorMessage(error, editing ? 'Failed to save workspace' : 'Failed to create workspace');
+  } finally {
+    bSavingWorkspace.value = false;
   }
-  bShowWorkspaceModal.value = false;
 };
 
 const openDeleteWorkspace = (workspace: Workspace): void => {
@@ -471,7 +433,10 @@ onMounted((): void => {
               v-for="workspace in section.workspaces"
               :key="workspace.id"
               class="ws-card nc-row-hover"
+              role="link"
+              tabindex="0"
               @click="openWorkspace(workspace.id)"
+              @keydown.enter.self="openWorkspace(workspace.id)"
               @contextmenu.prevent.stop="openWorkspaceContextMenu($event, workspace)"
             >
               <!-- 3px color bar -->
@@ -568,6 +533,10 @@ onMounted((): void => {
                     v-for="workspace in section.workspaces"
                     :key="workspace.id"
                     class="ws-card"
+                    role="link"
+                    tabindex="0"
+                    @click="openWorkspace(workspace.id)"
+                    @keydown.enter.self="openWorkspace(workspace.id)"
                     @contextmenu.prevent.stop="openWorkspaceContextMenu($event, workspace)"
                   >
                     <div class="ws-card__bar" :style="{ background: workspace.color || 'var(--accent)' }" />
@@ -612,6 +581,8 @@ onMounted((): void => {
     :open-code-available="openCodeAvailable"
     :codex-available="codexAvailable"
     :browse-root="workspaceBrowseRoot"
+    :saving="bSavingWorkspace"
+    :server-error="workspaceSaveError"
     @create-group="handleCreateGroup"
     @save="handleSaveWorkspace"
   />
@@ -623,9 +594,9 @@ onMounted((): void => {
   />
 
   <NewSessionModal
-    v-model="bShowNewSessionModal"
-    :loading="bSubmittingSession"
-    :error="createSessionError"
+    v-model="bShowNewSession"
+    :loading="bCreating"
+    :error="createError"
     :default-agent-type="newSessionWorkspace?.defaultAgentType ?? null"
     :claude-available="claudeAvailable"
     :cursor-available="cursorAvailable"
@@ -816,6 +787,10 @@ onMounted((): void => {
   transition: border-color 0.12s, box-shadow 0.12s;
   display: flex;
   flex-direction: column;
+}
+.ws-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .ws-card:hover {
   border-color: var(--line-strong);

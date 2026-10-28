@@ -13,6 +13,9 @@ import { computed, ref } from 'vue';
 import { sessionsApi } from '@/classes/api';
 
 // components
+import TodoStatusIcon from '@/components/chat/TodoStatusIcon.vue';
+
+// utils
 import {
   getToolIconSvg,
   filePathFromToolItem,
@@ -38,6 +41,11 @@ const visibleItems = computed(() =>
 
 /** Tool images whose file is gone (or outside the workspaces) — show a note instead. */
 const failedToolImagePaths = ref(new Set<string>());
+
+/** Tool/todo cards show a spinner only while live; other statuses have no icon. */
+function toolStatusIconShown(status: DisplayItem['status']): boolean {
+  return (props.bLive && status === 'running') || status === 'success' || status === 'rejected';
+}
 
 function imageToggleId(callId: string): string {
   return `${callId}:image`;
@@ -79,54 +87,7 @@ const emit = defineEmits<{
           >{{ item.todoDoneCount ?? 0 }}/{{ item.todoItems?.length ?? 0 }} completed</span
         >
         <span class="shrink-0 ml-auto pl-2">
-          <svg
-            v-if="bLive && item.status === 'running'"
-            class="animate-spin text-primary select-none"
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
-            <polyline points="23 4 23 10 17 10" />
-            <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
-          </svg>
-          <svg
-            v-else-if="item.status === 'success'"
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            class="text-green-500 select-none"
-            aria-hidden="true"
-          >
-            <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
-            <polyline points="22 4 12 14.01 9 11.01" />
-          </svg>
-          <svg
-            v-else-if="item.status === 'rejected'"
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            class="text-text-muted select-none"
-            aria-hidden="true"
-          >
-            <circle cx="12" cy="12" r="10" />
-            <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
-          </svg>
+          <TodoStatusIcon v-if="toolStatusIconShown(item.status)" :status="item.status ?? ''" />
         </span>
       </div>
     </div>
@@ -186,7 +147,7 @@ const emit = defineEmits<{
           stroke-width="1.6"
           stroke-linecap="round"
           stroke-linejoin="round"
-          class="select-none shrink-0 mt-px text-yellow-500"
+          class="select-none shrink-0 mt-px text-warning"
           aria-hidden="true"
         >
           <path
@@ -218,54 +179,7 @@ const emit = defineEmits<{
           </button>
           <span v-else class="truncate">{{ item.toolSummary }}</span>
           <span class="shrink-0 ml-auto pl-2">
-            <svg
-              v-if="bLive && item.status === 'running'"
-              class="animate-spin text-primary select-none"
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.6"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
-            >
-              <polyline points="23 4 23 10 17 10" />
-              <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
-            </svg>
-            <svg
-              v-else-if="item.status === 'success'"
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.6"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              class="text-green-500 select-none"
-              aria-hidden="true"
-            >
-              <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
-              <polyline points="22 4 12 14.01 9 11.01" />
-            </svg>
-            <svg
-              v-else-if="item.status === 'rejected'"
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.6"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              class="text-text-muted select-none"
-              aria-hidden="true"
-            >
-              <circle cx="12" cy="12" r="10" />
-              <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
-            </svg>
+            <TodoStatusIcon v-if="toolStatusIconShown(item.status)" :status="item.status ?? ''" />
           </span>
         </div>
         <!-- Locations -->

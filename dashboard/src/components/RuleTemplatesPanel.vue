@@ -293,7 +293,7 @@ onMounted(() => {
     </div>
     <div
       v-if="successMessage"
-      class="mb-4 px-4 py-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm"
+      class="mb-4 px-4 py-3 rounded-lg bg-success/10 border border-success/20 text-success text-sm"
     >
       {{ successMessage }}
     </div>
@@ -437,7 +437,7 @@ onMounted(() => {
           </button>
           <button
             type="button"
-            class="px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
+            class="px-3 py-1.5 text-sm font-medium text-on-accent bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
             :disabled="bCreating || !newName.trim() || !newContent.trim()"
             @click="createTemplate"
           >
@@ -508,7 +508,7 @@ onMounted(() => {
           </button>
           <button
             type="button"
-            class="px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
+            class="px-3 py-1.5 text-sm font-medium text-on-accent bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
             :disabled="bSavingEdit || !editName.trim() || !editContent.trim()"
             @click="saveEdit"
           >

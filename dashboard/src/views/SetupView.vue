@@ -18,6 +18,7 @@ import { authApi, agentAuthApi, isGloballyToasted, settingsApi } from '@/classes
 // classes
 import { themes, applyTheme, DEFAULT_THEME_ID, resolveStoredThemeId } from '@/lib/themes';
 import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
+import { passwordLengthError } from '@/utils/formValidation';
 import {
   isNotificationsEnabled,
   setNotificationsEnabled,
@@ -44,6 +45,8 @@ const selectedThemeId = ref<string>(
 );
 const profileError = ref<string>('');
 const bSavingProfile = ref<boolean>(false);
+// Set once authApi.setup succeeds so Back -> Next does not try to create the account again
+const bAccountCreated = ref<boolean>(false);
 
 // Step 2: AI Agents
 const bClaudeAuthenticated = ref<boolean>(false);
@@ -88,10 +91,13 @@ const notificationPermission = ref<NotificationPermission | 'unsupported'>(getPe
 const bFinishing = ref<boolean>(false);
 
 // -------------------------------------------------- Computed --------------------------------------------------
+const passwordError = computed((): string | undefined => passwordLengthError(password.value));
+
 const canProceedStep1 = computed((): boolean => {
   return (
     username.value.trim().length > 0 &&
-    password.value.length >= 6 &&
+    password.value.length > 0 &&
+    !passwordError.value &&
     password.value === passwordConfirm.value
   );
 });
@@ -125,13 +131,18 @@ const selectTheme = (themeId: string): void => {
 };
 
 const handleStep1Next = async (): Promise<void> => {
-  if (!canProceedStep1.value) {
+  if (bAccountCreated.value) {
+    step.value = 2;
+    return;
+  }
+  if (!canProceedStep1.value || bSavingProfile.value) {
     return;
   }
   profileError.value = '';
   bSavingProfile.value = true;
   try {
     const response = await authApi.setup(username.value.trim(), password.value);
+    bAccountCreated.value = true;
     auth.setToken(response.data.token, username.value.trim());
     await refreshAuthStatus();
     step.value = 2;
@@ -533,9 +544,11 @@ onMounted((): void => {
                     type="text"
                     autocomplete="username"
                     placeholder="admin"
+                    :readonly="bAccountCreated"
                     @keydown.enter="handleStep1Next"
                   />
                 </div>
+                <p v-if="bAccountCreated" class="hint text-success">Account created</p>
               </div>
 
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -550,10 +563,11 @@ onMounted((): void => {
                       type="password"
                       autocomplete="new-password"
                       placeholder="••••••••"
+                      :readonly="bAccountCreated"
                     />
                   </div>
-                  <p v-if="password && password.length < 6" class="hint is-error">
-                    At least 6 characters required
+                  <p v-if="passwordError" class="hint is-error">
+                    {{ passwordError }}
                   </p>
                 </div>
 
@@ -568,6 +582,7 @@ onMounted((): void => {
                       type="password"
                       autocomplete="new-password"
                       placeholder="••••••••"
+                      :readonly="bAccountCreated"
                       @keydown.enter="handleStep1Next"
                     />
                   </div>

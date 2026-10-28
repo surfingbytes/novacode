@@ -3,6 +3,10 @@
 import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
 
+// components
+import RowActions from '@/components/ui/RowActions.vue';
+import StatusBadge from '@/components/ui/StatusBadge.vue';
+
 // utils
 import { agentTypeLabel } from '@/utils/agentTypeMeta';
 import { tagColorClass } from '@/utils/tagColors';
@@ -106,7 +110,9 @@ const rootClass = computed(() => {
             aria-label="Favorite"
             title="Favorite"
           >
-            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z" />
+            <path
+              d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z"
+            />
           </svg>
           <span
             v-if="session.busy"
@@ -116,13 +122,7 @@ const rootClass = computed(() => {
             <span class="busy-spinner"></span>
             {{ sessionBusyLabel(session) }}
           </span>
-          <span
-            v-else-if="bUnread"
-            class="text-[11px] px-2 py-0.5 rounded-full inline-flex items-center shrink-0 border border-primary/30 text-primary"
-            title="Finished — unread"
-          >
-            Done
-          </span>
+          <StatusBadge v-else-if="bUnread" kind="done" title="Finished — unread" />
         </p>
         <p class="tag" :class="AGENT_TYPE_TAG_COLOR[session.agentType]">
           {{ agentTypeLabel(session.agentType) }}
@@ -139,100 +139,13 @@ const rootClass = computed(() => {
         </div>
       </div>
       <div class="buttons">
-        <button
-          v-if="!bArchived"
-          type="button"
-          class="button is-icon"
-          aria-label="Edit session"
-          @click.prevent.stop="emit('edit')"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            width="14"
-            height="14"
-            aria-hidden="true"
-          >
-            <path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6" />
-            <path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z" />
-          </svg>
-        </button>
-        <button
-          v-if="bArchived"
-          type="button"
-          class="button is-icon"
-          title="Unarchive"
-          aria-label="Unarchive session"
-          @click.prevent.stop="emit('archive')"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            width="14"
-            height="14"
-            class="text-primary"
-            aria-hidden="true"
-          >
-            <path
-              d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"
-            />
-          </svg>
-        </button>
-        <button
-          v-else
-          type="button"
-          class="button is-icon hover:bg-warning/10! hover:border-warning!"
-          aria-label="Archive session"
-          @click.prevent.stop="emit('archive')"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            width="14"
-            height="14"
-            class="text-warning"
-            aria-hidden="true"
-          >
-            <path
-              d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"
-            />
-          </svg>
-        </button>
-        <button
-          type="button"
-          class="button is-icon hover:bg-destructive/10! hover:border-destructive!"
-          aria-label="Delete session"
-          @click.prevent.stop="emit('delete')"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            width="14"
-            height="14"
-            class="text-destructive"
-            aria-hidden="true"
-          >
-            <path
-              d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"
-            />
-          </svg>
-        </button>
+        <RowActions
+          :show-edit="!bArchived"
+          :archived="bArchived"
+          @edit="emit('edit')"
+          @archive="emit('archive')"
+          @delete="emit('delete')"
+        />
       </div>
     </div>
 
@@ -264,13 +177,7 @@ const rootClass = computed(() => {
               <span class="busy-spinner"></span>
               {{ sessionBusyLabel(session) }}
             </span>
-            <span
-              v-else-if="bUnread"
-              class="text-[11px] px-2 py-0.5 rounded-full inline-flex items-center shrink-0 border border-primary/30 text-primary"
-              title="Finished — unread"
-            >
-              Done
-            </span>
+            <StatusBadge v-else-if="bUnread" kind="done" title="Finished — unread" />
             <span class="tag shrink-0" :class="AGENT_TYPE_TAG_COLOR[session.agentType]">
               {{ agentTypeLabel(session.agentType) }}
             </span>
@@ -291,10 +198,7 @@ const rootClass = computed(() => {
 
     <!-- List layout -->
     <template v-else>
-      <div
-        class="cell shrink-0"
-        :class="{ 'max-sm:hidden': !bSelectionActive && !bSelected }"
-      >
+      <div class="cell shrink-0" :class="{ 'max-sm:hidden': !bSelectionActive && !bSelected }">
         <button
           type="button"
           class="w-6 h-6 rounded border border-border bg-bg/90 text-primary flex items-center justify-center"
@@ -334,7 +238,9 @@ const rootClass = computed(() => {
             aria-label="Favorite"
             title="Favorite"
           >
-            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z" />
+            <path
+              d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z"
+            />
           </svg>
           <span
             v-if="session.busy"
@@ -344,13 +250,7 @@ const rootClass = computed(() => {
             <span class="busy-spinner"></span>
             {{ sessionBusyLabel(session) }}
           </span>
-          <span
-            v-else-if="bUnread"
-            class="text-[11px] px-2 py-0.5 rounded-full inline-flex items-center shrink-0 border border-primary/30 text-primary"
-            title="Finished — unread"
-          >
-            Done
-          </span>
+          <StatusBadge v-else-if="bUnread" kind="done" title="Finished — unread" />
           <span class="tag shrink-0" :class="AGENT_TYPE_TAG_COLOR[session.agentType]">
             {{ agentTypeLabel(session.agentType) }}
           </span>
@@ -367,100 +267,13 @@ const rootClass = computed(() => {
         </div>
       </div>
       <div class="cell buttons">
-        <button
-          v-if="!bArchived"
-          type="button"
-          class="button is-icon"
-          aria-label="Edit session"
-          @click.prevent.stop="emit('edit')"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            width="14"
-            height="14"
-            aria-hidden="true"
-          >
-            <path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6" />
-            <path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z" />
-          </svg>
-        </button>
-        <button
-          v-if="bArchived"
-          type="button"
-          class="button is-icon"
-          title="Unarchive"
-          aria-label="Unarchive session"
-          @click.prevent.stop="emit('archive')"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            width="14"
-            height="14"
-            class="text-primary"
-            aria-hidden="true"
-          >
-            <path
-              d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M12 12v4M10 14l2-2 2 2"
-            />
-          </svg>
-        </button>
-        <button
-          v-else
-          type="button"
-          class="button is-icon hover:bg-warning/10! hover:border-warning!"
-          aria-label="Archive session"
-          @click.prevent.stop="emit('archive')"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            width="14"
-            height="14"
-            class="text-warning"
-            aria-hidden="true"
-          >
-            <path
-              d="M5 8h14M5 8a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 01-2 2M5 8v11a2 2 0 002 2h10a2 2 0 002-2V8M10 12h4"
-            />
-          </svg>
-        </button>
-        <button
-          type="button"
-          class="button is-icon hover:bg-destructive/10! hover:border-destructive!"
-          aria-label="Delete session"
-          @click.prevent.stop="emit('delete')"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            width="14"
-            height="14"
-            class="text-destructive"
-            aria-hidden="true"
-          >
-            <path
-              d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"
-            />
-          </svg>
-        </button>
+        <RowActions
+          :show-edit="!bArchived"
+          :archived="bArchived"
+          @edit="emit('edit')"
+          @archive="emit('archive')"
+          @delete="emit('delete')"
+        />
       </div>
     </template>
   </RouterLink>

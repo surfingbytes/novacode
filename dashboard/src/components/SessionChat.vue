@@ -660,6 +660,7 @@ onUnmounted(() => {
             />
             <ChatMessageList
               ref="chatListRef"
+              :b-active="activeTab === 'chat'"
               :b-loading="bLoading"
               :b-history-loaded="bHistoryLoaded"
               :display-messages="displayMessages"
@@ -685,9 +686,9 @@ onUnmounted(() => {
               @open-plan="planDocs.openPlan"
               @open-file="openWorkspaceFile"
               @lightbox="(src) => (lightboxSrc = src)"
+              :send-approval-response="chatSocket.sendApprovalResponse"
+              :send-question-response="chatSocket.sendQuestionResponse"
               @chat-error-action="handleChatErrorAction"
-              @approval-response="chatSocket.sendApprovalResponse"
-              @question-response="chatSocket.sendQuestionResponse"
             />
 
             <!-- Todo panel (narrow: strip above the composer) -->
@@ -784,7 +785,7 @@ onUnmounted(() => {
         :selected-plan-document="selectedPlanDocument"
         @select="selectedPlanId = $event"
         @download="planDocs.downloadPlan"
-        @refresh="() => void planDocs.refreshPlanDocuments({ selectLatest: false })"
+        @refresh="() => planDocs.refreshPlanDocuments({ selectLatest: false })"
         @delete="bShowDeletePlanModal = true"
         @start-full-plan="planDocs.startSessionFromFullPlan"
         @start-plan-entry="({ plan, entry, index }) => planDocs.startSessionFromPlanEntry(plan, entry, index)"

@@ -4,6 +4,7 @@ import { computed, getCurrentInstance, ref, watch } from 'vue';
 
 // components
 import BaseModal from '@/components/BaseModal.vue';
+import ConfirmModal from '@/components/ConfirmModal.vue';
 import ModalHeader from '@/components/ModalHeader.vue';
 
 // -------------------------------------------------- Props --------------------------------------------------
@@ -45,6 +46,8 @@ const emit = defineEmits<{
 // -------------------------------------------------- Refs --------------------------------------------------
 
 const apiKeyInput = ref<string>('');
+// Remove-key confirmation, stacked on top of this modal.
+const bPendingDelete = ref<boolean>(false);
 
 // -------------------------------------------------- Computed --------------------------------------------------
 
@@ -80,6 +83,18 @@ watch(
   (bOpen) => {
     if (bOpen) {
       apiKeyInput.value = '';
+    } else {
+      bPendingDelete.value = false;
+    }
+  }
+);
+
+// Close the confirmation once the parent's remove request settles; errors surface via errorMessage.
+watch(
+  () => props.bDeleting,
+  (bNow, bBefore) => {
+    if (bBefore && !bNow) {
+      bPendingDelete.value = false;
     }
   }
 );
@@ -141,10 +156,19 @@ watch(
         type="button"
         class="button is-destructive flex-1"
         :disabled="bDeleting"
-        @click="emit('delete')"
+        @click="bPendingDelete = true"
       >
         {{ bDeleting ? 'Removing…' : 'Remove key' }}
       </button>
     </div>
   </BaseModal>
+  <ConfirmModal
+    v-model="bPendingDelete"
+    :title="`Remove ${providerName} API key`"
+    :description="`Remove the stored ${providerName} API key? Agents using it will stop working until a new key is set.`"
+    confirm-label="Remove key"
+    variant="danger"
+    :loading="bDeleting"
+    @confirm="emit('delete')"
+  />
 </template>

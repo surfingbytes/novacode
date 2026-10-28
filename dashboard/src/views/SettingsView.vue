@@ -1,9 +1,16 @@
 <script setup lang="ts">
 // node_modules
-import { ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { onBeforeUnmount, onMounted, ref, unref, watch, type Ref } from 'vue';
+import {
+  onBeforeRouteLeave,
+  onBeforeRouteUpdate,
+  useRoute,
+  useRouter,
+  type RouteLocationNormalized
+} from 'vue-router';
 
 // components
+import ConfirmModal from '@/components/ConfirmModal.vue';
 import PageShell from '@/components/layout/PageShell.vue';
 import PageHeader from '@/components/layout/PageHeader.vue';
 import RuleTemplatesPanel from '@/components/RuleTemplatesPanel.vue';
@@ -16,14 +23,88 @@ import SettingsMcpPanel from '@/components/settings/SettingsMcpPanel.vue';
 const SETTINGS_TAB_IDS = ['general', 'git', 'integrations', 'mcp', 'rules', 'templates'] as const;
 type SettingsTabId = (typeof SETTINGS_TAB_IDS)[number];
 
+/** Panels that can hold unsaved edits expose `hasUnsavedChanges`. */
+type DirtyAwarePanel = { hasUnsavedChanges?: Ref<boolean> | boolean };
+
 const route = useRoute();
 const router = useRouter();
 const activeTab = ref<SettingsTabId>('general');
+const activePanel = ref<DirtyAwarePanel | null>(null);
+const bShowDiscardConfirm = ref<boolean>(false);
+let pendingDiscardAction: (() => void) | null = null;
+// Set while navigating after the user confirmed the discard, so the guards let it through.
+let bDiscardConfirmed = false;
 
-function selectTab(tab: SettingsTabId): void {
+function isActivePanelDirty(): boolean {
+  return Boolean(unref(activePanel.value?.hasUnsavedChanges));
+}
+
+function askDiscard(action: () => void): void {
+  pendingDiscardAction = action;
+  bShowDiscardConfirm.value = true;
+}
+
+function confirmDiscard(): void {
+  const action = pendingDiscardAction;
+  pendingDiscardAction = null;
+  bShowDiscardConfirm.value = false;
+  action?.();
+}
+
+function navigateDiscarding(to: RouteLocationNormalized): void {
+  bDiscardConfirmed = true;
+  void router.push(to.fullPath).finally(() => {
+    bDiscardConfirmed = false;
+  });
+}
+
+function applyTab(tab: SettingsTabId): void {
   activeTab.value = tab;
   void router.replace({ name: 'settings', query: { tab } });
 }
+
+function selectTab(tab: SettingsTabId): void {
+  if (tab === activeTab.value) {
+    return;
+  }
+  if (isActivePanelDirty()) {
+    askDiscard(() => applyTab(tab));
+    return;
+  }
+  applyTab(tab);
+}
+
+function onBeforeUnload(event: BeforeUnloadEvent): void {
+  if (isActivePanelDirty()) {
+    event.preventDefault();
+    event.returnValue = '';
+  }
+}
+
+// Back/forward between tabs changes only the query.
+onBeforeRouteUpdate((to): boolean => {
+  if (bDiscardConfirmed || to.query.tab === activeTab.value || !isActivePanelDirty()) {
+    return true;
+  }
+  askDiscard(() => navigateDiscarding(to));
+  return false;
+});
+
+onBeforeRouteLeave((to): boolean => {
+  if (bDiscardConfirmed || !isActivePanelDirty()) {
+    return true;
+  }
+  askDiscard(() => navigateDiscarding(to));
+  return false;
+});
+
+onMounted((): void => {
+  window.addEventListener('beforeunload', onBeforeUnload);
+});
+
+onBeforeUnmount((): void => {
+  window.removeEventListener('beforeunload', onBeforeUnload);
+});
 
 watch(
   () => route.query.tab,
@@ -67,7 +148,7 @@ watch(
     </div>
 
     <SettingsGeneralPanel v-if="activeTab === 'general'" />
-    <SettingsGitPanel v-if="activeTab === 'git'" />
+    <SettingsGitPanel v-if="activeTab === 'git'" ref="activePanel" />
     <SettingsIntegrationsPanel v-if="activeTab === 'integrations'" />
     <SettingsMcpPanel v-if="activeTab === 'mcp'" />
 
@@ -77,7 +158,7 @@ watch(
         Markdown files injected into every agent prompt, in every workspace. Workspace rules still
         take precedence when they conflict.
       </p>
-      <RuleFilesEditor source="global" hide-header />
+      <RuleFilesEditor ref="activePanel" source="global" hide-header />
     </div>
 
     <div v-if="activeTab === 'templates'" role="tabpanel">
@@ -88,6 +169,15 @@ watch(
       </p>
       <RuleTemplatesPanel />
     </div>
+
+    <ConfirmModal
+      v-model="bShowDiscardConfirm"
+      title="Discard unsaved changes?"
+      description="Your edits on this tab have not been saved and will be lost."
+      confirm-label="Discard"
+      variant="danger"
+      @confirm="confirmDiscard"
+    />
   </PageShell>
 </template>
 

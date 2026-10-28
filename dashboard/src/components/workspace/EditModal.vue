@@ -40,6 +40,10 @@ const props = defineProps<{
   openCodeAvailable?: boolean;
   /** Absolute workspace browse root from settings (for the folder picker). */
   browseRoot?: string;
+  /** Parent is awaiting the save request: disables the form and shows the spinner. */
+  saving?: boolean;
+  /** Error from the last save request, shown above the buttons. */
+  serverError?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -119,7 +123,6 @@ const form = ref<FormState>({
 /** CI provider connections + what auto-detect resolves to; the fields stay hidden without connections. */
 const forgeConnections = ref<ForgeConnectionStatus[]>([]);
 const forgeDetected = ref<ForgeRepoDetectResponse | null>(null);
-const bSaving = ref<boolean>(false);
 const bShowDirPicker = ref<boolean>(false);
 const bNewGroupAddActive = ref<boolean>(false);
 const groupNameInput = ref<string>('');
@@ -194,35 +197,30 @@ function normalizeTags(raw: string[]): string[] {
 const validate = (): boolean => validateAll();
 
 // --- submit / close ---
-const submit = async (): Promise<void> => {
-  if (!validate()) return;
+const submit = (): void => {
+  if (props.saving || !validate()) return;
   addTag(tagInput.value);
   const tagsClean = normalizeTags(form.value.tags);
   form.value.tags = tagsClean;
   tagInput.value = '';
-  bSaving.value = true;
-  try {
-    emit('save', {
-      name: form.value.name.trim(),
-      path: form.value.path.trim(),
-      group: form.value.group.trim() || null,
-      gitUserName: form.value.gitUserName.trim() || null,
-      gitUserEmail: form.value.gitUserEmail.trim() || null,
-      color: form.value.color.trim() || null,
-      defaultAgentType:
-        form.value.defaultAgentType &&
-        AGENT_OPTIONS.value.some((o) => o.value === form.value.defaultAgentType)
-          ? (form.value.defaultAgentType as AgentType)
-          : null,
-      tags: tagsClean.length > 0 ? tagsClean : null,
-      ...(forgeConnections.value.length > 0 && {
-        forgeConnectionId: form.value.forgeConnectionId || null,
-        forgeRepo: form.value.forgeRepo.trim() || null
-      })
-    });
-  } finally {
-    bSaving.value = false;
-  }
+  emit('save', {
+    name: form.value.name.trim(),
+    path: form.value.path.trim(),
+    group: form.value.group.trim() || null,
+    gitUserName: form.value.gitUserName.trim() || null,
+    gitUserEmail: form.value.gitUserEmail.trim() || null,
+    color: form.value.color.trim() || null,
+    defaultAgentType:
+      form.value.defaultAgentType &&
+      AGENT_OPTIONS.value.some((o) => o.value === form.value.defaultAgentType)
+        ? (form.value.defaultAgentType as AgentType)
+        : null,
+    tags: tagsClean.length > 0 ? tagsClean : null,
+    ...(forgeConnections.value.length > 0 && {
+      forgeConnectionId: form.value.forgeConnectionId || null,
+      forgeRepo: form.value.forgeRepo.trim() || null
+    })
+  });
 };
 
 const close = (): void => {
@@ -370,7 +368,7 @@ watch(AGENT_OPTIONS, (options) => {
     />
 
           <!-- Body -->
-          <div class="flex-1 min-h-0 overflow-y-auto px-6 py-5 space-y-4">
+          <fieldset :disabled="saving" class="flex-1 min-h-0 min-w-0 overflow-y-auto px-6 py-5 space-y-4">
             <!-- Name -->
             <div class="field" :class="{ 'has-error': errors.name }">
               <div class="label">Workspace Name</div>
@@ -598,14 +596,22 @@ watch(AGENT_OPTIONS, (options) => {
                 connection for mirrors (e.g. GitHub repo built on Gitea).
               </p>
             </div>
-          </div>
+          </fieldset>
+
+          <p
+            v-if="serverError"
+            role="alert"
+            class="mx-6 mb-3 text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded-lg px-3 py-2"
+          >
+            {{ serverError }}
+          </p>
 
           <!-- Footer -->
           <div class="flex shrink-0 items-center justify-between gap-2 border-t border-border px-6 py-4">
             <button class="button is-transparent" @click="close">Cancel</button>
 
-            <button class="button is-primary" :disabled="bSaving" @click="submit">
-              <div v-if="bSaving" class="loading-spinner"></div>
+            <button class="button is-primary" :disabled="saving" @click="submit">
+              <div v-if="saving" class="loading-spinner"></div>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
               {{ workspace ? 'Save Workspace' : 'Create Workspace' }}
             </button>

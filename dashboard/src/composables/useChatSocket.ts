@@ -474,34 +474,37 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     socket.send({ type: 'cancel' });
   }
 
-  function sendApprovalResponse(approvalRequestId: string, approvalOptionId: string): void {
-    if (!socket || !bWsConnected.value) return;
+  /** Returns false when the socket is down and nothing was sent. */
+  function sendApprovalResponse(approvalRequestId: string, approvalOptionId: string): boolean {
+    if (!socket || !bWsConnected.value) return false;
     socket.send({
       type: 'approval-response',
       approvalRequestId,
       approvalOptionId
     });
+    return true;
   }
 
   function sendQuestionResponse(
     questionRequestId: string,
     payload: { skipped: true } | { answers: ChatQuestionAnswer[] }
-  ): void {
-    if (!socket || !bWsConnected.value) return;
+  ): boolean {
+    if (!socket || !bWsConnected.value) return false;
     if ('skipped' in payload && payload.skipped) {
       socket.send({
         type: 'question-response',
         questionRequestId,
         questionSkipped: true
       });
-      return;
+      return true;
     }
-    if (!('answers' in payload)) return;
+    if (!('answers' in payload)) return false;
     socket.send({
       type: 'question-response',
       questionRequestId,
       questionAnswers: payload.answers
     });
+    return true;
   }
 
   function deleteQueuedPrompt(queueItemId: string): void {

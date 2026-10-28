@@ -9,6 +9,7 @@ import ContextMenu from '@/components/ContextMenu.vue';
 import SessionEditModal from '@/components/SessionEditModal.vue';
 import NewSessionModal from '@/components/NewSessionModal.vue';
 import ListPageSkeleton from '@/components/ui/ListPageSkeleton.vue';
+import EmptyState from '@/components/ui/EmptyState.vue';
 import SessionListToolbar from './session-list/SessionListToolbar.vue';
 import SessionListGrid from './session-list/SessionListGrid.vue';
 import SessionListRows from './session-list/SessionListRows.vue';
@@ -24,17 +25,17 @@ import { useToastStore } from '@/stores/toasts';
 import { useOrchestratorsStore } from '@/stores/orchestrators';
 
 // classes
-import { apiErrorMessage, isGloballyToasted, sessionsApi, orchestratorApi } from '@/classes/api';
+import { isGloballyToasted, sessionsApi, orchestratorApi } from '@/classes/api';
 import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
-import { createPlanningSession, type NewOrchestratorOptions } from '@/lib/createPlanningSession';
 import { subtasksFromStoredJson } from '@/utils/orchestratorPayload';
 
 // composables
 import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
+import { useCreateSession, type NewSessionMode } from '@/composables/useCreateSession';
 
 // types
 import type { ContextMenuItem } from '@/components/ContextMenu.vue';
-import type { Session, Orchestrator, AgentType, ApprovalPolicy, Workspace } from '@/@types/index';
+import type { Session, Orchestrator, Workspace } from '@/@types/index';
 import type { CombinedItem } from './session-list/types';
 
 // -------------------------------------------------- Props --------------------------------------------------
@@ -56,14 +57,10 @@ const orchestrators = computed<Orchestrator[]>(() =>
 const bOrchestratorsLoading = ref(false);
 /** After first successful fetch; avoids showing step sessions at top level before orchestrator data exists. */
 const bOrchestratorsInitialFetched = ref(false);
-const bShowNewSessionModal = ref(false);
-const bSubmittingSession = ref(false);
-const createSessionError = ref<string | null>(null);
 const sessionToDelete = ref<Session | null>(null);
 const bDeletingSession = ref(false);
 const sessionToEdit = ref<Session | null>(null);
 const bSavingEdit = ref(false);
-const newSessionInitialMode = ref<'session' | 'orchestrator'>('session');
 const viewMode = ref<'list' | 'grid'>(
   (safeGetItem('sessionsViewMode') as 'list' | 'grid') ?? 'list'
 );
@@ -93,6 +90,8 @@ const {
   bCapabilitiesLoaded,
   ensureLoaded: ensureAgentCapabilitiesLoaded
 } = useAgentCapabilities();
+const { bShowNewSession, newSessionMode, bCreating, createError, openNewSession, createSession } =
+  useCreateSession();
 const activeFilter = ref<string | null>(null);
 
 // -------------------------------------------------- Computed --------------------------------------------------
@@ -448,35 +447,6 @@ const fetchOrchestrators = async (opts?: { silent?: boolean }): Promise<void> =>
   }
 };
 
-const createSession = async (payload: {
-  name: string;
-  tags?: string[] | null;
-  agentType: AgentType;
-  modelSelection?: string | null;
-  approvalPolicy: ApprovalPolicy;
-  orchestrator?: NewOrchestratorOptions;
-}): Promise<void> => {
-  if (!props.workspace || bSubmittingSession.value) return;
-  bSubmittingSession.value = true;
-  createSessionError.value = null;
-  try {
-    const { orchestrator, ...sessionPayload } = payload;
-    const sessionId = orchestrator
-      ? await createPlanningSession(props.workspace.id, { ...payload, orchestrator })
-      : (await sessionsApi.create(props.workspace.id, sessionPayload)).data.id;
-    bShowNewSessionModal.value = false;
-    await router.push({
-      name: 'session',
-      params: { id: props.workspace.id, sessionId }
-    });
-  } catch (error) {
-    toastStore.error('Failed to create session');
-    createSessionError.value = apiErrorMessage(error, 'Failed to create session');
-  } finally {
-    bSubmittingSession.value = false;
-  }
-};
-
 const deleteSession = async (): Promise<void> => {
   if (!sessionToDelete.value || !props.workspace) return;
   bDeletingSession.value = true;
@@ -752,10 +722,8 @@ function openNewSessionFromShortcut(): void {
   openNewSessionModal();
 }
 
-function openNewSessionModal(mode: 'session' | 'orchestrator' = 'session'): void {
-  ensureAgentCapabilitiesLoaded();
-  newSessionInitialMode.value = mode;
-  bShowNewSessionModal.value = true;
+function openNewSessionModal(mode: NewSessionMode = 'session'): void {
+  openNewSession(props.workspace, mode);
 }
 
 watch(
@@ -822,8 +790,21 @@ watch(
     label="Loading sessions"
   />
   <template v-else>
+    <EmptyState
+      v-if="combinedItems.length === 0"
+      icon="terminal"
+      :title="activeFilter ? `No sessions tagged ${activeFilter}` : 'No sessions yet'"
+      :description="activeFilter ? undefined : 'Start a session to work in this workspace.'"
+    >
+      <button v-if="activeFilter" type="button" class="button" @click="activeFilter = null">
+        Clear filter
+      </button>
+      <button v-else type="button" class="button is-primary" @click="openNewSessionModal()">
+        New session
+      </button>
+    </EmptyState>
     <SessionListGrid
-      v-if="viewMode === 'grid'"
+      v-else-if="viewMode === 'grid'"
       :items="combinedItems"
       :workspace-id="workspaceId"
       @session-context-menu="onSessionContextMenu"
@@ -954,9 +935,9 @@ watch(
   />
 
   <NewSessionModal
-    v-model="bShowNewSessionModal"
-    :loading="bSubmittingSession"
-    :error="createSessionError"
+    v-model="bShowNewSession"
+    :loading="bCreating"
+    :error="createError"
     :default-agent-type="(workspace && workspace.defaultAgentType) || null"
     :claude-available="bClaudeAvailable"
     :cursor-available="bCursorAvailable"
@@ -966,7 +947,7 @@ watch(
     :agents-loaded="bCapabilitiesLoaded"
     :existing-tags="sessionTags"
     allow-orchestrator
-    :initial-mode="newSessionInitialMode"
+    :initial-mode="newSessionMode"
     @create="createSession"
   />
 

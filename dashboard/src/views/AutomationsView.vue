@@ -15,6 +15,9 @@ import ListPageSkeleton from '@/components/ui/ListPageSkeleton.vue';
 import { automationsApi, isGloballyToasted, workspaceApi } from '@/classes/api';
 import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 
+// composables
+import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
+
 // stores
 import { useToastStore } from '@/stores/toasts';
 
@@ -39,6 +42,15 @@ interface AutomationFormPayload {
 
 const toastStore = useToastStore();
 const router = useRouter();
+const {
+  claudeAvailable,
+  cursorAvailable,
+  mistralVibeAvailable,
+  openCodeAvailable,
+  codexAvailable,
+  bCapabilitiesLoaded,
+  ensureLoaded: ensureAgentCapabilitiesLoaded
+} = useAgentCapabilities();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 
@@ -277,6 +289,7 @@ function changedFilesList(run: AutomationRun): Array<{ status: string; file: str
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 
 onMounted(async () => {
+  ensureAgentCapabilitiesLoaded();
   await fetchAll();
   startPoll();
 });
@@ -299,7 +312,7 @@ onUnmounted(() => {
       <template #actions>
         <button
           type="button"
-          class="px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-1 self-start"
+          class="px-4 py-2 text-sm font-medium text-on-accent bg-primary rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-1 self-start"
           @click="openCreateForm"
         >
           <svg
@@ -504,7 +517,7 @@ onUnmounted(() => {
                 stroke-linejoin="round"
                 width="16"
                 height="16"
-                class="shrink-0 text-green-400"
+                class="shrink-0 text-success"
                 aria-hidden="true"
               >
                 <polyline points="20 6 9 17 4 12" />
@@ -536,7 +549,7 @@ onUnmounted(() => {
                 stroke-linejoin="round"
                 width="16"
                 height="16"
-                class="shrink-0 text-yellow-400"
+                class="shrink-0 text-warning"
                 aria-hidden="true"
               >
                 <circle cx="12" cy="12" r="10" />
@@ -610,7 +623,7 @@ onUnmounted(() => {
               stroke-linejoin="round"
               width="16"
               height="16"
-              class="text-green-400"
+              class="text-success"
               aria-hidden="true"
             >
               <polyline points="20 6 9 17 4 12" />
@@ -642,7 +655,7 @@ onUnmounted(() => {
               stroke-linejoin="round"
               width="16"
               height="16"
-              class="text-yellow-400"
+              class="text-warning"
               aria-hidden="true"
             >
               <circle cx="12" cy="12" r="10" />
@@ -682,7 +695,7 @@ onUnmounted(() => {
                   :key="f.file"
                   class="flex items-center gap-2 text-xs"
                 >
-                  <span class="font-mono text-yellow-400 w-5 shrink-0 text-center">{{
+                  <span class="font-mono text-warning w-5 shrink-0 text-center">{{
                     f.status
                   }}</span>
                   <span class="text-text-muted font-mono truncate">{{ f.file }}</span>
@@ -797,6 +810,12 @@ onUnmounted(() => {
       v-model="bShowFormModal"
       :automation="editingAutomation"
       :workspaces="workspaces"
+      :claude-available="claudeAvailable"
+      :cursor-available="cursorAvailable"
+      :mistral-vibe-available="mistralVibeAvailable"
+      :open-code-available="openCodeAvailable"
+      :codex-available="codexAvailable"
+      :agents-loaded="bCapabilitiesLoaded"
       :b-saving="bSavingForm"
       :server-error="formError"
       @save="saveAutomation"

@@ -1,26 +1,24 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRoute } from 'vue-router';
 import { useWorkspacesStore } from '@/stores/workspaces';
-import { useToastStore } from '@/stores/toasts';
 import { useOrchestratorsStore } from '@/stores/orchestrators';
 import ThemeToggleButton from '@/components/ThemeToggleButton.vue';
 import NewSessionModal from '@/components/NewSessionModal.vue';
 import OrchestratorProgressRing from '@/components/OrchestratorProgressRing.vue';
-import { apiErrorMessage, sessionsApi } from '@/classes/api';
-import { createPlanningSession, type NewOrchestratorOptions } from '@/lib/createPlanningSession';
+import StatusBadge from '@/components/ui/StatusBadge.vue';
 import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
+import { useCreateSession } from '@/composables/useCreateSession';
 import { PANE_LAYOUT_MIN_WIDTH } from '@/constants/layout';
 import { agentTypeShortLabel } from '@/utils/agentTypeMeta';
 import {
   sessionFavoriteStarStyle,
   sessionStatusDotStyle,
-  sessionUnreadDoneStyle,
   workspaceColor
 } from '@/utils/workspaceColor';
 import { isOrchestratorUnread, isSessionUnread } from '@/utils/sessionUnread';
 import { orchestratorProgress, type OrchestratorProgress } from '@/utils/orchestratorProgress';
-import type { AgentType, ApprovalPolicy, Orchestrator, Session, Workspace } from '@/@types/index';
+import type { Orchestrator, Session, Workspace } from '@/@types/index';
 
 const props = withDefaults(
   defineProps<{
@@ -37,9 +35,7 @@ const emit = defineEmits<{
 }>();
 
 const route = useRoute();
-const router = useRouter();
 const workspacesStore = useWorkspacesStore();
-const toastStore = useToastStore();
 const orchestratorsStore = useOrchestratorsStore();
 const {
   claudeAvailable,
@@ -56,10 +52,15 @@ const windowWidth = ref(window.innerWidth);
 const bRailMode = computed(() => windowWidth.value >= PANE_LAYOUT_MIN_WIDTH);
 const bIsCollapsed = computed(() => props.collapsed && bRailMode.value);
 
-const bShowNewSessionModal = ref(false);
-const newSessionWorkspace = ref<Workspace | undefined>(undefined);
-const bSubmittingSession = ref(false);
-const createSessionError = ref<string | null>(null);
+const {
+  bShowNewSession,
+  newSessionWorkspace,
+  newSessionTags,
+  bCreating,
+  createError,
+  openNewSession,
+  createSession
+} = useCreateSession();
 
 function onWindowResize(): void {
   windowWidth.value = window.innerWidth;
@@ -148,28 +149,6 @@ function isNavItemBusy(item: NavItem): boolean {
   return item.kind === 'session' ? !!item.session.busy : item.progress.bRunning;
 }
 
-const newSessionTags = computed((): string[] => {
-  const workspaceId = newSessionWorkspace.value?.id;
-  if (!workspaceId) {
-    return [];
-  }
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const session of workspacesStore.allSessions) {
-    if (session.workspaceId !== workspaceId) continue;
-    const tags = session.tags;
-    if (!tags?.length) continue;
-    for (const tag of tags) {
-      if (typeof tag !== 'string' || !tag.trim()) continue;
-      const key = tag.trim().toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(tag.trim());
-    }
-  }
-  return out.sort((a, b) => a.localeCompare(b));
-});
-
 function workspaceById(id: string): Workspace | undefined {
   return workspacesStore.workspaces.find((w) => w.id === id);
 }
@@ -187,42 +166,8 @@ function favoriteInitial(workspace: Workspace): string {
 }
 
 function openFavoriteNewSession(workspace: Workspace): void {
-  newSessionWorkspace.value = workspace;
-  createSessionError.value = null;
-  ensureAgentCapabilitiesLoaded();
-  bShowNewSessionModal.value = true;
+  openNewSession(workspace);
   handleClose();
-}
-
-async function createSession(payload: {
-  name: string;
-  tags?: string[] | null;
-  agentType: AgentType;
-  modelSelection?: string | null;
-  approvalPolicy: ApprovalPolicy;
-  orchestrator?: NewOrchestratorOptions;
-}): Promise<void> {
-  const workspace = newSessionWorkspace.value;
-  if (!workspace || bSubmittingSession.value) return;
-  bSubmittingSession.value = true;
-  createSessionError.value = null;
-  try {
-    const { orchestrator, ...sessionPayload } = payload;
-    const sessionId = orchestrator
-      ? await createPlanningSession(workspace.id, { ...payload, orchestrator })
-      : (await sessionsApi.create(workspace.id, sessionPayload)).data.id;
-    bShowNewSessionModal.value = false;
-    newSessionWorkspace.value = undefined;
-    await router.push({
-      name: 'session',
-      params: { id: workspace.id, sessionId }
-    });
-  } catch (error) {
-    createSessionError.value = apiErrorMessage(error, 'Failed to create session');
-    toastStore.error(createSessionError.value);
-  } finally {
-    bSubmittingSession.value = false;
-  }
 }
 
 onMounted(() => {
@@ -458,14 +403,11 @@ onBeforeUnmount(() => {
                 <div class="sidebar__session-name">
                   {{ item.session.name || 'Untitled' }}
                 </div>
-                <span
+                <StatusBadge
                   v-if="isSessionUnread(item.session) && !item.session.busy"
-                  class="sidebar__session-done"
+                  kind="done"
                   title="Finished — unread"
-                  :style="sessionUnreadDoneStyle(workspaceById(item.session.workspaceId))"
-                >
-                  Done
-                </span>
+                />
               </div>
               <div class="sidebar__session-path nc-mono">
                 <span :style="{ color: workspaceColor(workspaceById(item.session.workspaceId)) }">{{
@@ -544,14 +486,11 @@ onBeforeUnmount(() => {
                 >
                   Input
                 </span>
-                <span
+                <StatusBadge
                   v-else-if="isOrchestratorDone(item)"
-                  class="sidebar__session-done"
+                  kind="done"
                   title="Finished — unread"
-                  :style="sessionUnreadDoneStyle(workspaceById(item.orchestrator.workspaceId))"
-                >
-                  Done
-                </span>
+                />
               </div>
               <div class="sidebar__session-path nc-mono">
                 <span :style="{ color: workspaceColor(workspaceById(item.orchestrator.workspaceId)) }">{{
@@ -630,9 +569,9 @@ onBeforeUnmount(() => {
   </aside>
 
   <NewSessionModal
-    v-model="bShowNewSessionModal"
-    :loading="bSubmittingSession"
-    :error="createSessionError"
+    v-model="bShowNewSession"
+    :loading="bCreating"
+    :error="createError"
     :default-agent-type="newSessionWorkspace?.defaultAgentType ?? null"
     :claude-available="claudeAvailable"
     :cursor-available="cursorAvailable"

@@ -22,6 +22,9 @@ import type { ContextMenuItem } from '@/components/ContextMenu.vue';
 import { useLongPress } from '@/composables/useLongPress';
 import { usePaneLayout } from '@/composables/usePaneLayout';
 
+// stores
+import { useToastStore } from '@/stores/toasts';
+
 // types
 import type { FileEntry } from '@/classes/api';
 import { ancestorDirectoryPaths } from '@/utils/workspaceFilePath';
@@ -56,6 +59,8 @@ const {
   detailVisible
 } = usePaneLayout('novacode:filesSidePanel');
 
+const toastStore = useToastStore();
+
 // -------------------------------------------------- Refs --------------------------------------------------
 const entriesByPath = ref<Record<string, FileEntry[]>>({});
 const expandedPaths = ref<Set<string>>(new Set());
@@ -75,6 +80,15 @@ const readError = ref<string | null>(null);
 const editorContainerRef = ref<HTMLDivElement | null>(null);
 const bSaving = ref<boolean>(false);
 const saveResult = ref<'success' | 'error' | null>(null);
+const saveErrorMessage = ref<string>('');
+let saveResultTimer: ReturnType<typeof setTimeout> | null = null;
+/** Content as last read from / written to disk; compared against the editor to detect unsaved edits. */
+const loadedContent = ref<string>('');
+/** Live Monaco content (markdown edits live in fileContent via MdEditor v-model). */
+const editorContent = ref<string>('');
+const bShowDiscardModal = ref<boolean>(false);
+/** Action blocked by unsaved changes; runs once the user confirms discarding them. */
+const pendingDiscardAction = ref<(() => void | Promise<void>) | null>(null);
 const bFullscreen = ref<boolean>(false);
 /** Edit vs rendered preview for markdown / HTML files in the files pane. */
 const contentViewMode = ref<'edit' | 'preview'>('edit');
@@ -238,6 +252,14 @@ const bIsDarkTheme = computed((): boolean => {
   return theme?.dark ?? false;
 });
 
+const bDirty = computed((): boolean => {
+  if (!selectedPath.value || !bIsEditorFile.value || bReadLoading.value || readError.value) {
+    return false;
+  }
+  const currentContent = bIsMarkdownFile.value ? fileContent.value : editorContent.value;
+  return currentContent !== loadedContent.value;
+});
+
 const bShowFileTree = computed((): boolean => listVisible(selectedPath.value !== null));
 const bShowEditor = computed((): boolean => detailVisible(selectedPath.value !== null));
 
@@ -316,10 +338,14 @@ const readFilePath = async (path: string, bEmit = true): Promise<void> => {
   bReadLoading.value = true;
   fileContent.value = '';
   fileEncoding.value = 'utf8';
+  loadedContent.value = '';
+  editorContent.value = '';
   try {
     const response = await filesApi.read(props.workspaceId, path);
     fileContent.value = response.data.content;
     fileEncoding.value = response.data.encoding;
+    loadedContent.value = response.data.content;
+    editorContent.value = response.data.content;
   } catch (error: unknown) {
     const errorWithMessage = error as { response?: { data?: { error?: string } }; message?: string };
     readError.value = errorWithMessage?.response?.data?.error ?? errorWithMessage?.message ?? 'Failed to read file';
@@ -347,8 +373,44 @@ const selectFile = async (entry: FileEntry): Promise<void> => {
   if (entry.isDirectory) {
     return;
   }
-  await readFilePath(entry.path);
+  runOrConfirmDiscard(() => readFilePath(entry.path));
 };
+
+/** Runs the action now, or asks to discard unsaved edits first and runs it on confirm. */
+function runOrConfirmDiscard(action: () => void | Promise<void>): void {
+  if (!bDirty.value) {
+    void action();
+    return;
+  }
+  pendingDiscardAction.value = action;
+  bShowDiscardModal.value = true;
+}
+
+function confirmDiscard(): void {
+  const action = pendingDiscardAction.value;
+  pendingDiscardAction.value = null;
+  bShowDiscardModal.value = false;
+  if (action) {
+    void action();
+  }
+}
+
+// Cancelled: drop the pending action and keep the URL pointing at the file still open.
+watch(bShowDiscardModal, (bOpen) => {
+  if (bOpen || !pendingDiscardAction.value) {
+    return;
+  }
+  pendingDiscardAction.value = null;
+  if (selectedPath.value && props.openPath !== selectedPath.value) {
+    commitOpenPath(selectedPath.value);
+  }
+});
+
+function closeEditor(): void {
+  runOrConfirmDiscard(() => {
+    selectedPath.value = null;
+  });
+}
 
 async function revealAndOpen(path: string): Promise<void> {
   const normalized = path.replace(/^\/+/, '').replace(/\/+/g, '/');
@@ -375,7 +437,8 @@ async function initEditor(): Promise<void> {
     return;
   }
   editor = monaco.editor.create(editorContainerRef.value, {
-    value: fileContent.value,
+    // editorContent keeps unsaved edits across editor re-creation (tab switch, HTML preview toggle).
+    value: editorContent.value,
     language: selectedPath.value ? languageForPath(selectedPath.value) : 'plaintext',
     readOnly: false,
     automaticLayout: true,
@@ -386,6 +449,10 @@ async function initEditor(): Promise<void> {
   });
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
     void saveFile();
+  });
+  const editorInstance = editor;
+  editor.onDidChangeModelContent(() => {
+    editorContent.value = editorInstance.getValue();
   });
 }
 
@@ -417,17 +484,28 @@ const saveFile = async (): Promise<void> => {
   if (!selectedPath.value) {
     return;
   }
-  const content = bIsMarkdownFile.value ? fileContent.value : (editor?.getModel()?.getValue() ?? '');
+  const content = bIsMarkdownFile.value
+    ? fileContent.value
+    : (editor?.getModel()?.getValue() ?? editorContent.value);
   bSaving.value = true;
   saveResult.value = null;
+  if (saveResultTimer) {
+    clearTimeout(saveResultTimer);
+  }
   try {
     await filesApi.write(props.workspaceId, selectedPath.value, content);
+    loadedContent.value = content;
+    editorContent.value = content;
     fileContent.value = content;
     saveResult.value = 'success';
-    setTimeout(() => (saveResult.value = null), 2000);
-  } catch {
+    saveResultTimer = setTimeout(() => (saveResult.value = null), 2000);
+  } catch (error: unknown) {
+    const errorWithMessage = error as { response?: { data?: { error?: string } }; message?: string };
+    saveErrorMessage.value =
+      errorWithMessage?.response?.data?.error ?? errorWithMessage?.message ?? 'Failed to save file';
     saveResult.value = 'error';
-    setTimeout(() => (saveResult.value = null), 3000);
+    toastStore.error(saveErrorMessage.value);
+    saveResultTimer = setTimeout(() => (saveResult.value = null), 3000);
   } finally {
     bSaving.value = false;
   }
@@ -652,7 +730,8 @@ function onEntryClick(entry: FileEntry): void {
 
 // -------------------------------------------------- Watchers --------------------------------------------------
 async function reloadOpenFileFromDisk(): Promise<void> {
-  if (!selectedPath.value) {
+  // Background reloads (tab activation, session change) must not silently drop unsaved edits.
+  if (!selectedPath.value || bDirty.value) {
     return;
   }
   await readFilePath(selectedPath.value, false);
@@ -782,7 +861,7 @@ watch(
     if (!path || path === selectedPath.value) {
       return;
     }
-    void revealAndOpen(path);
+    runOrConfirmDiscard(() => revealAndOpen(path));
   }
 );
 
@@ -814,6 +893,9 @@ onMounted(async (): Promise<void> => {
 
 onUnmounted((): void => {
   window.removeEventListener('keydown', onWindowKeydown);
+  if (saveResultTimer) {
+    clearTimeout(saveResultTimer);
+  }
   disposeEditor();
   if (imageObjectUrl.value) {
     URL.revokeObjectURL(imageObjectUrl.value);
@@ -1000,7 +1082,7 @@ onUnmounted((): void => {
             type="button"
             class="button is-icon is-transparent h-8! w-8!"
             aria-label="Back to file list"
-            @click="selectedPath = null"
+            @click="closeEditor"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           </button>
@@ -1009,8 +1091,31 @@ onUnmounted((): void => {
           >
             {{ bWidePane ? (selectedPath ?? 'Select a file') : selectedPathFileName }}
           </span>
+          <span
+            v-if="bDirty"
+            class="shrink-0 mt-1 flex items-center gap-1 text-xs text-warning"
+            title="Unsaved changes"
+          >
+            <span class="w-1.5 h-1.5 rounded-full bg-warning" aria-hidden="true" />
+            Unsaved
+          </span>
         </div>
         <div class="flex items-center gap-1">
+          <span
+            v-if="saveResult === 'success'"
+            class="text-xs text-success mr-1"
+            role="status"
+          >
+            Saved
+          </span>
+          <span
+            v-else-if="saveResult === 'error'"
+            class="text-xs text-destructive mr-1 truncate max-w-60"
+            role="alert"
+            :title="saveErrorMessage"
+          >
+            {{ saveErrorMessage }}
+          </span>
           <div
             v-if="bIsPreviewableMarkup"
             class="button-select-small h-8! p-0.5! mr-1"
@@ -1156,6 +1261,14 @@ onUnmounted((): void => {
     confirm-label="Delete"
     :loading="bDeleting"
     @confirm="confirmDelete"
+  />
+  <ConfirmModal
+    v-model="bShowDiscardModal"
+    title="Discard unsaved changes?"
+    :description="`Your edits to '${selectedPathFileName}' have not been saved and will be lost.`"
+    confirm-label="Discard"
+    variant="danger"
+    @confirm="confirmDiscard"
   />
   <PromptModal
     v-model="bShowRenameModal"

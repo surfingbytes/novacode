@@ -1,9 +1,9 @@
 <script setup lang="ts">
 // node_modules
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 
 // classes
-import { settingsApi } from '@/classes/api';
+import { apiErrorMessage, isGloballyToasted, settingsApi } from '@/classes/api';
 
 // components
 import SettingsForgeSection from '@/components/settings/SettingsForgeSection.vue';
@@ -11,11 +11,16 @@ import SettingsForgeSection from '@/components/settings/SettingsForgeSection.vue
 // composables
 import { useInlineFieldErrors } from '@/composables/useInlineFieldErrors';
 
+// stores
+import { useToastStore } from '@/stores/toasts';
+
 // utils
 import { optionalEmailError } from '@/utils/formValidation';
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const gitForm = ref<{ name: string; email: string }>({ name: '', email: '' });
+// Last loaded/saved values; the form is dirty when it differs from these.
+const gitBaseline = ref<{ name: string; email: string }>({ name: '', email: '' });
 const bSavingGit = ref<boolean>(false);
 const bGitSaved = ref<boolean>(false);
 const sshPublicKey = ref<string>('');
@@ -27,12 +32,22 @@ const { errors, touch, onInput, validateAll } = useInlineFieldErrors({
   email: () => optionalEmailError(gitForm.value.email)
 });
 
+const toastStore = useToastStore();
+
+// -------------------------------------------------- Computed --------------------------------------------------
+const hasUnsavedChanges = computed<boolean>(
+  () =>
+    gitForm.value.name !== gitBaseline.value.name ||
+    gitForm.value.email !== gitBaseline.value.email
+);
+
 // -------------------------------------------------- Methods --------------------------------------------------
 const loadSettings = async (): Promise<void> => {
   try {
     const response = await settingsApi.get();
     gitForm.value.name = response.data.gitUserName ?? '';
     gitForm.value.email = response.data.gitUserEmail ?? '';
+    gitBaseline.value = { ...gitForm.value };
     sshPublicKey.value = response.data.sshPublicKey ?? '';
     sshPrivateKey.value = response.data.sshPrivateKey ?? '';
   } catch {
@@ -40,34 +55,45 @@ const loadSettings = async (): Promise<void> => {
   }
 };
 
+/** Copies text, toasting when the Clipboard API is missing (plain-http deployments) or rejects. */
+const copyToClipboard = async (text: string, label: string): Promise<boolean> => {
+  if (!navigator.clipboard) {
+    toastStore.error(`Clipboard unavailable — copy the ${label} manually (requires HTTPS)`);
+    return false;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    toastStore.error(`Failed to copy the ${label}`);
+    return false;
+  }
+};
+
 const copySshPublic = async (): Promise<void> => {
   if (!sshPublicKey.value) {
     return;
   }
-  try {
-    await navigator.clipboard.writeText(sshPublicKey.value);
-    bCopiedSshPublic.value = true;
-    setTimeout(() => {
-      bCopiedSshPublic.value = false;
-    }, 2000);
-  } catch {
-    // ignore
+  if (!(await copyToClipboard(sshPublicKey.value, 'public key'))) {
+    return;
   }
+  bCopiedSshPublic.value = true;
+  setTimeout(() => {
+    bCopiedSshPublic.value = false;
+  }, 2000);
 };
 
 const copySshPrivate = async (): Promise<void> => {
   if (!sshPrivateKey.value) {
     return;
   }
-  try {
-    await navigator.clipboard.writeText(sshPrivateKey.value);
-    bCopiedSshPrivate.value = true;
-    setTimeout(() => {
-      bCopiedSshPrivate.value = false;
-    }, 2000);
-  } catch {
-    // ignore
+  if (!(await copyToClipboard(sshPrivateKey.value, 'private key'))) {
+    return;
   }
+  bCopiedSshPrivate.value = true;
+  setTimeout(() => {
+    bCopiedSshPrivate.value = false;
+  }, 2000);
 };
 
 const saveGitSettings = async (): Promise<void> => {
@@ -76,19 +102,29 @@ const saveGitSettings = async (): Promise<void> => {
   }
   bSavingGit.value = true;
   bGitSaved.value = false;
+  const submitted = { ...gitForm.value };
+  const saved = { name: submitted.name.trim(), email: submitted.email.trim() };
   try {
     const response = await settingsApi.update({
-      gitUserName: gitForm.value.name.trim() || null,
-      gitUserEmail: gitForm.value.email.trim() || null
+      gitUserName: saved.name || null,
+      gitUserEmail: saved.email || null
     });
     sshPublicKey.value = response.data.sshPublicKey ?? '';
     sshPrivateKey.value = response.data.sshPrivateKey ?? '';
+    // Keep edits typed while the request was in flight.
+    if (gitForm.value.name === submitted.name && gitForm.value.email === submitted.email) {
+      gitForm.value = { ...saved };
+    }
+    gitBaseline.value = saved;
+    toastStore.success('Git identity saved');
     bGitSaved.value = true;
     setTimeout(() => {
       bGitSaved.value = false;
     }, 2000);
-  } catch {
-    // ignore
+  } catch (err) {
+    if (!isGloballyToasted(err)) {
+      toastStore.error(apiErrorMessage(err, 'Failed to save git identity'));
+    }
   } finally {
     bSavingGit.value = false;
   }
@@ -97,6 +133,8 @@ const saveGitSettings = async (): Promise<void> => {
 onMounted((): void => {
   loadSettings();
 });
+
+defineExpose({ hasUnsavedChanges });
 </script>
 
 <template>

@@ -7,7 +7,10 @@ import ConfirmModal from '@/components/ConfirmModal.vue';
 import ListPageSkeleton from '@/components/ui/ListPageSkeleton.vue';
 
 // classes
-import { workspaceRulesApi, globalRulesApi, roleTemplatesApi } from '@/classes/api';
+import { workspaceRulesApi, globalRulesApi, roleTemplatesApi, isGloballyToasted } from '@/classes/api';
+
+// stores
+import { useToastStore } from '@/stores/toasts';
 
 // types
 import type { WorkspaceRuleFileSummary, RoleTemplate } from '@/@types/index';
@@ -19,6 +22,8 @@ const props = defineProps<{
   workspaceId?: string;
   hideHeader?: boolean;
 }>();
+
+const toastStore = useToastStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 
@@ -331,6 +336,9 @@ async function deleteFile(): Promise<void> {
       message?: string;
     };
     deleteError.value = caughtError.response?.data?.error ?? caughtError.message ?? 'Failed to delete rule file';
+    if (!isGloballyToasted(e)) {
+      toastStore.error(deleteError.value);
+    }
   } finally {
     bDeleting.value = false;
   }
@@ -454,6 +462,8 @@ async function submitRename(): Promise<void> {
 onMounted(async () => {
   await Promise.all([fetchFiles(), fetchRuleTemplates()]);
 });
+
+defineExpose({ hasUnsavedChanges });
 </script>
 
 <template>
@@ -477,7 +487,7 @@ onMounted(async () => {
     <div class="flex items-center gap-2" :class="{ 'ml-auto': hideHeader }">
       <button
         type="button"
-        class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors"
+        class="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-on-accent bg-primary rounded-lg hover:bg-primary/90 transition-colors"
         @click="openNewRuleModal"
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M12 5v14M5 12h14"/></svg>
@@ -495,7 +505,7 @@ onMounted(async () => {
   </div>
   <div
     v-if="successMessage"
-    class="mb-4 px-4 py-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm"
+    class="mb-4 px-4 py-3 rounded-lg bg-success/10 border border-success/20 text-success text-sm"
   >
     {{ successMessage }}
   </div>
@@ -592,12 +602,12 @@ onMounted(async () => {
               </p>
             </div>
             <div class="flex items-center gap-2">
-              <p v-if="hasUnsavedChanges" class="hidden sm:block text-xs text-amber-400">
+              <p v-if="hasUnsavedChanges" class="hidden sm:block text-xs text-warning">
                 Unsaved changes
               </p>
               <button
                 type="button"
-                class="px-3 py-1.5 text-xs font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
+                class="px-3 py-1.5 text-xs font-medium text-on-accent bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
                 :disabled="!hasUnsavedChanges || bSaving || !selectedFilename"
                 @click="saveCurrent"
               >
@@ -703,7 +713,7 @@ onMounted(async () => {
           </button>
           <button
             type="button"
-            class="px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
+            class="px-3 py-1.5 text-sm font-medium text-on-accent bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
             :disabled="
               bRenaming || !renameNewFilename.trim() || renameNewFilename.trim() === fileToRename
             "
@@ -833,7 +843,7 @@ onMounted(async () => {
           </button>
           <button
             type="button"
-            class="px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
+            class="px-3 py-1.5 text-sm font-medium text-on-accent bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
             :disabled="
               bCreatingRule ||
               !newRuleFilename.trim() ||
@@ -920,7 +930,7 @@ onMounted(async () => {
           </button>
           <button
             type="button"
-            class="px-3 py-1.5 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
+            class="px-3 py-1.5 text-sm font-medium text-on-accent bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-1"
             :disabled="bCreatingTemplate || !newTemplateName.trim() || !newTemplateContent.trim()"
             @click="createTemplate"
           >

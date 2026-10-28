@@ -9,6 +9,9 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { ChevronDown } from 'lucide-vue-next';
 
+// components
+import TodoStatusIcon from '@/components/chat/TodoStatusIcon.vue';
+
 // utils
 import {
   isPlanEntryDone,
@@ -23,6 +26,8 @@ import {
 const props = defineProps<{
   planDocuments: PlanDocument[];
   selectedPlanDocument: PlanDocument | null;
+  /** Bound via `@refresh`; declared as a prop so the tab can await the reload. */
+  onRefresh?: () => Promise<void> | void;
 }>();
 
 // -------------------------------------------------- Emits --------------------------------------------------
@@ -30,11 +35,13 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'select', planId: string): void;
   (e: 'download', plan: PlanDocument): void;
-  (e: 'refresh'): void;
   (e: 'delete'): void;
   (e: 'start-full-plan', plan: PlanDocument): void;
   (e: 'start-plan-entry', payload: { plan: PlanDocument; entry: PlanEntry; index: number }): void;
-  (e: 'mark-plan-entry-done', payload: { plan: PlanDocument; entry: PlanEntry; index: number }): void;
+  (
+    e: 'mark-plan-entry-done',
+    payload: { plan: PlanDocument; entry: PlanEntry; index: number }
+  ): void;
   (e: 'markdown-click', event: MouseEvent): void;
 }>();
 
@@ -66,7 +73,9 @@ const planEntries = computed(() => {
 });
 
 const doneStepsCount = computed(
-  () => props.selectedPlanDocument?.startableEntries.filter((entry) => isPlanEntryDone(entry)).length ?? 0
+  () =>
+    props.selectedPlanDocument?.startableEntries.filter((entry) => isPlanEntryDone(entry)).length ??
+    0
 );
 
 // -------------------------------------------------- Methods --------------------------------------------------
@@ -84,13 +93,14 @@ function onDownload(plan: PlanDocument): void {
   emit('download', plan);
 }
 
-function onRefresh(): void {
+async function onRefreshClick(): Promise<void> {
   if (bRefreshingPlan.value) return;
   bRefreshingPlan.value = true;
-  emit('refresh');
-  window.setTimeout(() => {
+  try {
+    await props.onRefresh?.();
+  } finally {
     bRefreshingPlan.value = false;
-  }, 800);
+  }
 }
 
 function onDelete(): void {
@@ -196,7 +206,7 @@ onUnmounted(() => {
             class="button is-transparent rounded-r-none! text-xs"
             title="Reload plan from disk"
             :disabled="bRefreshingPlan"
-            @click="onRefresh"
+            @click="onRefreshClick"
           >
             {{ bRefreshingPlan ? 'Refreshing…' : 'Refresh' }}
           </button>
@@ -230,21 +240,7 @@ onUnmounted(() => {
             </button>
             <button
               type="button"
-              class="flex w-full items-center px-3 py-2 text-left text-xs text-text-primary hover:bg-fg/[0.06]"
-              @click="onRefresh"
-            >
-              Refresh from disk
-            </button>
-            <button
-              type="button"
-              class="flex w-full items-center px-3 py-2 text-left text-xs text-text-primary hover:bg-fg/[0.06]"
-              @click="onDownload(selectedPlanDocument)"
-            >
-              Download markdown
-            </button>
-            <button
-              type="button"
-              class="flex w-full items-center px-3 py-2 text-left text-xs text-red-400 hover:bg-fg/[0.06]"
+              class="flex w-full items-center px-3 py-2 text-left text-xs text-destructive hover:bg-fg/[0.06]"
               @click="onDelete"
             >
               Delete plan
@@ -298,56 +294,14 @@ onUnmounted(() => {
               :key="`${selectedPlanDocument.id}-todo-${index}`"
               class="flex items-start gap-2 text-xs"
             >
-              <svg
-                v-if="planStatusIcon(entry.status) === 'completed' || isPlanEntryDone(entry)"
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.6"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                class="text-green-500 select-none shrink-0 mt-px"
-                aria-hidden="true"
-              >
-                <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
-                <polyline points="22 4 12 14.01 9 11.01" />
-              </svg>
-              <svg
-                v-else-if="planStatusIcon(entry.status) === 'in_progress'"
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.6"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                class="text-primary select-none shrink-0 mt-px"
-                aria-hidden="true"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <polyline points="12 6 12 12 16 14" />
-              </svg>
-              <svg
-                v-else
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.6"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                class="text-text-muted select-none shrink-0 mt-px"
-                aria-hidden="true"
-              >
-                <circle cx="12" cy="12" r="10" />
-              </svg>
+              <TodoStatusIcon
+                :status="isPlanEntryDone(entry) ? 'completed' : planStatusIcon(entry.status)"
+              />
               <span
                 class="min-w-0 flex-1 leading-snug"
-                :class="isPlanEntryDone(entry) ? 'text-text-muted line-through' : 'text-text-primary'"
+                :class="
+                  isPlanEntryDone(entry) ? 'text-text-muted line-through' : 'text-text-primary'
+                "
               >
                 {{ entry.content }}
               </span>

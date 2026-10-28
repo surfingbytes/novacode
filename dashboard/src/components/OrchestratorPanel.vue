@@ -1,11 +1,12 @@
 <script setup lang="ts">
 // node_modules
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import { ChevronDown, MessageSquare } from 'lucide-vue-next';
 
 // components
 import BaseModal from '@/components/BaseModal.vue';
+import ConfirmModal from '@/components/ConfirmModal.vue';
 import ModalHeader from '@/components/ModalHeader.vue';
 import AgentModelPicker from '@/components/AgentModelPicker.vue';
 import UiToggle from '@/components/ui/UiToggle.vue';
@@ -83,6 +84,7 @@ const workerModelOptions = ref<AgentModelOption[]>([]);
 const bLoadingWorkerModels = ref(false);
 const verifyModelOptions = ref<AgentModelOption[]>([]);
 const bLoadingVerifyModels = ref(false);
+const scrollContainer = ref<HTMLElement | null>(null);
 
 // -------------------------------------------------- Computed --------------------------------------------------
 
@@ -121,6 +123,50 @@ const runProgress = computed(() => {
     return { status, finished: finishedStepCount.value, running: runningStepCount.value, total: subtasks.value.length };
   }
   return null;
+});
+
+const RING_RADIUS = 8;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+const RUN_STATUS_RING_CLASS: Record<NonNullable<typeof runProgress.value>['status'], string> = {
+  running: 'text-primary',
+  completed: 'text-success',
+  failed: 'text-destructive',
+  stopped: 'text-warning'
+};
+
+const ringDashOffset = computed(() => {
+  const progress = runProgress.value;
+  const ratio = progress && progress.total > 0 ? progress.finished / progress.total : 0;
+  return RING_CIRCUMFERENCE * (1 - ratio);
+});
+
+// Short label beside the ring; the full sentence goes to the title
+const runSummary = computed(() => {
+  const progress = runProgress.value;
+  if (!progress) {
+    return { short: '', full: '' };
+  }
+  const parts = [`${progress.finished}/${progress.total}`];
+  if (progress.status === 'running') {
+    if (progress.running) parts.push(`${progress.running} running`);
+    if (waitingStepCount.value) parts.push(`${waitingStepCount.value} waiting`);
+  } else if (progress.status === 'failed') {
+    parts.push(`${failedStepCount.value} failed`);
+    if (skippedStepCount.value) parts.push(`${skippedStepCount.value} skipped`);
+  } else if (progress.status === 'stopped') {
+    parts.push('stopped');
+  }
+  const prefix =
+    progress.status === 'running'
+      ? props.orchestrator?.runMode === 'parallel'
+        ? 'Running in parallel'
+        : 'Running'
+      : progress.status === 'completed'
+        ? 'Completed'
+        : progress.status === 'failed'
+          ? 'Finished with failures'
+          : 'Stopped';
+  return { short: parts.join(' · '), full: `${prefix}: ${[`${parts[0]} finished`, ...parts.slice(1)].join(', ')}` };
 });
 
 const runChoices = computed<{ id: RunChoice; label: string; hint: string }[]>(() => [
@@ -211,12 +257,38 @@ function taskStatus(index: number): 'idle' | 'active' | 'waiting' | 'finishing' 
   return task?.runResult ?? 'idle';
 }
 
+// Step that needs attention first: waiting > failed > running > not started; null when all are finished
+function attentionStepIndex(): number | null {
+  const statuses = editedSubtasks.value.map((_, i) => taskStatus(i));
+  for (const wanted of [['waiting'], ['failed'], ['active', 'finishing'], ['idle']]) {
+    const index = statuses.findIndex((status) => wanted.includes(status));
+    if (index >= 0) {
+      return index;
+    }
+  }
+  return null;
+}
+
+function scrollToAttentionStep(behavior: ScrollBehavior) {
+  const container = scrollContainer.value;
+  if (!container) {
+    return;
+  }
+  const index = attentionStepIndex();
+  const card = index === null ? null : container.querySelector(`[data-step-index="${index}"]`);
+  if (card) {
+    card.scrollIntoView({ behavior, block: 'center' });
+  } else {
+    container.scrollTo({ top: container.scrollHeight, behavior });
+  }
+}
+
 const STEP_CARD_CLASS: Record<ReturnType<typeof taskStatus>, string> = {
   idle: 'border border-fg/15',
   active: 'orch-active-border',
   waiting: 'border border-warning/70',
   finishing: 'border border-dashed border-primary/50',
-  done: 'border border-emerald-500/60',
+  done: 'border border-success/60',
   failed: 'border border-destructive/60',
   skipped: 'border border-dashed border-fg/25 opacity-70'
 };
@@ -272,9 +344,9 @@ function saveEditFromModal() {
   saveSubtasks();
 }
 
-async function saveSubtasks() {
+async function saveSubtasks(): Promise<boolean> {
   if (!hasEdits.value || !props.orchestrator) {
-    return;
+    return true;
   }
   bSavingSubtasks.value = true;
   try {
@@ -290,8 +362,10 @@ async function saveSubtasks() {
     if (data) {
       emit('update:orchestrator', data);
     }
+    return true;
   } catch {
     toastStore.error('Failed to save tasks');
+    return false;
   } finally {
     bSavingSubtasks.value = false;
   }
@@ -392,9 +466,28 @@ async function stopTasks() {
   }
 }
 
-function removeTask(index: number) {
+// Index of the step awaiting delete confirmation
+const pendingDelete = ref<number | null>(null);
+
+const pendingDeleteDescription = computed(() => {
+  const index = pendingDelete.value;
+  if (index === null) {
+    return '';
+  }
+  const name = editedSubtasks.value[index]?.name || `step ${index + 1}`;
+  return `Delete step ${index + 1} '${name}'? Steps that depend on it lose that dependency.`;
+});
+
+async function removeTask(): Promise<void> {
+  const index = pendingDelete.value;
+  if (index === null) {
+    return;
+  }
   const without = editedSubtasks.value.filter((_, i) => i !== index);
   editedSubtasks.value = remapDependsOnAfterDelete(without, index);
+  // On failure saveSubtasks toasts and the change stays unsaved behind "Save changes"
+  await saveSubtasks();
+  pendingDelete.value = null;
 }
 
 function toggleDependsOn(depIndex: number) {
@@ -480,8 +573,21 @@ async function clonePlan() {
 
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 
+// Jump to the step that needs attention once per opened plan; live updates don't move the view.
+// A plan that never ran stays at the top so its settings are visible.
+async function scrollOnOpen() {
+  if (!runProgress.value) {
+    return;
+  }
+  await nextTick();
+  scrollToAttentionStep('auto');
+}
+
+watch(() => props.orchestratorId, scrollOnOpen);
+
 onMounted(() => {
   document.addEventListener('click', closeRunMenu);
+  scrollOnOpen();
 });
 
 onBeforeUnmount(() => {
@@ -491,7 +597,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="flex-1 flex flex-col overflow-hidden min-h-0">
-    <div class="flex-1 overflow-y-auto px-4 md:px-6 py-4 space-y-4">
+    <div ref="scrollContainer" class="flex-1 overflow-y-auto px-4 md:px-6 py-4 space-y-4">
       <!-- Planning chat: where the plan is written and adjusted -->
       <div class="rounded-xl border border-fg/15 bg-fg/[0.04] px-3 py-2.5 flex flex-wrap items-center gap-3">
         <MessageSquare :size="16" :stroke-width="1.6" class="text-text-muted shrink-0" aria-hidden="true" />
@@ -678,19 +784,22 @@ onBeforeUnmount(() => {
         <div class="flex flex-col gap-0">
           <template v-for="(task, i) in editedSubtasks" :key="'flow-' + i">
             <div
+              :data-step-index="i"
               :class="['rounded-xl overflow-hidden', STEP_CARD_CLASS[taskStatus(i)]]"
             >
               <div
-                class="px-3 py-2 border-b border-fg/10 flex items-center gap-2 bg-fg/[0.04] orch-card-inner"
+                class="px-3 py-2 border-b border-fg/10 flex flex-wrap items-center gap-x-2 gap-y-1 bg-fg/[0.04] orch-card-inner"
               >
-                <span
-                  class="flex items-center justify-center w-6 h-6 rounded-full bg-primary/15 text-primary text-xs font-semibold shrink-0"
-                >
-                  {{ i + 1 }}
-                </span>
-                <span class="font-medium text-text-primary truncate flex-1 min-w-0">{{
-                  task.name
-                }}</span>
+                <div class="flex items-center gap-2 min-w-0 flex-1 basis-full sm:basis-auto">
+                  <span
+                    class="flex items-center justify-center w-6 h-6 rounded-full bg-primary/15 text-primary text-xs font-semibold shrink-0"
+                  >
+                    {{ i + 1 }}
+                  </span>
+                  <span class="font-medium text-text-primary truncate min-w-0" :title="task.name">{{
+                    task.name
+                  }}</span>
+                </div>
                 <span
                   v-if="taskStatus(i) === 'active'"
                   class="text-xs px-2 py-0.5 rounded-full border border-primary/40 text-primary shrink-0"
@@ -782,7 +891,7 @@ onBeforeUnmount(() => {
                     type="button"
                     class="p-1.5 rounded text-text-muted hover:text-destructive hover:bg-fg/10 transition-colors"
                     title="Delete step"
-                    @click="removeTask(i)"
+                    @click="pendingDelete = i"
                   >
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" class="select-none" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
                   </button>
@@ -829,6 +938,23 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
+
+      <ConfirmModal
+        :model-value="pendingDelete !== null"
+        title="Delete step"
+        :description="pendingDeleteDescription"
+        confirm-label="Delete"
+        variant="danger"
+        :loading="bSavingSubtasks"
+        @update:model-value="
+          (v: boolean) => {
+            if (!v) {
+              pendingDelete = null;
+            }
+          }
+        "
+        @confirm="removeTask"
+      />
 
       <!-- Edit task modal -->
       <BaseModal
@@ -911,44 +1037,6 @@ onBeforeUnmount(() => {
         </div>
       </BaseModal>
 
-      <!-- Run progress (from server state) -->
-      <div
-        v-if="runProgress"
-        class="rounded-lg border px-4 py-2 text-sm"
-        :class="
-          runProgress.status === 'running'
-            ? 'border-primary/30 bg-primary/5 text-text-primary'
-            : runProgress.status === 'completed'
-              ? 'border-green-500/30 bg-green-500/5 text-text-primary'
-              : runProgress.status === 'failed'
-                ? 'border-destructive/30 bg-destructive/5 text-destructive'
-                : 'border-amber-500/30 bg-amber-500/5 text-amber-400'
-        "
-      >
-        <span v-if="runProgress.status === 'running'">
-          <span
-            class="inline-block w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin align-middle mr-1.5"
-          />
-          {{ orchestrator?.runMode === 'parallel' ? 'Running in parallel' : 'Running' }}:
-          {{ runProgress.finished }}/{{ runProgress.total }} finished<template v-if="runProgress.running"
-            >, {{ runProgress.running }} running</template
-          ><template v-if="waitingStepCount"
-            >, {{ waitingStepCount }} waiting for your input</template
-          >
-        </span>
-        <span v-else-if="runProgress.status === 'completed'">
-          Completed {{ runProgress.total }}/{{ runProgress.total }}
-        </span>
-        <span v-else-if="runProgress.status === 'failed'">
-          Finished with {{ failedStepCount }} failed step{{ failedStepCount === 1 ? '' : 's'
-          }}<template v-if="skippedStepCount"
-            >, {{ skippedStepCount }} skipped</template
-          >
-        </span>
-        <span v-else>
-          Stopped after {{ runProgress.finished }}/{{ runProgress.total }} steps
-        </span>
-      </div>
       <div v-if="runError" class="text-sm text-destructive">{{ runError }}</div>
     </div>
 
@@ -956,7 +1044,40 @@ onBeforeUnmount(() => {
     <div
       class="px-4 md:px-6 py-3 border-t border-fg/10 shrink-0 flex items-center justify-between gap-4"
     >
-      <span class="text-sm text-text-muted">
+      <!-- Run progress (from server state); click jumps to the step needing attention -->
+      <button
+        v-if="runProgress"
+        type="button"
+        class="flex items-center gap-2 min-w-0 text-sm text-text-muted hover:text-text-primary transition-colors"
+        :title="runSummary.full"
+        :aria-label="runSummary.full"
+        @click="scrollToAttentionStep('smooth')"
+      >
+        <svg
+          viewBox="0 0 20 20"
+          width="20"
+          height="20"
+          class="shrink-0 -rotate-90"
+          :class="[RUN_STATUS_RING_CLASS[runProgress.status], runProgress.status === 'running' && 'animate-pulse']"
+          aria-hidden="true"
+        >
+          <circle cx="10" cy="10" :r="RING_RADIUS" fill="none" stroke="currentColor" stroke-opacity="0.2" stroke-width="2.5" />
+          <circle
+            cx="10"
+            cy="10"
+            :r="RING_RADIUS"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            :stroke-dasharray="RING_CIRCUMFERENCE"
+            :stroke-dashoffset="ringDashOffset"
+            class="transition-[stroke-dashoffset] duration-500"
+          />
+        </svg>
+        <span class="truncate">{{ runSummary.short }}</span>
+      </button>
+      <span v-else class="text-sm text-text-muted">
         {{ subtasks.length }} task{{ subtasks.length === 1 ? '' : 's' }}
       </span>
       <div class="flex items-center gap-2">

@@ -2,13 +2,18 @@
 // node_modules
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
+import { MoreHorizontal } from 'lucide-vue-next';
 
 // components
 import AgentSessionAvatar from '@/components/AgentSessionAvatar.vue';
 import ConfirmModal from '@/components/ConfirmModal.vue';
 import ContextMenu from '@/components/ContextMenu.vue';
 import OrchestratorProgressRing from '@/components/OrchestratorProgressRing.vue';
+import StatusBadge from '@/components/ui/StatusBadge.vue';
 import SessionEditModal from '@/components/SessionEditModal.vue';
+
+// composables
+import { useLongPress } from '@/composables/useLongPress';
 
 // stores
 import { useWorkspacesStore } from '@/stores/workspaces';
@@ -62,8 +67,7 @@ const orchestratorsStore = useOrchestratorsStore();
 // -------------------------------------------------- Constants --------------------------------------------------
 
 type CtxTarget =
-  | { kind: 'session'; session: Session }
-  | { kind: 'orchestrator'; orchestrator: Orchestrator };
+  { kind: 'session'; session: Session } | { kind: 'orchestrator'; orchestrator: Orchestrator };
 
 type SidebarItem =
   | { kind: 'session'; session: Session }
@@ -184,9 +188,7 @@ const workspaceNameById = computed(() => {
 // -------------------------------------------------- Methods --------------------------------------------------
 
 function itemBusy(item: SidebarItem): boolean {
-  return item.kind === 'session'
-    ? !!item.session.busy
-    : item.nestedSessions.some((s) => s.busy);
+  return item.kind === 'session' ? !!item.session.busy : item.nestedSessions.some((s) => s.busy);
 }
 
 function orderedNestedSessions(orch: Orchestrator): Session[] {
@@ -263,7 +265,11 @@ function sessionContextItems(session: Session): ContextMenuItem[] {
   return [
     { key: 'open', label: 'Open', icon: 'open_in_new' },
     { key: 'edit', label: 'Edit…', icon: 'edit' },
-    { key: 'archive', label: arch ? 'Unarchive' : 'Archive', icon: arch ? 'unarchive' : 'inventory_2' },
+    {
+      key: 'archive',
+      label: arch ? 'Unarchive' : 'Archive',
+      icon: arch ? 'unarchive' : 'inventory_2'
+    },
     { key: 'delete', label: 'Delete…', icon: 'delete', danger: true }
   ];
 }
@@ -274,29 +280,87 @@ function orchestratorContextItems(orch: Orchestrator): ContextMenuItem[] {
     { key: 'open', label: 'Open', icon: 'open_in_new' },
     ...(arch
       ? []
-      : [{ key: 'favorite', label: orch.isFavorite ? 'Remove favorite' : 'Add to favorites', icon: 'star' }]),
+      : [
+          {
+            key: 'favorite',
+            label: orch.isFavorite ? 'Remove favorite' : 'Add to favorites',
+            icon: 'star'
+          }
+        ]),
     { key: 'clone', label: 'Clone', icon: 'content_copy' },
-    { key: 'archive', label: arch ? 'Unarchive' : 'Archive', icon: arch ? 'unarchive' : 'inventory_2' },
+    {
+      key: 'archive',
+      label: arch ? 'Unarchive' : 'Archive',
+      icon: arch ? 'unarchive' : 'inventory_2'
+    },
     { key: 'delete', label: 'Delete…', icon: 'delete', danger: true }
   ];
 }
 
+function openCtxMenu(target: CtxTarget, x: number, y: number): void {
+  ctxTarget.value = target;
+  ctxMenuItems.value =
+    target.kind === 'session'
+      ? sessionContextItems(target.session)
+      : orchestratorContextItems(target.orchestrator);
+  ctxMenuX.value = x;
+  ctxMenuY.value = y;
+  bCtxMenuOpen.value = true;
+}
+
 function openSessionContextMenu(e: MouseEvent, session: Session): void {
   e.preventDefault();
-  ctxTarget.value = { kind: 'session', session };
-  ctxMenuItems.value = sessionContextItems(session);
-  ctxMenuX.value = e.clientX;
-  ctxMenuY.value = e.clientY;
-  bCtxMenuOpen.value = true;
+  openCtxMenu({ kind: 'session', session }, e.clientX, e.clientY);
 }
 
 function openOrchestratorContextMenu(e: MouseEvent, orch: Orchestrator): void {
   e.preventDefault();
-  ctxTarget.value = { kind: 'orchestrator', orchestrator: orch };
-  ctxMenuItems.value = orchestratorContextItems(orch);
-  ctxMenuX.value = e.clientX;
-  ctxMenuY.value = e.clientY;
-  bCtxMenuOpen.value = true;
+  openCtxMenu({ kind: 'orchestrator', orchestrator: orch }, e.clientX, e.clientY);
+}
+
+/** '⋯' button: open the row menu anchored below the button's right edge. */
+function openCtxMenuFromButton(e: MouseEvent, target: CtxTarget): void {
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  openCtxMenu(target, rect.right, rect.bottom);
+}
+
+// Long-press opens the same menu at the press point (touch has no right-click)
+const rowLongPress = useLongPress<{ target: CtxTarget; x: number; y: number }>(({ target, x, y }) =>
+  openCtxMenu(target, x, y)
+);
+
+function onRowPointerDown(e: PointerEvent, target: CtxTarget): void {
+  rowLongPress.onPointerDown(e, { target, x: e.clientX, y: e.clientY });
+}
+
+/** Swallows the click that trails a long-press; returns true when the click should proceed. */
+function consumeLongPressClick(): boolean {
+  if (rowLongPress.bTriggered.value) {
+    rowLongPress.bTriggered.value = false;
+    return false;
+  }
+  return true;
+}
+
+function onRowClick(item: SidebarItem): void {
+  if (consumeLongPressClick()) {
+    open(item);
+  }
+}
+
+async function toggleSessionArchived(session: Session): Promise<void> {
+  try {
+    const { data: updatedSession } = await sessionsApi.update(props.workspaceId, session.id, {
+      archived: !session.archived
+    });
+    if (updatedSession) {
+      workspacesStore.upsertSession(updatedSession);
+    }
+  } catch {
+    toastStore.error(
+      session.archived ? 'Failed to unarchive session' : 'Failed to archive session'
+    );
+  }
 }
 
 function onCtxPick(key: string): void {
@@ -316,7 +380,7 @@ function onCtxPick(key: string): void {
       return;
     }
     if (key === 'archive') {
-      void sessionsApi.update(props.workspaceId, session.id, { archived: !session.archived });
+      void toggleSessionArchived(session);
       return;
     }
     if (key === 'delete') {
@@ -369,7 +433,13 @@ function onCtxPick(key: string): void {
           orchestratorsStore.upsertOrchestrator(updatedOrchestrator);
         }
       })
-      .catch(() => toastStore.error('Failed to archive orchestrator'));
+      .catch(() =>
+        toastStore.error(
+          orchestrator.archived
+            ? 'Failed to unarchive orchestrator'
+            : 'Failed to archive orchestrator'
+        )
+      );
     return;
   }
   if (key === 'delete') {
@@ -466,7 +536,20 @@ watch(
         title="Back to sessions"
         @click="emit('back')"
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+          class="select-none"
+        >
+          <path d="M19 12H5M12 19l-7-7 7-7" />
+        </svg>
       </button>
       <div class="flex flex-col min-w-0">
         <span class="text-sm font-medium text-text-primary truncate"> Sessions </span>
@@ -480,7 +563,20 @@ watch(
         title="New session"
         @click="emit('new-session')"
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M12 5v14M5 12h14"/></svg>
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+          class="select-none"
+        >
+          <path d="M12 5v14M5 12h14" />
+        </svg>
       </button>
       <button
         v-if="!props.showOnMobile"
@@ -490,7 +586,22 @@ watch(
         aria-label="Hide session list"
         @click="emit('close-desktop')"
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M14 9l-3 3 3 3"/></svg>
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+          class="select-none"
+        >
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <path d="M9 3v18" />
+          <path d="M14 9l-3 3 3 3" />
+        </svg>
       </button>
     </div>
 
@@ -523,107 +634,37 @@ watch(
           class="space-y-0.5"
         >
           <template v-if="item.kind === 'session'">
-            <button
-              type="button"
-              class="w-full flex items-start gap-3 px-3 py-2.5 rounded-lg text-left transition-colors border"
+            <div
+              class="sidebar-row w-full flex items-center rounded-lg transition-colors border"
               :class="[
                 activeKind === 'session' && activeId === item.session.id
                   ? 'bg-primary/15 border-primary/40 text-text-primary'
                   : 'border-transparent text-text-muted hover:bg-fg/[0.06] hover:text-text-primary'
               ]"
-              @click="open(item)"
               @contextmenu.prevent.stop="openSessionContextMenu($event, item.session)"
             >
-              <AgentSessionAvatar :agent-type="item.session.agentType" />
-
-              <div class="flex-1 min-w-0 flex flex-col gap-0.5 pt-0.5">
-                <div class="flex items-baseline gap-2 min-w-0">
-                  <span class="truncate flex-1 min-w-0 text-sm font-medium text-text-primary">
-                    {{ item.session.name || 'Untitled session' }}
-                  </span>
-                  <svg
-                    v-if="item.session.isFavorite"
-                    class="text-primary shrink-0 self-center"
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
-                    stroke="currentColor"
-                    stroke-width="1.6"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    aria-label="Favorite"
-                    title="Favorite"
-                  >
-                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z" />
-                  </svg>
-                  <span class="text-[11px] text-text-muted shrink-0 whitespace-nowrap tabular-nums">
-                    {{ relativeTimeShort(item.session.updatedAt) }}
-                  </span>
-                </div>
-                <p
-                  v-if="sessionPreviewLine(item.session)"
-                  class="text-xs text-text-muted truncate min-w-0 leading-snug"
-                >
-                  {{ sessionPreviewLine(item.session) }}
-                </p>
-                <div
-                  v-if="item.session.tags?.length"
-                  class="inline-flex flex-wrap items-center gap-1 min-w-0 mt-0.5"
-                >
-                  <span
-                    v-for="tag in item.session.tags"
-                    :key="tag"
-                    class="px-1.5 py-0.5 rounded-full border text-[11px]"
-                    :class="categoryColorClass(tag)"
-                  >
-                    {{ tag }}
-                  </span>
-                </div>
-              </div>
-
-              <span
-                v-if="item.session.busy"
-                class="inline-flex items-center gap-1.5 text-[11px] text-primary shrink-0 self-center"
-                :title="sessionBusyTitle(item.session)"
-              >
-                <span
-                  class="w-3 h-3 border-2 border-primary/40 border-t-primary rounded-full animate-spin"
-                />
-                {{ sessionBusyLabel(item.session) }}
-              </span>
-              <span
-                v-else-if="isSessionUnread(item.session)"
-                class="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0 self-center border border-primary/40 bg-primary/15 text-primary"
-                title="Finished — unread"
-              >
-                Done
-              </span>
-            </button>
-          </template>
-
-          <template v-else>
-            <div class="rounded-lg border border-border/60 bg-fg/[0.02] overflow-hidden">
               <button
                 type="button"
-                class="w-full flex items-start gap-3 px-3 py-2.5 text-left transition-colors"
-                :class="[
-                  activeKind === 'orchestrator' && activeId === item.orchestrator.id
-                    ? 'bg-primary/15 text-text-primary'
-                    : 'text-text-muted hover:bg-fg/[0.06] hover:text-text-primary'
-                ]"
-                @click="open(item)"
-                @contextmenu.prevent.stop="openOrchestratorContextMenu($event, item.orchestrator)"
+                class="sidebar-row-main flex-1 min-w-0 flex items-start gap-3 pl-3 pr-1 py-2.5 text-left"
+                @click="onRowClick(item)"
+                @pointerdown="onRowPointerDown($event, { kind: 'session', session: item.session })"
+                @pointerup="rowLongPress.onPointerUp"
+                @pointercancel="rowLongPress.onPointerUp"
+                @pointerleave="rowLongPress.onPointerUp"
+                @pointermove="rowLongPress.onPointerMove"
               >
-                <AgentSessionAvatar :agent-type="item.orchestrator.agentType" />
+                <AgentSessionAvatar :agent-type="item.session.agentType" />
 
                 <div class="flex-1 min-w-0 flex flex-col gap-0.5 pt-0.5">
                   <div class="flex items-baseline gap-2 min-w-0">
-                    <span class="truncate flex-1 min-w-0 text-sm font-medium text-text-primary">
-                      {{ item.orchestrator.name || 'Untitled orchestrator' }}
+                    <span
+                      class="truncate flex-1 min-w-0 text-sm font-medium text-text-primary"
+                      :title="item.session.name || 'Untitled session'"
+                    >
+                      {{ item.session.name || 'Untitled session' }}
                     </span>
                     <svg
-                      v-if="item.orchestrator.isFavorite"
+                      v-if="item.session.isFavorite"
                       class="text-primary shrink-0 self-center"
                       width="12"
                       height="12"
@@ -636,62 +677,227 @@ watch(
                       aria-label="Favorite"
                       title="Favorite"
                     >
-                      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z" />
+                      <path
+                        d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z"
+                      />
                     </svg>
-                    <span class="text-[11px] text-text-muted shrink-0 whitespace-nowrap tabular-nums">
-                      {{ relativeTimeShort(item.orchestrator.updatedAt) }}
+                    <span
+                      class="text-[11px] text-text-muted shrink-0 whitespace-nowrap tabular-nums"
+                    >
+                      {{ relativeTimeShort(item.session.updatedAt) }}
                     </span>
                   </div>
                   <p
-                    v-if="orchestratorPreviewLine(item.orchestrator)"
+                    v-if="sessionPreviewLine(item.session)"
                     class="text-xs text-text-muted truncate min-w-0 leading-snug"
                   >
-                    {{ orchestratorPreviewLine(item.orchestrator) }}
+                    {{ sessionPreviewLine(item.session) }}
                   </p>
+                  <div
+                    v-if="item.session.tags?.length"
+                    class="inline-flex flex-wrap items-center gap-1 min-w-0 mt-0.5"
+                  >
+                    <span
+                      v-for="tag in item.session.tags"
+                      :key="tag"
+                      class="px-1.5 py-0.5 rounded-full border text-[11px]"
+                      :class="categoryColorClass(tag)"
+                    >
+                      {{ tag }}
+                    </span>
+                  </div>
                 </div>
 
                 <span
-                  v-if="orchestratorRowProgress(item.orchestrator).bRunning"
-                  class="inline-flex items-center gap-1.5 text-[11px] text-primary shrink-0 self-center tabular-nums"
+                  v-if="item.session.busy"
+                  class="inline-flex items-center gap-1.5 text-[11px] text-primary shrink-0 self-center"
+                  :title="sessionBusyTitle(item.session)"
                 >
-                  <OrchestratorProgressRing
-                    :progress="orchestratorRowProgress(item.orchestrator)"
-                    :color="ringColor"
+                  <span
+                    class="w-3 h-3 border-2 border-primary/40 border-t-primary rounded-full animate-spin"
                   />
-                  {{ orchestratorRowProgress(item.orchestrator).done }}/{{ orchestratorRowProgress(item.orchestrator).total }}
+                  {{ sessionBusyLabel(item.session) }}
                 </span>
-                <span
-                  v-else-if="isOrchestratorUnread(item.orchestrator)"
-                  class="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0 self-center border border-primary/40 bg-primary/15 text-primary"
+                <StatusBadge
+                  v-else-if="isSessionUnread(item.session)"
+                  kind="done"
+                  class="self-center"
                   title="Finished — unread"
-                >
-                  Done
-                </span>
+                />
               </button>
+              <button
+                type="button"
+                class="sidebar-row-more shrink-0 self-center inline-flex items-center justify-center w-7 h-7 mr-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-fg/[0.08] transition-[opacity,colors]"
+                aria-label="More actions"
+                title="More actions"
+                @click.stop="
+                  openCtxMenuFromButton($event, { kind: 'session', session: item.session })
+                "
+              >
+                <MoreHorizontal :size="16" aria-hidden="true" />
+              </button>
+            </div>
+          </template>
+
+          <template v-else>
+            <div class="rounded-lg border border-border/60 bg-fg/[0.02] overflow-hidden">
+              <div
+                class="sidebar-row w-full flex items-center transition-colors"
+                :class="[
+                  activeKind === 'orchestrator' && activeId === item.orchestrator.id
+                    ? 'bg-primary/15 text-text-primary'
+                    : 'text-text-muted hover:bg-fg/[0.06] hover:text-text-primary'
+                ]"
+                @contextmenu.prevent.stop="openOrchestratorContextMenu($event, item.orchestrator)"
+              >
+                <button
+                  type="button"
+                  class="sidebar-row-main flex-1 min-w-0 flex items-start gap-3 pl-3 pr-1 py-2.5 text-left"
+                  @click="onRowClick(item)"
+                  @pointerdown="
+                    onRowPointerDown($event, {
+                      kind: 'orchestrator',
+                      orchestrator: item.orchestrator
+                    })
+                  "
+                  @pointerup="rowLongPress.onPointerUp"
+                  @pointercancel="rowLongPress.onPointerUp"
+                  @pointerleave="rowLongPress.onPointerUp"
+                  @pointermove="rowLongPress.onPointerMove"
+                >
+                  <AgentSessionAvatar :agent-type="item.orchestrator.agentType" />
+
+                  <div class="flex-1 min-w-0 flex flex-col gap-0.5 pt-0.5">
+                    <div class="flex items-baseline gap-2 min-w-0">
+                      <span
+                        class="truncate flex-1 min-w-0 text-sm font-medium text-text-primary"
+                        :title="item.orchestrator.name || 'Untitled orchestrator'"
+                      >
+                        {{ item.orchestrator.name || 'Untitled orchestrator' }}
+                      </span>
+                      <svg
+                        v-if="item.orchestrator.isFavorite"
+                        class="text-primary shrink-0 self-center"
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-label="Favorite"
+                        title="Favorite"
+                      >
+                        <path
+                          d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.56 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z"
+                        />
+                      </svg>
+                      <span
+                        class="text-[11px] text-text-muted shrink-0 whitespace-nowrap tabular-nums"
+                      >
+                        {{ relativeTimeShort(item.orchestrator.updatedAt) }}
+                      </span>
+                    </div>
+                    <p
+                      v-if="orchestratorPreviewLine(item.orchestrator)"
+                      class="text-xs text-text-muted truncate min-w-0 leading-snug"
+                    >
+                      {{ orchestratorPreviewLine(item.orchestrator) }}
+                    </p>
+                  </div>
+
+                  <span
+                    v-if="orchestratorRowProgress(item.orchestrator).bRunning"
+                    class="inline-flex items-center gap-1.5 text-[11px] text-primary shrink-0 self-center tabular-nums"
+                  >
+                    <OrchestratorProgressRing
+                      :progress="orchestratorRowProgress(item.orchestrator)"
+                      :color="ringColor"
+                    />
+                    {{ orchestratorRowProgress(item.orchestrator).done }}/{{
+                      orchestratorRowProgress(item.orchestrator).total
+                    }}
+                  </span>
+                  <StatusBadge
+                    v-else-if="isOrchestratorUnread(item.orchestrator)"
+                    kind="done"
+                    class="self-center"
+                    title="Finished — unread"
+                  />
+                </button>
+                <button
+                  type="button"
+                  class="sidebar-row-more shrink-0 self-center inline-flex items-center justify-center w-7 h-7 mr-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-fg/[0.08] transition-[opacity,colors]"
+                  aria-label="More actions"
+                  title="More actions"
+                  @click.stop="
+                    openCtxMenuFromButton($event, {
+                      kind: 'orchestrator',
+                      orchestrator: item.orchestrator
+                    })
+                  "
+                >
+                  <MoreHorizontal :size="16" aria-hidden="true" />
+                </button>
+              </div>
 
               <ul
                 v-if="item.nestedSessions.length > 0"
                 class="border-t border-border/50 pl-4 ml-4 mr-2 mb-2 space-y-0.5 border-l border-border/40"
               >
                 <li v-for="sub in item.nestedSessions" :key="sub.id">
-                  <button
-                    type="button"
-                    class="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-xs transition-colors"
+                  <div
+                    class="sidebar-row w-full flex items-center rounded-md text-xs transition-colors"
                     :class="[
                       activeKind === 'session' && activeId === sub.id
                         ? 'bg-primary/10 text-text-primary'
                         : 'text-text-muted hover:bg-fg/[0.06] hover:text-text-primary'
                     ]"
-                    @click.prevent.stop="open({ kind: 'session', session: sub })"
                     @contextmenu.prevent.stop="openSessionContextMenu($event, sub)"
                   >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="shrink-0 text-fg/50"><path d="M3 9l9 9 9-9"/></svg>
-                    <span class="truncate flex-1">{{ sub.name || 'Untitled session' }}</span>
-                    <span
-                      v-if="sub.busy"
-                      class="w-2.5 h-2.5 border border-primary/40 border-t-primary rounded-full animate-spin shrink-0"
-                    />
-                  </button>
+                    <button
+                      type="button"
+                      class="sidebar-row-main flex-1 min-w-0 flex items-center gap-2 pl-2 pr-1 py-1.5 text-left"
+                      @click.prevent.stop="onRowClick({ kind: 'session', session: sub })"
+                      @pointerdown="onRowPointerDown($event, { kind: 'session', session: sub })"
+                      @pointerup="rowLongPress.onPointerUp"
+                      @pointercancel="rowLongPress.onPointerUp"
+                      @pointerleave="rowLongPress.onPointerUp"
+                      @pointermove="rowLongPress.onPointerMove"
+                    >
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-hidden="true"
+                        class="shrink-0 text-fg/50"
+                      >
+                        <path d="M3 9l9 9 9-9" />
+                      </svg>
+                      <span class="truncate flex-1" :title="sub.name || 'Untitled session'">
+                        {{ sub.name || 'Untitled session' }}
+                      </span>
+                      <span
+                        v-if="sub.busy"
+                        class="w-2.5 h-2.5 border border-primary/40 border-t-primary rounded-full animate-spin shrink-0"
+                      />
+                    </button>
+                    <button
+                      type="button"
+                      class="sidebar-row-more shrink-0 inline-flex items-center justify-center w-6 h-6 mr-1 rounded-md text-text-muted hover:text-text-primary hover:bg-fg/[0.08] transition-[opacity,colors]"
+                      aria-label="More actions"
+                      title="More actions"
+                      @click.stop="openCtxMenuFromButton($event, { kind: 'session', session: sub })"
+                    >
+                      <MoreHorizontal :size="14" aria-hidden="true" />
+                    </button>
+                  </div>
                 </li>
               </ul>
             </div>
@@ -738,3 +944,27 @@ watch(
     @confirm="confirmDeleteOrchestrator"
   />
 </template>
+
+<style scoped>
+/* Row '⋯' button: revealed on hover / keyboard focus; always visible on touch-only devices */
+.sidebar-row-more {
+  opacity: 0;
+}
+
+.sidebar-row:hover .sidebar-row-more,
+.sidebar-row:focus-within .sidebar-row-more {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .sidebar-row-more {
+    opacity: 1;
+  }
+}
+
+/* Long-press opens the row menu; suppress the iOS link/selection callout */
+.sidebar-row-main {
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+</style>

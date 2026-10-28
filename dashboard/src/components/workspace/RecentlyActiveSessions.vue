@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import StatusBadge from '@/components/ui/StatusBadge.vue';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { agentTypeShortLabel } from '@/utils/agentTypeMeta';
 import { sessionStatusDotStyle, workspaceColor } from '@/utils/workspaceColor';
@@ -15,7 +16,9 @@ const recentlyActive = computed<Session[]>(() => {
   const busyIds = new Set(busy.map((session) => session.id));
   const rest = active
     .filter((session) => !busyIds.has(session.id))
-    .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
+    .sort(
+      (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
+    );
   return [
     ...[...busy].sort(
       (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
@@ -41,7 +44,9 @@ function workspaceName(workspaceId: string): string {
     <div class="recently-active__header">
       <span class="nc-eyebrow">// recently active</span>
     </div>
-    <p class="recently-active__error">Couldn't load recent sessions. They'll show up once the API is reachable.</p>
+    <p class="recently-active__error">
+      Couldn't load recent sessions. They'll show up once the API is reachable.
+    </p>
   </div>
   <div v-else-if="recentlyActive.length > 0" class="recently-active">
     <div class="recently-active__header">
@@ -62,13 +67,11 @@ function workspaceName(workspaceId: string): string {
         <span class="session-row__text">
           <span class="session-row__name-row">
             <span class="session-row__name">{{ session.name?.trim() || 'Untitled session' }}</span>
-            <span
+            <StatusBadge
               v-if="isSessionUnread(session) && !session.busy"
-              class="session-row__done"
+              kind="done"
               title="Finished — unread"
-            >
-              Done
-            </span>
+            />
           </span>
           <span class="session-row__meta nc-mono">
             <span
@@ -147,20 +150,6 @@ function workspaceName(workspaceId: string): string {
   white-space: nowrap;
   min-width: 0;
   flex: 1;
-}
-
-.session-row__done {
-  flex-shrink: 0;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--accent);
-  border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent);
-  background: color-mix(in oklab, var(--accent) 14%, transparent);
-  border-radius: 999px;
-  padding: 1px 6px;
-  line-height: 1.35;
 }
 
 .session-row__meta {

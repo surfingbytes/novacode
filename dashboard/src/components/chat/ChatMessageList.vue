@@ -16,6 +16,9 @@ import ChatDisplayItems from '@/components/chat/ChatDisplayItems.vue';
 // classes
 import { sessionsApi } from '@/classes/api';
 
+// stores
+import { useToastStore } from '@/stores/toasts';
+
 // utils
 import { relativeTimeShort } from '@/utils/relativeTime';
 import { agentTypeShortLabel } from '@/utils/agentTypeMeta';
@@ -47,6 +50,8 @@ interface DisplayChatMessage {
 
 const props = withDefaults(
   defineProps<{
+    /** False while another session tab is shown (pane stays mounted via v-show); disables Ctrl/Cmd+F capture */
+    bActive?: boolean;
     bLoading: boolean;
     /** False while the first chat history frame is still in flight */
     bHistoryLoaded: boolean;
@@ -68,13 +73,22 @@ const props = withDefaults(
     agentType?: AgentType | null;
     userName?: string | null;
     viewportHeight?: number | null;
+    /** Returns false when the socket is down and nothing was sent */
+    sendApprovalResponse?: (approvalRequestId: string, approvalOptionId: string) => boolean;
+    sendQuestionResponse?: (
+      questionRequestId: string,
+      payload: { skipped: true } | { answers: ChatQuestionAnswer[] }
+    ) => boolean;
   }>(),
   {
     agentType: null,
     userName: null,
     viewportHeight: null,
     usageTurns: () => [],
-    hideToolCalls: false
+    hideToolCalls: false,
+    bActive: true,
+    sendApprovalResponse: () => false,
+    sendQuestionResponse: () => false
   }
 );
 
@@ -87,13 +101,9 @@ const emit = defineEmits<{
   (e: 'openFile', path: string): void;
   (e: 'lightbox', src: string): void;
   (e: 'chatErrorAction'): void;
-  (e: 'approvalResponse', approvalRequestId: string, approvalOptionId: string): void;
-  (
-    e: 'questionResponse',
-    questionRequestId: string,
-    payload: { skipped: true } | { answers: ChatQuestionAnswer[] }
-  ): void;
 }>();
+
+const toasts = useToastStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 
@@ -435,11 +445,77 @@ function submitQuestion(request: ChatQuestionRequest): void {
     questionId: question.id,
     selectedOptionIds: selectedOptionIds(request.id, question.id)
   }));
-  emit('questionResponse', request.id, { answers });
+  respondOnce(request.id, () => props.sendQuestionResponse(request.id, { answers }));
 }
 
 function skipQuestion(request: ChatQuestionRequest): void {
-  emit('questionResponse', request.id, { skipped: true });
+  respondOnce(request.id, () => props.sendQuestionResponse(request.id, { skipped: true }));
+}
+
+function respondToApproval(approval: ChatApprovalRequest, optionId: string): void {
+  respondOnce(approval.id, () => props.sendApprovalResponse(approval.id, optionId));
+}
+
+/** Approval / question request ids whose answer was sent but not yet resolved by the server. */
+const pendingResponseIds = ref<Set<string>>(new Set());
+
+function isResponsePending(requestId: string): boolean {
+  return pendingResponseIds.value.has(requestId);
+}
+
+function respondOnce(requestId: string, send: () => boolean): void {
+  if (isResponsePending(requestId)) return;
+  if (!send()) {
+    toasts.error('Not connected to the session');
+    return;
+  }
+  pendingResponseIds.value = new Set([...pendingResponseIds.value, requestId]);
+}
+
+// approval-resolved / question-resolved drop the request from the props → prune its pending mark.
+watch(
+  () => [
+    ...props.pendingApprovals.map((approval) => approval.id),
+    ...props.pendingQuestions.map((question) => question.id)
+  ],
+  (ids) => {
+    if (pendingResponseIds.value.size === 0) return;
+    const live = new Set(ids);
+    const next = new Set([...pendingResponseIds.value].filter((id) => live.has(id)));
+    if (next.size !== pendingResponseIds.value.size) pendingResponseIds.value = next;
+  }
+);
+
+// -------------------------------------------------- Copy whole message --------------------------------------------------
+
+const copiedMessageKey = ref<string | null>(null);
+let copiedMessageTimer: number | undefined;
+
+async function copyMessageText(key: string, text: string): Promise<void> {
+  if (typeof navigator === 'undefined' || !navigator.clipboard) {
+    toasts.error('Clipboard is not available');
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    toasts.error('Could not copy message');
+    return;
+  }
+  copiedMessageKey.value = key;
+  window.clearTimeout(copiedMessageTimer);
+  copiedMessageTimer = window.setTimeout(() => {
+    copiedMessageKey.value = null;
+  }, 1500);
+}
+
+/** Raw (markdown) text of a history message; falls back to the assistant's text items. */
+function messageCopyText(entry: DisplayChatMessage): string {
+  if (entry.msg.content) return entry.msg.content;
+  return entry.items
+    .filter((item) => item.kind === 'text' && item.text)
+    .map((item) => item.text as string)
+    .join('\n\n');
 }
 
 const FIND_EVENT = 'novacode:find-in-chat';
@@ -546,6 +622,7 @@ function onFindKeydown(event: KeyboardEvent): void {
 }
 
 function onWindowFindKeydown(event: KeyboardEvent): void {
+  if (!props.bActive) return;
   if (event.key === 'Escape' && bFindOpen.value) {
     event.preventDefault();
     closeFind();
@@ -574,6 +651,7 @@ onUnmounted(() => {
   window.removeEventListener(FIND_EVENT, openFind as EventListener);
   contentResizeObserver?.disconnect();
   contentResizeObserver = null;
+  window.clearTimeout(copiedMessageTimer);
 });
 
 defineExpose({
@@ -705,6 +783,18 @@ defineExpose({
               <div class="chat-msg-meta nc-mono">
                 <span class="chat-msg-name">{{ msg.role === 'user' ? (userName ?? 'You') : agentDisplayName }}</span>
                 <span class="chat-msg-age">· {{ relativeTimeShort(msg.createdAt) }}</span>
+                <button
+                  v-if="messageCopyText({ msg, key, items, fallbackHtml })"
+                  type="button"
+                  class="chat-msg-copy"
+                  :data-copied="copiedMessageKey === key ? '1' : undefined"
+                  :title="copiedMessageKey === key ? 'Copied' : 'Copy message'"
+                  :aria-label="copiedMessageKey === key ? 'Copied' : 'Copy message'"
+                  @click="copyMessageText(key, messageCopyText({ msg, key, items, fallbackHtml }))"
+                >
+                  <template v-if="copiedMessageKey === key">Copied</template>
+                  <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                </button>
               </div>
 
               <!-- User attachments -->
@@ -803,7 +893,7 @@ defineExpose({
                     stroke-width="1.6"
                     stroke-linecap="round"
                     stroke-linejoin="round"
-                    class="mt-0.5 shrink-0 text-yellow-500"
+                    class="mt-0.5 shrink-0 text-warning"
                     aria-hidden="true"
                   >
                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
@@ -829,12 +919,18 @@ defineExpose({
                         v-for="option in approval.options"
                         :key="option.optionId"
                         type="button"
-                        class="rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors"
+                        class="rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                         :class="approvalOptionClass(option.kind)"
-                        @click="emit('approvalResponse', approval.id, option.optionId)"
+                        :disabled="isResponsePending(approval.id)"
+                        @click="respondToApproval(approval, option.optionId)"
                       >
                         {{ option.name }}
                       </button>
+                      <div
+                        v-if="isResponsePending(approval.id)"
+                        class="self-center w-4 h-4 border-2 border-surface border-t-primary rounded-full animate-spin"
+                        aria-label="Sending"
+                      ></div>
                     </div>
                   </div>
                 </div>
@@ -858,7 +954,7 @@ defineExpose({
                     stroke-width="1.6"
                     stroke-linecap="round"
                     stroke-linejoin="round"
-                    class="mt-0.5 shrink-0 text-sky-500"
+                    class="mt-0.5 shrink-0 text-primary"
                     aria-hidden="true"
                   >
                     <circle cx="12" cy="12" r="10" />
@@ -888,12 +984,13 @@ defineExpose({
                             v-for="option in question.options"
                             :key="option.id"
                             type="button"
-                            class="rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors"
+                            class="rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                             :class="
                               isOptionSelected(questionRequest.id, question.id, option.id)
-                                ? 'border-sky-500/40 bg-sky-500/15 text-sky-200'
+                                ? 'border-primary/30 bg-primary/15 text-primary'
                                 : 'border-fg/15 bg-fg/[0.04] text-text-primary hover:bg-fg/[0.08]'
                             "
+                            :disabled="isResponsePending(questionRequest.id)"
                             @click="
                               toggleQuestionOption(
                                 questionRequest,
@@ -911,19 +1008,25 @@ defineExpose({
                     <div class="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
-                        class="rounded-md border border-sky-500/40 bg-sky-500/15 px-2.5 py-1.5 text-xs font-medium text-sky-200 transition-colors hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-                        :disabled="!canSubmitQuestion(questionRequest)"
+                        class="rounded-md border border-primary/30 bg-primary/15 px-2.5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-40"
+                        :disabled="!canSubmitQuestion(questionRequest) || isResponsePending(questionRequest.id)"
                         @click="submitQuestion(questionRequest)"
                       >
                         Submit
                       </button>
                       <button
                         type="button"
-                        class="rounded-md border border-fg/15 bg-fg/[0.04] px-2.5 py-1.5 text-xs font-medium text-text-muted transition-colors hover:bg-fg/[0.08]"
+                        class="rounded-md border border-fg/15 bg-fg/[0.04] px-2.5 py-1.5 text-xs font-medium text-text-muted transition-colors hover:bg-fg/[0.08] disabled:cursor-not-allowed disabled:opacity-40"
+                        :disabled="isResponsePending(questionRequest.id)"
                         @click="skipQuestion(questionRequest)"
                       >
                         Skip
                       </button>
+                      <div
+                        v-if="isResponsePending(questionRequest.id)"
+                        class="self-center w-4 h-4 border-2 border-surface border-t-primary rounded-full animate-spin"
+                        aria-label="Sending"
+                      ></div>
                     </div>
                   </div>
                 </div>
@@ -1093,6 +1196,31 @@ defineExpose({
   color: var(--fg-subtle);
   line-height: 1;
   padding-top: 3px;
+}
+.chat-msg-copy {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  margin-left: 2px;
+  padding: 2px;
+  border-radius: 4px;
+  color: var(--fg-faint);
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+.chat-msg-row:hover .chat-msg-copy,
+.chat-msg-copy:focus-visible,
+.chat-msg-copy[data-copied] {
+  opacity: 1;
+}
+.chat-msg-copy:hover,
+.chat-msg-copy[data-copied] {
+  color: var(--fg-muted);
+}
+@media (hover: none) {
+  .chat-msg-copy {
+    opacity: 1;
+  }
 }
 .chat-msg-name {
   color: var(--fg-muted);

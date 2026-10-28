@@ -276,6 +276,14 @@ function onKeydown(e: KeyboardEvent): void {
   send();
 }
 
+// Esc in the prompt stops the agent, unless it is closing an open menu (handled by handleDocumentKeydown).
+function onEscapeKeydown(e: KeyboardEvent): void {
+  if (e.isComposing || !props.bIsStreaming) return;
+  if (bModeMenuOpen.value || bApprovalMenuOpen.value || bSendMenuOpen.value) return;
+  e.preventDefault();
+  emit('cancel');
+}
+
 function onPaste(e: ClipboardEvent): void {
   const items = e.clipboardData?.items;
   if (!items) return;
@@ -687,6 +695,7 @@ defineExpose({
           ref="textareaEl"
           v-model="promptText"
           @keydown.enter="onKeydown"
+          @keydown.esc="onEscapeKeydown"
           @paste="onPaste"
           :placeholder="promptPlaceholder"
           rows="1"
@@ -713,6 +722,31 @@ defineExpose({
         class="hidden"
         @change="onFileChange"
       />
+      <button
+        v-if="bIsStreaming && !bPrimaryIsStop"
+        type="button"
+        @click="emit('cancel')"
+        :disabled="!bWsConnected"
+        aria-label="Stop"
+        title="Stop (Esc)"
+        class="button is-icon is-transparent !h-[44px] !w-[44px] !min-w-[44px] shrink-0 !rounded-md !p-0 !text-destructive hover:!bg-destructive/10"
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="select-none"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <rect x="9" y="9" width="6" height="6" />
+        </svg>
+      </button>
       <div ref="sendMenuRef" class="relative flex shrink-0">
         <button
           type="button"

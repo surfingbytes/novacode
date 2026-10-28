@@ -4,6 +4,7 @@ import { ref, onMounted } from 'vue';
 
 // components
 import BaseModal from '@/components/BaseModal.vue';
+import ConfirmModal from '@/components/ConfirmModal.vue';
 import ModalHeader from '@/components/ModalHeader.vue';
 import UiToggle from '@/components/ui/UiToggle.vue';
 
@@ -200,7 +201,13 @@ const saveMcpClient = async (): Promise<void> => {
   }
 };
 
-const deleteMcpClient = async (name: string): Promise<void> => {
+const pendingDelete = ref<string | null>(null);
+
+const deleteMcpClient = async (): Promise<void> => {
+  const name = pendingDelete.value;
+  if (name === null) {
+    return;
+  }
   const updated = { ...mcpClients.value };
   delete updated[name];
   bSavingMcpClients.value = true;
@@ -208,6 +215,7 @@ const deleteMcpClient = async (name: string): Promise<void> => {
     const response = await settingsApi.saveMcpClients(updated);
     mcpClients.value = response.data.servers;
     applyAutoload(response.data.autoload);
+    pendingDelete.value = null;
   } catch (err) {
     if (!isGloballyToasted(err)) toastStore.error('Delete MCP server failed');
   } finally {
@@ -449,7 +457,7 @@ onMounted((): void => {
                   <button
                     class="text-xs text-destructive hover:bg-destructive/10 px-2.5 py-1.5 rounded-lg transition-colors"
                     :disabled="bSavingMcpClients"
-                    @click="deleteMcpClient(name as string)"
+                    @click="pendingDelete = name as string"
                   >
                     Delete
                   </button>
@@ -459,6 +467,23 @@ onMounted((): void => {
           </div>
         </div>
   </div>
+
+    <ConfirmModal
+      :model-value="pendingDelete !== null"
+      title="Delete MCP server"
+      :description="`Delete MCP server '${pendingDelete ?? ''}'? Agents will no longer be able to use it.`"
+      confirm-label="Delete"
+      variant="danger"
+      :loading="bSavingMcpClients"
+      @update:model-value="
+        (v: boolean) => {
+          if (!v) {
+            pendingDelete = null;
+          }
+        }
+      "
+      @confirm="deleteMcpClient"
+    />
 
     <!-- MCP client server modal -->
     <BaseModal

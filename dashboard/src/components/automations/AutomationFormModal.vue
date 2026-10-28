@@ -28,7 +28,8 @@ const intervalPresets = [
   { label: '7 days (weekly)', value: 10080 }
 ];
 
-const AGENT_FALLBACK_ORDER: AgentType[] = [
+/** Picker order; also the order used to pick the default agent. */
+const AGENT_ORDER: AgentType[] = [
   'cursor-agent',
   'mistral-vibe',
   'claude',
@@ -53,6 +54,11 @@ const props = defineProps<{
   openCodeAvailable?: boolean;
   /** Whether Codex can be used. */
   codexAvailable?: boolean;
+  /**
+   * False while capabilities have never been fetched: the availability flags
+   * are placeholders then, so show "loading" instead of "no agents".
+   */
+  agentsLoaded?: boolean;
   bSaving?: boolean;
   /** Server-side error from the last save attempt, shown inside the dialog. */
   serverError?: string | null;
@@ -97,17 +103,31 @@ const modalEyebrow = computed(() => (bIsEdit.value ? '// edit automation' : '// 
 const modalTitle = computed(() => (bIsEdit.value ? 'Edit automation' : 'New automation'));
 const submitLabel = computed(() => (bIsEdit.value ? 'Save' : 'Create'));
 
-const availableAgents = computed(() => {
-  const agents: AgentType[] = [];
-  if (props.cursorAvailable !== false) agents.push('cursor-agent');
-  if (props.mistralVibeAvailable !== false) agents.push('mistral-vibe');
-  if (props.claudeAvailable !== false) agents.push('claude');
-  if (props.openCodeAvailable !== false) agents.push('open-code');
-  if (props.codexAvailable !== false) agents.push('codex');
-  return agents;
+const bAgentsLoading = computed(() => props.agentsLoaded === false);
+
+const availableAgents = computed(() =>
+  bAgentsLoading.value ? [] : AGENT_ORDER.filter((agent) => isAgentAvailable(agent))
+);
+
+/**
+ * Agents shown in the picker: all (disabled) while loading; otherwise the
+ * available ones plus the edited automation's agent if it is no longer available.
+ */
+const pickerAgents = computed(() => {
+  if (bAgentsLoading.value) {
+    return AGENT_ORDER;
+  }
+  const savedAgent = props.automation?.agentType;
+  if (savedAgent && !availableAgents.value.includes(savedAgent)) {
+    return AGENT_ORDER.filter((agent) => agent === savedAgent || availableAgents.value.includes(agent));
+  }
+  return availableAgents.value;
 });
 
-const gridColsClass = computed(() => `grid-cols-${Math.min(availableAgents.value.length, 3)}`);
+const GRID_COLS_CLASSES = ['grid-cols-1', 'grid-cols-1', 'grid-cols-2', 'grid-cols-3'];
+const gridColsClass = computed(
+  () => GRID_COLS_CLASSES[Math.min(pickerAgents.value.length, GRID_COLS_CLASSES.length - 1)]
+);
 
 const displayedError = computed(() => props.serverError);
 
@@ -116,12 +136,16 @@ const bSubmitDisabled = computed(
     Boolean(props.bSaving) ||
     !name.value.trim() ||
     !prompt.value.trim() ||
-    (!bIsEdit.value && !workspaceId.value)
+    (!bIsEdit.value && !workspaceId.value) ||
+    (!bIsEdit.value && !availableAgents.value.includes(agentType.value))
 );
 
 // -------------------------------------------------- Methods --------------------------------------------------
 
 function isAgentAvailable(agent: AgentType): boolean {
+  if (bAgentsLoading.value) {
+    return false;
+  }
   if (agent === 'cursor-agent') {
     return props.cursorAvailable !== false;
   }
@@ -141,15 +165,7 @@ function isAgentAvailable(agent: AgentType): boolean {
 }
 
 function computeInitialAgentType(): AgentType {
-  if (isAgentAvailable('cursor-agent')) {
-    return 'cursor-agent';
-  }
-  for (const fallbackAgentType of AGENT_FALLBACK_ORDER) {
-    if (isAgentAvailable(fallbackAgentType)) {
-      return fallbackAgentType;
-    }
-  }
-  return availableAgents.value[0] ?? 'cursor-agent';
+  return availableAgents.value[0] ?? AGENT_ORDER[0];
 }
 
 function selectAgentType(agent: AgentType): void {
@@ -208,6 +224,13 @@ watch(
     }
   }
 );
+
+// Capabilities can land (or change) while the create dialog is open: re-pick the default.
+watch(availableAgents, (agents) => {
+  if (props.modelValue && !bIsEdit.value && !agents.includes(agentType.value)) {
+    agentType.value = computeInitialAgentType();
+  }
+});
 </script>
 
 <template>
@@ -278,18 +301,27 @@ watch(
             :class="gridColsClass"
           >
             <button
-              v-for="agent in availableAgents"
+              v-for="agent in pickerAgents"
               :key="agent"
               type="button"
-              class="text-xs px-2 py-1.5 rounded-md border border-transparent transition-colors text-text-muted hover:text-text-primary hover:bg-fg/[0.06]"
-              :style="agentType === agent ? agentSelectedStyle(agent) : {}"
-              :disabled="bSaving"
+              class="text-xs px-2 py-1.5 rounded-md border border-transparent transition-colors text-text-muted hover:text-text-primary hover:bg-fg/[0.06] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-muted"
+              :style="agentType === agent && !bAgentsLoading ? agentSelectedStyle(agent) : {}"
+              :disabled="bSaving || !isAgentAvailable(agent)"
+              :title="!bAgentsLoading && !isAgentAvailable(agent) ? 'Agent not available' : undefined"
               @click="selectAgentType(agent)"
             >
               {{ agentTypeLabel(agent) }}
             </button>
           </div>
-          <p v-if="availableAgents.length === 0" class="text-[11px] text-warning">
+          <p v-if="bAgentsLoading" class="text-[11px] text-text-muted">Loading agents…</p>
+          <p
+            v-else-if="bIsEdit && !isAgentAvailable(agentType)"
+            class="text-[11px] text-warning"
+          >
+            {{ agentTypeLabel(agentType) }} is not available. It will keep this agent unless you
+            pick another.
+          </p>
+          <p v-else-if="availableAgents.length === 0" class="text-[11px] text-warning">
             No agents available. Configure an agent in Settings.
           </p>
         </div>

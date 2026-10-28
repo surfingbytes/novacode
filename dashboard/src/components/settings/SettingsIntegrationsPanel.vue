@@ -6,6 +6,7 @@ import { computed, ref, onMounted } from 'vue';
 import ApiKeyModal from '@/components/ApiKeyModal.vue';
 import AppTerminal from '@/components/AppTerminal.vue';
 import BaseModal from '@/components/BaseModal.vue';
+import ConfirmModal from '@/components/ConfirmModal.vue';
 import ModalHeader from '@/components/ModalHeader.vue';
 
 // classes
@@ -423,11 +424,18 @@ const saveOpenCodeProvider = async (): Promise<void> => {
   }
 };
 
-const deleteOpenCodeProvider = async (providerId: string): Promise<void> => {
+const pendingDelete = ref<OpenCodeProvider | null>(null);
+
+const deleteOpenCodeProvider = async (): Promise<void> => {
+  if (!pendingDelete.value) {
+    return;
+  }
+  const providerId = pendingDelete.value.id;
   bSavingOpenCodeProvider.value = true;
   try {
     await settingsApi.deleteOpenCodeProvider(providerId);
     openCodeProviders.value = openCodeProviders.value.filter((provider) => provider.id !== providerId);
+    pendingDelete.value = null;
     await refreshAuthStatus();
   } catch (err) {
     if (!isGloballyToasted(err)) toastStore.error('Delete provider failed');
@@ -592,8 +600,9 @@ const deleteVibeApiKey = async (): Promise<void> => {
     await settingsApi.clearVibeApiKey();
     bVibeConfigured.value = false;
     closeVibeApiKeyModal();
-  } catch {
+  } catch (err) {
     vibeApiKeyError.value = 'Failed to remove API key.';
+    if (!isGloballyToasted(err)) toastStore.error('Remove Vibe API key failed');
   } finally {
     bDeletingVibeApiKey.value = false;
   }
@@ -735,7 +744,7 @@ onMounted((): void => {
                     <button
                       class="settings-btn text-destructive"
                       :disabled="bSavingOpenCodeProvider"
-                      @click="deleteOpenCodeProvider(provider.id)"
+                      @click="pendingDelete = provider"
                     >
                       Delete
                     </button>
@@ -762,6 +771,23 @@ onMounted((): void => {
           </div>
         </div>
   </div>
+
+    <ConfirmModal
+      :model-value="pendingDelete !== null"
+      title="Delete OpenCode provider"
+      :description="`Delete provider '${pendingDelete?.name ?? ''}'? Its stored API key will also be deleted.`"
+      confirm-label="Delete"
+      variant="danger"
+      :loading="bSavingOpenCodeProvider"
+      @update:model-value="
+        (v: boolean) => {
+          if (!v) {
+            pendingDelete = null;
+          }
+        }
+      "
+      @confirm="deleteOpenCodeProvider"
+    />
 
     <!-- Codex API key modal -->
     <ApiKeyModal

@@ -69,10 +69,7 @@ function bDone(status: string): boolean {
     "
   >
     <!-- Header — always visible; tap toggles collapsed ↔ full (strip only) -->
-    <div
-      class="flex items-center shrink-0"
-      :class="bExpanded ? 'border-b border-fg/10' : ''"
-    >
+    <div class="flex items-center shrink-0" :class="bExpanded ? 'border-b border-fg/10' : ''">
       <button
         type="button"
         class="flex flex-1 items-center gap-2 px-3 py-1.5 min-w-0"
@@ -83,22 +80,7 @@ function bDone(status: string): boolean {
         <span class="text-xs font-medium text-text-primary shrink-0">Tasks</span>
         <span class="ml-auto flex items-center gap-1.5 shrink-0">
           <span class="text-xs text-text-muted">{{ doneCount }}/{{ todoItems.length }}</span>
-          <svg
-            v-if="bRunning"
-            class="animate-spin text-primary select-none"
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
-            <polyline points="23 4 23 10 17 10" />
-            <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
-          </svg>
+          <TodoStatusIcon v-if="bRunning" status="running" />
           <template v-if="layout === 'strip'">
             <ChevronUp v-if="panelState === 'collapsed'" :size="13" class="text-text-muted" />
             <ChevronDown v-else :size="13" class="text-text-muted" />
@@ -120,7 +102,9 @@ function bDone(status: string): boolean {
     <ul
       v-if="bExpanded"
       class="px-3 py-1.5 space-y-1"
-      :class="layout === 'panel' ? 'flex-1 min-h-0 overflow-y-auto' : 'max-h-[45vh] overflow-y-auto'"
+      :class="
+        layout === 'panel' ? 'flex-1 min-h-0 overflow-y-auto' : 'max-h-[45vh] overflow-y-auto'
+      "
     >
       <li v-for="todo in todoItems" :key="todo.id" class="flex items-start gap-2 text-xs">
         <TodoStatusIcon :status="todo.status" />

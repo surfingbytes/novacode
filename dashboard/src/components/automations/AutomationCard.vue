@@ -101,7 +101,7 @@ const metaLine = computed(() => {
         <div class="flex items-center gap-2 mt-2">
           <span
             class="text-[10px] px-1.5 py-0.5 rounded font-medium"
-            :class="automation.enabled ? 'bg-green-500/15 text-green-400' : 'bg-fg/10 text-text-muted'"
+            :class="automation.enabled ? 'bg-success/15 text-success' : 'bg-fg/10 text-text-muted'"
           >
             {{ automation.enabled ? 'active' : 'disabled' }}
           </span>
@@ -241,7 +241,7 @@ const metaLine = computed(() => {
           <p class="text-sm font-medium text-text-primary truncate">{{ automation.name }}</p>
           <span
             class="text-[10px] px-1.5 py-0.5 rounded font-medium"
-            :class="automation.enabled ? 'bg-green-500/15 text-green-400' : 'bg-fg/10 text-text-muted'"
+            :class="automation.enabled ? 'bg-success/15 text-success' : 'bg-fg/10 text-text-muted'"
           >
             {{ automation.enabled ? 'active' : 'disabled' }}
           </span>
