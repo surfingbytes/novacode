@@ -9,6 +9,7 @@ const { dbMock, runClaudeAcp, cancelClaudeAcp } = vi.hoisted(() => ({
     persistSessionMessages: vi.fn(),
     getFirstUser: vi.fn(),
     updateSession: vi.fn(),
+    setSessionAcpId: vi.fn(async () => {}),
     recordSessionUsage: vi.fn(),
     listUsers: vi.fn(async () => [])
   },
@@ -41,6 +42,7 @@ import {
   subscribeBusy,
   unsubscribeBusy
 } from './chatEngine';
+import { HANDOFF_CONTEXT_CONFIG_KEY, serializeHandoffContext } from './sessionHandoffConfig';
 
 // types
 import type { ChatMessage } from '../@types/index';
@@ -123,6 +125,41 @@ describe('dispatchPrompt failure path', () => {
     await waitForIdle('s1');
     await vi.waitFor(() => expect(subscriber.onDone).toHaveBeenCalledTimes(1));
     expect(subscriber.onError).not.toHaveBeenCalled();
+  });
+});
+
+describe('dispatchPrompt fresh-session context', () => {
+  it('saves the ACP session id as soon as the agent reports it', async () => {
+    runClaudeAcp.mockImplementation(async (opts: { onSessionId: (id: string) => void }) => {
+      opts.onSessionId('acp-1');
+      return { acpSessionId: 'acp-1', stopReason: 'end_turn' };
+    });
+
+    await dispatchPrompt({ sessionId: 's1', text: 'hi', subscriber: makeSubscriber() });
+    await waitForIdle('s1');
+
+    expect(dbMock.setSessionAcpId).toHaveBeenCalledWith('s1', 'acp-1');
+  });
+
+  it('gives the handoff note to a fresh ACP session on a later turn, not in the prompt', async () => {
+    dbMock.getSession.mockResolvedValue({
+      ...(await dbMock.getSession()),
+      sessionConfigJson: JSON.stringify({
+        [HANDOFF_CONTEXT_CONFIG_KEY]: serializeHandoffContext({ sessionId: 'src', sessionName: 'Old chat', summary: 'NOTE-123' })
+      })
+    });
+    // Earlier turn was interrupted before its ACP session id was saved.
+    dbMock.listSessionMessages.mockResolvedValue([
+      { role: 'user', content: 'first', createdAt: '2026-01-01T00:00:00.000Z' }
+    ]);
+    runClaudeAcp.mockResolvedValue({ acpSessionId: 'acp-2', stopReason: 'end_turn' });
+
+    await dispatchPrompt({ sessionId: 's1', text: 'continue', subscriber: makeSubscriber() });
+    await waitForIdle('s1');
+
+    const opts = runClaudeAcp.mock.calls[0]![0] as { promptText: string; getFreshSessionPrefix: () => Promise<string> };
+    expect(opts.promptText).toBe('continue');
+    expect(await opts.getFreshSessionPrefix()).toContain('NOTE-123');
   });
 });
 

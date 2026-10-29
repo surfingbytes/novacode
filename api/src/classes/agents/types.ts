@@ -25,13 +25,13 @@ export interface AgentRunParams {
   model?: string;
   mode?: string;
   configJson?: Record<string, string>;
-  /** Lazy rules-prefix builder, invoked only when a fresh ACP session is created. */
-  getRulesPrefix?: () => Promise<string>;
+  /** Lazy builder for new-conversation context (rules, handoff note, linked plan), invoked only when a fresh ACP session is created. */
+  getFreshSessionPrefix?: () => Promise<string>;
   /** Extra dirs the agent may use without per-file approval (ACP additionalDirectories). */
   additionalDirectories?: string[];
   /** Claude OAuth token; ignored by subprocess agents. */
   claudeToken?: string | null;
-  /** Called as soon as the ACP session id is known (Claude only; subprocess agents report it in the result). */
+  /** Called as soon as the ACP session id is known, before the prompt is sent. */
   onSessionId?: (id: string) => void;
   onEvent: AcpEventHandler;
   onConfigSync?: SessionConfigSyncHandler;

@@ -602,7 +602,7 @@ onBeforeUnmount(() => {
         <MessageSquare :size="16" :stroke-width="1.6" class="text-text-muted shrink-0" aria-hidden="true" />
         <p class="text-sm text-text-muted flex-1 min-w-[12rem]">
           <template v-if="bHasPlanner">
-            The planning chat<span v-if="plannerSession"> <strong class="text-text-primary font-medium">{{ plannerSession.name || 'Untitled session' }}</strong></span>
+            The planning chat<span v-if="plannerSession">{{ ' ' }}<strong class="text-text-primary font-medium">{{ plannerSession.name || 'Untitled session' }}</strong></span>
             writes these steps and the spec every step reads. Ask it there to change the plan.
           </template>
           <template v-else>

@@ -118,13 +118,15 @@ export interface AcpSubprocessRunParams {
    */
   transformPrompt?: (promptText: string, acpSessionId: string) => string;
   /**
-   * Lazy rules-prefix builder. Invoked only when a FRESH ACP session was
-   * created (first turn, or fallback after a failed session/load) — on resumed
-   * sessions the rules are already in the conversation history, so re-sending
-   * them would duplicate tokens on every turn. Lazy so resumed turns never
-   * hit the disk for rules at all.
+   * Lazy builder for the context a new conversation needs (rules, handoff note,
+   * linked plan). Invoked only when a FRESH ACP session was created (first
+   * turn, or fallback after a failed session/load) — on resumed sessions it is
+   * already in the conversation history, so re-sending it would duplicate
+   * tokens on every turn. Lazy so resumed turns never hit the disk for it.
    */
-  getRulesPrefix?: () => Promise<string>;
+  getFreshSessionPrefix?: () => Promise<string>;
+  /** Called as soon as the ACP session is opened (before the prompt is sent). */
+  onSessionId?: (id: string) => void;
   /**
    * Extra directories the agent may read/write without per-file approval (ACP
    * `additionalDirectories`, e.g. the session's spec folder). Only sent when the
@@ -621,7 +623,7 @@ export async function runAcpSubprocessPrompt(
       const loadOrCreateSession = async (servers: McpServer[]): Promise<{
         sessionId: string;
         response: AcpSessionResponse;
-        /** True when a brand-new conversation was created (rules must be injected). */
+        /** True when a brand-new conversation was created (new-conversation context must be injected). */
         isFresh: boolean;
       }> => {
         if (!acpSessionId) {
@@ -675,6 +677,7 @@ export async function runAcpSubprocessPrompt(
       const resolvedSessionId = opened.sessionId;
 
       sessionIdForCancel = resolvedSessionId;
+      params.onSessionId?.(resolvedSessionId);
 
       if (sessionResponse.modes?.currentModeId) {
         resolvedModeId = sessionResponse.modes.currentModeId;
@@ -723,14 +726,14 @@ export async function runAcpSubprocessPrompt(
       try {
         phase('session:prompt:start');
         let basePromptText = promptText;
-        if (opened.isFresh && params.getRulesPrefix) {
+        if (opened.isFresh && params.getFreshSessionPrefix) {
           try {
-            const rulesPrefix = await params.getRulesPrefix();
-            if (rulesPrefix.trim()) {
-              basePromptText = `${rulesPrefix}\n\n---\n\nUser request:\n${promptText}`;
+            const freshPrefix = await params.getFreshSessionPrefix();
+            if (freshPrefix.trim()) {
+              basePromptText = `${freshPrefix}\n\n---\n\nUser request:\n${promptText}`;
             }
           } catch (err) {
-            logger.warn({ logTag, novaSessionId, err }, 'Failed to build rules prefix; prompting without rules');
+            logger.warn({ logTag, novaSessionId, err }, 'Failed to build fresh-session prefix; prompting without it');
           }
         }
         const finalPromptText = params.transformPrompt

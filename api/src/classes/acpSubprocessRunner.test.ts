@@ -212,7 +212,7 @@ describe('runAcpSubprocessPrompt', () => {
       acpSessionId: null,
       promptText: 'hello',
       logTag: 'testAcp',
-      getRulesPrefix: async () => {
+      getFreshSessionPrefix: async () => {
         builds += 1;
         return 'GLOBAL RULES HERE';
       },
@@ -237,7 +237,7 @@ describe('runAcpSubprocessPrompt', () => {
       acpSessionId: 'existing-session-42',
       promptText: 'hello',
       logTag: 'testAcp',
-      getRulesPrefix: async () => {
+      getFreshSessionPrefix: async () => {
         builds += 1;
         return 'GLOBAL RULES HERE';
       },
@@ -263,7 +263,7 @@ describe('runAcpSubprocessPrompt', () => {
       acpSessionId: 'stale-session-id',
       promptText: 'hello',
       logTag: 'testAcp',
-      getRulesPrefix: async () => {
+      getFreshSessionPrefix: async () => {
         builds += 1;
         return 'GLOBAL RULES HERE';
       },

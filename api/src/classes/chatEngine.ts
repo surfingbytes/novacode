@@ -750,38 +750,36 @@ export async function dispatchPrompt(
 
   const assistantEvents: string[] = [];
 
-  // Rules are NOT prepended here: they are injected by the ACP runner only when
-  // a fresh ACP session is created (first turn or fallback after a failed
-  // resume). On resumed sessions the rules are already in the conversation
+  // Rules, the handoff note and linked-plan context are NOT prepended here: the
+  // ACP runner injects them only when a fresh ACP session is created (first
+  // turn, a turn after one that never saved its ACP session, or fallback after
+  // a failed resume). On resumed sessions they are already in the conversation
   // history — re-sending them every turn would duplicate tokens. Lazy callback
-  // so resumed turns never touch the disk for rules.
-  const getRulesPrefix = () => buildWorkspaceRulesPrefix(workspacePath, agentType);
-  let linkedPlanWorkspacePath: string | null = workspacePath;
-  if (linkedPlanContext && currentMessages.length === 1) {
-    const sourceSession = await db.getSession(linkedPlanContext.sourceSessionId);
-    if (sourceSession) {
-      const sourceWorkspace = await db.getWorkspace(sourceSession.workspaceId);
-      if (sourceWorkspace) {
-        linkedPlanWorkspacePath = resolveWorkspaceAbsolutePath(sourceWorkspace.path);
+  // so resumed turns never touch the disk for them.
+  const getFreshSessionPrefix = async (): Promise<string> => {
+    let linkedPlanWorkspacePath: string | null = workspacePath;
+    if (linkedPlanContext) {
+      const sourceSession = await db.getSession(linkedPlanContext.sourceSessionId);
+      if (sourceSession) {
+        const sourceWorkspace = await db.getWorkspace(sourceSession.workspaceId);
+        if (sourceWorkspace) {
+          linkedPlanWorkspacePath = resolveWorkspaceAbsolutePath(sourceWorkspace.path);
+        }
       }
     }
-  }
-  const linkedPlanPrefix = currentMessages.length === 1
-    ? [
-        buildHandoffContextPrefix(extractHandoffLinksFromConfig(session.sessionConfigJson).continuedFrom),
-        await buildLinkedPlanContextPrefix(linkedPlanContext, {
-          workspacePath: linkedPlanWorkspacePath,
-        }),
-      ].filter((part) => part.trim()).join('\n\n')
-    : '';
+    return [
+      await buildWorkspaceRulesPrefix(workspacePath, agentType),
+      buildHandoffContextPrefix(extractHandoffLinksFromConfig(session.sessionConfigJson).continuedFrom),
+      await buildLinkedPlanContextPrefix(linkedPlanContext, {
+        workspacePath: linkedPlanWorkspacePath,
+      }),
+    ].filter((part) => part.trim()).join('\n\n');
+  };
   // Sessions with a spec file get its path every turn (it may be created mid-chat)
   // and the spec folder as an extra allowed directory, so edits need no approval.
   const spec = await readSessionSpec(session.workspaceId, sessionId).catch(() => null);
   const additionalDirectories = spec ? [workspaceSpecDir(session.workspaceId)] : undefined;
-  const promptWithSpec = spec ? `${buildSpecPromptNote(spec.path)}\n\n${effectiveText}` : effectiveText;
-  const agentPrompt = linkedPlanPrefix.trim()
-    ? `${linkedPlanPrefix}\n\n---\n\nUser request:\n${promptWithSpec}`
-    : promptWithSpec;
+  const agentPrompt = spec ? `${buildSpecPromptNote(spec.path)}\n\n${effectiveText}` : effectiveText;
 
   // Get Claude OAuth token (only needed for claude agent type)
   const user = await db.getFirstUser();
@@ -902,9 +900,16 @@ export async function dispatchPrompt(
       model,
       mode: sessionMode,
       configJson: sessionConfig,
-      getRulesPrefix,
+      getFreshSessionPrefix,
       additionalDirectories,
       onSessionId: (id) => {
+        if (id !== currentAcpSessionId) {
+          // Saved now, not only with the turn's messages: an interrupted first
+          // turn would otherwise leave no session to resume.
+          db.setSessionAcpId(sessionId, id).catch((err) => {
+            logger.warn({ err, sessionId }, 'Failed to save ACP session ID early');
+          });
+        }
         currentAcpSessionId = id;
         run.acpSessionId = id;
         // Stop pressed during session startup (before the ACP session id was

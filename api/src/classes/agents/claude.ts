@@ -84,7 +84,7 @@ export const claudeAdapter: AgentAdapter = {
           model: params.model,
           mode: params.mode,
           configJson: params.configJson,
-          getRulesPrefix: params.getRulesPrefix,
+          getFreshSessionPrefix: params.getFreshSessionPrefix,
           additionalDirectories: params.additionalDirectories,
           onSessionId: (id) => {
             acpSessionIdByNovaSession.set(novaSessionId, id);

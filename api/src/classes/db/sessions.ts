@@ -248,6 +248,15 @@ async function setSessionWorktreePath(id: string, worktreePath: string | null): 
 }
 
 /**
+ * Save the ACP session id as soon as the agent reports it, so a turn that never
+ * finishes (API restart, agent crash) can still be resumed. Touches only this
+ * column, so it cannot clobber a concurrent rename or config change.
+ */
+async function setSessionAcpId(id: string, acpSessionId: string): Promise<void> {
+  await prisma.session.updateMany({ where: { id }, data: { sessionId: acpSessionId } });
+}
+
+/**
  * Toggle the unread flag without bumping updatedAt (read/unread should not
  * reshuffle session lists). Returns undefined when the row is missing or
  * already has the requested value.
@@ -566,6 +575,7 @@ export const sessionDb = {
   getLatestSessionByAgentType,
   updateSession,
   setSessionWorktreePath,
+  setSessionAcpId,
   setSessionUnread,
   listSessionMessages,
   listSessionMessagesPage,

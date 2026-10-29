@@ -450,11 +450,11 @@ export interface RunClaudeAcpParams {
   mode?: string;
   configJson?: Record<string, string>;
   /**
-   * Lazy rules-prefix builder, invoked only when a FRESH ACP session was
-   * created — on resumed sessions the rules are already in history, so
-   * re-sending them would duplicate tokens on every turn.
+   * Lazy new-conversation context builder (rules, handoff note, linked plan),
+   * invoked only when a FRESH ACP session was created — on resumed sessions it
+   * is already in history, so re-sending it would duplicate tokens every turn.
    */
-  getRulesPrefix?: () => Promise<string>;
+  getFreshSessionPrefix?: () => Promise<string>;
   /** Extra dirs the agent may use without per-file approval (ACP additionalDirectories). */
   additionalDirectories?: string[];
   /** Called with the resolved session ID before the prompt starts — used to keep cancel state in sync. */
@@ -518,7 +518,7 @@ async function runClaudeAcpTurn(
     : configuredMcp;
   let resolvedSessionId: string;
   let sessionResponse: AcpSessionResponse;
-  /** True when a brand-new conversation was created (rules must be injected). */
+  /** True when a brand-new conversation was created (new-conversation context must be injected). */
   let isFreshSession = false;
 
   const sessionParams = {
@@ -614,14 +614,14 @@ async function runClaudeAcpTurn(
   });
   try {
     let finalPromptText = promptText;
-    if (isFreshSession && params.getRulesPrefix) {
+    if (isFreshSession && params.getFreshSessionPrefix) {
       try {
-        const rulesPrefix = await params.getRulesPrefix();
-        if (rulesPrefix.trim()) {
-          finalPromptText = `${rulesPrefix}\n\n---\n\nUser request:\n${promptText}`;
+        const freshPrefix = await params.getFreshSessionPrefix();
+        if (freshPrefix.trim()) {
+          finalPromptText = `${freshPrefix}\n\n---\n\nUser request:\n${promptText}`;
         }
       } catch (err) {
-        logger.warn({ err, sessionId: resolvedSessionId }, 'Failed to build rules prefix; prompting without rules');
+        logger.warn({ err, sessionId: resolvedSessionId }, 'Failed to build fresh-session prefix; prompting without it');
       }
     }
     const work = getSessionWork(resolvedSessionId);
