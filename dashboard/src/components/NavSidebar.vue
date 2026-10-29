@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import { useOrchestratorsStore } from '@/stores/orchestrators';
 import ThemeToggleButton from '@/components/ThemeToggleButton.vue';
+import NotificationBell from '@/components/NotificationBell.vue';
 import NewSessionModal from '@/components/NewSessionModal.vue';
 import OrchestratorProgressRing from '@/components/OrchestratorProgressRing.vue';
 import StatusBadge from '@/components/ui/StatusBadge.vue';
@@ -101,6 +102,12 @@ const navItems = [
     label: 'Automations',
     to: '/automations',
     svgPath: 'M12 7v5l3 2 M12 21a9 9 0 100-18 9 9 0 000 18z'
+  },
+  {
+    id: 'usage',
+    label: 'Usage',
+    to: '/usage',
+    svgPath: 'M4 20h16 M7 16v-5 M12 16V6 M17 16v-8'
   }
 ];
 
@@ -562,6 +569,7 @@ onBeforeUnmount(() => {
             </svg>
           </RouterLink>
 
+          <NotificationBell compact />
           <ThemeToggleButton compact class="sidebar__footer-theme" />
         </div>
       </div>

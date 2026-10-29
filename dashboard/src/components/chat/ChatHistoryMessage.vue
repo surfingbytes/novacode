@@ -50,6 +50,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (e: 'copy', text: string): void;
+  (e: 'edit', text: string): void;
   (e: 'toggleToolOutput', callId: string): void;
   (e: 'openPlan', planId: string | undefined): void;
   (e: 'openFile', path: string): void;
@@ -102,7 +103,9 @@ function onChatMarkdownClick(e: MouseEvent): void {
     :b-find-match="bFindMatch"
     :b-copyable="Boolean(copyText)"
     :b-copied="bCopied"
+    :b-editable="entry.msg.role === 'user' && Boolean(entry.msg.content)"
     @copy="emit('copy', copyText)"
+    @edit="emit('edit', entry.msg.content ?? '')"
   >
     <!-- User attachments -->
     <div v-if="entry.msg.role === 'user' && entry.msg.imagePaths?.length" class="flex flex-wrap gap-2">

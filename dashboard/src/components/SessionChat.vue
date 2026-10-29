@@ -6,6 +6,7 @@ import { useRoute, useRouter } from 'vue-router';
 // components
 import OrchestratorPanel from '@/components/OrchestratorPanel.vue';
 import ClaudeLimitPopup from '@/components/ClaudeLimitPopup.vue';
+import ConfirmModal from '@/components/ConfirmModal.vue';
 import ChatHandoffBanner from '@/components/chat/ChatHandoffBanner.vue';
 import ChatMessageList from '@/components/chat/ChatMessageList.vue';
 import ChatComposer from '@/components/chat/ChatComposer.vue';
@@ -311,6 +312,31 @@ const {
 
 // -------------------------------------------------- Composer state --------------------------------------------------
 const promptText = ref<string>('');
+/** Text of a sent message waiting for "Replace current draft?" confirmation. */
+const pendingEditText = ref<string | null>(null);
+const bShowReplaceDraftModal = computed({
+  get: (): boolean => pendingEditText.value !== null,
+  set: (value: boolean): void => {
+    if (!value) {
+      pendingEditText.value = null;
+    }
+  }
+});
+/** Sent user prompts (oldest → newest) for ArrowUp/ArrowDown recall in the composer. */
+const promptHistory = computed((): string[] => {
+  const history: string[] = [];
+  for (const entry of displayMessages.value) {
+    if (entry.msg.role !== 'user') {
+      continue;
+    }
+    const text = entry.msg.content?.trim();
+    if (!text || history[history.length - 1] === text) {
+      continue;
+    }
+    history.push(text);
+  }
+  return history;
+});
 const { pendingImages, bUploadingImage, onUploadFiles } = useChatAttachments({
   sessionId: () => props.sessionId,
   onUploadError: (message) => chatSocket.setChatError(message)
@@ -438,6 +464,32 @@ function onFixBuild(prompt: string): void {
   const draft = promptText.value.trim();
   promptText.value = draft ? `${draft}\n\n${prompt}` : prompt;
   activeTab.value = 'chat';
+  void nextTick(() => {
+    composerRef.value?.resizeTextarea();
+    composerRef.value?.focus();
+  });
+}
+
+/** "Edit" on a sent message: put its text back into the composer (attachments are not restored). */
+function onEditMessage(text: string): void {
+  const draft = promptText.value;
+  if (draft.trim() && draft !== text) {
+    pendingEditText.value = text;
+    return;
+  }
+  applyEditText(text);
+}
+
+function confirmReplaceDraft(): void {
+  const text = pendingEditText.value;
+  pendingEditText.value = null;
+  if (text !== null) {
+    applyEditText(text);
+  }
+}
+
+function applyEditText(text: string): void {
+  promptText.value = text;
   void nextTick(() => {
     composerRef.value?.resizeTextarea();
     composerRef.value?.focus();
@@ -708,6 +760,7 @@ onUnmounted(() => {
               @open-file="openWorkspaceFile"
               @lightbox="(src) => (lightboxSrc = src)"
               @chat-error-action="handleChatErrorAction"
+              @edit="onEditMessage"
             />
 
             <!-- Todo panel (narrow: strip above the composer) -->
@@ -780,6 +833,7 @@ onUnmounted(() => {
           :b-uploading-image="bUploadingImage"
           :b-can-continue-in-new-chat="messages.length > 0"
           :b-handoff-pending="bHandoffPending"
+          :prompt-history="promptHistory"
           @send="onComposerSend"
           @continue-in-new-chat="onContinueInNewChat"
           @cancel="chatSocket.cancelPrompt"
@@ -875,6 +929,14 @@ onUnmounted(() => {
     />
 
     <ImageLightbox v-model="lightboxSrc" />
+    <ConfirmModal
+      v-model="bShowReplaceDraftModal"
+      title="Replace current draft?"
+      description="Your unsent draft will be replaced by the selected message."
+      confirm-label="Replace"
+      variant="primary"
+      @confirm="confirmReplaceDraft"
+    />
   </div>
 
   <!-- Claude Limit Popup -->

@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router';
 import NavSidebar from '@/components/NavSidebar.vue';
 import NavTopBar from '@/components/NavTopBar.vue';
 import GlobalSearchModal from '@/components/GlobalSearchModal.vue';
+import ShortcutsModal from '@/components/ShortcutsModal.vue';
 import ApiOfflineBanner from '@/components/ApiOfflineBanner.vue';
 import {
   APP_NAV_TOGGLE_KEY,
@@ -11,6 +12,8 @@ import {
   PANE_LAYOUT_MIN_WIDTH
 } from '@/constants/layout';
 import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
+import { isAnyModalOpen } from '@/utils/modalStack';
+import { shouldOpenShortcuts } from '@/utils/shortcutsTrigger';
 
 const SIDEBAR_COLLAPSED_KEY = 'sidebarCollapsed';
 
@@ -18,6 +21,7 @@ const route = useRoute();
 const bSidebarIsOpen = ref(false);
 const bSidebarCollapsed = ref(safeGetItem(SIDEBAR_COLLAPSED_KEY) === 'true');
 const bSearchModalOpen = ref(false);
+const bShortcutsOpen = ref(false);
 const isFullHeightRoute = computed(() => FULL_HEIGHT_ROUTE_NAMES.has(route.name as string));
 const hideMobileTopBar = computed(() => isFullHeightRoute.value);
 
@@ -68,7 +72,18 @@ function handleMobileSearch(): void {
   setTimeout(() => { openSearchModal(); }, 100);
 }
 
+function openShortcuts(): void {
+  bShortcutsOpen.value = true;
+}
+
 function handleKeyDown(event: KeyboardEvent): void {
+  if (shouldOpenShortcuts(event)) {
+    if (!bSearchModalOpen.value && !isAnyModalOpen()) {
+      event.preventDefault();
+      openShortcuts();
+    }
+    return;
+  }
   if (!(event.ctrlKey || event.metaKey) || event.altKey) {
     return;
   }
@@ -91,8 +106,14 @@ function handleKeyDown(event: KeyboardEvent): void {
   }
 }
 
-onMounted(() => { window.addEventListener('keydown', handleKeyDown, true); });
-onBeforeUnmount(() => { window.removeEventListener('keydown', handleKeyDown, true); });
+onMounted(() => {
+  window.addEventListener('keydown', handleKeyDown, true);
+  window.addEventListener('novacode:open-shortcuts', openShortcuts);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleKeyDown, true);
+  window.removeEventListener('novacode:open-shortcuts', openShortcuts);
+});
 </script>
 
 <template>
@@ -135,6 +156,8 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', handleKeyDown, tru
         @close="closeSearchModal"
         @navigate="handleSearchNavigate"
       />
+
+      <ShortcutsModal v-model="bShortcutsOpen" />
     </div>
   </div>
 </template>

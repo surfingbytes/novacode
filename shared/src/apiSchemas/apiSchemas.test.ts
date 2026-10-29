@@ -81,6 +81,17 @@ const samples: Record<string, unknown> = {
   PlanUpdateResponseSchema: { ok: true },
   SessionBulkDeleteResponseSchema: { deleted: 2 },
   SessionBulkArchiveResponseSchema: { updated: 2 },
+  // usage
+  UsageOverviewQuerySchema: { from: '2026-10-01T00:00:00.000Z' },
+  UsageOverviewSchema: {
+    from: '2026-10-01T00:00:00.000Z',
+    to: '2026-10-29T00:00:00.000Z',
+    totals: { turnCount: 3, used: 1200, costAmount: 0.42, costCurrency: 'USD' },
+    byWorkspace: [{ workspaceId: 'ws-1', workspaceName: 'Nova', turnCount: 3, used: 1200, costAmount: 0.42 }],
+    byAgentType: [{ agentType: 'claude', turnCount: 3, used: 1200, costAmount: 0.42 }],
+    byModel: [{ agentType: 'claude', model: 'auto', turnCount: 3, used: 1200, costAmount: null }],
+    byDay: [{ date: '2026-10-28', turnCount: 3, used: 1200, costAmount: 0.42 }]
+  },
   // workspaces
   WorkspaceSchema: workspace,
   WorkspaceListResponseSchema: [workspace],

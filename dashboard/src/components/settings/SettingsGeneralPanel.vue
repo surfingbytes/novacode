@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // node_modules
 import { computed, onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { isOneShotAgentType, pickInexpensiveModel } from '@novacode/shared';
 
 // components
@@ -44,6 +45,7 @@ import type { AgentModelOption, AgentType } from '@/@types/index';
 import { agentSelectedStyle, agentTypeLabel } from '@/utils/agentTypeMeta';
 
 // -------------------------------------------------- Stores --------------------------------------------------
+const router = useRouter();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const activeThemeId = ref<string>(
@@ -65,6 +67,8 @@ const bCiNotifications = ref<boolean>(isCiNotificationsEnabled());
 const notifPermission = ref<NotificationPermission | 'unsupported'>(getPermissionState());
 
 const bSendOnEnter = ref<boolean>(isSendOnEnter());
+
+const bResettingTour = ref<boolean>(false);
 
 const idleTimeoutMinutes = ref<number>(5);
 const bIdleTimeoutEnvOverride = ref<boolean>(false);
@@ -320,6 +324,22 @@ const toggleClaudeAutoContinue = async (): Promise<void> => {
   }
 };
 
+/** Clears the flag and returns to the workspace list, which opens the tour on mount. */
+const showTourAgain = async (): Promise<void> => {
+  if (bResettingTour.value) {
+    return;
+  }
+  bResettingTour.value = true;
+  try {
+    await settingsApi.update({ tourCompleted: false });
+    void router.push('/');
+  } catch (err) {
+    notifyApiError(err, 'Reset tour failed');
+  } finally {
+    bResettingTour.value = false;
+  }
+};
+
 const loadSettings = async (): Promise<void> => {
   try {
     const response = await settingsApi.get();
@@ -435,6 +455,25 @@ onMounted((): void => {
           <p v-if="bIdleTimeoutError" class="text-xs text-destructive mt-2">
             Enter a whole number of minutes between 0 and 60.
           </p>
+        </div>
+
+        <!-- Tour -->
+        <div class="settings-section-label nc-eyebrow" style="margin-top: 36px;">Tour</div>
+        <div class="settings-pref-list">
+          <div class="settings-pref-row">
+            <div class="settings-pref-row__text">
+              <div class="settings-pref-row__title">Welcome tour</div>
+              <div class="settings-pref-row__desc">
+                A short walk through workspaces, sessions, orchestrators and shortcuts. Opens on the workspace list.
+              </div>
+            </div>
+            <button
+              type="button"
+              class="button shrink-0"
+              :disabled="bResettingTour"
+              @click="showTourAgain"
+            >Show tour again</button>
+          </div>
         </div>
 
         <!-- Appearance -->

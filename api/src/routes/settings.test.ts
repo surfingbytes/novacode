@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => {
     getUserById: vi.fn(),
     getUserByUsername: vi.fn(),
     getUserByApiToken: vi.fn(),
+    updateUser: vi.fn(),
     readSshKeyMaterial: vi.fn()
   };
 });
@@ -18,7 +19,8 @@ vi.mock('../classes/database', async (importOriginal) => ({
   db: {
     getUserById: (...args: unknown[]) => mocks.getUserById(...args),
     getUserByUsername: (...args: unknown[]) => mocks.getUserByUsername(...args),
-    getUserByApiToken: (...args: unknown[]) => mocks.getUserByApiToken(...args)
+    getUserByApiToken: (...args: unknown[]) => mocks.getUserByApiToken(...args),
+    updateUser: (...args: unknown[]) => mocks.updateUser(...args)
   }
 }));
 
@@ -78,6 +80,47 @@ describe('GET /api/settings', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json().hasSshPrivateKey).toBe(false);
+  });
+
+  it('defaults tourCompleted to false', async () => {
+    const res = await app.inject({ url: '/api/settings', headers: { authorization } });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().tourCompleted).toBe(false);
+  });
+});
+
+describe('PUT /api/settings', () => {
+  beforeEach(() => {
+    mocks.updateUser.mockImplementation(async (_id: string, patch: Record<string, unknown>) => ({
+      ...USER,
+      ...patch
+    }));
+  });
+
+  it('persists tourCompleted when present', async () => {
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/settings',
+      headers: { authorization },
+      payload: { tourCompleted: true }
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mocks.updateUser).toHaveBeenCalledWith(USER.id, expect.objectContaining({ tourCompleted: true }));
+    expect(res.json().tourCompleted).toBe(true);
+  });
+
+  it('leaves tourCompleted untouched when absent', async () => {
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/settings',
+      headers: { authorization },
+      payload: { theme: 'cloud' }
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mocks.updateUser.mock.calls[0]?.[1]).not.toHaveProperty('tourCompleted');
   });
 });
 

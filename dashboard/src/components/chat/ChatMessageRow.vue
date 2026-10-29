@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * Chat message row shell: avatar square + mono name/age caption (+ optional
- * copy button); the message body goes in the default slot.
+ * copy / edit buttons); the message body goes in the default slot.
  * Extracted from ChatMessageList.vue.
  */
 
@@ -20,12 +20,15 @@ withDefaults(
     /** Show the copy-message button */
     bCopyable?: boolean;
     bCopied?: boolean;
+    /** Show the edit-message button (put the text back into the composer) */
+    bEditable?: boolean;
   }>(),
   {
     findKey: undefined,
     bFindMatch: false,
     bCopyable: false,
-    bCopied: false
+    bCopied: false,
+    bEditable: false
   }
 );
 
@@ -33,6 +36,7 @@ withDefaults(
 
 const emit = defineEmits<{
   (e: 'copy'): void;
+  (e: 'edit'): void;
 }>();
 </script>
 
@@ -58,7 +62,7 @@ const emit = defineEmits<{
         <button
           v-if="bCopyable"
           type="button"
-          class="chat-msg-copy"
+          class="chat-msg-action chat-msg-copy"
           :data-copied="bCopied ? '1' : undefined"
           :title="bCopied ? 'Copied' : 'Copy message'"
           :aria-label="bCopied ? 'Copied' : 'Copy message'"
@@ -66,6 +70,16 @@ const emit = defineEmits<{
         >
           <template v-if="bCopied">Copied</template>
           <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        </button>
+        <button
+          v-if="bEditable"
+          type="button"
+          class="chat-msg-action chat-msg-edit"
+          title="Edit and resend"
+          aria-label="Edit message"
+          @click="emit('edit')"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4z"/></svg>
         </button>
       </div>
 
@@ -133,7 +147,7 @@ const emit = defineEmits<{
   line-height: 1;
   padding-top: 3px;
 }
-.chat-msg-copy {
+.chat-msg-action {
   display: inline-flex;
   align-items: center;
   align-self: center;
@@ -144,17 +158,17 @@ const emit = defineEmits<{
   opacity: 0;
   transition: opacity 0.15s, color 0.15s;
 }
-.chat-msg-row:hover .chat-msg-copy,
-.chat-msg-copy:focus-visible,
+.chat-msg-row:hover .chat-msg-action,
+.chat-msg-action:focus-visible,
 .chat-msg-copy[data-copied] {
   opacity: 1;
 }
-.chat-msg-copy:hover,
+.chat-msg-action:hover,
 .chat-msg-copy[data-copied] {
   color: var(--fg-muted);
 }
 @media (hover: none) {
-  .chat-msg-copy {
+  .chat-msg-action {
     opacity: 1;
   }
 }

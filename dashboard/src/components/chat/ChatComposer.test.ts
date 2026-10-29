@@ -181,4 +181,66 @@ describe('ChatComposer send controls', () => {
     const offButton = wrapper.get('button[aria-label="Show tool calls"]');
     expect(offButton.attributes('aria-pressed')).toBe('false');
   });
+  it('recalls prompt history with ArrowUp (newest first) and goes back with ArrowDown', async () => {
+    const wrapper = mountComposer({ promptHistory: ['first', 'second', 'third'] });
+    await nextTick();
+    const textarea = wrapper.get('textarea');
+    const el = textarea.element as HTMLTextAreaElement;
+    await textarea.setValue('my draft');
+    el.setSelectionRange(0, 0);
+
+    await textarea.trigger('keydown.up', { key: 'ArrowUp' });
+    expect(el.value).toBe('third');
+    await textarea.trigger('keydown.up', { key: 'ArrowUp' });
+    expect(el.value).toBe('second');
+    await textarea.trigger('keydown.up', { key: 'ArrowUp' });
+    expect(el.value).toBe('first');
+    // Oldest entry reached: stays put.
+    await textarea.trigger('keydown.up', { key: 'ArrowUp' });
+    expect(el.value).toBe('first');
+
+    await textarea.trigger('keydown.down', { key: 'ArrowDown' });
+    expect(el.value).toBe('second');
+    await textarea.trigger('keydown.down', { key: 'ArrowDown' });
+    expect(el.value).toBe('third');
+    await textarea.trigger('keydown.down', { key: 'ArrowDown' });
+    expect(el.value).toBe('my draft');
+
+    // Navigation finished: ArrowDown is a normal cursor key again.
+    const downEvent = new KeyboardEvent('keydown', { key: 'ArrowDown', cancelable: true });
+    el.dispatchEvent(downEvent);
+    expect(downEvent.defaultPrevented).toBe(false);
+  });
+
+  it('keeps normal ArrowUp cursor movement when the caret is not on the first line', async () => {
+    const wrapper = mountComposer({ promptHistory: ['earlier'] });
+    await nextTick();
+    const textarea = wrapper.get('textarea');
+    const el = textarea.element as HTMLTextAreaElement;
+    await textarea.setValue('line one\nline two');
+    el.setSelectionRange(el.value.length, el.value.length);
+
+    const upEvent = new KeyboardEvent('keydown', { key: 'ArrowUp', cancelable: true });
+    el.dispatchEvent(upEvent);
+    await nextTick();
+    expect(upEvent.defaultPrevented).toBe(false);
+    expect(el.value).toBe('line one\nline two');
+  });
+
+  it('resets history navigation when the user types', async () => {
+    const wrapper = mountComposer({ promptHistory: ['first', 'second'] });
+    await nextTick();
+    const textarea = wrapper.get('textarea');
+    const el = textarea.element as HTMLTextAreaElement;
+
+    await textarea.trigger('keydown.up', { key: 'ArrowUp' });
+    expect(el.value).toBe('second');
+    await textarea.setValue('second edited');
+
+    const downEvent = new KeyboardEvent('keydown', { key: 'ArrowDown', cancelable: true });
+    el.dispatchEvent(downEvent);
+    await nextTick();
+    expect(downEvent.defaultPrevented).toBe(false);
+    expect(el.value).toBe('second edited');
+  });
 });

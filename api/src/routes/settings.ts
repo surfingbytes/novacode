@@ -56,6 +56,7 @@ type AppSettingsUser = {
   modelSelection: string | null;
   utilityAgentType: string | null;
   utilityModelSelection: string | null;
+  tourCompleted: boolean | null;
 };
 
 /** Legacy dashboard theme id `rust` was replaced by OLED. */
@@ -73,6 +74,7 @@ type AppSettings = {
   modelSelection: string;
   utilityAgentType: string | null;
   utilityModelSelection: string;
+  tourCompleted: boolean;
   sshPublicKey: string;
   hasSshPrivateKey: boolean;
   workspaceBrowseRoot: string;
@@ -88,6 +90,8 @@ const AppSettingsSchema = Type.Object({
   modelSelection: Type.String(),
   utilityAgentType: Type.Union([Type.String(), Type.Null()]),
   utilityModelSelection: Type.String(),
+  /** Whether the user finished or skipped the dashboard onboarding tour */
+  tourCompleted: Type.Boolean(),
   /** SSH public key (e.g. register on GitHub/GitLab) — persisted under config volume `.ssh/` */
   sshPublicKey: Type.String(),
   /** Whether the private key of the same pair exists — fetched via GET /api/settings/ssh-private-key */
@@ -113,6 +117,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       modelSelection: user?.modelSelection ?? 'auto',
       utilityAgentType: user?.utilityAgentType && isAgentType(user.utilityAgentType) ? user.utilityAgentType : null,
       utilityModelSelection: user?.utilityModelSelection ?? '',
+      tourCompleted: user?.tourCompleted ?? false,
       sshPublicKey: ssh.sshPublicKey,
       hasSshPrivateKey: ssh.sshPrivateKey !== '',
       workspaceBrowseRoot: config.workspaceBrowseRoot
@@ -151,7 +156,8 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
           lightTheme: Type.Optional(Type.String()),
           modelSelection: Type.Optional(Type.String()),
           utilityAgentType: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-          utilityModelSelection: Type.Optional(Type.String())
+          utilityModelSelection: Type.Optional(Type.String()),
+          tourCompleted: Type.Optional(Type.Boolean())
         }),
         response: { 200: AppSettingsSchema }
       }
@@ -200,7 +206,8 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         lightTheme,
         modelSelection,
         utilityAgentType,
-        utilityModelSelection
+        utilityModelSelection,
+        ...(body.tourCompleted !== undefined ? { tourCompleted: body.tourCompleted } : {})
       });
       if (!user) {
         throw new Error('Failed to update user');

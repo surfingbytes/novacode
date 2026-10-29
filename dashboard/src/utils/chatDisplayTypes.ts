@@ -13,6 +13,13 @@ export interface PlanEntry {
   status: string;
 }
 
+/** ACP `diff` content entry of an Edit/Write tool call (`oldText: null` = new file). */
+export interface ToolDiff {
+  path: string;
+  oldText: string | null;
+  newText: string;
+}
+
 export interface DisplayItem {
   kind: 'text' | 'tool' | 'todos' | 'plan' | 'notice';
   // text
@@ -28,6 +35,8 @@ export interface DisplayItem {
   toolOutput?: string;
   /** Image file the tool returned (e.g. Read on a JPEG) — shown from disk on demand. */
   toolImagePath?: string;
+  /** File edits the tool reported as ACP `diff` content (tool_call and tool_call_update). */
+  toolDiffs?: ToolDiff[];
   // todos
   todoItems?: TodoDisplayItem[];
   todoDoneCount?: number;

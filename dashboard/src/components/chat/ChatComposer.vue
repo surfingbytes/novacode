@@ -86,6 +86,8 @@ const props = withDefaults(
     bCanContinueInNewChat?: boolean;
     /** Handoff summary is being written; the new chat opens when it's done. */
     bHandoffPending?: boolean;
+    /** Earlier prompts of the session (oldest → newest), recalled with ArrowUp/ArrowDown. */
+    promptHistory?: string[];
   }>(),
   {
     agentType: null,
@@ -94,7 +96,8 @@ const props = withDefaults(
     bSavingApprovalPolicy: false,
     hideToolCalls: false,
     bCanContinueInNewChat: false,
-    bHandoffPending: false
+    bHandoffPending: false,
+    promptHistory: () => []
   }
 );
 
@@ -132,6 +135,10 @@ const approvalMenuRef = ref<HTMLElement | null>(null);
 const bApprovalMenuOpen = ref(false);
 const sendMenuRef = ref<HTMLElement | null>(null);
 const bSendMenuOpen = ref(false);
+/** Index into `promptHistory` while navigating with ArrowUp/ArrowDown; null when not navigating. */
+const historyIndex = ref<number | null>(null);
+/** Draft saved on the first ArrowUp, restored when ArrowDown goes past the newest entry. */
+const historySavedDraft = ref('');
 
 const approvalPolicyOptions: Array<{ id: ApprovalPolicy; label: string; description: string }> = [
   { id: 'ask', label: 'Ask', description: 'Prompt before tool actions' },
@@ -236,6 +243,7 @@ function send(): void {
     return;
   }
   emit('send', { text, imagePaths });
+  resetHistoryNavigation();
   promptText.value = '';
   pendingImages.value = [];
   void nextTick(() => textareaEl.value?.focus());
@@ -282,6 +290,81 @@ function onEscapeKeydown(e: KeyboardEvent): void {
   if (bModeMenuOpen.value || bApprovalMenuOpen.value || bSendMenuOpen.value) return;
   e.preventDefault();
   emit('cancel');
+}
+
+// -------------------------------------------------- Prompt history --------------------------------------------------
+
+function resetHistoryNavigation(): void {
+  historyIndex.value = null;
+  historySavedDraft.value = '';
+}
+
+function applyHistoryText(text: string): void {
+  promptText.value = text;
+  void nextTick(() => {
+    const el = textareaEl.value;
+    if (el) {
+      el.setSelectionRange(text.length, text.length);
+    }
+    resizeTextarea();
+  });
+}
+
+function isCaretOnFirstLine(el: HTMLTextAreaElement): boolean {
+  return !el.value.slice(0, el.selectionStart).includes('\n');
+}
+
+function isCaretOnLastLine(el: HTMLTextAreaElement): boolean {
+  return !el.value.slice(el.selectionEnd).includes('\n');
+}
+
+// ArrowUp recalls older prompts when the prompt is empty or the caret is on the first line.
+function onArrowUpKeydown(e: KeyboardEvent): void {
+  if (e.isComposing || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) {
+    return;
+  }
+  const el = textareaEl.value;
+  const history = props.promptHistory;
+  if (!el || history.length === 0) {
+    return;
+  }
+  if (el.value !== '' && !isCaretOnFirstLine(el)) {
+    return;
+  }
+  let nextIndex: number;
+  if (historyIndex.value === null) {
+    historySavedDraft.value = promptText.value;
+    nextIndex = history.length - 1;
+  } else {
+    nextIndex = historyIndex.value - 1;
+  }
+  if (nextIndex < 0) {
+    return;
+  }
+  e.preventDefault();
+  historyIndex.value = nextIndex;
+  applyHistoryText(history[nextIndex]);
+}
+
+// ArrowDown steps to newer prompts while navigating; past the newest it restores the saved draft.
+function onArrowDownKeydown(e: KeyboardEvent): void {
+  if (e.isComposing || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) {
+    return;
+  }
+  const el = textareaEl.value;
+  if (!el || historyIndex.value === null || !isCaretOnLastLine(el)) {
+    return;
+  }
+  e.preventDefault();
+  const nextIndex = historyIndex.value + 1;
+  if (nextIndex >= props.promptHistory.length) {
+    const draft = historySavedDraft.value;
+    resetHistoryNavigation();
+    applyHistoryText(draft);
+    return;
+  }
+  historyIndex.value = nextIndex;
+  applyHistoryText(props.promptHistory[nextIndex]);
 }
 
 function onPaste(e: ClipboardEvent): void {
@@ -701,6 +784,9 @@ defineExpose({
           style="height: 32px; max-height: 160px; overflow-y: auto"
           @keydown.enter="onKeydown"
           @keydown.esc="onEscapeKeydown"
+          @keydown.up="onArrowUpKeydown"
+          @keydown.down="onArrowDownKeydown"
+          @input="resetHistoryNavigation"
           @paste="onPaste"
         ></textarea>
         <button

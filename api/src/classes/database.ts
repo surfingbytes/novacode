@@ -8,6 +8,7 @@ import { pushDb } from './db/push';
 import { roleTemplateDb } from './db/roleTemplates';
 import { automationDb } from './db/automations';
 import { searchDb } from './db/search';
+import { usageDb } from './db/usage';
 
 export { FavoriteLimitError, normalizeTagStringList } from './db/shared';
 
@@ -21,7 +22,8 @@ type Db = typeof healthDb &
   typeof pushDb &
   typeof roleTemplateDb &
   typeof automationDb &
-  typeof searchDb;
+  typeof searchDb &
+  typeof usageDb;
 
 export const db: Db = {
   ...healthDb,
@@ -32,5 +34,6 @@ export const db: Db = {
   ...pushDb,
   ...roleTemplateDb,
   ...automationDb,
-  ...searchDb
+  ...searchDb,
+  ...usageDb
 };

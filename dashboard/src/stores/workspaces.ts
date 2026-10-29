@@ -7,13 +7,16 @@ import { orchestratorApi, sessionsApi, workspaceApi, buildSessionsWsUrl, isApiUn
 import { createManagedSocket, type ManagedSocket } from '@/lib/wsClient';
 
 // stores
+import { useNotificationsStore } from '@/stores/notifications';
 import { useOrchestratorsStore } from '@/stores/orchestrators';
 import { useSessionSpecsStore } from '@/stores/sessionSpecs';
 import { forgetLocalStateForId } from '@/lib/sessionLocalState';
+import { subtasksFromStoredJson } from '@/utils/orchestratorPayload';
 import { isViewingSession } from '@/utils/sessionUnread';
 
 // types
 import type {
+  AutomationRunFinishedMessage,
   Workspace,
   CreateWorkspacePayload,
   UpdateWorkspacePayload,
@@ -24,6 +27,11 @@ import type {
 } from '@/@types/index';
 
 const LIST_RETRY_DELAYS_MS = [1000, 3000];
+const NOTIFICATION_QUESTION_MAX_LENGTH = 140;
+
+function truncateText(text: string, maxLength: number): string {
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+}
 
 /** Retries dropped connections / gateway errors so a wake-from-sleep blip does not stick as a load failure. */
 async function withUnreachableRetry<T>(request: () => Promise<T>): Promise<T> {
@@ -194,6 +202,71 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     if (previous?.busy && !busy && isViewingSession(sessionId)) {
       void markSessionRead(sessionId);
     }
+    if (previous?.busy && !busy && !isViewingSession(sessionId)) {
+      notifySessionFinished(previous);
+    }
+  }
+
+  // ---------------- Notification bell (live transitions only, never snapshots) ----------------
+  function workspaceName(workspaceId: string): string {
+    return workspaces.value.find((workspace) => workspace.id === workspaceId)?.name ?? '';
+  }
+
+  function notifySessionFinished(session: Session): void {
+    // Orchestrator step chats are covered by the plan's own notifications.
+    if (useOrchestratorsStore().isStepSession(session)) {
+      return;
+    }
+    useNotificationsStore().push({
+      kind: 'session-finished',
+      title: session.name,
+      body: workspaceName(session.workspaceId),
+      href: `/workspace/${session.workspaceId}/session/${session.id}`
+    });
+  }
+
+  /** Compare an `orchestrator-upsert` against the state before it was applied. */
+  function notifyOrchestratorChanges(previous: Orchestrator | null, next: Orchestrator): void {
+    if (!previous) {
+      return;
+    }
+    const notifications = useNotificationsStore();
+    const title = next.name;
+    const body = workspaceName(next.workspaceId);
+    const href = `/workspace/${next.workspaceId}/orchestrator/${next.id}`;
+    if (next.runStatus !== undefined && next.runStatus !== previous.runStatus) {
+      if (next.runStatus === 'completed') {
+        notifications.push({ kind: 'orchestrator-finished', title, body, href });
+      } else if (next.runStatus === 'failed') {
+        notifications.push({ kind: 'orchestrator-failed', title, body, href });
+      }
+    }
+    if (next.subtasksJson === undefined || next.subtasksJson === previous.subtasksJson) {
+      return;
+    }
+    const previousSteps = subtasksFromStoredJson(previous.subtasksJson);
+    subtasksFromStoredJson(next.subtasksJson).forEach((step, index) => {
+      if (step.waitingQuestion && !previousSteps[index]?.waitingQuestion) {
+        notifications.push({
+          kind: 'orchestrator-needs-input',
+          title,
+          body: truncateText(step.waitingQuestion, NOTIFICATION_QUESTION_MAX_LENGTH),
+          href
+        });
+      }
+    });
+  }
+
+  function notifyAutomationFinished(message: AutomationRunFinishedMessage): void {
+    if (message.status !== 'failed') {
+      return;
+    }
+    useNotificationsStore().push({
+      kind: 'automation-failed',
+      title: message.automationName,
+      body: message.error || 'Run failed',
+      href: '/automations'
+    });
   }
 
   const fetchAllSessions = async (): Promise<void> => {
@@ -236,6 +309,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
             | { type: 'busy-changed'; id: string; busy: boolean; busySubagents?: Session['busySubagents'] }
             | { type: 'orchestrator-upsert'; orchestrator: Orchestrator }
             | { type: 'session-spec-status'; status: SessionSpecStatus }
+            | AutomationRunFinishedMessage
             | { type: 'refresh' }
             | { type: 'server-shutdown' }
             | { type: 'ping' };
@@ -259,12 +333,17 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
             setSessionBusy(messagePayload.id, messagePayload.busy, messagePayload.busySubagents);
           } else if (messagePayload.type === 'orchestrator-upsert') {
             if (messagePayload.orchestrator) {
-              useOrchestratorsStore().upsertOrchestrator(messagePayload.orchestrator);
+              const orchestratorsStore = useOrchestratorsStore();
+              const previous = orchestratorsStore.byId(messagePayload.orchestrator.id);
+              orchestratorsStore.upsertOrchestrator(messagePayload.orchestrator);
+              notifyOrchestratorChanges(previous, messagePayload.orchestrator);
             }
           } else if (messagePayload.type === 'session-spec-status') {
             if (messagePayload.status) {
               useSessionSpecsStore().applyStatus(messagePayload.status);
             }
+          } else if (messagePayload.type === 'automation-run-finished') {
+            notifyAutomationFinished(messagePayload);
           } else if (messagePayload.type === 'refresh') {
             void fetchAllSessions();
           } else if (messagePayload.type === 'server-shutdown') {

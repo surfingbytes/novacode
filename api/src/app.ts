@@ -39,6 +39,7 @@ import { imageRoutes } from './routes/images';
 import { pushRoutes } from './routes/push';
 import { forgeRoutes } from './routes/forge';
 import { searchRoutes } from './routes/search';
+import { usageRoutes } from './routes/usage';
 
 /** Max JSON/raw body size for most routes. Default Fastify limit is 1MiB and returns 413.
  *  The attachment-upload route overrides this with config.uploadBodyLimitBytes (video-sized). */
@@ -141,6 +142,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await registerTaggedRoutes(fastify, 'push', pushRoutes);
   await registerTaggedRoutes(fastify, 'forge', forgeRoutes);
   await registerTaggedRoutes(fastify, 'search', searchRoutes);
+  await registerTaggedRoutes(fastify, 'usage', usageRoutes);
 
   // health check (no auth, for monitoring/Docker HEALTHCHECK)
   const healthBody = Type.Object({

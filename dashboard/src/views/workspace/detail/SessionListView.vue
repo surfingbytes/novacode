@@ -12,6 +12,7 @@ import PromptModal from '@/components/PromptModal.vue';
 import ListPageSkeleton from '@/components/ui/ListPageSkeleton.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import SessionListToolbar from './session-list/SessionListToolbar.vue';
+import SessionListFilters from './session-list/SessionListFilters.vue';
 import SessionListGrid from './session-list/SessionListGrid.vue';
 import SessionListRows from './session-list/SessionListRows.vue';
 import SessionListArchived from './session-list/SessionListArchived.vue';
@@ -31,6 +32,13 @@ import { sessionsApi, orchestratorApi } from '@/classes/api';
 import { notifyApiError } from '@/lib/notifyApiError';
 import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 import { subtasksFromStoredJson } from '@/utils/orchestratorPayload';
+import {
+  emptySessionListFilter,
+  isSessionListFilterActive,
+  matchesOrchestrator,
+  matchesSession,
+  sessionStatusOf
+} from '@/utils/sessionListFilter';
 
 // composables
 import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
@@ -38,7 +46,8 @@ import { useCreateSession, type NewSessionMode } from '@/composables/useCreateSe
 
 // types
 import type { ContextMenuItem } from '@/components/ContextMenu.vue';
-import type { Session, Orchestrator, Workspace } from '@/@types/index';
+import type { AgentType, Session, Orchestrator, Workspace } from '@/@types/index';
+import type { SessionListFilter } from '@/utils/sessionListFilter';
 import type { CombinedItem } from './session-list/types';
 
 // -------------------------------------------------- Props --------------------------------------------------
@@ -94,7 +103,7 @@ const {
 } = useAgentCapabilities();
 const { bShowNewSession, newSessionMode, bCreating, createError, openNewSession, createSession } =
   useCreateSession();
-const activeFilter = ref<string | null>(null);
+const filter = ref<SessionListFilter>(emptySessionListFilter());
 
 // -------------------------------------------------- Computed --------------------------------------------------
 const sessions = computed<Session[]>(() => store.activeSessions);
@@ -120,6 +129,17 @@ const sessionTags = computed((): string[] => {
   }
   return out.sort((a, b) => a.localeCompare(b));
 });
+
+/** Unique agent types used by sessions (agent filter chips render only when 2+). */
+const agentTypesPresent = computed((): AgentType[] => {
+  const seen = new Set<AgentType>();
+  for (const s of [...sessions.value, ...archivedSessions.value]) {
+    seen.add(s.agentType);
+  }
+  return [...seen].sort((a, b) => a.localeCompare(b));
+});
+
+const bFilterActive = computed((): boolean => isSessionListFilterActive(filter.value));
 
 /**
  * Sessions that were created by orchestrator runs, grouped by orchestrator.
@@ -181,8 +201,8 @@ function orderedNestedSessions(orch: Orchestrator): Session[] {
 
 const filteredOrchestrators = computed(() => {
   let list = orchestrators.value.filter((o) => !o.archived);
-  if (activeFilter.value) {
-    list = list.filter((o) => o.tags === activeFilter.value);
+  if (bFilterActive.value) {
+    list = list.filter((o) => matchesOrchestrator(o, orderedNestedSessions(o), filter.value));
   }
   return [...list].sort(
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
@@ -191,19 +211,36 @@ const filteredOrchestrators = computed(() => {
 
 const filteredArchivedOrchestrators = computed(() => {
   let list = orchestrators.value.filter((o) => o.archived);
-  if (activeFilter.value) {
-    list = list.filter((o) => o.tags === activeFilter.value);
+  if (bFilterActive.value) {
+    list = list.filter((o) => matchesOrchestrator(o, orderedNestedSessions(o), filter.value));
   }
   return [...list].sort(
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
   );
 });
 
-const filteredSessions = computed(() => {
+/** Non-archived sessions not attached to an orchestrator (base for status counts and filtering). */
+const standaloneSessions = computed<Session[]>(() => {
   const excludedIds = sessionsAttachedToOrchestrators.value;
-  let list = sessions.value.filter((s) => !excludedIds.has(s.id));
-  if (activeFilter.value) {
-    list = list.filter((s) => sessionHasTag(s, activeFilter.value));
+  return sessions.value.filter((s) => !excludedIds.has(s.id));
+});
+
+/** Status chip counts follow the other filter dimensions (text, agent, tag) so they match what is listed. */
+const statusCounts = computed(() => {
+  const counts = { busy: 0, unread: 0, idle: 0 };
+  const statusAgnosticFilter: SessionListFilter = { ...filter.value, status: 'all' };
+  for (const s of standaloneSessions.value) {
+    if (matchesSession(s, statusAgnosticFilter)) {
+      counts[sessionStatusOf(s)] += 1;
+    }
+  }
+  return counts;
+});
+
+const filteredSessions = computed(() => {
+  let list = standaloneSessions.value;
+  if (bFilterActive.value) {
+    list = list.filter((s) => matchesSession(s, filter.value));
   }
   return [...list].sort((a, b) => {
     // Favorites first, then busy, then by updatedAt descending
@@ -221,8 +258,8 @@ const archivedCount = computed(
 
 const filteredArchivedSessions = computed(() => {
   let list = archivedSessions.value;
-  if (activeFilter.value) {
-    list = list.filter((s) => sessionHasTag(s, activeFilter.value));
+  if (bFilterActive.value) {
+    list = list.filter((s) => matchesSession(s, filter.value));
   }
   return [...list].sort(
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
@@ -410,15 +447,8 @@ function scheduleUpdateMultiselectBarPosition(): void {
   void nextTick(() => updateMultiselectBarPosition());
 }
 
-function sessionHasTag(s: Session, tag: string | null): boolean {
-  if (!tag) {
-    return true;
-  }
-  const list = s.tags;
-  if (!list?.length) {
-    return false;
-  }
-  return list.some((x) => x.toLowerCase() === tag.toLowerCase());
+function clearFilter(): void {
+  filter.value = emptySessionListFilter();
 }
 
 // -------------------------------------------------- Watchers --------------------------------------------------
@@ -619,35 +649,12 @@ watch(
 </script>
 
 <template>
-  <div v-if="sessionTags.length > 0" class="flex flex-wrap items-center gap-2 mb-3">
-    <span class="text-xs text-text-muted shrink-0">Tags</span>
-    <button
-      type="button"
-      class="text-xs px-2.5 py-1 rounded-full border transition-colors"
-      :class="
-        activeFilter === null
-          ? 'bg-primary/15 text-primary border-primary/30'
-          : 'border-border text-text-muted hover:text-text-primary'
-      "
-      @click="activeFilter = null"
-    >
-      All
-    </button>
-    <button
-      v-for="t in sessionTags"
-      :key="t"
-      type="button"
-      class="text-xs px-2.5 py-1 rounded-full border transition-colors"
-      :class="
-        activeFilter === t
-          ? 'bg-primary/15 text-primary border-primary/30'
-          : 'border-border text-text-muted hover:text-text-primary'
-      "
-      @click="activeFilter = activeFilter === t ? null : t"
-    >
-      {{ t }}
-    </button>
-  </div>
+  <SessionListFilters
+    v-model="filter"
+    :tags="sessionTags"
+    :agent-types="agentTypesPresent"
+    :counts="statusCounts"
+  />
 
   <SessionListToolbar
     :view-mode="viewMode"
@@ -666,10 +673,10 @@ watch(
     <EmptyState
       v-if="combinedItems.length === 0"
       icon="terminal"
-      :title="activeFilter ? `No sessions tagged ${activeFilter}` : 'No sessions yet'"
-      :description="activeFilter ? undefined : 'Start a session to work in this workspace.'"
+      :title="bFilterActive ? 'No sessions match the filter' : 'No sessions yet'"
+      :description="bFilterActive ? undefined : 'Start a session to work in this workspace.'"
     >
-      <button v-if="activeFilter" type="button" class="button" @click="activeFilter = null">
+      <button v-if="bFilterActive" type="button" class="button" @click="clearFilter">
         Clear filter
       </button>
       <button v-else type="button" class="button is-primary" @click="openNewSessionModal()">

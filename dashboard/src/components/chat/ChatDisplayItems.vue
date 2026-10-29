@@ -13,6 +13,7 @@ import { computed, ref } from 'vue';
 import { sessionsApi } from '@/classes/api';
 
 // components
+import ChatToolDiff from '@/components/chat/ChatToolDiff.vue';
 import TodoStatusIcon from '@/components/chat/TodoStatusIcon.vue';
 
 // utils
@@ -49,6 +50,10 @@ function toolStatusIconShown(status: DisplayItem['status']): boolean {
 
 function imageToggleId(callId: string): string {
   return `${callId}:image`;
+}
+
+function diffToggleId(callId: string): string {
+  return `diff:${callId}`;
 }
 
 function markToolImageFailed(path: string): void {
@@ -195,6 +200,13 @@ const emit = defineEmits<{
             {{ loc.path.split('/').at(-1) }}{{ loc.line ? `:${loc.line}` : '' }}
           </button>
         </div>
+        <!-- Tool diffs (Edit/Write) -->
+        <ChatToolDiff
+          v-if="item.toolDiffs?.length && item.callId"
+          :diffs="item.toolDiffs"
+          :b-expanded="expandedToolOutputIds.has(diffToggleId(item.callId!))"
+          @toggle="emit('toggleToolOutput', diffToggleId(item.callId!))"
+        />
         <!-- Tool output toggle -->
         <div v-if="item.toolOutput && item.callId" class="px-1">
           <button

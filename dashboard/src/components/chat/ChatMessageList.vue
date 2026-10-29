@@ -103,6 +103,7 @@ const emit = defineEmits<{
   (e: 'openFile', path: string): void;
   (e: 'lightbox', src: string): void;
   (e: 'chatErrorAction'): void;
+  (e: 'edit', text: string): void;
 }>();
 
 const toasts = useToastStore();
@@ -281,6 +282,7 @@ defineExpose({
           :b-find-match="findMatchKeys[findMatchIndex] === entry.key"
           :b-copied="copiedMessageKey === entry.key"
           @copy="(text) => copyMessageText(entry.key, text)"
+          @edit="(text) => emit('edit', text)"
           @toggle-tool-output="(callId) => emit('toggleToolOutput', callId)"
           @open-plan="(planId) => emit('openPlan', planId)"
           @open-file="(path) => emit('openFile', path)"

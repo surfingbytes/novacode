@@ -129,6 +129,19 @@ export interface WsServerMessage {
   status?: SessionStatus;
 }
 
+// ---------------------------------- Sessions list WebSocket protocol ----------------------------------
+
+/** Sent on the global sessions socket and the workspace socket when an automation run finishes. */
+export interface AutomationRunFinishedMessage {
+  type: 'automation-run-finished';
+  automationId: string;
+  workspaceId: string;
+  automationName: string;
+  status: 'success' | 'failed';
+  error: string | null;
+  finishedAt: string;
+}
+
 // ---------------------------------- Chat WebSocket protocol ----------------------------------
 
 export interface ChatMessage {
@@ -610,6 +623,8 @@ export interface AppSettings {
   utilityAgentType: AgentType | null;
   /** Model for those short tasks. Empty picks Composer/Haiku, then Auto. */
   utilityModelSelection: string;
+  /** Whether the user finished or skipped the dashboard onboarding tour. */
+  tourCompleted: boolean;
   /** ed25519 public key — add to your Git host for SSH git access */
   sshPublicKey: string;
   /** Whether the same keypair’s private key exists — fetch it via GET /api/settings/ssh-private-key */

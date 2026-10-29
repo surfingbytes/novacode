@@ -5,7 +5,7 @@ import type { WebSocket } from 'ws';
 import { registerSessionListBroadcaster } from './sessionListBroadcast';
 
 // types
-import type { WsServerMessage } from '../@types/index';
+import type { AutomationRunFinishedMessage, WsServerMessage } from '../@types/index';
 
 const wsClients = new Set<WebSocket>();
 const workspaceSessionClients = new Map<string, Set<WebSocket>>();
@@ -100,6 +100,16 @@ export function broadcastOrchestratorUpsert(workspaceId: string, orchestrator: u
 export function broadcastSessionSpecStatus(workspaceId: string, status: unknown): void {
   broadcastWorkspace(workspaceId, { type: 'session-spec-status', status });
   broadcastGlobalSessions({ type: 'session-spec-status', status });
+}
+
+/** An automation run finished (success or failure). */
+export function broadcastAutomationRunFinished(
+  workspaceId: string,
+  payload: Omit<AutomationRunFinishedMessage, 'type'>
+): void {
+  const msg: AutomationRunFinishedMessage = { type: 'automation-run-finished', ...payload };
+  broadcastWorkspace(workspaceId, msg);
+  broadcastGlobalSessions(msg);
 }
 
 export function broadcastServerShutdown(): void {

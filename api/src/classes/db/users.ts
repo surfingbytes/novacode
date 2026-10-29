@@ -94,6 +94,7 @@ export async function updateUser(
     utilityAgentType?: string | null;
     utilityModelSelection?: string;
     tokenVersion?: number;
+    tourCompleted?: boolean;
   }
 ): Promise<UserModel | undefined> {
   const existingUser = await prisma.user.findUnique({ where: { id } });

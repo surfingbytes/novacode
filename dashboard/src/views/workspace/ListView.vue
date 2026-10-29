@@ -11,6 +11,7 @@ import WorkspaceEditModal from '@/components/workspace/EditModal.vue';
 import RecentlyActiveSessions from '@/components/workspace/RecentlyActiveSessions.vue';
 import ContextMenu from '@/components/ContextMenu.vue';
 import ListPageSkeleton from '@/components/ui/ListPageSkeleton.vue';
+import TourModal from '@/components/TourModal.vue';
 import type { ContextMenuItem } from '@/components/ContextMenu.vue';
 
 // stores
@@ -64,6 +65,7 @@ const deletingId = ref<string | null>(null);
 const confirmingDeleteId = ref<string | null>(null);
 const archivingId = ref<string | null>(null);
 const bShowArchived = ref<boolean>(false);
+const bShowTour = ref<boolean>(false);
 
 const newGroupNames = ref<string[]>([]);
 const bShowWorkspaceDeleteModal = ref<boolean>(false);
@@ -329,6 +331,24 @@ const fetchFirstStartStatus = async (): Promise<void> => {
   if (settingsResult.status === 'fulfilled' && settingsResult.value.data.workspaceBrowseRoot) {
     workspaceBrowseRoot.value = settingsResult.value.data.workspaceBrowseRoot;
   }
+  if (settingsResult.status === 'fulfilled' && settingsResult.value.data.tourCompleted === false) {
+    bShowTour.value = true;
+  }
+};
+
+/** Done, Skip and the card actions all end the tour; a failed save still closes it. */
+const completeTour = async (): Promise<void> => {
+  bShowTour.value = false;
+  try {
+    await settingsApi.update({ tourCompleted: true });
+  } catch {
+    toastStore.error('Failed to save tour progress');
+  }
+};
+
+const handleTourAddWorkspace = (): void => {
+  void completeTour();
+  openCreateWorkspace();
 };
 
 // -------------------------------------------------- Lifecycle --------------------------------------------------
@@ -582,6 +602,13 @@ onMounted((): void => {
     :existing-tags="newSessionTags"
     allow-orchestrator
     @create="createSession"
+  />
+
+  <TourModal
+    v-model="bShowTour"
+    @done="completeTour"
+    @skip="completeTour"
+    @add-workspace="handleTourAddWorkspace"
   />
 
   <ContextMenu

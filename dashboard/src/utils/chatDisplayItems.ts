@@ -9,7 +9,7 @@
 
 // types
 import type { TodoDisplayItem } from '@novacode/shared';
-import type { DisplayItem, PlanEntry } from './chatDisplayTypes';
+import type { DisplayItem, PlanEntry, ToolDiff } from './chatDisplayTypes';
 
 // utils
 import { renderMdCached } from './chatMarkdown';
@@ -80,6 +80,34 @@ function textFromAcpToolContent(content: unknown): string {
     }
   }
   return parts.join('');
+}
+
+/** Appends ACP `diff` content entries to the tool item, skipping malformed and identical ones. */
+function mergeToolDiffs(item: DisplayItem, content: unknown): void {
+  if (!Array.isArray(content)) {
+    return;
+  }
+  for (const entry of content) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+    const obj = entry as Record<string, unknown>;
+    if (obj.type !== 'diff' || typeof obj.path !== 'string' || typeof obj.newText !== 'string') {
+      continue;
+    }
+    const diff: ToolDiff = {
+      path: obj.path,
+      oldText: typeof obj.oldText === 'string' ? obj.oldText : null,
+      newText: obj.newText
+    };
+    const bDuplicate = item.toolDiffs?.some(
+      (existing) =>
+        existing.path === diff.path && existing.oldText === diff.oldText && existing.newText === diff.newText
+    );
+    if (!bDuplicate) {
+      item.toolDiffs = [...(item.toolDiffs ?? []), diff];
+    }
+  }
 }
 
 /** Full plan body from ExitPlanMode / Approve Plan tool calls (not task-list plan updates). */
@@ -316,14 +344,16 @@ export function createChatStreamParser(hooks: ChatStreamParserHooks = {}) {
       const callPath = callLocations?.find((location) => location.path?.trim())?.path;
       if (callPath) toolCallFilePaths.set(toolCallId, callPath);
       const kind = update.kind as string | undefined;
-      items.push({
+      const toolItem: DisplayItem = {
         kind: 'tool',
         callId: toolCallId,
         toolName: ACP_KIND_TO_NAME[kind ?? ''] ?? 'Tool',
         toolIcon: ACP_KIND_TO_ICON[kind ?? ''] ?? 'build',
         toolSummary: typeof update.title === 'string' ? update.title : '',
         status: 'running'
-      });
+      };
+      mergeToolDiffs(toolItem, update.content);
+      items.push(toolItem);
       return;
     }
 
@@ -361,6 +391,7 @@ export function createChatStreamParser(hooks: ChatStreamParserHooks = {}) {
           item.toolIcon = undefined;
           item.toolSummary = undefined;
           item.toolOutput = undefined;
+          item.toolDiffs = undefined;
           return;
         }
       }
@@ -368,6 +399,7 @@ export function createChatStreamParser(hooks: ChatStreamParserHooks = {}) {
         if (typeof update.title === 'string') item.toolSummary = update.title;
         const rawLocs = update.locations as Array<{ path: string; line?: number }> | undefined;
         if (rawLocs?.length) item.locations = rawLocs;
+        mergeToolDiffs(item, update.content);
         if (status === 'completed') {
           const rawContent = update.content as
             Array<{ type?: string; content?: { type?: string; text?: string } }> | undefined;

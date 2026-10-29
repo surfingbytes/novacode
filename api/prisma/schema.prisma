@@ -24,6 +24,7 @@ model User {
   utilityAgentType    String?            @map("utility_agent_type")
   utilityModelSelection String           @default("") @map("utility_model_selection")
   tokenVersion        Int                @default(0) @map("token_version")
+  tourCompleted       Boolean            @default(false) @map("tour_completed")
   pushSubscriptions   PushSubscription[]
   apiTokens           ApiToken[]
 
@@ -156,6 +157,7 @@ model SessionUsage {
 
   @@index([sessionId], map: "idx_session_usage_session_id")
   @@index([workspaceId], map: "idx_session_usage_workspace_id")
+  @@index([createdAt], map: "idx_session_usage_created_at")
   @@map("session_usage")
 }
 

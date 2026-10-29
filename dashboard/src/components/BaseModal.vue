@@ -2,6 +2,9 @@
 // node_modules
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
+// utils
+import { allocateModalId, isTopModal, pushModal, removeModal } from '@/utils/modalStack';
+
 // -------------------------------------------------- Props --------------------------------------------------
 
 const props = withDefaults(
@@ -37,16 +40,13 @@ const emit = defineEmits<{
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-// Tracks the stack of open modals so only the topmost reacts to ESC/backdrop.
-const openModalIds: number[] = [];
-let nextModalId = 1;
 let scrollLockCount = 0;
 let previousBodyOverflow = '';
 
 // -------------------------------------------------- Refs --------------------------------------------------
 
-const modalId = nextModalId;
-nextModalId += 1;
+// The open-modal stack lives in utils/modalStack so only the topmost reacts to ESC/backdrop.
+const modalId = allocateModalId();
 
 const panelRef = ref<HTMLElement | null>(null);
 let previouslyFocused: Element | null = null;
@@ -58,7 +58,7 @@ const close = (): void => {
 };
 
 const bIsTopModal = (): boolean => {
-  return openModalIds[openModalIds.length - 1] === modalId;
+  return isTopModal(modalId);
 };
 
 const onBackdropClick = (): void => {
@@ -123,7 +123,7 @@ const unlockScroll = (): void => {
 
 const activate = (): void => {
   previouslyFocused = document.activeElement;
-  openModalIds.push(modalId);
+  pushModal(modalId);
   lockScroll();
   document.addEventListener('keydown', onKeydown, true);
   // Focus the first sensible target inside the dialog.
@@ -140,10 +140,7 @@ const activate = (): void => {
 };
 
 const deactivate = (): void => {
-  const index = openModalIds.indexOf(modalId);
-  if (index !== -1) {
-    openModalIds.splice(index, 1);
-  }
+  removeModal(modalId);
   unlockScroll();
   document.removeEventListener('keydown', onKeydown, true);
   if (previouslyFocused instanceof HTMLElement) {

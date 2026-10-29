@@ -9,6 +9,7 @@ import { safeGetItem, safeRemoveItem, safeSetItem } from '@/lib/safeLocalStorage
 import { clearAllUserLocalState } from '@/lib/sessionLocalState';
 
 // stores
+import { useNotificationsStore } from '@/stores/notifications';
 import { useOrchestratorsStore } from '@/stores/orchestrators';
 import { useSessionSpecsStore } from '@/stores/sessionSpecs';
 import { useToastStore } from '@/stores/toasts';
@@ -94,6 +95,7 @@ export const useAuthStore = defineStore('auth', () => {
     useOrchestratorsStore().reset();
     useSessionSpecsStore().reset();
     useToastStore().reset();
+    useNotificationsStore().reset();
     clearAllUserLocalState();
   };
 

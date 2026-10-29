@@ -14,3 +14,4 @@ export * from './api/orchestrator';
 export * from './api/automations';
 export * from './api/search';
 export * from './api/rules';
+export * from './api/usage';

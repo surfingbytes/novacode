@@ -7,6 +7,7 @@ import { runGit } from './runGit';
 import { createSessionWithAgent } from './sessionService';
 import { dispatchPromptAndWait } from './chatEngine';
 import { sendPushToAll } from './push';
+import { broadcastAutomationRunFinished } from './wsBroadcast';
 import { resolveWorkspaceAbsolutePath } from './workspacePaths';
 import { logger } from './logger';
 
@@ -184,12 +185,21 @@ async function runAutomation(automationId: string): Promise<void> {
 
     if (sessionResult.error || !sessionResult.session) {
       const error = sessionResult.error ?? 'Failed to create session';
+      const finishedAt = new Date().toISOString();
       await db.updateAutomationRun(run.id, {
         status: 'failed',
-        finishedAt: new Date().toISOString(),
+        finishedAt,
         error
       });
       await db.updateAutomation(automationId, { lastRunStatus: 'failed', lastRunError: error });
+      broadcastAutomationRunFinished(automation.workspaceId, {
+        automationId,
+        workspaceId: automation.workspaceId,
+        automationName: automation.name,
+        status: 'failed',
+        error,
+        finishedAt
+      });
       await notifyAutomationFinished({
         automationName: automation.name,
         workspaceId: automation.workspaceId,
@@ -231,9 +241,10 @@ async function runAutomation(automationId: string): Promise<void> {
 
     const agentResponse = extractAssistantText(result.messages);
     const bFailed = Boolean(result.error);
+    const finishedAt = new Date().toISOString();
     await db.updateAutomationRun(run.id, {
       status: bFailed ? 'failed' : 'completed',
-      finishedAt: new Date().toISOString(),
+      finishedAt,
       agentResponse,
       changedFiles: JSON.stringify(uniqueChanged),
       error: result.error ?? null,
@@ -242,6 +253,14 @@ async function runAutomation(automationId: string): Promise<void> {
     await db.updateAutomation(automationId, {
       lastRunStatus: bFailed ? 'failed' : 'completed',
       lastRunError: result.error ?? null
+    });
+    broadcastAutomationRunFinished(automation.workspaceId, {
+      automationId,
+      workspaceId: automation.workspaceId,
+      automationName: automation.name,
+      status: bFailed ? 'failed' : 'success',
+      error: result.error ?? null,
+      finishedAt
     });
     await notifyAutomationFinished({
       automationName: automation.name,
@@ -254,13 +273,22 @@ async function runAutomation(automationId: string): Promise<void> {
   } catch (err) {
     const error = err instanceof Error ? err.message : 'Unknown error';
     logger.error({ err, runId: run.id }, 'automations: run failed');
+    const finishedAt = new Date().toISOString();
     await db.updateAutomationRun(run.id, {
       status: 'failed',
-      finishedAt: new Date().toISOString(),
+      finishedAt,
       error,
       sessionId
     });
     await db.updateAutomation(automationId, { lastRunStatus: 'failed', lastRunError: error });
+    broadcastAutomationRunFinished(automation.workspaceId, {
+      automationId,
+      workspaceId: automation.workspaceId,
+      automationName: automation.name,
+      status: 'failed',
+      error,
+      finishedAt
+    });
     await notifyAutomationFinished({
       automationName: automation.name,
       workspaceId: automation.workspaceId,

@@ -156,6 +156,11 @@ const paletteCommands = computed<PaletteCommand[]>(() => {
       keywords: ['automation', 'workflow', 'schedule']
     },
     {
+      id: 'usage',
+      name: 'Go to Usage',
+      keywords: ['usage', 'cost', 'tokens']
+    },
+    {
       id: 'settings',
       name: 'Go to Settings',
       keywords: ['settings', 'preferences', 'config']
@@ -174,6 +179,11 @@ const paletteCommands = computed<PaletteCommand[]>(() => {
       id: 'integrations',
       name: 'Settings → Integrations',
       keywords: ['integrations', 'auth', 'cursor', 'claude', 'api key', 'token']
+    },
+    {
+      id: 'shortcuts',
+      name: 'Keyboard shortcuts',
+      keywords: ['shortcuts', 'keys', 'hotkeys']
     }
   ];
   const workspaceId = currentWorkspaceId.value;
@@ -427,6 +437,9 @@ function runPaletteCommand(commandId: string): void {
     case 'automations':
       void router.push('/automations');
       break;
+    case 'usage':
+      void router.push('/usage');
+      break;
     case 'settings':
       void router.push('/settings');
       break;
@@ -473,6 +486,9 @@ function runPaletteCommand(commandId: string): void {
       break;
     case 'find-in-chat':
       window.dispatchEvent(new CustomEvent('novacode:find-in-chat'));
+      break;
+    case 'shortcuts':
+      window.dispatchEvent(new CustomEvent('novacode:open-shortcuts'));
       break;
     default:
       break;

@@ -108,6 +108,83 @@ describe('ACP native events', () => {
     expect(items[0].toolOutput).toBe('ok');
   });
 
+  it('collects diff content from tool_call and merges diffs from tool_call_update', () => {
+    const parser = createChatStreamParser();
+    const items: DisplayItem[] = [];
+    const firstDiff = { type: 'diff', path: '/repo/src/a.ts', oldText: 'one\n', newText: 'two\n' };
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: { sessionUpdate: 'tool_call', toolCallId: 't1', kind: 'edit', title: 'Edit', content: [firstDiff] }
+      }),
+      items
+    );
+    expect(items[0].toolDiffs).toEqual([{ path: '/repo/src/a.ts', oldText: 'one\n', newText: 'two\n' }]);
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 't1',
+          status: 'in_progress',
+          content: [{ type: 'diff', path: '/repo/src/b.ts', oldText: 'x\n', newText: 'y\n' }]
+        }
+      }),
+      items
+    );
+    expect(items[0].toolDiffs?.map((diff) => diff.path)).toEqual(['/repo/src/a.ts', '/repo/src/b.ts']);
+  });
+
+  it('keeps a null oldText for new files written by the tool', () => {
+    const parser = createChatStreamParser();
+    const items: DisplayItem[] = [];
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 't1',
+          kind: 'edit',
+          content: [{ type: 'diff', path: '/repo/new.ts', oldText: null, newText: 'hello\n' }]
+        }
+      }),
+      items
+    );
+    expect(items[0].toolDiffs).toEqual([{ path: '/repo/new.ts', oldText: null, newText: 'hello\n' }]);
+  });
+
+  it('de-duplicates identical diffs and ignores malformed diff entries', () => {
+    const parser = createChatStreamParser();
+    const items: DisplayItem[] = [];
+    const diff = { type: 'diff', path: '/repo/a.ts', oldText: 'a\n', newText: 'b\n' };
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: { sessionUpdate: 'tool_call', toolCallId: 't1', kind: 'edit', content: [diff] }
+      }),
+      items
+    );
+    parser.processEventLine(
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 't1',
+          status: 'completed',
+          content: [
+            diff,
+            { type: 'diff', oldText: 'a\n', newText: 'b\n' },
+            { type: 'diff', path: '/repo/c.ts', oldText: 'a\n', newText: 42 },
+            { type: 'content', content: { type: 'text', text: 'done' } }
+          ]
+        }
+      }),
+      items
+    );
+    expect(items[0].toolDiffs).toHaveLength(1);
+    expect(items[0].toolOutput).toBe('done');
+  });
+
   it('marks a tool image result with the path from the initial tool_call', () => {
     const parser = createChatStreamParser();
     const items: DisplayItem[] = [];

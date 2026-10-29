@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
 import { useAuthStore } from '@/stores/auth';
+import { useNotificationsStore } from '@/stores/notifications';
 import { useOrchestratorsStore } from '@/stores/orchestrators';
 import { useSessionSpecsStore } from '@/stores/sessionSpecs';
 import { useToastStore } from '@/stores/toasts';
@@ -34,7 +35,8 @@ describe('auth store logout', () => {
       vi.spyOn(useWorkspacesStore(), 'reset'),
       vi.spyOn(useOrchestratorsStore(), 'reset'),
       vi.spyOn(useSessionSpecsStore(), 'reset'),
-      vi.spyOn(useToastStore(), 'reset')
+      vi.spyOn(useToastStore(), 'reset'),
+      vi.spyOn(useNotificationsStore(), 'reset')
     ];
 
     useAuthStore().logout();

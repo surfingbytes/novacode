@@ -148,33 +148,3 @@ defineProps<{
     </div>
 </template>
 
-<style scoped>
-.diff-row--added {
-  background: color-mix(in oklab, var(--success) 14%, transparent);
-  color: var(--success);
-  box-shadow: inset 2px 0 0 color-mix(in oklab, var(--success) 55%, transparent);
-}
-
-.diff-row--removed {
-  background: color-mix(in oklab, var(--danger) 14%, transparent);
-  color: var(--danger);
-  box-shadow: inset 2px 0 0 color-mix(in oklab, var(--danger) 55%, transparent);
-}
-
-.diff-row--hunk {
-  background: var(--accent-soft);
-  color: var(--fg-muted);
-}
-
-.diff-row--meta {
-  color: var(--fg-subtle);
-}
-
-:global(html[data-theme='light']) .diff-row--added {
-  color: color-mix(in oklab, var(--success), #000 25%);
-}
-
-:global(html[data-theme='light']) .diff-row--removed {
-  color: color-mix(in oklab, var(--danger), #000 20%);
-}
-</style>

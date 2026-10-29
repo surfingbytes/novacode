@@ -3,6 +3,8 @@ import { computed } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 import ThemeToggleButton from '@/components/ThemeToggleButton.vue';
 import ApiOfflineBanner from '@/components/ApiOfflineBanner.vue';
+import NotificationBell from '@/components/NotificationBell.vue';
+import { shortcutLabel } from '@/utils/platformKeys';
 
 defineProps<{
   sidebarOpen: boolean;
@@ -16,9 +18,11 @@ const emit = defineEmits<{
 
 const auth = useAuthStore();
 
-const searchShortcutLabel = computed(() =>
-  /Mac|iPhone|iPad|iPod/.test(navigator.userAgent) ? '⌘K' : 'Ctrl+K'
-);
+const searchShortcutLabel = computed(() => shortcutLabel('K'));
+
+function openShortcuts(): void {
+  window.dispatchEvent(new CustomEvent('novacode:open-shortcuts'));
+}
 
 function userInitial(): string {
   const name = auth.username ?? '';
@@ -73,7 +77,7 @@ function userInitial(): string {
         <path d="M16.5 16.5L21 21" />
       </svg>
       <span class="topbar__search-placeholder">Search or jump to…</span>
-      <kbd class="topbar__kbd">{{ searchShortcutLabel }}</kbd>
+      <kbd class="kbd topbar__kbd">{{ searchShortcutLabel }}</kbd>
     </button>
 
     <div class="topbar__spacer" aria-hidden="true" />
@@ -81,6 +85,31 @@ function userInitial(): string {
     <!-- Theme + account: desktop always; mobile only when top bar is visible -->
     <div class="topbar__actions" :class="{ 'topbar__actions--hide-mobile': hideOnMobile }">
       <ApiOfflineBanner />
+
+      <NotificationBell />
+
+      <button
+        type="button"
+        class="topbar__icon-button"
+        aria-label="Keyboard shortcuts"
+        title="Keyboard shortcuts (?)"
+        @click="openShortcuts"
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="9" />
+          <path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.4 M12 17h.01" />
+        </svg>
+      </button>
 
       <ThemeToggleButton />
 
@@ -158,21 +187,6 @@ function userInitial(): string {
   text-align: left;
 }
 
-.topbar__kbd {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 10.5px;
-  color: var(--fg-muted);
-  background: var(--bg-elev-2);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 0 5px;
-  height: 18px;
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-  line-height: 1;
-}
-
 .topbar__spacer {
   flex: 1;
 }
@@ -182,6 +196,27 @@ function userInitial(): string {
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+}
+
+.topbar__icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition:
+    background 0.1s,
+    color 0.1s;
+  flex-shrink: 0;
+}
+.topbar__icon-button:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
 }
 
 .topbar__divider {
