@@ -90,6 +90,8 @@ async function updateOrchestrator(
     runCurrentStep?: number | null;
     runTotalSteps?: number | null;
     runStartedAt?: string | null;
+    /** Server-set only (never accepted from the PATCH route). */
+    runChangedFiles?: number | null;
     runMode?: string | null;
     agentType?: string;
     workerModel?: string | null;
@@ -121,6 +123,7 @@ async function updateOrchestrator(
     ...('runCurrentStep' in patch && { runCurrentStep: patch.runCurrentStep }),
     ...('runTotalSteps' in patch && { runTotalSteps: patch.runTotalSteps }),
     ...('runStartedAt' in patch && { runStartedAt: patch.runStartedAt }),
+    ...('runChangedFiles' in patch && { runChangedFiles: patch.runChangedFiles }),
     ...('runMode' in patch && { runMode: patch.runMode }),
     ...(patch.agentType !== undefined && { agentType: patch.agentType }),
     ...('workerModel' in patch && { workerModel: patch.workerModel }),

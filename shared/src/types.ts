@@ -35,6 +35,15 @@ export interface SubTask {
   runResult?: 'running' | 'done' | 'failed' | 'skipped';
   /** Why the step failed or what happened while merging it (parallel runs). */
   runNote?: string | null;
+  /** When the step last started running (ISO string); null until it runs. */
+  startedAt?: string | null;
+  /** When the step last ended (done or failed, ISO string); null while running. */
+  finishedAt?: string | null;
+  /**
+   * Parallel runs: the step's branch when its changes were not merged (the step
+   * failed or merging it failed) and the commit it started from, so the work can be recovered.
+   */
+  keptBranch?: { base: string; branch: string } | null;
   /** Question the step's agent asked the user; the step waits for a reply in its session. */
   waitingQuestion?: string | null;
   /**
@@ -74,6 +83,8 @@ export interface Orchestrator {
   runCurrentStep?: number | null;
   runTotalSteps?: number | null;
   runStartedAt?: string | null;
+  /** Files changed by the last full run; null when unknown. */
+  runChangedFiles?: number | null;
   /** Planning chat that owns this plan; its agent edits it through the nova MCP. */
   sourceSessionId?: string | null;
   /** Model for step sessions (agent type is `agentType`); null = planning chat's model. */

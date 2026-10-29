@@ -143,6 +143,7 @@ async function callNovaTool(sessionId: string, name: string, args: Record<string
             ? { agentType: existing.verifyAgentType, model: existing.verifyModel ?? 'same as this chat' }
             : 'same as this chat',
           runStatus: existing.runStatus ?? 'not started',
+          runChangedFiles: existing.runChangedFiles ?? null,
           notes: payload?.sharedContext ?? '',
           steps: (payload?.subtasks ?? []).map((task, index) => ({
             index,
@@ -152,6 +153,9 @@ async function callNovaTool(sessionId: string, name: string, args: Record<string
             dependsOn: task.dependsOn ?? [],
             status: task.runResult ?? 'not run',
             ...(task.runNote ? { note: task.runNote } : {}),
+            ...(task.startedAt ? { startedAt: task.startedAt } : {}),
+            ...(task.finishedAt ? { finishedAt: task.finishedAt } : {}),
+            ...(task.keptBranch ? { keptBranch: task.keptBranch } : {}),
             ...(task.kind ? { automatic: true } : {})
           })),
           handoffLog: payload?.handoffLog ?? ''

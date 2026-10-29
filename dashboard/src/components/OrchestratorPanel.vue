@@ -7,6 +7,7 @@ import { useRouter } from 'vue-router';
 import ConfirmModal from '@/components/ConfirmModal.vue';
 import OrchestratorPlannerBanner from '@/components/orchestrator/OrchestratorPlannerBanner.vue';
 import OrchestratorRunSettings from '@/components/orchestrator/OrchestratorRunSettings.vue';
+import OrchestratorSpecCard from '@/components/orchestrator/OrchestratorSpecCard.vue';
 import OrchestratorPlanNotes from '@/components/orchestrator/OrchestratorPlanNotes.vue';
 import OrchestratorStepRow from '@/components/orchestrator/OrchestratorStepRow.vue';
 import OrchestratorStepEditModal from '@/components/orchestrator/OrchestratorStepEditModal.vue';
@@ -17,6 +18,9 @@ import OrchestratorRunSplitButton from '@/components/orchestrator/OrchestratorRu
 import { orchestratorApi } from '@/classes/api';
 import { notifyApiError } from '@/lib/notifyApiError';
 import {
+  handoffNoteForStep,
+  insertSubtask,
+  moveSubtask,
   normalizeDependsOn,
   parseSubtasksPayloadString,
   remapDependsOnAfterDelete,
@@ -28,7 +32,7 @@ import { motionSafeScrollBehavior } from '@/utils/reducedMotion';
 import { useOrchestratorRunState, type StepStatus } from '@/composables/useOrchestratorRunState';
 
 // stores
-import { useOrchestratorsStore } from '@/stores/orchestrators';
+import { useNovaMcpStore } from '@/stores/novaMcp';
 import { useWorkspacesStore } from '@/stores/workspaces';
 
 // types
@@ -55,7 +59,7 @@ const emit = defineEmits<{
 // -------------------------------------------------- Store --------------------------------------------------
 
 const router = useRouter();
-const orchestratorsStore = useOrchestratorsStore();
+const novaMcpStore = useNovaMcpStore();
 const workspacesStore = useWorkspacesStore();
 
 // -------------------------------------------------- Composables --------------------------------------------------
@@ -65,6 +69,7 @@ const {
   bStopping,
   runError,
   preferredRunMode,
+  parallelBlockedReason,
   isRunning,
   maxParallel,
   subtasks,
@@ -83,11 +88,16 @@ const {
 
 // -------------------------------------------------- Refs --------------------------------------------------
 
-const bCloning = ref(false);
 const bSavingSubtasks = ref(false);
 const editedSubtasks = ref<SubTask[]>([]);
 const bShowEditModal = ref(false);
 const editingTaskIndex = ref<number | null>(null);
+/** The edit modal drafts a new step instead of editing `editingTaskIndex`. */
+const bAddingStep = ref(false);
+/** Index of the step whose kept branch is being applied or discarded (null when idle). */
+const branchBusyIndex = ref<number | null>(null);
+/** Index of the step whose kept branch awaits discard confirmation. */
+const pendingDiscardBranch = ref<number | null>(null);
 const scrollContainer = ref<HTMLElement | null>(null);
 
 // -------------------------------------------------- Computed --------------------------------------------------
@@ -96,6 +106,16 @@ const canEdit = computed(() => !isRunning.value);
 const plannerSession = computed(() => {
   const id = props.orchestrator?.sourceSessionId;
   return id ? workspacesStore.allSessions.find((session) => session.id === id) ?? null : null;
+});
+/** Per-step handoff note from the run's handoff log (null when the step has none yet). */
+const stepHandoffNotes = computed(() =>
+  editedSubtasks.value.map((_, index) => handoffNoteForStep(handoffLogDisplay.value, index))
+);
+const bBranchBusy = computed(() => branchBusyIndex.value !== null);
+const pendingDiscardDescription = computed(() => {
+  const index = pendingDiscardBranch.value;
+  const branch = index === null ? null : editedSubtasks.value[index]?.keptBranch?.branch;
+  return branch ? `Discard branch ${branch}? Its changes are lost.` : '';
 });
 
 // -------------------------------------------------- Watchers --------------------------------------------------
@@ -180,12 +200,46 @@ function openEditModal(index: number) {
   bShowEditModal.value = true;
 }
 
+function openAddModal() {
+  editingTaskIndex.value = null;
+  bAddingStep.value = true;
+  bShowEditModal.value = true;
+}
+
 function closeEditModal() {
   bShowEditModal.value = false;
   editingTaskIndex.value = null;
+  bAddingStep.value = false;
+}
+
+/** New manual steps go before the automatic merge/verify steps (which are always last). */
+function addStepFromModal(editDraft: SubTask) {
+  const name = editDraft.name.trim();
+  const prompt = editDraft.prompt.trim();
+  if (!name || !prompt) {
+    return;
+  }
+  const list = editedSubtasks.value;
+  const firstAuto = list.findIndex((task) => Boolean(task.kind));
+  const at = firstAuto === -1 ? list.length : firstAuto;
+  const dependsOn = normalizeDependsOn(editDraft.dependsOn).filter(
+    (dep) => dep < at && !list[dep]?.kind
+  );
+  editedSubtasks.value = insertSubtask(list, at, {
+    name,
+    prompt,
+    category: editDraft.category?.trim() || null,
+    ...(dependsOn.length > 0 ? { dependsOn } : {})
+  });
+  closeEditModal();
+  void saveSubtasks();
 }
 
 function saveEditFromModal(editDraft: SubTask) {
+  if (bAddingStep.value) {
+    addStepFromModal(editDraft);
+    return;
+  }
   const i = editingTaskIndex.value;
   if (i === null || i < 0 || i >= editedSubtasks.value.length) {
     closeEditModal();
@@ -263,30 +317,73 @@ async function removeTask(): Promise<void> {
   pendingDelete.value = null;
 }
 
+/** Up is blocked at the top and when the step depends on the step directly above it. */
+function canMoveUp(index: number): boolean {
+  const task = editedSubtasks.value[index];
+  if (!task || task.kind || index === 0) {
+    return false;
+  }
+  return !normalizeDependsOn(task.dependsOn).includes(index - 1);
+}
+
+/** Down is blocked above an automatic step and when the step below depends on this one. */
+function canMoveDown(index: number): boolean {
+  const task = editedSubtasks.value[index];
+  const below = editedSubtasks.value[index + 1];
+  if (!task || task.kind || !below || below.kind) {
+    return false;
+  }
+  return !normalizeDependsOn(below.dependsOn).includes(index);
+}
+
+function moveStep(index: number, direction: -1 | 1): void {
+  const allowed = direction === -1 ? canMoveUp(index) : canMoveDown(index);
+  if (!allowed) {
+    return;
+  }
+  editedSubtasks.value = moveSubtask(editedSubtasks.value, index, index + direction);
+  void saveSubtasks();
+}
+
+async function applyStepBranch(index: number): Promise<void> {
+  if (bBranchBusy.value || !editedSubtasks.value[index]?.keptBranch) {
+    return;
+  }
+  branchBusyIndex.value = index;
+  try {
+    const { data } = await orchestratorApi.applyStepBranch(props.workspaceId, props.orchestratorId, index);
+    if (data) {
+      emit('update:orchestrator', data);
+    }
+  } catch (err: unknown) {
+    notifyApiError(err, 'Failed to apply the step branch');
+  } finally {
+    branchBusyIndex.value = null;
+  }
+}
+
+async function discardStepBranch(): Promise<void> {
+  const index = pendingDiscardBranch.value;
+  if (index === null || bBranchBusy.value) {
+    return;
+  }
+  branchBusyIndex.value = index;
+  try {
+    const { data } = await orchestratorApi.discardStepBranch(props.workspaceId, props.orchestratorId, index);
+    if (data) {
+      emit('update:orchestrator', data);
+    }
+    pendingDiscardBranch.value = null;
+  } catch (err: unknown) {
+    notifyApiError(err, 'Failed to discard the step branch');
+  } finally {
+    branchBusyIndex.value = null;
+  }
+}
+
 function openStepSession(task: SubTask): void {
   if (!task.sessionId) return;
   void router.push({ name: 'session', params: { id: props.workspaceId, sessionId: task.sessionId } });
-}
-
-async function clonePlan() {
-  if (bCloning.value) {
-    return;
-  }
-  bCloning.value = true;
-  try {
-    const { data } = await orchestratorApi.clone(props.workspaceId, props.orchestratorId);
-    if (data) {
-      orchestratorsStore.upsertOrchestrator(data);
-      await router.push({
-        name: 'orchestrator',
-        params: { id: props.workspaceId, orchestratorId: data.id }
-      });
-    }
-  } catch (err: unknown) {
-    notifyApiError(err, 'Failed to clone plan');
-  } finally {
-    bCloning.value = false;
-  }
 }
 
 // -------------------------------------------------- Lifecycle --------------------------------------------------
@@ -304,6 +401,7 @@ async function scrollOnOpen() {
 watch(() => props.orchestratorId, scrollOnOpen);
 
 onMounted(() => {
+  void novaMcpStore.ensureFetched();
   void scrollOnOpen();
 });
 </script>
@@ -332,12 +430,22 @@ onMounted(() => {
         @update:orchestrator="emit('update:orchestrator', $event)"
       />
 
+      <!-- Planning chat's spec: read live by every step, editable even during a run -->
+      <OrchestratorSpecCard
+        v-if="orchestrator?.sourceSessionId"
+        :workspace-id="workspaceId"
+        :session-id="orchestrator.sourceSessionId"
+      />
+
       <p v-if="editedSubtasks.length === 0" class="text-sm text-text-muted">
         No steps yet. Describe the work in the planning chat, then ask the agent to plan it as an orchestrator
         (or use <strong>Plan as orchestrator</strong> in the chat header).
+        <template v-if="novaMcpStore.bEnabled === false">
+          Nova MCP is turned off in Settings → MCP, so the agent cannot save a plan.
+        </template>
       </p>
 
-      <OrchestratorPlanNotes :shared-context="sharedContextDisplay" :handoff-log="handoffLogDisplay" />
+      <OrchestratorPlanNotes :shared-context="sharedContextDisplay" />
 
       <!-- Task flow (read-only cards; Edit/Delete open modal or remove) -->
       <div v-if="editedSubtasks.length > 0" class="space-y-3">
@@ -351,11 +459,19 @@ onMounted(() => {
               :is-running="isRunning"
               :can-edit="canEdit"
               :b-starting-run="bStartingRun"
+              :handoff-note="stepHandoffNotes[i] ?? null"
+              :b-can-move-up="canMoveUp(i)"
+              :b-can-move-down="canMoveDown(i)"
+              :b-branch-busy="bBranchBusy"
               @open-session="openStepSession(task)"
               @run-only="startRun('sequential', { onlyIndex: i })"
               @run-from="startRun('sequential', { startIndex: i })"
               @edit="openEditModal(i)"
               @delete="pendingDelete = i"
+              @move-up="moveStep(i, -1)"
+              @move-down="moveStep(i, 1)"
+              @apply-branch="applyStepBranch(i)"
+              @discard-branch="pendingDiscardBranch = i"
             />
             <div
               v-if="i < editedSubtasks.length - 1"
@@ -382,6 +498,36 @@ onMounted(() => {
         </div>
       </div>
 
+      <!-- Manual step: inserted before the automatic merge/verify steps -->
+      <div v-if="canEdit && orchestrator" class="flex items-center gap-2">
+        <button
+          type="button"
+          :disabled="bSavingSubtasks"
+          class="px-3 py-1.5 text-sm font-medium border border-fg/20 text-text-primary rounded-lg hover:bg-fg/[0.06] transition-colors flex items-center gap-2 disabled:opacity-60"
+          @click="openAddModal"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" class="select-none shrink-0" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Add step
+        </button>
+      </div>
+
+      <ConfirmModal
+        :model-value="pendingDiscardBranch !== null"
+        title="Discard branch"
+        :description="pendingDiscardDescription"
+        confirm-label="Discard"
+        variant="danger"
+        :loading="bBranchBusy"
+        @update:model-value="
+          (v: boolean) => {
+            if (!v) {
+              pendingDiscardBranch = null;
+            }
+          }
+        "
+        @confirm="discardStepBranch"
+      />
+
       <ConfirmModal
         :model-value="pendingDelete !== null"
         title="Delete step"
@@ -399,11 +545,12 @@ onMounted(() => {
         @confirm="removeTask"
       />
 
-      <!-- Edit task modal -->
+      <!-- Edit / add task modal -->
       <OrchestratorStepEditModal
         v-model="bShowEditModal"
         :task-index="editingTaskIndex"
         :subtasks="editedSubtasks"
+        :b-new="bAddingStep"
         @close="closeEditModal"
         @save="saveEditFromModal"
       />
@@ -427,18 +574,6 @@ onMounted(() => {
       </span>
       <div class="flex items-center gap-2">
         <button
-          type="button"
-          :disabled="bCloning"
-          class="px-4 py-2.5 text-sm font-medium border border-fg/20 text-text-primary rounded-lg hover:bg-fg/[0.06] transition-colors flex items-center gap-2 disabled:opacity-60"
-          @click="clonePlan"
-        >
-          <span
-            v-if="bCloning"
-            class="w-4 h-4 border-2 border-fg/30 border-t-primary rounded-full animate-spin shrink-0"
-          />
-          {{ bCloning ? 'Cloning…' : 'Clone plan' }}
-        </button>
-        <button
           v-if="isRunning"
           type="button"
           :disabled="bStopping"
@@ -456,6 +591,7 @@ onMounted(() => {
           v-else
           :preferred-run-mode="preferredRunMode"
           :max-parallel="maxParallel"
+          :parallel-blocked-reason="parallelBlockedReason"
           :b-disabled="subtasks.length === 0"
           :b-starting-run="bStartingRun"
           @run="startRun($event)"

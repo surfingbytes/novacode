@@ -1,11 +1,21 @@
 // @vitest-environment jsdom
 // node_modules
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { nextTick, ref } from 'vue';
 import type { Router } from 'vue-router';
+import { createPinia, setActivePinia } from 'pinia';
+
+vi.mock('@/classes/api', () => ({
+  settingsApi: { getMcpClients: vi.fn(() => new Promise(() => {})) },
+  isGloballyToasted: () => false
+}));
 
 // composables
-import { useSessionOrchestrator } from './useSessionOrchestrator';
+import { NOVA_MCP_OFF_MESSAGE, useSessionOrchestrator } from './useSessionOrchestrator';
+
+// stores
+import { useNovaMcpStore } from '@/stores/novaMcp';
+import { useToastStore } from '@/stores/toasts';
 
 // types
 import type { Orchestrator } from '@/@types/index';
@@ -39,6 +49,10 @@ function mountOrchestrator(initial: Partial<Orchestrator> | null) {
 }
 
 describe('useSessionOrchestrator', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
   it('detects whether the planned orchestrator has steps', () => {
     const { api, orchestrator } = mountOrchestrator(null);
     expect(api.bPlanHasSteps.value).toBe(false);
@@ -82,6 +96,23 @@ describe('useSessionOrchestrator', () => {
     expect(activeTab.value).toBe('chat');
     expect(sendPrompt).toHaveBeenCalledTimes(1);
     expect(typeof sendPrompt.mock.calls[0][0]).toBe('string');
+  });
+
+  it('toasts instead of sending the prompt while the nova MCP is off', () => {
+    useNovaMcpStore().setEnabled(false);
+    const { api, activeTab, sendPrompt } = mountOrchestrator(null);
+    activeTab.value = 'git';
+    api.planAsOrchestrator();
+    expect(sendPrompt).not.toHaveBeenCalled();
+    expect(activeTab.value).toBe('git');
+    expect(useToastStore().toasts.map((toast) => [toast.kind, toast.text])).toEqual([
+      ['error', NOVA_MCP_OFF_MESSAGE]
+    ]);
+
+    // Unknown state (fetch failed or pending) does not block planning.
+    useNovaMcpStore().setEnabled(true);
+    api.planAsOrchestrator();
+    expect(sendPrompt).toHaveBeenCalledTimes(1);
   });
 
   it('opens the orchestrator page only when a plan exists', () => {

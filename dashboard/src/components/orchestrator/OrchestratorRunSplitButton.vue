@@ -7,13 +7,28 @@ import { ChevronDown } from 'lucide-vue-next';
 import type { OrchestratorRunMode } from '@/@types/index';
 import type { RunChoice } from '@/composables/useOrchestratorRunState';
 
-/** Run button with the preferred mode plus a menu of the other run choices. Extracted from OrchestratorPanel.vue. */
+/**
+ * Run button with the preferred mode plus a menu of the other run choices.
+ * While `parallelBlockedReason` is set the parallel choices are disabled and the main button falls back to
+ * one by one. Extracted from OrchestratorPanel.vue.
+ */
+
+// -------------------------------------------------- Types --------------------------------------------------
+
+interface RunChoiceItem {
+  id: RunChoice;
+  label: string;
+  hint: string;
+  bDisabled: boolean;
+}
 
 // -------------------------------------------------- Props --------------------------------------------------
 
 const props = defineProps<{
   preferredRunMode: OrchestratorRunMode;
   maxParallel: number;
+  /** Why a parallel run cannot start (null = it can) */
+  parallelBlockedReason: string | null;
   bDisabled: boolean;
   bStartingRun: boolean;
 }>();
@@ -30,21 +45,42 @@ const bRunMenuOpen = ref(false);
 
 // -------------------------------------------------- Computed --------------------------------------------------
 
-const runChoices = computed<{ id: RunChoice; label: string; hint: string }[]>(() => [
-  { id: 'sequential', label: 'Run one by one', hint: 'Every step in the workspace, in order' },
-  {
-    id: 'parallel',
-    label: 'Run in parallel',
-    hint: `Up to ${props.maxParallel} at once, each in its own git worktree; merged back automatically. Done steps are kept`
-  },
-  { id: 'parallel-fresh', label: 'Run all again in parallel', hint: 'Like Run in parallel, but done steps run again too' },
-  { id: 'next', label: 'Run next step', hint: 'Only the first step that is ready' }
-]);
-const mainRunLabel = computed(() => (props.preferredRunMode === 'parallel' ? 'Run in parallel' : 'Run one by one'));
+const bParallelBlocked = computed(() => typeof props.parallelBlockedReason === 'string');
+
+const runChoices = computed<RunChoiceItem[]>(() => {
+  const parallelHint = (hint: string) => (bParallelBlocked.value ? (props.parallelBlockedReason as string) : hint);
+  return [
+    { id: 'sequential', label: 'Run one by one', hint: 'Steps in the workspace, in order; done steps are kept', bDisabled: false },
+    {
+      id: 'parallel',
+      label: 'Run in parallel',
+      hint: parallelHint(
+        `Up to ${props.maxParallel} at once, each in its own git worktree; merged back automatically. Done steps are kept`
+      ),
+      bDisabled: bParallelBlocked.value
+    },
+    { id: 'next', label: 'Run next step', hint: 'Only the first step that is ready', bDisabled: false },
+    { id: 'sequential-fresh', label: 'Run all again one by one', hint: 'Every step runs again, done ones too', bDisabled: false },
+    {
+      id: 'parallel-fresh',
+      label: 'Run all again in parallel',
+      hint: parallelHint('Every step runs again, done ones too'),
+      bDisabled: bParallelBlocked.value
+    }
+  ];
+});
+/** Main button choice: the preferred mode unless parallel is blocked */
+const mainRunChoice = computed<RunChoice>(() =>
+  props.preferredRunMode === 'parallel' && !bParallelBlocked.value ? 'parallel' : 'sequential'
+);
+const mainRunLabel = computed(() => (mainRunChoice.value === 'parallel' ? 'Run in parallel' : 'Run one by one'));
 
 // -------------------------------------------------- Methods --------------------------------------------------
 
 function run(choice: RunChoice): void {
+  if (runChoices.value.find((item) => item.id === choice)?.bDisabled) {
+    return;
+  }
   bRunMenuOpen.value = false;
   emit('run', choice);
 }
@@ -71,7 +107,7 @@ onBeforeUnmount(() => {
         type="button"
         class="px-4 py-2.5 text-sm font-medium disabled:opacity-40 transition-opacity flex items-center gap-2"
         :disabled="bDisabled || bStartingRun"
-        @click="run(preferredRunMode)"
+        @click="run(mainRunChoice)"
       >
         <span
           v-if="bStartingRun"
@@ -102,11 +138,14 @@ onBeforeUnmount(() => {
         v-for="choice in runChoices"
         :key="choice.id"
         type="button"
-        class="w-full px-3 py-2 text-left hover:bg-fg/[0.06] transition-colors"
+        class="w-full px-3 py-2 text-left transition-colors"
+        :class="choice.bDisabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-fg/[0.06]'"
         role="menuitem"
+        :disabled="choice.bDisabled"
+        :aria-disabled="choice.bDisabled"
         @click="run(choice.id)"
       >
-        <span class="block text-sm text-text-primary">{{ choice.label }}</span>
+        <span class="block text-sm" :class="choice.bDisabled ? 'text-text-muted' : 'text-text-primary'">{{ choice.label }}</span>
         <span class="block text-xs text-text-muted">{{ choice.hint }}</span>
       </button>
     </div>

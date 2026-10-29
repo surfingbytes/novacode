@@ -13,6 +13,7 @@ import { settingsApi } from '@/classes/api';
 import { notifyApiError } from '@/lib/notifyApiError';
 
 // stores
+import { useNovaMcpStore } from '@/stores/novaMcp';
 
 // types
 import type { McpClientServer, McpConnectivityCheckResult, McpAutoloadStatus } from '@/@types/index';
@@ -20,6 +21,7 @@ import type { McpClientServer, McpConnectivityCheckResult, McpAutoloadStatus } f
 const isMcpEnabled = (server: McpClientServer): boolean => server.enabled !== false;
 
 // -------------------------------------------------- Stores --------------------------------------------------
+const novaMcpStore = useNovaMcpStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const mcpClients = ref<Record<string, McpClientServer>>({});
@@ -73,6 +75,7 @@ const toggleNovaMcp = async (enabled: boolean): Promise<void> => {
   try {
     const { data } = await settingsApi.saveMcpBuiltin({ nova: { enabled } });
     bNovaMcpEnabled.value = data.nova.enabled;
+    novaMcpStore.setEnabled(data.nova.enabled);
   } catch (err) {
     bNovaMcpEnabled.value = previous;
     notifyApiError(err, 'Update Nova MCP failed');

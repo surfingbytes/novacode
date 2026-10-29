@@ -124,6 +124,64 @@ export function remapDependsOnAfterDelete(subtasks: SubTask[], deletedIndex: num
   });
 }
 
+function withDependsOn(task: SubTask, dependsOn: number[]): SubTask {
+  const next: SubTask = { ...task };
+  if (dependsOn.length > 0) {
+    next.dependsOn = dependsOn;
+  } else {
+    delete next.dependsOn;
+  }
+  return next;
+}
+
+/**
+ * Swap the adjacent steps `from` and `to` (`to = from ± 1`) and remap every
+ * step's `dependsOn` so each entry still points at the same step. A dependency
+ * between the two swapped steps cannot point forward, so it is dropped; callers
+ * are expected to refuse such moves. Returns the input unchanged for any other
+ * pair of indexes.
+ */
+export function moveSubtask(subtasks: SubTask[], from: number, to: number): SubTask[] {
+  const inRange = (index: number) => index >= 0 && index < subtasks.length;
+  if (Math.abs(from - to) !== 1 || !inRange(from) || !inRange(to)) {
+    return subtasks;
+  }
+  const remap = (dep: number) => (dep === from ? to : dep === to ? from : dep);
+  const swapped = [...subtasks];
+  swapped[from] = subtasks[to];
+  swapped[to] = subtasks[from];
+  return swapped.map((task, index) =>
+    withDependsOn(
+      task,
+      normalizeDependsOn(task.dependsOn)
+        .map(remap)
+        .filter((dep) => dep < index)
+        .sort((left, right) => left - right)
+    )
+  );
+}
+
+/**
+ * Insert `task` at `index`, shifting the dependencies that pointed at that
+ * position or later. A verify step after the insert point depends on every other
+ * step, so it gains the new step as a dependency too.
+ */
+export function insertSubtask(subtasks: SubTask[], index: number, task: SubTask): SubTask[] {
+  const at = Math.max(0, Math.min(index, subtasks.length));
+  const shifted = subtasks.map((existing, position) => {
+    const dependsOn = normalizeDependsOn(existing.dependsOn).map((dep) => (dep >= at ? dep + 1 : dep));
+    if (existing.kind === 'verify' && position >= at && !dependsOn.includes(at)) {
+      dependsOn.push(at);
+    }
+    return withDependsOn(existing, dependsOn.sort((left, right) => left - right));
+  });
+  const inserted = withDependsOn(
+    task,
+    normalizeDependsOn(task.dependsOn).filter((dep) => dep < at)
+  );
+  return [...shifted.slice(0, at), inserted, ...shifted.slice(at)];
+}
+
 /** Subtasks only (empty array when missing/invalid). */
 export function subtasksFromStoredJson(json: string | null | undefined): SubTask[] {
   return parseSubtasksPayloadString(json)?.subtasks ?? [];
@@ -216,17 +274,40 @@ function extractAssistantTextFromEvents(events: string[] | undefined): string {
   return text.trim();
 }
 
+const HANDOFF_BLOCK_SPLIT = /\n(?=### Step \d+: )/;
+const HANDOFF_BLOCK_HEADING = /^### Step (\d+): /;
+
 /** Keep only the `### Step N:` handoff blocks whose step index is in `indexes`. */
 export function filterHandoffLog(log: string, indexes: number[]): string {
   const wanted = new Set(indexes.map((index) => index + 1));
   return log
-    .split(/\n(?=### Step \d+: )/)
+    .split(HANDOFF_BLOCK_SPLIT)
     .filter((block) => {
-      const match = /^### Step (\d+): /.exec(block.trim());
+      const match = HANDOFF_BLOCK_HEADING.exec(block.trim());
       return match ? wanted.has(Number(match[1])) : false;
     })
     .map((block) => block.trim())
     .join('\n\n');
+}
+
+/**
+ * Body of the `### Step <stepIndex+1>:` handoff block (heading line dropped,
+ * trimmed), or null when the log has no block for that step. Blocks are appended
+ * in run order, so the last one for the step is its latest report.
+ */
+export function handoffNoteForStep(handoffLog: string, stepIndex: number): string | null {
+  const stepNumber = stepIndex + 1;
+  let note: string | null = null;
+  for (const rawBlock of handoffLog.split(HANDOFF_BLOCK_SPLIT)) {
+    const block = rawBlock.trim();
+    const match = HANDOFF_BLOCK_HEADING.exec(block);
+    if (!match || Number(match[1]) !== stepNumber) {
+      continue;
+    }
+    const newline = block.indexOf('\n');
+    note = newline === -1 ? '' : block.slice(newline + 1).trim();
+  }
+  return note;
 }
 
 /**

@@ -8,13 +8,19 @@ import { computed, ref, watch, type Ref } from 'vue';
 import type { Router } from 'vue-router';
 
 // stores
+import { useNovaMcpStore } from '@/stores/novaMcp';
 import type { useOrchestratorsStore } from '@/stores/orchestrators';
+import { useToastStore } from '@/stores/toasts';
 
 // types
 import { buildPlanAsOrchestratorPrompt, subtasksFromStoredJson } from '@novacode/shared';
 import type { Orchestrator } from '@/@types/index';
 
 // -------------------------------------------------- Types --------------------------------------------------
+
+/** Shown wherever "Plan as orchestrator" cannot work because the nova MCP is off. */
+export const NOVA_MCP_OFF_MESSAGE =
+  'Nova MCP is turned off in Settings → MCP; the agent cannot save the plan';
 
 export interface UseSessionOrchestratorOptions {
   workspaceId: () => string;
@@ -51,6 +57,10 @@ export function useSessionOrchestrator(options: UseSessionOrchestratorOptions) {
 
   /** Ask the chat's agent to write the spec and the steps (nova MCP tools). */
   function planAsOrchestrator(): void {
+    if (useNovaMcpStore().bEnabled === false) {
+      useToastStore().error(NOVA_MCP_OFF_MESSAGE);
+      return;
+    }
     options.activeTab.value = 'chat';
     options.sendPrompt(buildPlanAsOrchestratorPrompt(bPlanHasSteps.value));
   }

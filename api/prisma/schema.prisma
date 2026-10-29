@@ -192,6 +192,8 @@ model Orchestrator {
   runCurrentStep  Int?      @map("run_current_step")
   runTotalSteps   Int?      @map("run_total_steps")
   runStartedAt    String?   @map("run_started_at")
+  /** Files changed by the last full run; null when unknown. */
+  runChangedFiles Int?      @map("run_changed_files")
   /** Planning chat session that owns this plan (writes it through the nova MCP). */
   sourceSessionId String?   @map("source_session_id")
   /** Model for step sessions; null = the planning chat's model (or agent default). */

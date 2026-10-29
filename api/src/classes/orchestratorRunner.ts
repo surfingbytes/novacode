@@ -330,9 +330,7 @@ async function runStep(ctx: StepContext, index: number, worktreeCwd: string | nu
     await runMergeStep(ctx, index, ctx.run.options.onlyIndex === index ? (task.mergeRef ?? null) : null);
     return;
   }
-  task.runResult = 'running';
-  task.runNote = null;
-  task.waitingQuestion = null;
+  markStepRunning(task);
   const bVerify = task.kind === 'verify';
   const settings = await ctx.settings();
   const spec = bVerify ? await readLiveSpec(ctx.workspaceId, ctx.plannerSessionId) : null;
@@ -345,13 +343,27 @@ async function runStep(ctx: StepContext, index: number, worktreeCwd: string | nu
     worktreeCwd
   });
   if (result.error) {
-    task.runResult = 'failed';
+    markStepFinished(task, 'failed');
     task.runNote = result.error;
   } else {
-    task.runResult = 'done';
+    markStepFinished(task, 'done');
     ctx.payload.handoffLog = appendHandoff(ctx.payload.handoffLog, index + 1, task.name, summarizeStepHandoff(result.messages));
   }
   await ctx.persist();
+}
+
+/** Step starts running: reset its result and timing (skipped steps get no timing). */
+function markStepRunning(task: SubTask): void {
+  task.runResult = 'running';
+  task.runNote = null;
+  task.waitingQuestion = null;
+  task.startedAt = new Date().toISOString();
+  task.finishedAt = null;
+}
+
+function markStepFinished(task: SubTask, runResult: 'done' | 'failed'): void {
+  task.runResult = runResult;
+  task.finishedAt = new Date().toISOString();
 }
 
 const MAX_LISTED_FILES = 60;
@@ -386,12 +398,10 @@ async function runMergeStep(
   bAllowAgent = true
 ): Promise<void> {
   const task = ctx.payload.subtasks[index];
-  task.runResult = 'running';
-  task.runNote = null;
-  task.waitingQuestion = null;
+  markStepRunning(task);
   await ctx.persist();
   const finish = async (runResult: 'done' | 'failed', note: string | null): Promise<void> => {
-    task.runResult = runResult;
+    markStepFinished(task, runResult);
     task.runNote = note;
     await ctx.persist();
   };
@@ -476,6 +486,8 @@ async function runSequential(ctx: StepContext, startIndex: number): Promise<void
       ctx.run.bResumable = false;
       return;
     }
+    // Finished steps kept by the run route stay as they are.
+    if (subtasks[index].runResult === 'done') continue;
     if (shouldSkipOrchestratorStep(index, subtasks)) {
       subtasks[index].runResult = 'skipped';
       await ctx.persist();
@@ -561,6 +573,7 @@ async function runParallel(ctx: StepContext, repo: RepoInfo): Promise<void> {
     if (task.runResult !== 'done') {
       await removeWorktree(repo.root, dir);
       task.runNote = `${task.runNote ?? 'Step failed'} — its changes are kept on branch ${branch}.`;
+      task.keptBranch = { base: stepBase, branch };
       await ctx.persist();
       return;
     }
@@ -573,8 +586,9 @@ async function runParallel(ctx: StepContext, repo: RepoInfo): Promise<void> {
             await abortMerge(integrationDir);
           }
           await removeWorktree(repo.root, dir);
-          task.runResult = 'failed';
+          markStepFinished(task, 'failed');
           task.runNote = `Merging failed (${merged.conflicts.join(', ') || merged.error}); changes are kept on branch ${branch}.`;
+          task.keptBranch = { base: stepBase, branch };
           await ctx.persist();
           return;
         }
@@ -595,7 +609,7 @@ async function runParallel(ctx: StepContext, repo: RepoInfo): Promise<void> {
         const promise = runWorktreeStep(index)
           .catch(async (err) => {
             logger.warn({ err, orchestratorId: ctx.orchestratorId, index }, 'Orchestrator step failed');
-            subtasks[index].runResult = 'failed';
+            markStepFinished(subtasks[index], 'failed');
             subtasks[index].runNote = err instanceof Error ? err.message : String(err);
             await ctx.persist();
           })
@@ -723,6 +737,30 @@ async function runOrchestratorSteps(workspaceId: string, orchestratorId: string,
     isStopped: async () => (await db.getOrchestrator(orchestratorId))?.runStatus !== 'running' && !run.bResumePending
   };
 
+  // Full runs in a git workspace: snapshot before and after to count the files the run changed.
+  let changeBase: { repoRoot: string; startSnapshot: string } | null = null;
+  if (options.onlyIndex === undefined) {
+    try {
+      const repo = await resolveRepo(workspacePath);
+      if (!('error' in repo)) {
+        changeBase = { repoRoot: repo.root, startSnapshot: await createSnapshotCommit(repo.root, ctx.gitEnv) };
+      }
+    } catch (err) {
+      logger.warn({ err, orchestratorId }, 'Could not snapshot the workspace before the orchestrator run');
+    }
+  }
+  /** `{ runChangedFiles }` for the final update, or nothing when the count is unknown. */
+  const changedFilesPatch = async (): Promise<{ runChangedFiles?: number }> => {
+    if (!changeBase) return {};
+    try {
+      const endSnapshot = await createSnapshotCommit(changeBase.repoRoot, ctx.gitEnv);
+      return { runChangedFiles: (await changedFiles(changeBase.repoRoot, changeBase.startSnapshot, endSnapshot)).length };
+    } catch (err) {
+      logger.warn({ err, orchestratorId }, 'Could not count the files changed by the orchestrator run');
+      return {};
+    }
+  };
+
   try {
     if (options.onlyIndex !== undefined) {
       await runStep(ctx, options.onlyIndex, null);
@@ -739,6 +777,7 @@ async function runOrchestratorSteps(workspaceId: string, orchestratorId: string,
 
     if (await ctx.isStopped()) {
       await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
+        ...(await changedFilesPatch()),
         runCurrentStep: finishedCount(subtasks),
         runTotalSteps: total,
         subtasksJson: serializeSubtasksPayload(payload)
@@ -752,6 +791,7 @@ async function runOrchestratorSteps(workspaceId: string, orchestratorId: string,
       runStatus,
       // Full runs only: "Done" until the plan is opened (single-step reruns are watched).
       ...(options.onlyIndex === undefined && runStatus !== null && { unread: true }),
+      ...(await changedFilesPatch()),
       runCurrentStep: finishedCount(subtasks),
       runTotalSteps: total,
       subtasksJson: serializeSubtasksPayload(payload)
@@ -768,7 +808,7 @@ async function runOrchestratorSteps(workspaceId: string, orchestratorId: string,
   } catch (error) {
     logger.error({ err: error, orchestratorId }, 'Orchestrator run failed');
     for (const task of subtasks) {
-      if (task.runResult === 'running') task.runResult = 'failed';
+      if (task.runResult === 'running') markStepFinished(task, 'failed');
       task.waitingQuestion = null;
     }
     const message = error instanceof Error ? error.message : String(error);
@@ -778,6 +818,7 @@ async function runOrchestratorSteps(workspaceId: string, orchestratorId: string,
     await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
       runStatus: 'failed',
       unread: true,
+      ...(await changedFilesPatch()),
       runCurrentStep: finishedCount(subtasks),
       runTotalSteps: subtasks.length,
       subtasksJson: serializeSubtasksPayload(payload)

@@ -1,11 +1,11 @@
 /**
  * Orchestrator run state derived from the server copy: parsed plan payload,
- * step counts, run progress and its summary, plus starting/stopping a run.
- * Extracted from OrchestratorPanel.vue.
+ * step counts, run progress and its summary, run preconditions, plus
+ * starting/stopping a run. Extracted from OrchestratorPanel.vue.
  */
 
 // node_modules
-import { computed, ref, toValue, type MaybeRefOrGetter } from 'vue';
+import { computed, ref, toValue, watch, type MaybeRefOrGetter } from 'vue';
 
 // classes
 import { apiErrorMessage, orchestratorApi } from '@/classes/api';
@@ -17,7 +17,7 @@ import type { Orchestrator, OrchestratorRunMode, SubTask } from '@/@types/index'
 
 // -------------------------------------------------- Types --------------------------------------------------
 
-export type RunChoice = OrchestratorRunMode | 'parallel-fresh' | 'next';
+export type RunChoice = OrchestratorRunMode | 'sequential-fresh' | 'parallel-fresh' | 'next';
 
 export type StepStatus = 'idle' | 'active' | 'waiting' | 'finishing' | 'done' | 'failed' | 'skipped';
 
@@ -45,6 +45,27 @@ export interface UseOrchestratorRunStateOptions {
 
 const RUN_MODE_STORAGE_KEY = 'nova:orchestrator:runMode';
 
+// -------------------------------------------------- Helpers --------------------------------------------------
+
+/** Base run mode of a choice (null for `next`), with the fresh variants folded in. */
+function runModeOfChoice(choice: RunChoice): OrchestratorRunMode | null {
+  switch (choice) {
+    case 'sequential':
+    case 'sequential-fresh':
+      return 'sequential';
+    case 'parallel':
+    case 'parallel-fresh':
+      return 'parallel';
+    default:
+      return null;
+  }
+}
+
+function changedFilesLabel(count: number): string {
+  if (count === 0) return 'no file changes';
+  return count === 1 ? '1 file changed' : `${count} files changed`;
+}
+
 // -------------------------------------------------- Composable --------------------------------------------------
 
 export function useOrchestratorRunState(options: UseOrchestratorRunStateOptions) {
@@ -56,6 +77,8 @@ export function useOrchestratorRunState(options: UseOrchestratorRunStateOptions)
   const preferredRunMode = ref<OrchestratorRunMode>(
     safeGetItem(RUN_MODE_STORAGE_KEY) === 'parallel' ? 'parallel' : 'sequential'
   );
+  /** Why a parallel run cannot start right now (null = it can, or unknown) */
+  const parallelBlockedReason = ref<string | null>(null);
 
   const isRunning = computed(() => orchestrator.value?.runStatus === 'running');
   const maxParallel = computed(() => orchestrator.value?.maxParallel ?? 3);
@@ -98,6 +121,10 @@ export function useOrchestratorRunState(options: UseOrchestratorRunStateOptions)
     } else if (progress.status === 'stopped') {
       parts.push('stopped');
     }
+    const changedFiles = orchestrator.value?.runChangedFiles;
+    if (progress.status !== 'running' && typeof changedFiles === 'number') {
+      parts.push(changedFilesLabel(changedFiles));
+    }
     const prefix =
       progress.status === 'running'
         ? orchestrator.value?.runMode === 'parallel'
@@ -115,7 +142,8 @@ export function useOrchestratorRunState(options: UseOrchestratorRunStateOptions)
     if (subtasks.value.length === 0 || isRunning.value) {
       return;
     }
-    const mode: OrchestratorRunMode | null = choice === 'next' ? null : choice === 'parallel-fresh' ? 'parallel' : choice;
+    const mode = runModeOfChoice(choice);
+    const fresh = choice === 'sequential-fresh' || choice === 'parallel-fresh';
     if (mode && opts.onlyIndex === undefined && opts.startIndex === undefined) {
       preferredRunMode.value = mode;
       safeSetItem(RUN_MODE_STORAGE_KEY, mode);
@@ -127,7 +155,7 @@ export function useOrchestratorRunState(options: UseOrchestratorRunStateOptions)
         ? { next: true }
         : {
             mode,
-            ...(choice === 'parallel-fresh' ? { fresh: true } : {}),
+            ...(fresh ? { fresh: true } : {}),
             ...(opts.onlyIndex !== undefined ? { onlyIndex: opts.onlyIndex } : {}),
             ...(opts.startIndex !== undefined ? { startIndex: opts.startIndex } : {})
           };
@@ -141,6 +169,34 @@ export function useOrchestratorRunState(options: UseOrchestratorRunStateOptions)
       bStartingRun.value = false;
     }
   }
+
+  /** Ask the server whether a parallel run can start; errors count as not blocked. */
+  async function refreshRunPreconditions() {
+    const workspaceId = toValue(options.workspaceId);
+    const orchestratorId = toValue(options.orchestratorId);
+    try {
+      const { data } = await orchestratorApi.runPreconditions(workspaceId, orchestratorId);
+      // Ignore a late answer for a previously shown orchestrator
+      if (toValue(options.orchestratorId) === orchestratorId) {
+        parallelBlockedReason.value = data?.parallelBlockedReason ?? null;
+      }
+    } catch {
+      parallelBlockedReason.value = null;
+    }
+  }
+
+  // Once up front, then again when a run ends or another orchestrator is shown
+  void refreshRunPreconditions();
+  watch(isRunning, (running, wasRunning) => {
+    if (wasRunning && !running) void refreshRunPreconditions();
+  });
+  watch(
+    () => toValue(options.orchestratorId),
+    () => {
+      parallelBlockedReason.value = null;
+      void refreshRunPreconditions();
+    }
+  );
 
   async function stopTasks() {
     if (!isRunning.value) {
@@ -165,6 +221,7 @@ export function useOrchestratorRunState(options: UseOrchestratorRunStateOptions)
     bStopping,
     runError,
     preferredRunMode,
+    parallelBlockedReason,
     isRunning,
     maxParallel,
     subtasks,
@@ -173,6 +230,7 @@ export function useOrchestratorRunState(options: UseOrchestratorRunStateOptions)
     runProgress,
     runSummary,
     startRun,
+    refreshRunPreconditions,
     stopTasks
   };
 }

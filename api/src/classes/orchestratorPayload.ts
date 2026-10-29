@@ -7,6 +7,7 @@ export {
   buildStepPrompt,
   cloneSubtasksForNewPlan,
   collectStepSessionIdsFromSubtasksJson,
+  filterHandoffLog,
   findRunnableSteps,
   mergeSubtasksJsonPatch,
   normalizeDependsOn,

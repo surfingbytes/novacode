@@ -6,11 +6,12 @@ import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 // classes
 import { db } from '../classes/database';
 import { jwtPreHandler } from '../classes/auth';
-import { ensureSessionSpec, readSessionSpec } from '../classes/sessionSpec';
+import { ensureSessionSpec, readSessionSpec, writeSessionSpec } from '../classes/sessionSpec';
 import { buildSessionSpecStatus } from '../classes/sessionSpecStatus';
 import { broadcastSessionSpecStatus } from '../classes/wsBroadcast';
 
 const SpecParamsSchema = Type.Object({ workspaceId: Type.String(), sessionId: Type.String() });
+const UpdateSpecBodySchema = Type.Object({ content: Type.String() });
 
 export async function sessionSpecRoutes(fastify: FastifyInstance): Promise<void> {
   const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
@@ -47,6 +48,23 @@ export async function sessionSpecRoutes(fastify: FastifyInstance): Promise<void>
       const status = await buildSessionSpecStatus(session);
       broadcastSessionSpecStatus(workspaceId, status);
       return reply.code(201).send({ status, content: spec.content });
+    }
+  );
+
+  // PUT /api/workspaces/:workspaceId/sessions/:sessionId/spec — replace the spec file content
+  fastifyInstance.put(
+    '/api/workspaces/:workspaceId/sessions/:sessionId/spec',
+    { preHandler: jwtPreHandler, schema: { params: SpecParamsSchema, body: UpdateSpecBodySchema } },
+    async (request, reply) => {
+      const { workspaceId, sessionId } = request.params;
+      const { content } = request.body;
+      if (!content.trim()) return reply.code(400).send({ error: 'Spec content is required' });
+      const session = await loadSession(workspaceId, sessionId);
+      if (!session) return reply.code(404).send({ error: 'Session not found' });
+      const spec = await writeSessionSpec(workspaceId, sessionId, content);
+      const status = await buildSessionSpecStatus(session);
+      broadcastSessionSpecStatus(workspaceId, status);
+      return reply.send({ status, content: spec.content });
     }
   );
 }

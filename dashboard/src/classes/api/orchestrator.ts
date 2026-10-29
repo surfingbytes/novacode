@@ -107,6 +107,35 @@ export const orchestratorApi = {
   stop: (workspaceId: string, orchestratorId: string): ReturnType<typeof http.post<Orchestrator>> =>
     http.post<Orchestrator>(`/workspaces/${workspaceId}/orchestrators/${orchestratorId}/stop`),
 
+  /** Why a parallel run cannot start in this workspace (null = it can). */
+  runPreconditions: (
+    workspaceId: string,
+    orchestratorId: string
+  ): ReturnType<typeof http.get<{ parallelBlockedReason: string | null }>> =>
+    http.get<{ parallelBlockedReason: string | null }>(
+      `/workspaces/${workspaceId}/orchestrators/${orchestratorId}/run-preconditions`
+    ),
+
+  /** Apply a failed parallel step's kept branch to the workspace as uncommitted changes. */
+  applyStepBranch: (
+    workspaceId: string,
+    orchestratorId: string,
+    index: number
+  ): ReturnType<typeof http.post<Orchestrator>> =>
+    http.post<Orchestrator>(
+      `/workspaces/${workspaceId}/orchestrators/${orchestratorId}/steps/${index}/branch/apply`
+    ),
+
+  /** Delete a failed parallel step's kept branch. */
+  discardStepBranch: (
+    workspaceId: string,
+    orchestratorId: string,
+    index: number
+  ): ReturnType<typeof http.post<Orchestrator>> =>
+    http.post<Orchestrator>(
+      `/workspaces/${workspaceId}/orchestrators/${orchestratorId}/steps/${index}/branch/discard`
+    ),
+
   clone: (
     workspaceId: string,
     orchestratorId: string

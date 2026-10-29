@@ -9,9 +9,11 @@ import { createSessionWithAgent } from '../classes/sessionService';
 import { jwtPreHandler } from '../classes/auth';
 import { AGENT_ROUTE_RATE_LIMIT } from '../classes/rateLimits';
 import { resolveWorkspaceAbsolutePath } from '../classes/workspacePaths';
+import { applyCommitRangeToWorkingTree, branchExists, deleteBranch, resolveRepo } from '../classes/gitWorktrees';
 import {
   cloneSubtasksForNewPlan,
   collectStepSessionIdsFromSubtasksJson,
+  filterHandoffLog,
   findRunnableSteps,
   mergeSubtasksJsonPatch,
   parseSubtasksPayloadString,
@@ -25,7 +27,7 @@ import { broadcastSessionListUpsert } from '../classes/sessionListBroadcast';
 import { checkRunPreconditions, claimRunResume, finishRunResume, inFlightRunSteps, runOrchestrator } from '../classes/orchestratorRunner';
 
 // types
-import type { AgentType, OrchestratorRunMode } from '../@types/index';
+import type { AgentType, OrchestratorRunMode, SubTask } from '../@types/index';
 
 const AGENT_TYPES: AgentType[] = ['cursor-agent', 'claude', 'mistral-vibe', 'open-code', 'codex'];
 const MAX_PARALLEL_LIMIT = 8;
@@ -46,6 +48,12 @@ function parseMaxParallel(raw: unknown): number | undefined {
 const WorkspaceParamsSchema = Type.Object({ workspaceId: Type.String() });
 
 const OrchestratorParamsSchema = Type.Object({ workspaceId: Type.String(), orchestratorId: Type.String() });
+
+const StepParamsSchema = Type.Object({
+  workspaceId: Type.String(),
+  orchestratorId: Type.String(),
+  index: Type.Integer({ minimum: 0 })
+});
 
 const PlannerSessionSchema = Type.Object({
   agentType: Type.Optional(Type.String()),
@@ -86,9 +94,19 @@ const RunOrchestratorBodySchema = Type.Object({
   onlyIndex: Type.Optional(Type.Number()),
   /** Run only the first step that is ready (dependencies done). */
   next: Type.Optional(Type.Boolean()),
-  /** Parallel only: re-run every step, including finished ones. */
+  /** Either mode: re-run every step, including finished ones, and drop the handoff log. */
   fresh: Type.Optional(Type.Boolean())
 });
+
+type KeptBranchStep =
+  | { code: 404 | 409; error: string }
+  | {
+      code?: undefined;
+      root: string;
+      keptBranch: NonNullable<SubTask['keptBranch']>;
+      /** Clear `keptBranch` (and set the note), persist and broadcast; returns the updated orchestrator. */
+      save: (runNote?: string) => Promise<NonNullable<Awaited<ReturnType<typeof db.getOrchestrator>>>>;
+    };
 
 /** New planning chat for an orchestrator (its agent writes the plan through the nova MCP). */
 async function createPlannerSession(workspaceId: string, input: PlannerSessionInput, fallbackName: string) {
@@ -406,6 +424,9 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         delete subtasks[index].sessionId;
         delete subtasks[index].runNote;
         delete subtasks[index].waitingQuestion;
+        delete subtasks[index].startedAt;
+        delete subtasks[index].finishedAt;
+        delete subtasks[index].keptBranch;
         if (!bKeepMergeRef) delete subtasks[index].mergeRef;
       };
 
@@ -438,11 +459,18 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       }
       if (onlyIndex !== undefined) {
         clearResult(onlyIndex, true);
-      } else if (mode === 'parallel' && !body.fresh) {
-        // Keep finished steps (their work is already in the workspace); merge and verification re-run with the rest.
+      } else if (body.fresh) {
+        // "Run all again": start over in either mode.
+        subtasks.forEach((_, index) => clearResult(index));
+      } else if (mode === 'sequential' && startIndex > 0) {
+        // "Run from here": earlier steps keep their results and handoff notes.
+        for (let index = startIndex; index < subtasks.length; index++) clearResult(index);
+      } else {
+        // Plain run, same in both modes: keep finished steps (their work is already in the
+        // workspace); merge and verification re-run with the rest.
         if (subtasks.some((task) => task.kind === 'merge' && task.runResult === 'failed' && task.mergeRef)) {
           return reply.code(409).send({
-            error: `The last run's result is not merged into the workspace yet. Run the "${MERGE_STEP_NAME}" step first, or use "Run all again in parallel" to start over.`
+            error: `The last run's result is not merged into the workspace yet. Run the "${MERGE_STEP_NAME}" step first, or use "Run all again" to start over.`
           });
         }
         subtasks.forEach((task, index) => task.runResult !== 'done' && clearResult(index));
@@ -450,14 +478,15 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
           subtasks.forEach((task, index) => task.kind && clearResult(index));
         }
         if (subtasks.every((task) => task.runResult === 'done')) {
-          return reply.code(400).send({ error: 'Every step is done. Use "Run all again in parallel" to start over.' });
+          return reply.code(400).send({ error: 'Every step is done. Use "Run all again" to start over.' });
         }
-      } else if (mode === 'parallel' || startIndex === 0) {
-        payload.handoffLog = '';
-        subtasks.forEach((_, index) => clearResult(index));
-      } else {
-        for (let index = startIndex; index < subtasks.length; index++) clearResult(index);
       }
+      // Handoff notes follow their steps: only steps that keep their result keep their note; a step
+      // that runs again reports again (otherwise its old block would stay next to the new one).
+      payload.handoffLog = filterHandoffLog(
+        payload.handoffLog,
+        subtasks.flatMap((task, index) => (task.runResult ? [index] : []))
+      );
 
       await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
         runStatus: 'running',
@@ -466,6 +495,8 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         runCurrentStep: subtasks.filter((task) => task.runResult).length,
         runTotalSteps: subtasks.length,
         runStartedAt: new Date().toISOString(),
+        // Full runs count their changed files at the end; single-step runs keep the last count.
+        ...(onlyIndex === undefined && { runChangedFiles: null }),
         subtasksJson: serializeSubtasksPayload(payload)
       });
 
@@ -473,6 +504,117 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
 
       const updated = await db.getOrchestrator(orchestratorId);
       return reply.code(202).send(updated);
+    }
+  );
+
+  // GET /api/workspaces/:workspaceId/orchestrators/:orchestratorId/run-preconditions — why a parallel run can't start, if so
+  fastifyInstance.get(
+    '/api/workspaces/:workspaceId/orchestrators/:orchestratorId/run-preconditions',
+    {
+      preHandler: jwtPreHandler,
+      schema: { params: OrchestratorParamsSchema }
+    },
+    async (request, reply) => {
+      const { workspaceId, orchestratorId } = request.params;
+
+      const orchestrator = await db.getOrchestrator(orchestratorId);
+      if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
+        return reply.code(404).send({ error: 'Orchestrator not found' });
+      }
+      const workspace = await db.getWorkspace(workspaceId);
+      if (!workspace) {
+        return reply.code(404).send({ error: 'Workspace not found' });
+      }
+
+      const repo = await resolveRepo(resolveWorkspaceAbsolutePath(workspace.path));
+      return reply.send({ parallelBlockedReason: 'error' in repo ? repo.error : null });
+    }
+  );
+
+  /**
+   * Common part of the kept-branch routes: the step at `index` with a `keptBranch` and the
+   * workspace repo, or the error reply. The branch is deleted by both routes, so the step's
+   * `keptBranch` is always cleared afterwards.
+   */
+  const loadKeptBranchStep = async (params: Static<typeof StepParamsSchema>): Promise<KeptBranchStep> => {
+    const { workspaceId, orchestratorId, index } = params;
+    const orchestrator = await db.getOrchestrator(orchestratorId);
+    if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
+      return { code: 404, error: 'Orchestrator not found' };
+    }
+    const workspace = await db.getWorkspace(workspaceId);
+    if (!workspace) {
+      return { code: 404, error: 'Workspace not found' };
+    }
+    if (orchestrator.runStatus === 'running') {
+      return { code: 409, error: 'Run already in progress' };
+    }
+    const payload = parseSubtasksPayloadString(orchestrator.subtasksJson);
+    const step = payload?.subtasks[index];
+    if (!payload || !step?.keptBranch) {
+      return { code: 404, error: 'The step has no kept branch' };
+    }
+    const repo = await resolveRepo(resolveWorkspaceAbsolutePath(workspace.path));
+    if ('error' in repo) {
+      return { code: 409, error: repo.error };
+    }
+    const save = async (runNote?: string) => {
+      delete step.keptBranch;
+      if (runNote !== undefined) step.runNote = runNote;
+      const updated = await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
+        subtasksJson: serializeSubtasksPayload(payload)
+      });
+      return updated ?? orchestrator;
+    };
+    return { root: repo.root, keptBranch: step.keptBranch, save };
+  };
+
+  // POST /api/workspaces/:workspaceId/orchestrators/:orchestratorId/steps/:index/branch/apply
+  // Bring a failed parallel step's kept branch into the workspace as uncommitted changes.
+  fastifyInstance.post(
+    '/api/workspaces/:workspaceId/orchestrators/:orchestratorId/steps/:index/branch/apply',
+    {
+      preHandler: jwtPreHandler,
+      schema: { params: StepParamsSchema }
+    },
+    async (request, reply) => {
+      const loaded = await loadKeptBranchStep(request.params);
+      if ('error' in loaded) {
+        return reply.code(loaded.code).send({ error: loaded.error });
+      }
+      const { root, keptBranch, save } = loaded;
+      if (!(await branchExists(root, keptBranch.branch))) {
+        // Deleted outside the app: nothing to apply, just forget it.
+        return reply.send(await save());
+      }
+      const applied = await applyCommitRangeToWorkingTree(root, keptBranch.base, keptBranch.branch);
+      if (!applied.ok) {
+        return reply.code(409).send({ error: applied.error });
+      }
+      await deleteBranch(root, keptBranch.branch);
+      return reply.send(
+        await save(`Changes of branch ${keptBranch.branch} were applied to the workspace as uncommitted changes.`)
+      );
+    }
+  );
+
+  // POST /api/workspaces/:workspaceId/orchestrators/:orchestratorId/steps/:index/branch/discard
+  fastifyInstance.post(
+    '/api/workspaces/:workspaceId/orchestrators/:orchestratorId/steps/:index/branch/discard',
+    {
+      preHandler: jwtPreHandler,
+      schema: { params: StepParamsSchema }
+    },
+    async (request, reply) => {
+      const loaded = await loadKeptBranchStep(request.params);
+      if ('error' in loaded) {
+        return reply.code(loaded.code).send({ error: loaded.error });
+      }
+      const { root, keptBranch, save } = loaded;
+      if (await branchExists(root, keptBranch.branch)) {
+        await deleteBranch(root, keptBranch.branch);
+      }
+      return reply.send(await save(`Branch ${keptBranch.branch} was discarded.`));
     }
   );
 

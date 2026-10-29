@@ -3,7 +3,7 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 
 // classes
-import { sessionSpecApi } from '@/classes/api';
+import { sessionsApi, sessionSpecApi } from '@/classes/api';
 
 // types
 import type { SessionSpecStatus } from '@/@types/index';
@@ -39,6 +39,13 @@ export const useSessionSpecsStore = defineStore('sessionSpecs', () => {
     return data.status;
   }
 
+  /** Replace the spec file content; the saved content is returned, not stored. */
+  async function saveSpec(workspaceId: string, sessionId: string, content: string): Promise<string> {
+    const { data } = await sessionsApi.updateSpec(workspaceId, sessionId, content);
+    applyStatus(data.status);
+    return data.content ?? content;
+  }
+
   /** Logout: drop cached spec status. */
   function reset(): void {
     statusBySession.value = {};
@@ -50,6 +57,7 @@ export const useSessionSpecsStore = defineStore('sessionSpecs', () => {
     applyStatus,
     fetchSpec,
     createSpec,
+    saveSpec,
     reset
   };
 });

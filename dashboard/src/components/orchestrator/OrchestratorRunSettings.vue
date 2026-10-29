@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // node_modules
 import { ref, computed, watch } from 'vue';
+import { ChevronRight } from 'lucide-vue-next';
 
 // components
 import AgentModelPicker from '@/components/AgentModelPicker.vue';
@@ -41,6 +42,8 @@ const emit = defineEmits<{
 
 // -------------------------------------------------- Refs --------------------------------------------------
 
+/** Collapsed by default; the header summarises the current values. */
+const bExpanded = ref(false);
 const bSavingSettings = ref(false);
 const workerModelOptions = ref<AgentModelOption[]>([]);
 const bLoadingWorkerModels = ref(false);
@@ -59,6 +62,17 @@ const bVerifyUsesPlanner = computed(() => !props.orchestrator?.verifyAgentType);
 const verifyAgentType = computed<AgentType>(
   () => (props.orchestrator?.verifyAgentType ?? props.plannerSession?.agentType ?? workerAgentType.value)
 );
+/** One-line summary for the collapsed header. */
+const summary = computed(() => {
+  const workerModel = bWorkersUsePlanner.value
+    ? 'same as planning chat'
+    : props.orchestrator?.workerModel || 'auto';
+  const workers = `Workers: ${agentTypeLabel(workerAgentType.value)} · ${workerModel} · ${maxParallel.value} parallel`;
+  const verify = bVerifyUsesPlanner.value
+    ? 'Verify: same as planning chat'
+    : `Verify: ${agentTypeLabel(verifyAgentType.value)} · ${props.orchestrator?.verifyModel || 'auto'}`;
+  return `${workers} — ${verify}`;
+});
 
 // -------------------------------------------------- Watchers --------------------------------------------------
 
@@ -149,11 +163,32 @@ function onVerifySamePlannerToggle(bSame: boolean): void {
 
 <template>
   <div class="rounded-xl border border-fg/15 overflow-hidden">
-    <div class="px-3 py-2 border-b border-fg/10 bg-fg/[0.04]">
-      <span class="text-sm font-medium text-text-primary">Run settings</span>
-      <p class="text-xs text-text-muted mt-0.5">Agent and model of the step sessions and of the final verify step.</p>
-    </div>
-    <div class="divide-y divide-fg/10">
+    <button
+      type="button"
+      class="w-full px-3 py-2 bg-fg/[0.04] flex items-start gap-2 text-left hover:bg-fg/[0.06] transition-colors"
+      :class="{ 'border-b border-fg/10': bExpanded }"
+      :aria-expanded="bExpanded"
+      data-testid="run-settings-toggle"
+      @click="bExpanded = !bExpanded"
+    >
+      <ChevronRight
+        :size="16"
+        :stroke-width="1.8"
+        class="shrink-0 mt-0.5 text-text-muted transition-transform"
+        :class="{ 'rotate-90': bExpanded }"
+        aria-hidden="true"
+      />
+      <span class="min-w-0 flex-1">
+        <span class="block text-sm font-medium text-text-primary">Run settings</span>
+        <span v-if="bExpanded" class="block text-xs text-text-muted mt-0.5">
+          Agent and model of the step sessions and of the final verify step.
+        </span>
+        <span v-else class="block text-xs text-text-muted mt-0.5 truncate" data-testid="run-settings-summary">
+          {{ summary }}
+        </span>
+      </span>
+    </button>
+    <div v-if="bExpanded" class="divide-y divide-fg/10">
       <div class="px-3 py-2.5 flex flex-wrap items-center gap-x-6 gap-y-2">
         <span class="text-xs font-medium text-text-primary w-20 shrink-0">Workers</span>
         <div class="flex items-center gap-2">

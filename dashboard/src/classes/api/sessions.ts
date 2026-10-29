@@ -136,6 +136,16 @@ export const sessionsApi = {
       ...(filename ? { filename } : {})
     }),
 
+  /** Replace the session's spec file content. */
+  updateSpec: (
+    workspaceId: string,
+    sessionId: string,
+    content: string
+  ): ReturnType<typeof http.put<SessionSpecResponse>> =>
+    http.put<SessionSpecResponse>(`/workspaces/${workspaceId}/sessions/${sessionId}/spec`, {
+      content
+    }),
+
   imageUrl: (sessionId: string, filename: string): string => {
     const base = (import.meta.env.VITE_API_URL ?? location.origin + '/api').replace(/\/$/, '');
     return `${base}/sessions/${sessionId}/images/${encodeURIComponent(filename)}`;

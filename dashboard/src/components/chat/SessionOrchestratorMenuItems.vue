@@ -4,10 +4,14 @@
  * phone counterpart of SessionOrchestratorButton (which hides below lg).
  */
 // node_modules
-import { computed } from 'vue';
-import { ExternalLink, FileText, ListOrdered, RefreshCw } from 'lucide-vue-next';
+import { computed, onMounted } from 'vue';
+import { AlertTriangle, ExternalLink, FileText, ListOrdered, RefreshCw } from 'lucide-vue-next';
+
+// composables
+import { NOVA_MCP_OFF_MESSAGE } from '@/composables/useSessionOrchestrator';
 
 // stores
+import { useNovaMcpStore } from '@/stores/novaMcp';
 import { useSessionSpecsStore } from '@/stores/sessionSpecs';
 
 // -------------------------------------------------- Props --------------------------------------------------
@@ -36,6 +40,7 @@ const emit = defineEmits<{
 // -------------------------------------------------- Stores --------------------------------------------------
 
 const specsStore = useSessionSpecsStore();
+const novaMcpStore = useNovaMcpStore();
 
 // -------------------------------------------------- Computed --------------------------------------------------
 
@@ -43,6 +48,8 @@ const status = computed(() => specsStore.forSession(props.sessionId));
 const bHasPlan = computed(() => !!props.orchestratorId);
 const bStale = computed(() => props.bHasSteps && !!status.value?.bChatNewerThanSpec);
 const bHasSpec = computed(() => !!status.value?.hasContent);
+/** The agent saves the plan through the nova MCP; off means the plan actions cannot work. */
+const bNovaMcpOff = computed(() => novaMcpStore.bEnabled === false);
 
 // -------------------------------------------------- Methods --------------------------------------------------
 
@@ -50,6 +57,12 @@ function onMainClick(): void {
   if (props.bHasSteps) emit('open-plan');
   else emit('plan');
 }
+
+// -------------------------------------------------- Lifecycle --------------------------------------------------
+
+onMounted(() => {
+  void novaMcpStore.ensureFetched();
+});
 </script>
 
 <template>
@@ -57,21 +70,39 @@ function onMainClick(): void {
     type="button"
     class="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-text-primary hover:bg-fg/[0.06] transition-colors"
     role="menuitem"
+    :title="!bHasSteps && bNovaMcpOff ? NOVA_MCP_OFF_MESSAGE : undefined"
     @click="onMainClick"
   >
     <ListOrdered :size="14" :stroke-width="1.6" class="shrink-0" aria-hidden="true" />
-    {{ bHasSteps ? 'Orchestrator' : 'Plan as orchestrator' }}
+    <span class="flex-1">{{ bHasSteps ? 'Orchestrator' : 'Plan as orchestrator' }}</span>
+    <AlertTriangle
+      v-if="!bHasSteps && bNovaMcpOff"
+      :size="14"
+      :stroke-width="1.8"
+      class="shrink-0 text-warning"
+      data-testid="nova-mcp-off-plan"
+      aria-hidden="true"
+    />
   </button>
   <button
     v-if="bHasSteps"
     type="button"
     class="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-text-primary hover:bg-fg/[0.06] transition-colors"
     role="menuitem"
+    :title="bNovaMcpOff ? NOVA_MCP_OFF_MESSAGE : undefined"
     @click="emit('plan')"
   >
     <RefreshCw :size="14" :stroke-width="1.6" class="shrink-0" aria-hidden="true" />
     <span class="flex-1">Update plan</span>
     <span v-if="bStale" class="text-[11px] text-warning">chat changed</span>
+    <AlertTriangle
+      v-if="bNovaMcpOff"
+      :size="14"
+      :stroke-width="1.8"
+      class="shrink-0 text-warning"
+      data-testid="nova-mcp-off-update"
+      aria-hidden="true"
+    />
   </button>
   <button
     v-if="bHasPlan"

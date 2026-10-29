@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // node_modules
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 // components
 import BaseModal from '@/components/BaseModal.vue';
@@ -12,16 +12,21 @@ import { normalizeDependsOn } from '@/utils/orchestratorPayload';
 // types
 import type { SubTask } from '@/@types/index';
 
-/** Edit a step's name, category, prompt and dependencies. Extracted from OrchestratorPanel.vue. */
+/**
+ * Edit a step's name, category, prompt and dependencies, or (with `bNew`) draft a
+ * new manual step. Extracted from OrchestratorPanel.vue.
+ */
 
 // -------------------------------------------------- Props --------------------------------------------------
 
 const bOpen = defineModel<boolean>({ required: true });
 
 const props = defineProps<{
-  /** Index of the step being edited */
+  /** Index of the step being edited (ignored when adding) */
   taskIndex: number | null;
   subtasks: SubTask[];
+  /** Add a step instead of editing one: empty draft, every manual step offered as dependency. */
+  bNew?: boolean;
 }>();
 
 // -------------------------------------------------- Emits --------------------------------------------------
@@ -35,12 +40,37 @@ const emit = defineEmits<{
 
 const editDraft = ref<SubTask>({ name: '', prompt: '', category: null });
 
+// -------------------------------------------------- Computed --------------------------------------------------
+
+const modalTitle = computed(() => (props.bNew ? 'Add step' : 'Edit task'));
+const modalEyebrow = computed(() => (props.bNew ? '// add step' : '// edit task'));
+
+/** Steps the draft may depend on: earlier manual steps (a new step goes before the automatic ones). */
+const dependencyCandidates = computed(() => {
+  const limit = props.bNew ? props.subtasks.length : props.taskIndex ?? 0;
+  return props.subtasks
+    .map((task, index) => ({ task, index }))
+    .filter(({ task, index }) => index < limit && !task.kind);
+});
+
+/** A new step needs a name and a prompt; an edited one falls back to its previous values. */
+const bCanSave = computed(
+  () => !props.bNew || (editDraft.value.name.trim().length > 0 && editDraft.value.prompt.trim().length > 0)
+);
+
 // -------------------------------------------------- Watchers --------------------------------------------------
 
-// Fresh draft from the step each time the modal opens
+// Fresh draft from the step (or an empty one) each time the modal opens
 watch(bOpen, (bNowOpen) => {
+  if (!bNowOpen) {
+    return;
+  }
+  if (props.bNew) {
+    editDraft.value = { name: '', prompt: '', category: null, dependsOn: [] };
+    return;
+  }
   const task = props.taskIndex === null ? undefined : props.subtasks[props.taskIndex];
-  if (!bNowOpen || !task) {
+  if (!task) {
     return;
   }
   editDraft.value = {
@@ -74,8 +104,8 @@ function toggleDependsOn(depIndex: number) {
     panel-class="max-w-md"
   >
     <ModalHeader
-      eyebrow="// edit task"
-      title="Edit task"
+      :eyebrow="modalEyebrow"
+      :title="modalTitle"
       title-id="edit-task-title"
       @close="emit('close')"
     />
@@ -110,13 +140,13 @@ function toggleDependsOn(depIndex: number) {
                 placeholder="Instruction for this step"
               />
             </div>
-            <div v-if="taskIndex !== null && taskIndex > 0">
+            <div v-if="dependencyCandidates.length > 0">
               <p class="block text-xs font-medium text-text-muted mb-1">Depends on</p>
               <p class="text-xs text-text-muted mb-2">
                 This step is skipped if a selected earlier step failed or was skipped.
               </p>
               <label
-                v-for="(prior, depIndex) in subtasks.slice(0, taskIndex)"
+                v-for="{ task: prior, index: depIndex } in dependencyCandidates"
                 :key="'dep-' + depIndex"
                 class="flex items-center gap-2 text-sm text-text-primary py-0.5"
               >
@@ -139,10 +169,11 @@ function toggleDependsOn(depIndex: number) {
             </button>
             <button
               type="button"
-              class="px-4 py-2 text-sm font-medium btn-primary-solid rounded-lg"
+              class="px-4 py-2 text-sm font-medium btn-primary-solid rounded-lg disabled:opacity-60"
+              :disabled="!bCanSave"
               @click="emit('save', editDraft)"
             >
-              Save
+              {{ bNew ? 'Add step' : 'Save' }}
             </button>
           </div>
     </div>

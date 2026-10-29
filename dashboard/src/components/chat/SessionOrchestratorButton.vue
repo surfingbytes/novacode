@@ -7,13 +7,17 @@
  */
 // node_modules
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { ChevronDown, Copy, ExternalLink, FileText, ListOrdered, RefreshCw } from 'lucide-vue-next';
+import { AlertTriangle, ChevronDown, Copy, ExternalLink, FileText, ListOrdered, RefreshCw } from 'lucide-vue-next';
 
 // components
 import BaseModal from '@/components/BaseModal.vue';
 import ModalHeader from '@/components/ModalHeader.vue';
 
+// composables
+import { NOVA_MCP_OFF_MESSAGE } from '@/composables/useSessionOrchestrator';
+
 // stores
+import { useNovaMcpStore } from '@/stores/novaMcp';
 import { useSessionSpecsStore } from '@/stores/sessionSpecs';
 import { useToastStore } from '@/stores/toasts';
 
@@ -49,6 +53,7 @@ const emit = defineEmits<{
 
 const specsStore = useSessionSpecsStore();
 const toastStore = useToastStore();
+const novaMcpStore = useNovaMcpStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 
@@ -63,12 +68,14 @@ const bSpecLoading = ref(false);
 const status = computed(() => specsStore.forSession(props.sessionId));
 const bHasPlan = computed(() => !!props.orchestratorId);
 const bStale = computed(() => props.bHasSteps && !!status.value?.bChatNewerThanSpec);
+/** The agent saves the plan through the nova MCP; off means the plan actions cannot work. */
+const bNovaMcpOff = computed(() => novaMcpStore.bEnabled === false);
 const mainLabel = computed(() => (props.bHasSteps ? 'Orchestrator' : 'Plan as orchestrator'));
-const mainTitle = computed(() =>
-  props.bHasSteps
-    ? 'Show the plan of this chat'
-    : 'The agent writes the spec and splits the agreed work into steps (Nova MCP)'
-);
+const mainTitle = computed(() => {
+  if (props.bHasSteps) return 'Show the plan of this chat';
+  if (bNovaMcpOff.value) return NOVA_MCP_OFF_MESSAGE;
+  return 'The agent writes the spec and splits the agreed work into steps (Nova MCP)';
+});
 /** The agent writes the spec through the nova MCP; until then there is nothing to open. */
 const bHasSpec = computed(() => !!status.value?.hasContent);
 const bHasMenu = computed(() => bHasPlan.value || bHasSpec.value);
@@ -149,6 +156,7 @@ watch(
 
 onMounted(() => {
   void loadStatus();
+  void novaMcpStore.ensureFetched();
   document.addEventListener('click', handleDocumentClick);
   document.addEventListener('keydown', handleKeydown);
 });
@@ -172,6 +180,14 @@ onBeforeUnmount(() => {
       >
         <ListOrdered :size="16" :stroke-width="1.6" aria-hidden="true" />
         <span class="hidden xl:inline whitespace-nowrap">{{ mainLabel }}</span>
+        <AlertTriangle
+          v-if="!bHasSteps && bNovaMcpOff"
+          :size="14"
+          :stroke-width="1.8"
+          class="shrink-0 text-warning"
+          data-testid="nova-mcp-off-plan"
+          aria-hidden="true"
+        />
         <span
           v-if="bStale"
           class="absolute top-1.5 right-1 w-1.5 h-1.5 rounded-full bg-warning"
@@ -204,12 +220,20 @@ onBeforeUnmount(() => {
           type="button"
           class="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-text-primary hover:bg-fg/[0.06] transition-colors"
           role="menuitem"
-          title="Ask the agent to update the spec and the steps from this chat"
+          :title="bNovaMcpOff ? NOVA_MCP_OFF_MESSAGE : 'Ask the agent to update the spec and the steps from this chat'"
           @click="runMenuAction('plan')"
         >
           <RefreshCw :size="14" :stroke-width="1.6" class="shrink-0" aria-hidden="true" />
           <span class="flex-1">Update plan from chat</span>
           <span v-if="bStale" class="text-[11px] text-warning">chat changed</span>
+          <AlertTriangle
+            v-if="bNovaMcpOff"
+            :size="14"
+            :stroke-width="1.8"
+            class="shrink-0 text-warning"
+            data-testid="nova-mcp-off-update"
+            aria-hidden="true"
+          />
         </button>
         <button
           type="button"

@@ -2,6 +2,7 @@
 // node_modules
 import { ref, computed, onBeforeUnmount, onMounted, watch, defineAsyncComponent } from 'vue';
 import { useRouter } from 'vue-router';
+import { Copy } from 'lucide-vue-next';
 
 // components
 import OrchestratorPanel from '@/components/OrchestratorPanel.vue';
@@ -59,6 +60,7 @@ const bLoading = ref(true);
 const error = ref<string | null>(null);
 const bShowDeleteModal = ref(false);
 const bDeleting = ref(false);
+const bCloning = ref(false);
 type OrchestratorTab = 'orchestrator' | 'files' | 'git';
 const activeTab = ref<OrchestratorTab>('orchestrator');
 
@@ -166,6 +168,28 @@ function updateOrchestratorFromPanel(o: Orchestrator): void {
   orchestratorsStore.upsertOrchestrator(o);
 }
 
+/** Copy the plan (steps and settings) into a new orchestrator and open it. */
+async function clonePlan(): Promise<void> {
+  if (bCloning.value) {
+    return;
+  }
+  bCloning.value = true;
+  try {
+    const { data } = await orchestratorApi.clone(props.workspaceId, props.orchestratorId);
+    if (data) {
+      orchestratorsStore.upsertOrchestrator(data);
+      await router.push({
+        name: 'orchestrator',
+        params: { id: props.workspaceId, orchestratorId: data.id }
+      });
+    }
+  } catch (err: unknown) {
+    notifyApiError(err, 'Failed to clone plan');
+  } finally {
+    bCloning.value = false;
+  }
+}
+
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 
 onMounted(() => {
@@ -220,6 +244,36 @@ onBeforeUnmount(() => {
     >
       <template v-if="orchestrator && !orchestrator.archived" #title-trailing>
         <FavoriteButton :b-favorite="!!orchestrator.isFavorite" @toggle="toggleFavorite" />
+      </template>
+      <template v-if="orchestrator" #actions-leading>
+        <button
+          type="button"
+          class="hidden lg:inline-flex items-center justify-center w-9 h-9 rounded-lg text-text-muted hover:text-text-primary hover:bg-fg/[0.06] transition-colors disabled:opacity-60"
+          :disabled="bCloning"
+          title="Clone plan"
+          aria-label="Clone plan"
+          data-testid="clone-plan"
+          @click="clonePlan"
+        >
+          <span
+            v-if="bCloning"
+            class="w-4 h-4 border-2 border-fg/30 border-t-primary rounded-full animate-spin"
+            aria-hidden="true"
+          />
+          <Copy v-else :size="18" :stroke-width="1.6" aria-hidden="true" />
+        </button>
+      </template>
+      <template v-if="orchestrator" #mobile-menu-leading="{ close }">
+        <button
+          type="button"
+          class="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left text-text-primary hover:bg-fg/[0.06] transition-colors"
+          role="menuitem"
+          :disabled="bCloning"
+          @click="close(); clonePlan()"
+        >
+          <Copy :size="14" :stroke-width="1.6" class="shrink-0" aria-hidden="true" />
+          Clone plan
+        </button>
       </template>
     </EntityDetailHeader>
 
