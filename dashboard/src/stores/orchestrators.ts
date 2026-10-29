@@ -6,7 +6,11 @@ import { computed, ref } from 'vue';
 import { orchestratorApi } from '@/classes/api';
 import { forgetLocalStateForId } from '@/lib/sessionLocalState';
 import { subtasksFromStoredJson } from '@/utils/orchestratorPayload';
+import { orchestratorReadTargets } from '@/utils/orchestratorProgress';
 import { isViewingOrchestrator } from '@/utils/sessionUnread';
+
+// stores
+import { useNotificationsStore } from '@/stores/notifications';
 
 // types
 import type { Orchestrator, OrchestratorSummary, Session } from '@/@types/index';
@@ -90,9 +94,11 @@ export const useOrchestratorsStore = defineStore('orchestrators', () => {
       ...orchestratorsByWorkspace.value,
       [workspaceId]: list
     };
-    if (orchestrator.unread && isViewingOrchestrator(orchestrator.id)) {
-      void markRead(orchestrator.workspaceId, orchestrator.id);
+    const merged = index === -1 ? orchestrator : list[index];
+    if (merged.unread && isViewingOrchestrator(merged.id)) {
+      void markRead(merged.workspaceId, merged.id);
     }
+    useNotificationsStore().markReadForTargets(orchestratorReadTargets(merged));
   }
 
   /** Clear "Done" (optimistically; a later push corrects a failed persist). */
@@ -105,6 +111,7 @@ export const useOrchestratorsStore = defineStore('orchestrators', () => {
       orchestrator.id === orchestratorId ? { ...orchestrator, unread: false } : orchestrator
     );
     orchestratorsByWorkspace.value = { ...orchestratorsByWorkspace.value, [workspaceId]: list };
+    useNotificationsStore().markReadForTargets([orchestratorId]);
     try {
       await orchestratorApi.markRead(workspaceId, orchestratorId);
     } catch {
@@ -130,6 +137,7 @@ export const useOrchestratorsStore = defineStore('orchestrators', () => {
       next[summary.workspaceId] = list;
     }
     orchestratorsByWorkspace.value = next;
+    useNotificationsStore().markReadForTargets(summaries.flatMap(orchestratorReadTargets));
   }
 
   function removeOrchestrator(orchestratorId: string, workspaceId?: string): void {

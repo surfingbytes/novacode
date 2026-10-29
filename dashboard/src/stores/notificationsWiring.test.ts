@@ -143,6 +143,71 @@ describe('notification wiring on the sessions socket', () => {
     expect(useNotificationsStore().items).toHaveLength(0);
   });
 
+  it('reads the session item once the session is read (sidebar "Done" gone)', async () => {
+    const send = await connect();
+    send({ type: 'global-snapshot', sessions: [sessionFixture({ busy: true })] });
+    send({ type: 'busy-changed', id: 'sess-1', busy: false });
+    send({ type: 'session-upsert', session: sessionFixture({ busy: false, unread: true }) });
+    expect(useNotificationsStore().unreadCount).toBe(1);
+
+    // Read on another device: the list push carries unread=false.
+    send({ type: 'session-upsert', session: sessionFixture({ busy: false, unread: false }) });
+    expect(useNotificationsStore().unreadCount).toBe(0);
+    expect(useNotificationsStore().items).toHaveLength(1);
+  });
+
+  it('reads the session item when this device opens the chat', async () => {
+    const send = await connect();
+    send({ type: 'global-snapshot', sessions: [sessionFixture({ busy: true })] });
+    send({ type: 'busy-changed', id: 'sess-1', busy: false });
+    send({ type: 'session-upsert', session: sessionFixture({ busy: false, unread: true }) });
+
+    await useWorkspacesStore().markSessionRead('sess-1');
+    expect(useNotificationsStore().unreadCount).toBe(0);
+  });
+
+  it('reads the session item from a snapshot taken after the read happened elsewhere', async () => {
+    const send = await connect();
+    send({ type: 'global-snapshot', sessions: [sessionFixture({ busy: true })] });
+    send({ type: 'busy-changed', id: 'sess-1', busy: false });
+    expect(useNotificationsStore().unreadCount).toBe(1);
+
+    send({ type: 'global-snapshot', sessions: [sessionFixture({ busy: false, unread: false })] });
+    expect(useNotificationsStore().unreadCount).toBe(0);
+  });
+
+  it('reads the plan item once the orchestrator is read, and the input item once the step is answered', async () => {
+    const send = await connect();
+    send({ type: 'global-snapshot', sessions: [], orchestrators: [orchestratorFixture([{}, {}])] });
+
+    send({
+      type: 'orchestrator-upsert',
+      orchestrator: orchestratorFixture([{}, { runResult: 'running', waitingQuestion: 'Which DB?' }])
+    });
+    send({
+      type: 'orchestrator-upsert',
+      orchestrator: orchestratorFixture([{}, { runResult: 'running', waitingQuestion: 'Which DB?' }], { name: 'Renamed' })
+    });
+    expect(useNotificationsStore().items.map((item) => [item.kind, item.read])).toEqual([
+      ['orchestrator-needs-input', false]
+    ]);
+
+    send({ type: 'orchestrator-upsert', orchestrator: orchestratorFixture([{}, { runResult: 'running' }]) });
+    expect(useNotificationsStore().items.map((item) => [item.kind, item.read])).toEqual([
+      ['orchestrator-needs-input', true]
+    ]);
+
+    send({
+      type: 'orchestrator-upsert',
+      orchestrator: orchestratorFixture([{ runResult: 'done' }, { runResult: 'done' }], { runStatus: 'completed', unread: true })
+    });
+    expect(useNotificationsStore().unreadCount).toBe(1);
+
+    await useOrchestratorsStore().markRead('ws-1', 'orch-1');
+    expect(useNotificationsStore().unreadCount).toBe(0);
+    expect(useNotificationsStore().items).toHaveLength(2);
+  });
+
   it('notifies when an orchestrator step starts waiting for input', async () => {
     const send = await connect();
     send({ type: 'global-snapshot', sessions: [], orchestrators: [orchestratorFixture([{}, {}])] });

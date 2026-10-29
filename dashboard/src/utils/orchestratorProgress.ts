@@ -4,6 +4,25 @@ import { subtasksFromStoredJson } from '@/utils/orchestratorPayload';
 // types
 import type { Orchestrator, Session } from '@/@types/index';
 
+/** Bell target for a step's "needs input" item; read once that step stops waiting. */
+export function orchestratorInputTargetId(orchestratorId: string, stepIndex: number): string {
+  return `${orchestratorId}:input:${stepIndex}`;
+}
+
+/**
+ * Bell targets that count as read for this plan: the plan itself once its "Done"
+ * mark is gone, and every step that is not waiting for an answer.
+ */
+export function orchestratorReadTargets(orchestrator: Pick<Orchestrator, 'id' | 'unread' | 'runStatus' | 'subtasksJson'>): string[] {
+  const targets = orchestrator.unread ? [] : [orchestrator.id];
+  subtasksFromStoredJson(orchestrator.subtasksJson).forEach((task, index) => {
+    if (!(task.runResult === 'running' && task.waitingQuestion && orchestrator.runStatus === 'running')) {
+      targets.push(orchestratorInputTargetId(orchestrator.id, index));
+    }
+  });
+  return targets;
+}
+
 export interface OrchestratorProgress {
   total: number;
   /** Steps that finished well (done or skipped). */

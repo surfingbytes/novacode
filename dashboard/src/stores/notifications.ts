@@ -15,12 +15,14 @@ export interface AppNotification {
   title: string;
   body: string;
   href: string;
+  /** Session / orchestrator the item is about; read along with it (sidebar "Done" mark). */
+  targetId?: string;
   createdAt: string;
   read: boolean;
 }
 
 export type AppNotificationInput = Pick<AppNotification, 'kind' | 'title' | 'body' | 'href'> &
-  Partial<Pick<AppNotification, 'createdAt'>>;
+  Partial<Pick<AppNotification, 'createdAt' | 'targetId'>>;
 
 export const MAX_NOTIFICATIONS = 50;
 
@@ -46,6 +48,7 @@ export const useNotificationsStore = defineStore('notifications', () => {
       title: input.title,
       body: input.body,
       href: input.href,
+      ...(input.targetId && { targetId: input.targetId }),
       createdAt: input.createdAt ?? new Date().toISOString(),
       read: false
     };
@@ -55,6 +58,17 @@ export const useNotificationsStore = defineStore('notifications', () => {
 
   function markRead(id: string): void {
     items.value = items.value.map((item) => (item.id === id && !item.read ? { ...item, read: true } : item));
+  }
+
+  /** The session / orchestrator was read (its sidebar "Done" mark is gone): read its notifications too. */
+  function markReadForTargets(targetIds: Iterable<string>): void {
+    const ids = new Set(targetIds);
+    if (ids.size === 0 || !items.value.some((item) => !item.read && item.targetId && ids.has(item.targetId))) {
+      return;
+    }
+    items.value = items.value.map((item) =>
+      !item.read && item.targetId && ids.has(item.targetId) ? { ...item, read: true } : item
+    );
   }
 
   function markAllRead(): void {
@@ -79,6 +93,7 @@ export const useNotificationsStore = defineStore('notifications', () => {
     // methods
     push,
     markRead,
+    markReadForTargets,
     markAllRead,
     clear,
     reset

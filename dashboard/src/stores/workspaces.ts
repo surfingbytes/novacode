@@ -12,6 +12,7 @@ import { useOrchestratorsStore } from '@/stores/orchestrators';
 import { useSessionSpecsStore } from '@/stores/sessionSpecs';
 import { forgetLocalStateForId } from '@/lib/sessionLocalState';
 import { subtasksFromStoredJson } from '@/utils/orchestratorPayload';
+import { orchestratorInputTargetId } from '@/utils/orchestratorProgress';
 import { isViewingSession } from '@/utils/sessionUnread';
 
 // types
@@ -155,6 +156,8 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     }
     if (merged.unread && isViewingSession(merged.id)) {
       void markSessionRead(merged.id);
+    } else if (!merged.unread) {
+      useNotificationsStore().markReadForTargets([merged.id]);
     }
   }
 
@@ -175,6 +178,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
       return;
     }
     setSessionUnread(sessionId, false);
+    useNotificationsStore().markReadForTargets([sessionId]);
     try {
       await sessionsApi.markRead(sessionId);
     } catch {
@@ -221,8 +225,14 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
       kind: 'session-finished',
       title: session.name,
       body: workspaceName(session.workspaceId),
-      href: `/workspace/${session.workspaceId}/session/${session.id}`
+      href: `/workspace/${session.workspaceId}/session/${session.id}`,
+      targetId: session.id
     });
+  }
+
+  /** A list snapshot may carry reads done elsewhere (other device, while disconnected). */
+  function syncReadSessionsToNotifications(sessions: Session[]): void {
+    useNotificationsStore().markReadForTargets(sessions.filter((session) => !session.unread).map((session) => session.id));
   }
 
   /** Compare an `orchestrator-upsert` against the state before it was applied. */
@@ -234,11 +244,12 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     const title = next.name;
     const body = workspaceName(next.workspaceId);
     const href = `/workspace/${next.workspaceId}/orchestrator/${next.id}`;
+    const targetId = next.id;
     if (next.runStatus !== undefined && next.runStatus !== previous.runStatus) {
       if (next.runStatus === 'completed') {
-        notifications.push({ kind: 'orchestrator-finished', title, body, href });
+        notifications.push({ kind: 'orchestrator-finished', title, body, href, targetId });
       } else if (next.runStatus === 'failed') {
-        notifications.push({ kind: 'orchestrator-failed', title, body, href });
+        notifications.push({ kind: 'orchestrator-failed', title, body, href, targetId });
       }
     }
     if (next.subtasksJson === undefined || next.subtasksJson === previous.subtasksJson) {
@@ -251,7 +262,8 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
           kind: 'orchestrator-needs-input',
           title,
           body: truncateText(step.waitingQuestion, NOTIFICATION_QUESTION_MAX_LENGTH),
-          href
+          href,
+          targetId: orchestratorInputTargetId(next.id, index)
         });
       }
     });
@@ -279,6 +291,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
       const orchestratorsRequest = orchestratorApi.listAll().catch(() => null);
       const response = await withUnreachableRetry(() => sessionsApi.listAll());
       allSessions.value = response.data ?? [];
+      syncReadSessionsToNotifications(allSessions.value);
       const orchestratorsResponse = await orchestratorsRequest;
       if (orchestratorsResponse?.data) {
         useOrchestratorsStore().applySummaries(orchestratorsResponse.data);
@@ -316,6 +329,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
 
           if (messagePayload.type === 'global-snapshot') {
             allSessions.value = messagePayload.sessions ?? [];
+            syncReadSessionsToNotifications(allSessions.value);
             if (messagePayload.orchestrators) {
               useOrchestratorsStore().applySummaries(messagePayload.orchestrators);
             }

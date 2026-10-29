@@ -51,6 +51,21 @@ describe('notifications store', () => {
     expect(store.items).toHaveLength(3);
   });
 
+  it('marks items read by target, leaving other and already-read items alone', () => {
+    const store = useNotificationsStore();
+    store.push({ kind: 'session-finished', title: 'a', body: '', href: '/x', targetId: 'sess-1' });
+    store.push({ kind: 'session-finished', title: 'b', body: '', href: '/y', targetId: 'sess-2' });
+    store.push({ kind: 'automation-failed', title: 'c', body: '', href: '/automations' });
+    const before = store.items;
+
+    store.markReadForTargets(['nope']);
+    expect(store.items).toBe(before);
+
+    store.markReadForTargets(['sess-1', 'sess-2']);
+    expect(store.items.map((item) => item.read)).toEqual([false, true, true]);
+    expect(store.unreadCount).toBe(1);
+  });
+
   it('clear and reset empty the list', () => {
     pushSample('first');
     const store = useNotificationsStore();
