@@ -31,6 +31,7 @@ defineProps<{
   headerCiState: CiBadgeState;
   headerCiTitle: string;
   sessionCostLabel: string | null;
+  sessionCostTitle: string | null;
   pooledRemainingLabel: string | null;
   rulesSubtitleLabel: string | null;
   rulesSubtitleTitle: string;
@@ -113,7 +114,7 @@ const emit = defineEmits<{
       </template>
       <template v-if="sessionCostLabel">
         <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>
-        <span class="shrink-0 tabular-nums" :title="sessionCostLabel">{{ sessionCostLabel }}</span>
+        <span class="shrink-0 tabular-nums" :title="sessionCostTitle ?? sessionCostLabel">{{ sessionCostLabel }}</span>
       </template>
       <template v-else-if="pooledRemainingLabel">
         <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>

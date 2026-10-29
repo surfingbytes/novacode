@@ -18,8 +18,13 @@ export function resolveSessionCostAmount(opts: {
   return live;
 }
 
-export function formatSessionCostLabel(amount: number, currency?: string | null): string {
-  const formatted = `$${amount.toFixed(4)}`;
+export function formatSessionCostLabel(
+  amount: number,
+  currency?: string | null,
+  decimals = 2
+): string {
+  const bTiny = decimals === 2 && amount > 0 && amount < 0.01;
+  const formatted = bTiny ? '<$0.01' : `$${amount.toFixed(decimals)}`;
   if (currency && currency !== 'USD') {
     return `${formatted} ${currency}`;
   }

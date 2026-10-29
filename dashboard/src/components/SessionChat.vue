@@ -373,7 +373,15 @@ function onComposerSend(payload: { text: string; imagePaths: string[] }): void {
 }
 
 // -------------------------------------------------- Computed --------------------------------------------------
-const { usageTurns, sessionCostLabel, pooledRemainingLabel, fetchUsageTurns, loadPooledRemaining, resetUsage } =
+const {
+  usageTurns,
+  sessionCostLabel,
+  sessionCostTitle,
+  pooledRemainingLabel,
+  fetchUsageTurns,
+  loadPooledRemaining,
+  resetUsage
+} =
   useSessionUsage({
     workspaceId: () => props.workspaceId,
     sessionId: () => props.sessionId,
@@ -618,6 +626,7 @@ onUnmounted(() => {
       :header-ci-state="headerCiState"
       :header-ci-title="headerCiTitle"
       :session-cost-label="sessionCostLabel"
+      :session-cost-title="sessionCostTitle"
       :pooled-remaining-label="pooledRemainingLabel"
       :rules-subtitle-label="rulesSubtitleLabel"
       :rules-subtitle-title="rulesSubtitleTitle"

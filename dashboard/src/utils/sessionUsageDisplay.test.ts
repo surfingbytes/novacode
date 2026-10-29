@@ -32,12 +32,21 @@ describe('resolveSessionCostAmount', () => {
 });
 
 describe('formatSessionCostLabel', () => {
-  it('formats USD with four decimals', () => {
-    expect(formatSessionCostLabel(0.0123)).toBe('$0.0123');
-    expect(formatSessionCostLabel(1.2, 'USD')).toBe('$1.2000');
+  it('formats USD with two decimals', () => {
+    expect(formatSessionCostLabel(0.0123)).toBe('$0.01');
+    expect(formatSessionCostLabel(1.2, 'USD')).toBe('$1.20');
+  });
+
+  it('shows sub-cent amounts as <$0.01', () => {
+    expect(formatSessionCostLabel(0.0031)).toBe('<$0.01');
+    expect(formatSessionCostLabel(0)).toBe('$0.00');
+  });
+
+  it('supports full precision for tooltips', () => {
+    expect(formatSessionCostLabel(0.0031, null, 4)).toBe('$0.0031');
   });
 
   it('appends a non-USD currency', () => {
-    expect(formatSessionCostLabel(0.5, 'EUR')).toBe('$0.5000 EUR');
+    expect(formatSessionCostLabel(0.5, 'EUR')).toBe('$0.50 EUR');
   });
 });

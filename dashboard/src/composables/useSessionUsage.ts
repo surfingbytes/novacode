@@ -35,20 +35,27 @@ export function useSessionUsage(options: UseSessionUsageOptions) {
   const pooledRemainingCents = ref<number | null>(null);
 
   // -------------------------------------------------- Computed --------------------------------------------------
-  const sessionCostLabel = computed(() => {
-    const amount = resolveSessionCostAmount({
+  const sessionCostAmount = computed(() =>
+    resolveSessionCostAmount({
       persistedAmount: usageSummary.value?.costAmount,
       liveAmount: streamingUsage.value?.cost?.amount,
       bStreaming: bIsStreaming.value
-    });
-    if (amount == null) {
-      return null;
-    }
-    return formatSessionCostLabel(
-      amount,
-      streamingUsage.value?.cost?.currency ?? usageSummary.value?.costCurrency
-    );
-  });
+    })
+  );
+  const sessionCostCurrency = computed(
+    () => streamingUsage.value?.cost?.currency ?? usageSummary.value?.costCurrency
+  );
+  const sessionCostLabel = computed(() =>
+    sessionCostAmount.value == null
+      ? null
+      : formatSessionCostLabel(sessionCostAmount.value, sessionCostCurrency.value)
+  );
+  /** Full-precision cost for the hover tooltip. */
+  const sessionCostTitle = computed(() =>
+    sessionCostAmount.value == null
+      ? null
+      : formatSessionCostLabel(sessionCostAmount.value, sessionCostCurrency.value, 4)
+  );
   /** Account remaining — used when ACP does not report per-session cost (typical for Cursor). */
   const pooledRemainingLabel = computed(() => {
     if (sessionCostLabel.value != null) return null;
@@ -103,6 +110,7 @@ export function useSessionUsage(options: UseSessionUsageOptions) {
     usageTurns,
     usageSummary,
     sessionCostLabel,
+    sessionCostTitle,
     pooledRemainingLabel,
     // methods
     fetchUsageTurns,
