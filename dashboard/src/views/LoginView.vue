@@ -204,7 +204,7 @@ onMounted(async (): Promise<void> => {
           </p>
 
           <div v-else class="space-y-4">
-            <form v-if="bShowPasswordForm" @submit.prevent="submit" class="space-y-4">
+            <form v-if="bShowPasswordForm" class="space-y-4" @submit.prevent="submit">
               <div class="field" :class="{ 'has-error': error }">
                 <label class="block text-sm font-medium text-text-primary mb-1.5">Username</label>
                 <div class="input-wrap is-error">

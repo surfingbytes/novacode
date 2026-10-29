@@ -1,5 +1,6 @@
-import { spawnSync } from 'node:child_process';
+import { execCli } from './childEnv';
 import { config } from './config';
+import { logger } from './logger';
 
 const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
 
@@ -9,6 +10,7 @@ export interface OpenCodeModelOption {
 }
 
 let cache: { models: OpenCodeModelOption[]; fetchedAt: number } | null = null;
+let inFlight: Promise<OpenCodeModelOption[]> | null = null;
 
 function parseModelsOutput(stdout: string): OpenCodeModelOption[] {
   return stdout
@@ -22,33 +24,27 @@ export function clearOpenCodeModelsCache(): void {
   cache = null;
 }
 
-export function getOpenCodeModels(): { models: OpenCodeModelOption[]; fromCache: boolean } {
+export async function getOpenCodeModels(): Promise<{ models: OpenCodeModelOption[]; fromCache: boolean }> {
   const now = Date.now();
   if (cache && now - cache.fetchedAt < CACHE_TTL_MS) {
     return { models: cache.models, fromCache: true };
   }
-
-  const env = { ...process.env, ...config.agentEnv() };
-  console.log('[opencode-models] OPENCODE_HOME:', env['OPENCODE_HOME']);
-  console.log('[opencode-models] HOME:', env['HOME']);
-
-  const result = spawnSync(config.openCodeCommand, ['models'], {
-    encoding: 'utf8',
-    timeout: 15_000,
-    cwd: config.configDir,
-    env,
-    stdio: ['ignore', 'pipe', 'pipe'],
+  inFlight ??= fetchOpenCodeModels().finally(() => {
+    inFlight = null;
   });
+  return { models: await inFlight, fromCache: false };
+}
 
-  console.log('[opencode-models] status:', result.status, 'signal:', result.signal);
-  console.log('[opencode-models] stdout:', result.stdout?.slice(0, 500));
-  console.log('[opencode-models] stderr:', result.stderr?.slice(0, 500));
-  if (result.error) console.log('[opencode-models] error:', result.error.message);
+async function fetchOpenCodeModels(): Promise<OpenCodeModelOption[]> {
+  const result = await execCli(config.openCodeCommand, ['models'], { timeoutMs: 15_000 });
+  if (result.error) {
+    logger.warn({ error: result.error.message, stderr: result.stderr.slice(0, 500) }, 'opencode models listing failed');
+  }
 
-  const raw = (result.stdout ?? '').trim();
+  const raw = result.stdout.trim();
   const models = result.status === 0 && raw ? parseModelsOutput(raw) : [];
   const fallback: OpenCodeModelOption[] = [{ id: 'opencode/big-pickle', label: 'opencode/big-pickle' }];
   const toCache = models.length > 0 ? models : fallback;
-  cache = { models: toCache, fetchedAt: now };
-  return { models: toCache, fromCache: false };
+  cache = { models: toCache, fetchedAt: Date.now() };
+  return toCache;
 }

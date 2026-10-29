@@ -63,12 +63,12 @@ onMounted(() => {
       <hr class="w-full" />
       <div class="flex items-center gap-2">
         <input
+          v-model="customColor"
           type="text"
           maxlength="7"
-          v-model="customColor"
-          @input="handleCustomColorInput"
           placeholder="#6366f1"
           class="border border-border rounded-lg p-1 text-sm shrink-0 grow-0 w-20!"
+          @input="handleCustomColorInput"
         />
         <button
           class="shrink-0 w-9 h-9 border border-border rounded-full flex items-center justify-center"

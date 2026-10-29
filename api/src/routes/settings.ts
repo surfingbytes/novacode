@@ -31,18 +31,18 @@ import { getAgentModels } from '../classes/agentModels';
 import { getAgentModes } from '../classes/agentModes';
 import { getAgentConfigOptions } from '../classes/agentConfigOptions';
 import { getAgentOptions } from '../classes/agentOptions';
+import { isAgentType } from '../classes/agents';
 import {
   deleteOpenCodeProvider,
   readOpenCodeProviders,
   saveOpenCodeProvider
 } from '../classes/openCodeProviders';
 import { readSshKeyMaterial } from '../classes/sshKey';
-import { checkCursorAuth, isAgentAuthenticated } from './agentAuth';
+import { checkCursorAuth, isAgentAuthenticated } from '../classes/agentAuthStatus';
 
 // types
 import type { FastifyInstance } from 'fastify';
 import type { McpClientServerConfig } from '../classes/config';
-import type { AgentType } from '../@types/index';
 import type { SaveOpenCodeProviderInput } from '../classes/openCodeProviders';
 
 type AppSettingsUser = {
@@ -60,10 +60,6 @@ type AppSettingsUser = {
 /** Legacy dashboard theme id `rust` was replaced by OLED. */
 function normalizeThemeId(theme: string): string {
   return theme === 'rust' ? 'oled' : theme;
-}
-
-function isAgentType(value: string): value is AgentType {
-  return value === 'cursor-agent' || value === 'claude' || value === 'mistral-vibe' || value === 'open-code' || value === 'codex';
 }
 
 type AppSettings = {
@@ -243,7 +239,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       }
     },
     async () => {
-      return getCursorModels();
+      return await getCursorModels();
     }
   );
 
@@ -263,7 +259,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request) => {
       if ((request.query as Record<string, string>)['bust']) clearOpenCodeModelsCache();
-      return getOpenCodeModels();
+      return await getOpenCodeModels();
     }
   );
 
@@ -328,15 +324,11 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       const { providerId } = request.params;
       const body = request.body as SaveOpenCodeProviderInput;
       if (body.id !== providerId) {
-        return reply.status(400).send({ error: 'Provider id cannot be changed while editing.' });
+        return reply.code(400).send({ error: 'Provider id cannot be changed while editing.' });
       }
-      try {
-        const provider = await saveOpenCodeProvider(config.configDir, body);
-        clearOpenCodeModelsCache();
-        return provider;
-      } catch (err) {
-        return reply.status(400).send({ error: err instanceof Error ? err.message : 'Invalid provider config' });
-      }
+      const provider = await saveOpenCodeProvider(config.configDir, body);
+      clearOpenCodeModelsCache();
+      return provider;
     }
   );
 
@@ -354,13 +346,9 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request, reply) => {
       const { providerId } = request.params;
-      try {
-        deleteOpenCodeProvider(config.configDir, providerId);
-        clearOpenCodeModelsCache();
-        return reply.code(204).send(null);
-      } catch (err) {
-        return reply.status(400).send({ error: err instanceof Error ? err.message : 'Invalid provider id' });
-      }
+      deleteOpenCodeProvider(config.configDir, providerId);
+      clearOpenCodeModelsCache();
+      return reply.code(204).send(null);
     }
   );
 
@@ -383,7 +371,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { agentType } = request.params;
       if (!isAgentType(agentType)) {
-        return reply.status(400).send({ error: 'Unsupported agent type' });
+        return reply.code(400).send({ error: 'Unsupported agent type' });
       }
       return getAgentModels(agentType);
     }
@@ -415,7 +403,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { agentType } = request.params;
       if (!isAgentType(agentType)) {
-        return reply.status(400).send({ error: 'Unsupported agent type' });
+        return reply.code(400).send({ error: 'Unsupported agent type' });
       }
       return getAgentModes(agentType);
     }
@@ -478,7 +466,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { agentType } = request.params;
       if (!isAgentType(agentType)) {
-        return reply.status(400).send({ error: 'Unsupported agent type' });
+        return reply.code(400).send({ error: 'Unsupported agent type' });
       }
       const user = agentType === 'claude' ? await db.getUserById(request.jwtUser!.id) : null;
       return getAgentOptions(agentType, { claudeToken: user?.claudeToken ?? null });
@@ -504,7 +492,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { agentType } = request.params;
       if (!isAgentType(agentType)) {
-        return reply.status(400).send({ error: 'Unsupported agent type' });
+        return reply.code(400).send({ error: 'Unsupported agent type' });
       }
       return getAgentConfigOptions(agentType);
     }
@@ -635,15 +623,23 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     async (request) => {
       const user = await db.getUserById(request.jwtUser!.id);
       const claudeToken = user?.claudeToken;
-      const cursorAuth = checkCursorAuth();
+      const [cursorAuth, cursorAvailable, claudeAvailable, mistralVibeAvailable, openCodeAvailable, codexAvailable] =
+        await Promise.all([
+          checkCursorAuth(),
+          isAgentAuthenticated('cursor-agent', claudeToken),
+          isAgentAuthenticated('claude', claudeToken),
+          isAgentAuthenticated('mistral-vibe', claudeToken),
+          isAgentAuthenticated('open-code', claudeToken),
+          isAgentAuthenticated('codex', claudeToken)
+        ]);
       return {
-        cursorAvailable: isAgentAuthenticated('cursor-agent', claudeToken),
+        cursorAvailable,
         cursorStatus: cursorAuth.status,
         ...(cursorAuth.message ? { cursorStatusMessage: cursorAuth.message } : {}),
-        claudeAvailable: isAgentAuthenticated('claude', claudeToken),
-        mistralVibeAvailable: isAgentAuthenticated('mistral-vibe', claudeToken),
-        openCodeAvailable: isAgentAuthenticated('open-code', claudeToken),
-        codexAvailable: isAgentAuthenticated('codex', claudeToken)
+        claudeAvailable,
+        mistralVibeAvailable,
+        openCodeAvailable,
+        codexAvailable
       };
     }
   );

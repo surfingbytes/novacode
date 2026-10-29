@@ -9,11 +9,7 @@ import { roleTemplateDb } from './db/roleTemplates';
 import { automationDb } from './db/automations';
 import { searchDb } from './db/search';
 
-export { FavoriteLimitError, normalizeTagStringList, SEARCH_LIMIT } from './db/shared';
-
-// types
-export type { SessionWithCategory, SessionWithCategoryAndMessages, OrchestratorWithCategory } from './db/shared';
-export type { SearchHit } from './db/search';
+export { FavoriteLimitError, normalizeTagStringList } from './db/shared';
 
 // --------------------------------------------- Facade ---------------------------------------------
 

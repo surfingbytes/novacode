@@ -25,7 +25,7 @@ import type {
 
 const MODE_SENTINEL = 'default';
 
-export function normalizeStoredMode(mode: string | undefined): string {
+function normalizeStoredMode(mode: string | undefined): string {
   // `auto` is the legacy mode sentinel (renamed to `default`); map it so old sessions don't
   // treat it as a non-existent concrete mode.
   if (!mode || mode === 'auto') return MODE_SENTINEL;
@@ -431,5 +431,3 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
     resetAgentOptions
   };
 }
-
-export type UseAgentOptions = ReturnType<typeof useAgentOptions>;

@@ -9,19 +9,15 @@ import {
 } from 'lucide-vue-next';
 
 // classes
-import {
-  apiErrorMessage,
-  forgeApi,
-  gitApi,
-  type GitBranch,
-  type GitCommit,
-  type GitFile,
-  type GitRepoStatus
-} from '@/classes/api';
+import { apiErrorMessage, forgeApi, gitApi } from '@/classes/api';
+
+// types
+import type { GitBranch, GitCommit, GitFile, GitRepoStatus } from '@/@types/index';
 
 // composables
 import { usePaneLayout } from '@/composables/usePaneLayout';
 import { useCiStatus } from '@/composables/useCiStatus';
+import { usePolling } from '@/composables/usePolling';
 
 // components
 import BaseModal from '@/components/BaseModal.vue';
@@ -117,7 +113,6 @@ const commitPatchError = ref<string | null>(null);
 
 const bFixingBuild = ref<boolean>(false);
 
-let pollTimer: ReturnType<typeof setInterval> | null = null;
 let ciAfterPushTimer: ReturnType<typeof setTimeout> | null = null;
 let commitResultTimer: ReturnType<typeof setTimeout> | null = null;
 let pushResultTimer: ReturnType<typeof setTimeout> | null = null;
@@ -401,8 +396,11 @@ const loadBranches = async (repo: string): Promise<void> => {
   }
 };
 
+let bStatusFailed = false;
+
 const refresh = async (): Promise<void> => {
   bIsLoading.value = true;
+  bStatusFailed = false;
   try {
     const response = await gitApi.status(props.workspaceId);
     files.value = response.data.files;
@@ -436,6 +434,7 @@ const refresh = async (): Promise<void> => {
       await loadHistory();
     }
   } catch (e: unknown) {
+    bStatusFailed = true;
     const message = gitErrorMessage(e, 'Failed to get git status');
     // Keep the last-known file list visible — a failed poll (e.g. while a long
     // commit-message request holds browser connections) must not wipe the pane.
@@ -449,6 +448,17 @@ const refresh = async (): Promise<void> => {
     bIsLoading.value = false;
   }
 };
+
+// Background status poll: never overlaps a slow `git status`, pauses while the tab is hidden and
+// backs off while the API keeps failing.
+const statusPoll = usePolling(
+  async (): Promise<void> => {
+    await refresh();
+    if (bStatusFailed) throw new Error('git status failed');
+  },
+  5000,
+  { immediate: true, backoffOnError: true }
+);
 
 const openFile = async (file: GitFile): Promise<void> => {
   selectedCommit.value = null;
@@ -563,10 +573,7 @@ const generateCommitMessage = async (targetRepo: string): Promise<void> => {
   commitResult.value = null;
   // Pause status polling so hung/slow AI requests do not starve the browser's
   // per-host connection pool and make status look like a Network Error.
-  if (pollTimer) {
-    clearInterval(pollTimer);
-    pollTimer = null;
-  }
+  statusPoll.stop();
   try {
     const response = await gitApi.generateCommitMessage(
       props.workspaceId,
@@ -594,9 +601,7 @@ const generateCommitMessage = async (targetRepo: string): Promise<void> => {
     }, 5000);
   } finally {
     bGeneratingCommitMessage.value = false;
-    if (props.active && !pollTimer) {
-      pollTimer = setInterval(refresh, 5000);
-    }
+    if (props.active) statusPoll.start();
   }
 };
 
@@ -729,15 +734,15 @@ const openGitActions = (e?: MouseEvent): void => {
 
 const onGitActionPick = (key: string): void => {
   if (key === 'fetch') {
-    fetchActiveRepo();
+    void fetchActiveRepo();
     return;
   }
   if (key === 'pull') {
-    pullActiveRepo();
+    void pullActiveRepo();
     return;
   }
   if (key === 'switch') {
-    openSwitchBranchDialog();
+    void openSwitchBranchDialog();
     return;
   }
   if (key === 'create') {
@@ -877,7 +882,7 @@ watch(
     const list = fileList as GitFile[];
     if (!p || !list?.length || selectedFile.value) return;
     const match = list.find((f) => f.file === p);
-    if (match) openFile(match);
+    if (match) void openFile(match);
   },
   { flush: 'post' }
 );
@@ -900,7 +905,7 @@ watch(
 
 watch(selectedGitRepo, (repo) => {
   if (!props.active || (!repo && repos.value.length === 0)) return;
-  loadBranches(repo);
+  void loadBranches(repo);
   if (listPane.value === 'history') {
     void loadHistory();
   }
@@ -909,27 +914,16 @@ watch(selectedGitRepo, (repo) => {
 watch(
   () => props.active,
   (active: boolean) => {
-    if (active) {
-      refresh();
-      pollTimer = setInterval(refresh, 5000);
-    } else {
-      if (pollTimer) {
-        clearInterval(pollTimer);
-        pollTimer = null;
-      }
-    }
+    if (active) statusPoll.start();
+    else statusPoll.stop();
   }
 );
 
 onMounted((): void => {
-  if (props.active) {
-    refresh();
-    pollTimer = setInterval(refresh, 5000);
-  }
+  if (props.active) statusPoll.start();
 });
 
 onUnmounted((): void => {
-  if (pollTimer) clearInterval(pollTimer);
   if (commitResultTimer) clearTimeout(commitResultTimer);
   if (pushResultTimer) clearTimeout(pushResultTimer);
   if (gitActionResultTimer) clearTimeout(gitActionResultTimer);

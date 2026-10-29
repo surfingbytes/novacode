@@ -80,5 +80,3 @@ export function useChatAttachments(options: UseChatAttachmentsOptions) {
     onUploadFiles
   };
 }
-
-export type UseChatAttachments = ReturnType<typeof useChatAttachments>;

@@ -3,7 +3,7 @@ import { getPlanDocumentsSource } from './planDocumentSources';
 
 export const LINKED_PLAN_CONTEXT_CONFIG_KEY = '__novaLinkedPlanContext';
 
-export type LinkedPlanContextMode = 'target-only' | 'full';
+type LinkedPlanContextMode = 'target-only' | 'full';
 
 export interface LinkedPlanContext {
   sourceSessionId: string;

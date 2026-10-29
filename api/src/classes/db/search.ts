@@ -5,7 +5,7 @@ import { SEARCH_LIMIT, ilikeContains } from './shared';
 
 // --------------------------------------------- Search ---------------------------------------------
 
-export type SearchHit = {
+type SearchHit = {
   id: string;
   name: string;
   type: 'workspace' | 'session' | 'orchestrator' | 'role-template' | 'automation';
@@ -16,7 +16,7 @@ export type SearchHit = {
 };
 
 /** Fill `search_text` for messages persisted before the column existed. Returns rows updated. */
-export async function backfillSessionMessageSearchText(): Promise<number> {
+async function backfillSessionMessageSearchText(): Promise<number> {
   // events_json can be many MB per row (tool output), so keep batches small
   const BATCH = 25;
   let updated = 0;
@@ -48,7 +48,7 @@ export async function backfillSessionMessageSearchText(): Promise<number> {
   }
 }
 
-export async function searchCatalog(query: string): Promise<{
+async function searchCatalog(query: string): Promise<{
   workspaces: SearchHit[];
   sessions: SearchHit[];
   orchestrators: SearchHit[];

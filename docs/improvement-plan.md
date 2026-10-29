@@ -21,7 +21,6 @@ Shipped work has been removed from this list. Items below are still open.
 - Keyboard shortcuts for new orchestrator and refresh (Ctrl+K search and Ctrl/Cmd+N new session already exist).
 - Accessibility: remaining `aria-label`s, `prefers-reduced-motion` (modal focus trap is already in BaseModal).
 - Custom theme colors.
-- Global toast on 403/5xx (401 logout is already handled).
 
 ## Testing and docs
 

@@ -1,4 +1,4 @@
-import type { GitFile } from '@/classes/api';
+import type { GitFile } from '@/@types/index';
 
 export function gitFileKey(file: GitFile): string {
   return `${file.repo}::${file.file}`;

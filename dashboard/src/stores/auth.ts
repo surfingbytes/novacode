@@ -6,6 +6,13 @@ import { ref } from 'vue';
 // classes
 import { authApi } from '@/classes/api';
 import { safeGetItem, safeRemoveItem, safeSetItem } from '@/lib/safeLocalStorage';
+import { clearAllUserLocalState } from '@/lib/sessionLocalState';
+
+// stores
+import { useOrchestratorsStore } from '@/stores/orchestrators';
+import { useSessionSpecsStore } from '@/stores/sessionSpecs';
+import { useToastStore } from '@/stores/toasts';
+import { useWorkspacesStore } from '@/stores/workspaces';
 
 const SIGNED_IN_KEY = 'nova:signedIn';
 const LEGACY_TOKEN_KEY = 'token';
@@ -81,6 +88,13 @@ export const useAuthStore = defineStore('auth', () => {
     bValidated.value = false;
     safeRemoveItem(SIGNED_IN_KEY);
     safeRemoveItem(LEGACY_TOKEN_KEY);
+    // Drop the previous user's data and sockets so the next login starts clean
+    // and the sessions socket reconnects with the new cookie.
+    useWorkspacesStore().reset();
+    useOrchestratorsStore().reset();
+    useSessionSpecsStore().reset();
+    useToastStore().reset();
+    clearAllUserLocalState();
   };
 
   // -------------------------------------------------- Export --------------------------------------------------

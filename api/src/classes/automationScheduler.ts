@@ -1,20 +1,17 @@
 // node_modules
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { readdir } from 'node:fs/promises';
 
 // classes
 import { db, normalizeTagStringList } from './database';
-import { config } from './config';
+import { runGit } from './runGit';
 import { createSessionWithAgent } from './sessionService';
 import { dispatchPromptAndWait } from './chatEngine';
 import { sendPushToAll } from './push';
 import { resolveWorkspaceAbsolutePath } from './workspacePaths';
+import { logger } from './logger';
 
 // types
 import type { AgentType, ChatMessage } from '../@types/index';
-
-const execFileAsync = promisify(execFile);
 
 // --------------------------------------------- Helpers ---------------------------------------------
 
@@ -62,10 +59,7 @@ async function getGitStatus(
 
   const readPorcelain = async (cwd: string, prefix: string): Promise<void> => {
     try {
-      const { stdout } = await execFileAsync('git', ['status', '--porcelain', '-u'], {
-        cwd,
-        env: { ...process.env, HOME: config.configDir } as Record<string, string>
-      });
+      const { stdout } = await runGit(['status', '--porcelain', '-u'], { cwd });
       for (const line of stdout.split('\n')) {
         if (!line.trim()) {
           continue;
@@ -143,7 +137,7 @@ async function notifyAutomationFinished(opts: {
         : '/automations'
     });
   } catch (err) {
-    console.error('[automations] Failed to send push:', err);
+    logger.error({ err }, 'automations: failed to send push');
   }
 }
 
@@ -161,9 +155,7 @@ async function runAutomation(automationId: string): Promise<void> {
 
   const workspace = await db.getWorkspace(automation.workspaceId);
   if (!workspace) {
-    console.error(
-      `[automations] workspace ${automation.workspaceId} not found for automation ${automationId}`
-    );
+    logger.error({ workspaceId: automation.workspaceId, automationId }, 'automations: workspace not found');
     runningAutomationIds.delete(automationId);
     return;
   }
@@ -261,7 +253,7 @@ async function runAutomation(automationId: string): Promise<void> {
     await db.pruneAutomationRuns(automationId, 50);
   } catch (err) {
     const error = err instanceof Error ? err.message : 'Unknown error';
-    console.error(`[automations] run ${run.id} failed:`, error);
+    logger.error({ err, runId: run.id }, 'automations: run failed');
     await db.updateAutomationRun(run.id, {
       status: 'failed',
       finishedAt: new Date().toISOString(),
@@ -291,7 +283,7 @@ export function startAutomationScheduler(): void {
   }
 
   void db.failStaleAutomationRuns().catch((err) => {
-    console.error('[automations] failed to clear stale runs:', err);
+    logger.error({ err }, 'automations: failed to clear stale runs');
   });
 
   const tick = async (): Promise<void> => {
@@ -300,11 +292,11 @@ export function startAutomationScheduler(): void {
       for (const automation of due) {
         // fire and forget; errors are caught inside runAutomation
         runAutomation(automation.id).catch((err) => {
-          console.error(`[automations] unhandled error for ${automation.id}:`, err);
+          logger.error({ err, automationId: automation.id }, 'automations: unhandled error');
         });
       }
     } catch (err) {
-      console.error('[automations] scheduler tick error:', err);
+      logger.error({ err }, 'automations: scheduler tick error');
     }
   };
 

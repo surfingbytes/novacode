@@ -19,8 +19,6 @@ import {
 // types
 import type { UserModel } from '../generated/client/models';
 
-export { extractWsToken };
-
 interface JwtPayload {
   username: string;
   id: string;
@@ -203,7 +201,7 @@ export async function changeUsername(
   return updated;
 }
 
-export function extractBearerToken(request: FastifyRequest): string | null {
+function extractBearerToken(request: FastifyRequest): string | null {
   const header = request.headers['authorization'];
   if (!header || !header.startsWith('Bearer ')) {
     return null;

@@ -86,12 +86,12 @@ const enterDir = (entry: { path: string | null }): void => {
     return;
   }
 
-  load(entry.path);
+  void load(entry.path);
 };
 
 const goUp = (): void => {
   const p = currentPath.value.replace(/\/?[^/]+\/?$/, '') || '/';
-  load(p);
+  void load(p);
 };
 
 const selectCurrent = (): void => {
@@ -157,7 +157,7 @@ watch(
         resolvedBrowseRoot.value = rootHint.trim();
       }
       const start = typeof initial === 'string' && initial.trim() ? initial.trim() : '';
-      load(start === '.' ? '/' : start);
+      void load(start === '.' ? '/' : start);
     }
   }
 );
@@ -223,12 +223,12 @@ watch(
                   <div class="label">New folder</div>
                   <div class="input-wrap flex-wrap lg:flex-nowrap">
                     <input
-                      type="text"
+                      ref="newFolderInputRef"
                       v-model="newFolderName"
+                      type="text"
                       placeholder="Folder name"
                       @keydown.enter="createFolder"
                       @keydown.escape="cancelNewFolder"
-                      ref="newFolderInputRef"
                     />
                     <button class="button is-primary flex-1 lg:flex-none" @click="createFolder">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>

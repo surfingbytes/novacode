@@ -5,39 +5,25 @@ import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { readdir, mkdir } from 'node:fs/promises';
 import { resolve, normalize } from 'node:path';
 import { existsSync } from 'node:fs';
+import {
+  CreateWorkspaceBodySchema,
+  UpdateWorkspaceBodySchema,
+  WorkspaceBrowseResponseSchema,
+  WorkspaceListResponseSchema,
+  WorkspaceMkdirResponseSchema,
+  WorkspaceSchema,
+  WorkspaceUsageSummarySchema
+} from '@novacode/shared';
 
 // classes
 import { jwtPreHandler } from '../classes/auth';
 import { db, FavoriteLimitError } from '../classes/database';
+import { disposeWorkspace } from '../classes/dispose';
 import { config } from '../classes/config';
 import { migrateCachesForWorkspacePathChange } from '../classes/workspacePathMigration';
 import { normalizeWorkspaceRelativePath } from '../classes/workspacePaths';
 import { getForgeConnection, normalizeForgeRepoInput } from '../classes/forge';
-
-const WorkspaceSchema = Type.Object({
-  id: Type.String(),
-  name: Type.String(),
-  path: Type.String(),
-  group: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-  createdAt: Type.String(),
-  gitUserName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-  gitUserEmail: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-  color: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-  sortOrder: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
-  defaultAgentType: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-  tags: Type.Optional(Type.Union([Type.Array(Type.String()), Type.Null()])),
-  archived: Type.Boolean(),
-  isFavorite: Type.Boolean(),
-  favoriteOrder: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
-  forgeConnectionId: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-  forgeRepo: Type.Optional(Type.Union([Type.String(), Type.Null()]))
-});
-
-const BrowseEntrySchema = Type.Object({
-  name: Type.String(),
-  path: Type.String(),
-  isDirectory: Type.Boolean()
-});
+import { BadRequestError, fsHttpError } from '../classes/httpErrors';
 
 const rootPath = resolve(config.workspaceBrowseRoot);
 const rootNorm = normalize(rootPath).replace(/\\/g, '/').replace(/\/?$/, '/');
@@ -66,7 +52,7 @@ function isPathUnderRoot(path: string): boolean {
 function validateAndNormalizeWorkspacePath(path: string): string {
   const trimmed = path.trim();
   if (!trimmed) {
-    throw new Error('Workspace path is required');
+    throw new BadRequestError('Workspace path is required');
   }
   const pathRelativeToRoot = normalizeWorkspaceRelativePath(trimmed);
   const resolved = resolve(rootPath, pathRelativeToRoot);
@@ -75,7 +61,7 @@ function validateAndNormalizeWorkspacePath(path: string): string {
   const isUnder =
     resolvedNorm === rootNormNoTrailing || resolvedNorm.startsWith(rootNormNoTrailing + '/');
   if (!isUnder) {
-    throw new Error('Workspace path must be inside the allowed root');
+    throw new BadRequestError('Workspace path must be inside the allowed root');
   }
   return pathRelativeToRoot;
 }
@@ -117,7 +103,7 @@ function normalizeForgeOverride(
 ): { forgeConnectionId: string | null; forgeRepo: string | null } {
   const id = connectionId?.trim() || null;
   const connection = id ? getForgeConnection(config.configDir, id) : null;
-  if (id && !connection) throw new Error('Unknown forge connection');
+  if (id && !connection) throw new BadRequestError('Unknown forge connection');
   return { forgeConnectionId: id, forgeRepo: normalizeForgeRepoInput(repo, connection?.provider ?? null) };
 }
 
@@ -132,11 +118,7 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
       schema: {
         querystring: Type.Object({ path: Type.Optional(Type.String()) }),
         response: {
-          200: Type.Object({
-            path: Type.String(),
-            root: Type.String(),
-            entries: Type.Array(BrowseEntrySchema)
-          }),
+          200: WorkspaceBrowseResponseSchema,
           400: Type.Object({ error: Type.String() })
         }
       }
@@ -169,8 +151,7 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
           });
         return { path: safePath, root: rootPath, entries: dirs };
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to list directory';
-        return reply.code(400).send({ error: message });
+        throw fsHttpError(err);
       }
     }
   );
@@ -186,7 +167,7 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
           name: Type.String({ minLength: 1 })
         }),
         response: {
-          201: Type.Object({ path: Type.String() }),
+          201: WorkspaceMkdirResponseSchema,
           400: Type.Object({ error: Type.String() })
         }
       }
@@ -211,8 +192,7 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
         await mkdir(newDir, { recursive: false });
         return reply.code(201).send({ path: newDir });
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to create folder';
-        return reply.code(400).send({ error: message });
+        throw fsHttpError(err);
       }
     }
   );
@@ -224,7 +204,7 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
       preHandler: jwtPreHandler,
       schema: {
         querystring: Type.Object({ includeArchived: Type.Optional(Type.String()) }),
-        response: { 200: Type.Array(WorkspaceSchema) }
+        response: { 200: WorkspaceListResponseSchema }
       }
     },
     async (request) => {
@@ -243,13 +223,7 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
       schema: {
         params: Type.Object({ workspaceId: Type.String() }),
         response: {
-          200: Type.Object({
-            turnCount: Type.Number(),
-            used: Type.Number(),
-            size: Type.Number(),
-            costAmount: Type.Union([Type.Number(), Type.Null()]),
-            costCurrency: Type.Union([Type.String(), Type.Null()])
-          }),
+          200: WorkspaceUsageSummarySchema,
           404: Type.Object({ error: Type.String() })
         }
       }
@@ -270,18 +244,7 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
     {
       preHandler: jwtPreHandler,
       schema: {
-        body: Type.Object({
-          name: Type.String({ minLength: 1 }),
-          path: Type.String({ minLength: 1 }),
-          group: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-          gitUserName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-          gitUserEmail: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-          color: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-          defaultAgentType: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-          tags: Type.Optional(Type.Union([Type.Array(Type.String()), Type.Null()])),
-          forgeConnectionId: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-          forgeRepo: Type.Optional(Type.Union([Type.String(), Type.Null()]))
-        }),
+        body: CreateWorkspaceBodySchema,
         response: {
           201: WorkspaceSchema,
           400: Type.Object({ error: Type.String() })
@@ -290,14 +253,8 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request, reply) => {
       const { name, path, group, gitUserName, gitUserEmail, color, defaultAgentType, tags } = request.body;
-      let safePath: string;
-      let forge: { forgeConnectionId: string | null; forgeRepo: string | null };
-      try {
-        safePath = validateAndNormalizeWorkspacePath(path);
-        forge = normalizeForgeOverride(request.body.forgeConnectionId ?? null, request.body.forgeRepo ?? null);
-      } catch (err) {
-        return reply.code(400).send({ error: (err as Error).message });
-      }
+      const safePath = validateAndNormalizeWorkspacePath(path);
+      const forge = normalizeForgeOverride(request.body.forgeConnectionId ?? null, request.body.forgeRepo ?? null);
 
       const workspace = await db.createWorkspace({
         name,
@@ -321,19 +278,7 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
       preHandler: jwtPreHandler,
       schema: {
         params: Type.Object({ id: Type.String() }),
-        body: Type.Object({
-          name: Type.Optional(Type.String({ minLength: 1 })),
-          path: Type.Optional(Type.String({ minLength: 1 })),
-          group: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-          gitUserName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-          gitUserEmail: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-          color: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-          defaultAgentType: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-          tags: Type.Optional(Type.Union([Type.Array(Type.String()), Type.Null()])),
-          isFavorite: Type.Optional(Type.Boolean()),
-          forgeConnectionId: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-          forgeRepo: Type.Optional(Type.Union([Type.String(), Type.Null()]))
-        }),
+        body: UpdateWorkspaceBodySchema,
         response: {
           200: WorkspaceSchema,
           400: Type.Object({ error: Type.String() }),
@@ -342,33 +287,17 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
       }
     },
     async (request, reply) => {
-      const body = request.body as {
-        name?: string;
-        path?: string;
-        group?: string | null;
-        gitUserName?: string | null;
-        gitUserEmail?: string | null;
-        color?: string | null;
-        defaultAgentType?: string | null;
-        tags?: string[] | null;
-        isFavorite?: boolean;
-        forgeConnectionId?: string | null;
-        forgeRepo?: string | null;
-      };
+      const body = request.body;
       let pathPatch: string | undefined;
       let previousPath: string | undefined;
       let forgePatch: { forgeConnectionId?: string | null; forgeRepo?: string | null } = {};
-      try {
-        if (body.path !== undefined) pathPatch = validateAndNormalizeWorkspacePath(body.path);
-        if (body.forgeConnectionId !== undefined || body.forgeRepo !== undefined) {
-          const existing = await db.getWorkspace(request.params.id);
-          forgePatch = normalizeForgeOverride(
-            body.forgeConnectionId !== undefined ? body.forgeConnectionId : (existing?.forgeConnectionId ?? null),
-            body.forgeRepo !== undefined ? body.forgeRepo : (existing?.forgeRepo ?? null)
-          );
-        }
-      } catch (err) {
-        return reply.code(400).send({ error: (err as Error).message });
+      if (body.path !== undefined) pathPatch = validateAndNormalizeWorkspacePath(body.path);
+      if (body.forgeConnectionId !== undefined || body.forgeRepo !== undefined) {
+        const existing = await db.getWorkspace(request.params.id);
+        forgePatch = normalizeForgeOverride(
+          body.forgeConnectionId !== undefined ? body.forgeConnectionId : (existing?.forgeConnectionId ?? null),
+          body.forgeRepo !== undefined ? body.forgeRepo : (existing?.forgeRepo ?? null)
+        );
       }
       if (pathPatch !== undefined) {
         const existing = await db.getWorkspace(request.params.id);
@@ -393,9 +322,7 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
           ...forgePatch
         });
       } catch (err) {
-        if (err instanceof FavoriteLimitError) {
-          return reply.code(400).send({ error: err.message });
-        }
+        if (err instanceof FavoriteLimitError) throw new BadRequestError(err.message);
         throw err;
       }
       if (!updated) return reply.code(404).send({ error: 'Workspace not found' });
@@ -464,7 +391,8 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
         response: {
           204: Type.Null(),
           404: Type.Object({ error: Type.String() }),
-          409: Type.Object({ error: Type.String() })
+          409: Type.Object({ error: Type.String() }),
+          500: Type.Object({ error: Type.String() })
         }
       }
     },
@@ -473,7 +401,15 @@ export async function workspaceRoutes(fastify: FastifyInstance): Promise<void> {
       if (!(await db.getWorkspace(id))) {
         return reply.code(404).send({ error: 'Workspace not found' });
       }
-      await db.deleteWorkspace(id);
+      await disposeWorkspace(id);
+      const result = await db.deleteWorkspace(id);
+      if (!result.ok) {
+        if (result.reason === 'not_found') {
+          return reply.code(404).send({ error: 'Workspace not found' });
+        }
+        request.log.error({ err: result.error, workspaceId: id }, 'Failed to delete workspace');
+        return reply.code(500).send({ error: 'Failed to delete workspace' });
+      }
       return reply.code(204).send(null);
     }
   );

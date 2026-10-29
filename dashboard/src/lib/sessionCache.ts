@@ -164,3 +164,12 @@ export function removeSessionCachesForId(sessionId: string): void {
     }
   }
 }
+
+/** Drop every cached session snapshot (logout — the next user must not see them). */
+export function clearAllSessionCaches(): void {
+  for (const key of safeLocalStorageKeys()) {
+    if (key.startsWith(KEY_PREFIX)) {
+      safeRemoveItem(key);
+    }
+  }
+}

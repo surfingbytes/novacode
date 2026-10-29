@@ -1,8 +1,8 @@
 // node_modules
-import { spawnSync } from 'node:child_process';
 import stripAnsi from 'strip-ansi';
 
 // classes
+import { execCli } from './childEnv';
 import { config } from './config';
 
 const CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
@@ -14,6 +14,7 @@ export interface CursorModelOption {
 }
 
 let cache: { models: CursorModelOption[]; fetchedAt: number } | null = null;
+let inFlight: Promise<CursorModelOption[]> | null = null;
 
 /**
  * Parse stdout from `cursor-agent models` into a list of { id, label }.
@@ -53,19 +54,19 @@ function parseModelsOutput(stdout: string): CursorModelOption[] {
  * Fetch available Cursor agent models by running `cursor-agent models`.
  * Results are cached for 4 hours.
  */
-export function getCursorModels(): { models: CursorModelOption[]; fromCache: boolean } {
+export async function getCursorModels(): Promise<{ models: CursorModelOption[]; fromCache: boolean }> {
   const now = Date.now();
   if (cache && now - cache.fetchedAt < CACHE_TTL_MS) {
     return { models: cache.models, fromCache: true };
   }
-
-  const result = spawnSync(config.cursorCommand, ['models'], {
-    encoding: 'utf8',
-    timeout: 15_000,
-    cwd: config.configDir,
-    env: { ...process.env, ...config.agentEnv() },
-    stdio: ['ignore', 'pipe', 'pipe']
+  inFlight ??= fetchCursorModels().finally(() => {
+    inFlight = null;
   });
+  return { models: await inFlight, fromCache: false };
+}
+
+async function fetchCursorModels(): Promise<CursorModelOption[]> {
+  const result = await execCli(config.cursorCommand, ['models'], { timeoutMs: 15_000 });
 
   const raw = [result.stdout, result.stderr].filter(Boolean).join('\n');
   const out = stripAnsi(raw);
@@ -74,6 +75,6 @@ export function getCursorModels(): { models: CursorModelOption[]; fromCache: boo
   // If we got no models from CLI, provide a minimal default so the UI still works
   const fallback: CursorModelOption[] = [{ id: 'auto', label: 'Auto' }];
   const toCache = models.length > 0 ? models : fallback;
-  cache = { models: toCache, fetchedAt: now };
-  return { models: toCache, fromCache: false };
+  cache = { models: toCache, fetchedAt: Date.now() };
+  return toCache;
 }

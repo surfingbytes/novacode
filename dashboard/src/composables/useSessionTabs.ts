@@ -128,5 +128,3 @@ export function useSessionTabs(options: UseSessionTabsOptions) {
     onFilesOpenPath
   };
 }
-
-export type UseSessionTabs = ReturnType<typeof useSessionTabs>;

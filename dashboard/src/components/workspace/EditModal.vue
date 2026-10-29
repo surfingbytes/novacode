@@ -391,7 +391,7 @@ watch(AGENT_OPTIONS, (options) => {
               <div class="label">
                 Group
 
-                <button @click="bNewGroupAddActive = true" v-if="!bNewGroupAddActive">
+                <button v-if="!bNewGroupAddActive" @click="bNewGroupAddActive = true">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
                   New Group
                 </button>
@@ -413,20 +413,20 @@ watch(AGENT_OPTIONS, (options) => {
                   placeholder="New group name"
                   @input="newGroupError = groupNameInput.trim() ? null : newGroupError"
                 />
-                <button class="button is-primary" @click="createNewGroup" v-if="bNewGroupAddActive">
+                <button v-if="bNewGroupAddActive" class="button is-primary" @click="createNewGroup">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
                   Create
                 </button>
                 <button
+                  v-if="bNewGroupAddActive"
                   class="button is-icon"
                   @click="bNewGroupAddActive = false"
-                  v-if="bNewGroupAddActive"
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
                 </button>
               </div>
-              <p class="hint is-error" v-if="newGroupError">Name is required</p>
-              <p class="hint" v-else>Select an existing group or type a new name to create one.</p>
+              <p v-if="newGroupError" class="hint is-error">Name is required</p>
+              <p v-else class="hint">Select an existing group or type a new name to create one.</p>
             </div>
 
             <!-- Tags: chips + field share one bordered control (global input { width:100% } is overridden in scoped CSS). -->
@@ -445,9 +445,9 @@ watch(AGENT_OPTIONS, (options) => {
                     <button
                       type="button"
                       class="rounded hover:bg-primary/20 p-0.5"
+                      aria-label="Remove tag"
                       @mousedown.prevent
                       @click="removeTag(index)"
-                      aria-label="Remove tag"
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
@@ -514,10 +514,10 @@ watch(AGENT_OPTIONS, (options) => {
               <div class="label">Default Agent</div>
               <div class="button-select" aria-describedby="workspace-agent-error">
                 <button
-                  type="button"
-                  class="button is-transparent"
                   v-for="opt in AGENT_OPTIONS"
                   :key="opt.value"
+                  type="button"
+                  class="button is-transparent"
                   :class="form.defaultAgentType === opt.value ? 'is-active' : ''"
                   @click="
                     form.defaultAgentType = opt.value;

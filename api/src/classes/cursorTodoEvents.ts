@@ -12,7 +12,7 @@ export interface CursorTodoItem {
   status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
 }
 
-export interface CursorUpdateTodosParams {
+interface CursorUpdateTodosParams {
   toolCallId: string;
   todos: CursorTodoItem[];
   merge: boolean;
@@ -21,7 +21,7 @@ export interface CursorUpdateTodosParams {
 /** Last accepted todos from cursor/update_todos, keyed by ACP session id (survives per-turn subprocess restarts). */
 const cursorTodoStateBySession = new Map<string, CursorTodoItem[]>();
 
-export function normalizeCursorTodoStatus(status: unknown): CursorTodoItem['status'] {
+function normalizeCursorTodoStatus(status: unknown): CursorTodoItem['status'] {
   if (typeof status !== 'string') return 'pending';
   const normalized = status.toLowerCase().replace(/^todo_status_/, '').replace(/[\s-]+/g, '_');
   if (normalized === 'completed' || normalized === 'done') return 'completed';
@@ -32,7 +32,7 @@ export function normalizeCursorTodoStatus(status: unknown): CursorTodoItem['stat
   return 'pending';
 }
 
-export function parseCursorTodoItem(value: unknown): CursorTodoItem | null {
+function parseCursorTodoItem(value: unknown): CursorTodoItem | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const obj = value as Record<string, unknown>;
   if (typeof obj.id !== 'string' || !obj.id.trim()) return null;
@@ -52,7 +52,7 @@ export function parseCursorTodoItem(value: unknown): CursorTodoItem | null {
   };
 }
 
-export function parseCursorUpdateTodosParams(params: unknown): CursorUpdateTodosParams | null {
+function parseCursorUpdateTodosParams(params: unknown): CursorUpdateTodosParams | null {
   if (!params || typeof params !== 'object' || Array.isArray(params)) return null;
   const obj = params as Record<string, unknown>;
   if (typeof obj.toolCallId !== 'string' || !obj.toolCallId.trim()) return null;
@@ -108,7 +108,7 @@ export function mergeCursorTodos(
  * Emit synthetic ACP tool_call(+update) events so dashboard/shared parsers surface
  * todos in the existing Tasks panel (latest todos display item wins).
  */
-export function emitCursorTodosUpdate(
+function emitCursorTodosUpdate(
   params: CursorUpdateTodosParams,
   acceptedTodos: CursorTodoItem[],
   getSessionId: () => string | null,

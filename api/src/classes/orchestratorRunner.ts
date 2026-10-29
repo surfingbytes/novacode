@@ -35,7 +35,7 @@ import {
   unmergedFiles,
   worktreesRootDir
 } from './gitWorktrees';
-import { updateOrchestratorAndBroadcast } from '../routes/orchestrator';
+import { updateOrchestratorAndBroadcast } from './orchestratorEvents';
 
 // types
 import type { AgentType, ApprovalPolicy, ChatMessage, OrchestratorRunMode, OrchestratorSubtasksPayload, SubTask } from '../@types/index';
@@ -90,6 +90,44 @@ export function finishRunResume(orchestratorId: string): void {
 const runningStepSessions = new Set<string>();
 /** Question a running step's agent asked during its current turn. */
 const stepQuestions = new Map<string, string>();
+/** Fails a running step from outside (its session is being deleted), by step session id. */
+const stepCancels = new Map<string, (reason: string) => void>();
+
+/** Fail the running orchestrator step bound to `sessionId`; false when no step runs there. */
+export function cancelOrchestratorStep(sessionId: string, reason: string): boolean {
+  const cancel = stepCancels.get(sessionId);
+  if (!cancel) return false;
+  cancel(reason);
+  return true;
+}
+
+/** Settles when the run ends, by orchestrator id (kept alongside `activeRuns`). */
+const runCompletions = new Map<string, Promise<void>>();
+
+/**
+ * Fail every running orchestrator run (server shutdown): marks them `failed` so no
+ * new steps start, fails each running step with `reason`, then waits up to `waitMs`
+ * for the runners to persist their final state.
+ */
+export async function cancelAllOrchestratorRuns(reason: string, waitMs = 3_000): Promise<void> {
+  const failedCount = await db.failStaleRunningOrchestrators();
+  if (failedCount > 0) logger.info({ reason, failedCount }, 'Marked running orchestrator runs as failed');
+  for (const cancel of [...stepCancels.values()]) cancel(reason);
+  const completions = [...runCompletions.values()];
+  if (completions.length === 0) return;
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([
+    Promise.allSettled(completions),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        logger.warn({ reason }, 'Timed out waiting for orchestrator runs to finish');
+        resolve();
+      }, waitMs);
+      timer.unref?.();
+    })
+  ]);
+  clearTimeout(timer);
+}
 
 /** Called by the nova `step_needs_input` tool; false when the session isn't a running step. */
 export function markStepNeedsInput(sessionId: string, question: string): boolean {
@@ -106,7 +144,8 @@ export function markStepNeedsInput(sessionId: string, question: string): boolean
 function waitForReplyTurn(
   sessionId: string,
   isStopped: () => Promise<boolean>,
-  onReplyStart: () => void
+  onReplyStart: () => void,
+  cancelled: Promise<unknown>
 ): Promise<{ messages: ChatMessage[] } | null> {
   return new Promise((resolve) => {
     let bSawBusy = isSessionBusy(sessionId);
@@ -135,6 +174,7 @@ function waitForReplyTurn(
       void isStopped().then((bStopped) => bStopped && !isSessionBusy(sessionId) && finish(null));
     }, STOP_POLL_MS);
     subscribeBusy(onBusy);
+    void cancelled.then(() => finish(null));
   });
 }
 
@@ -222,15 +262,25 @@ async function runStep(ctx: StepContext, index: number, worktreeCwd: string | nu
   const spec = bVerify ? await readLiveSpec(ctx.workspaceId, ctx.plannerSessionId) : null;
   const stepPrompt = buildStepPrompt(task, ctx.payload, spec, index);
   runningStepSessions.add(session.id);
+  let cancelReason: string | null = null;
+  const cancelled = new Promise<{ error: string }>((resolve) => {
+    stepCancels.set(session.id, (reason) => {
+      cancelReason ??= reason;
+      resolve({ error: cancelReason });
+    });
+  });
   let result: { error?: string; messages?: ChatMessage[] };
   try {
-    result = await dispatchPromptAndWait({
-      sessionId: session.id,
-      text: isNovaMcpEnabled() ? `${stepPrompt}\n\n---\n\n${STEP_NEEDS_INPUT_PROMPT}` : stepPrompt,
-      model: session.modelSelection,
-      mode: session.sessionMode,
-      timeoutMs: STEP_TIMEOUT_MS
-    });
+    result = await Promise.race([
+      dispatchPromptAndWait({
+        sessionId: session.id,
+        text: isNovaMcpEnabled() ? `${stepPrompt}\n\n---\n\n${STEP_NEEDS_INPUT_PROMPT}` : stepPrompt,
+        model: session.modelSelection,
+        mode: session.sessionMode,
+        timeoutMs: STEP_TIMEOUT_MS
+      }),
+      cancelled
+    ]);
     // The agent asked the user: hold the step (and its dependents) until a reply turn ends without a new question.
     for (let question = stepQuestions.get(session.id); !result.error && question !== undefined; question = stepQuestions.get(session.id)) {
       stepQuestions.delete(session.id);
@@ -246,7 +296,7 @@ async function runStep(ctx: StepContext, index: number, worktreeCwd: string | nu
       const reply = await waitForReplyTurn(session.id, ctx.isStopped, () => {
         task.waitingQuestion = null;
         void ctx.persist();
-      });
+      }, cancelled);
       task.waitingQuestion = null;
       if (!reply) {
         result = { error: 'Stopped while waiting for your answer' };
@@ -254,9 +304,12 @@ async function runStep(ctx: StepContext, index: number, worktreeCwd: string | nu
       }
       result = reply;
     }
+    // A cancelled turn ends like a finished one; don't count it as done.
+    if (cancelReason !== null) result = { error: cancelReason };
   } finally {
     runningStepSessions.delete(session.id);
     stepQuestions.delete(session.id);
+    stepCancels.delete(session.id);
   }
   if (result.error) {
     task.runResult = 'failed';
@@ -472,10 +525,19 @@ export async function runOrchestrator(
     wake: () => {}
   };
   activeRuns.set(orchestratorId, run);
+  const completion = runOrchestratorSteps(workspaceId, orchestratorId, run);
+  runCompletions.set(
+    orchestratorId,
+    completion.then(
+      () => undefined,
+      () => undefined
+    )
+  );
   try {
-    await runOrchestratorSteps(workspaceId, orchestratorId, run);
+    await completion;
   } finally {
     activeRuns.delete(orchestratorId);
+    runCompletions.delete(orchestratorId);
   }
 }
 

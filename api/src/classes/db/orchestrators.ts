@@ -10,7 +10,7 @@ import type { OrchestratorWithCategory } from './shared';
 
 // --------------------------------------------- Orchestrators ---------------------------------------------
 
-export async function listOrchestratorsByWorkspace(workspaceId: string): Promise<OrchestratorWithCategory[]> {
+async function listOrchestratorsByWorkspace(workspaceId: string): Promise<OrchestratorWithCategory[]> {
   return prisma.orchestrator.findMany({
     where: { workspaceId },
     orderBy: { updatedAt: 'desc' }
@@ -21,7 +21,7 @@ export async function listOrchestratorsByWorkspace(workspaceId: string): Promise
  * Non-archived orchestrators of every workspace for the nav sidebar, without
  * the planning chat (`messageJson`), which can be large and isn't needed there.
  */
-export async function listOrchestratorSummaries(): Promise<Omit<OrchestratorWithCategory, 'messageJson'>[]> {
+async function listOrchestratorSummaries(): Promise<Omit<OrchestratorWithCategory, 'messageJson'>[]> {
   return prisma.orchestrator.findMany({
     where: { archived: false },
     omit: { messageJson: true },
@@ -29,12 +29,12 @@ export async function listOrchestratorSummaries(): Promise<Omit<OrchestratorWith
   });
 }
 
-export async function getOrchestrator(id: string): Promise<OrchestratorWithCategory | undefined> {
+async function getOrchestrator(id: string): Promise<OrchestratorWithCategory | undefined> {
   const row = await prisma.orchestrator.findUnique({ where: { id } });
   return (row ?? undefined) as OrchestratorWithCategory | undefined;
 }
 
-export async function createOrchestrator(data: {
+async function createOrchestrator(data: {
   name: string;
   workspaceId: string;
   tags?: string | null;
@@ -68,7 +68,7 @@ export async function createOrchestrator(data: {
 }
 
 /** Newest non-archived plan generated from a chat session (spec → orchestrator). */
-export async function getLatestOrchestratorBySourceSession(
+async function getLatestOrchestratorBySourceSession(
   sourceSessionId: string
 ): Promise<OrchestratorWithCategory | undefined> {
   const row = await prisma.orchestrator.findFirst({
@@ -78,7 +78,7 @@ export async function getLatestOrchestratorBySourceSession(
   return (row ?? undefined) as OrchestratorWithCategory | undefined;
 }
 
-export async function updateOrchestrator(
+async function updateOrchestrator(
   id: string,
   patch: {
     name?: string;
@@ -136,7 +136,7 @@ export async function updateOrchestrator(
 }
 
 // marks orchestrator runs that were "running" at startup as "failed" (handles container restart mid-run)
-export async function failStaleRunningOrchestrators(): Promise<number> {
+async function failStaleRunningOrchestrators(): Promise<number> {
   const now = new Date().toISOString();
   const result = await prisma.orchestrator.updateMany({
     where: { runStatus: 'running' },
@@ -148,7 +148,7 @@ export async function failStaleRunningOrchestrators(): Promise<number> {
   return result.count;
 }
 
-export async function deleteOrchestrator(id: string): Promise<boolean> {
+async function deleteOrchestrator(id: string): Promise<boolean> {
   try {
     await prisma.orchestrator.delete({ where: { id } });
     return true;
@@ -157,7 +157,7 @@ export async function deleteOrchestrator(id: string): Promise<boolean> {
   }
 }
 
-export async function deleteSession(id: string): Promise<boolean> {
+async function deleteSession(id: string): Promise<boolean> {
   try {
     await prisma.session.delete({ where: { id } });
     return true;
@@ -166,19 +166,19 @@ export async function deleteSession(id: string): Promise<boolean> {
   }
 }
 
-export async function listOrchestratorSessionIds(orchestratorId: string): Promise<string[]> {
+async function listOrchestratorSessionIds(orchestratorId: string): Promise<string[]> {
   const rows = await prisma.session.findMany({ where: { orchestratorId }, select: { id: true } });
   return rows.map((row) => row.id);
 }
 
-export async function deleteManySessions(ids: string[], workspaceId: string): Promise<number> {
+async function deleteManySessions(ids: string[], workspaceId: string): Promise<number> {
   const result = await prisma.session.deleteMany({
     where: { id: { in: ids }, workspaceId }
   });
   return result.count;
 }
 
-export async function archiveManySessions(
+async function archiveManySessions(
   ids: string[],
   workspaceId: string,
   archived: boolean

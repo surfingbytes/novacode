@@ -40,7 +40,7 @@ async function summarizeUsageWhere(
   };
 }
 
-export async function listSessionsByWorkspace(
+async function listSessionsByWorkspace(
   workspaceId: string,
   opts?: { archived?: boolean }
 ): Promise<SessionWithCategory[]> {
@@ -53,7 +53,7 @@ export async function listSessionsByWorkspace(
   }) as Promise<SessionWithCategory[]>;
 }
 
-export async function listSessions(): Promise<SessionWithCategory[]> {
+async function listSessions(): Promise<SessionWithCategory[]> {
   return prisma.session.findMany({
     orderBy: { updatedAt: 'desc' }
   }) as Promise<SessionWithCategory[]>;
@@ -63,7 +63,7 @@ export async function listSessions(): Promise<SessionWithCategory[]> {
  * List payloads do not include chat rows. If `last_preview_*` was never set
  * (older rows), derive from `session_messages` and persist so future lists are cheap.
  */
-export async function enrichSessionListPreviews<
+async function enrichSessionListPreviews<
   T extends { id: string; lastPreviewText?: string | null; lastPreviewRole?: string | null }
 >(sessions: T[]): Promise<void> {
   const missing = sessions.filter(
@@ -107,12 +107,12 @@ export async function enrichSessionListPreviews<
   }
 }
 
-export async function getSession(id: string): Promise<SessionWithCategoryAndMessages | undefined> {
+async function getSession(id: string): Promise<SessionWithCategoryAndMessages | undefined> {
   const row = await prisma.session.findUnique({ where: { id } });
   return (row ?? undefined) as SessionWithCategoryAndMessages | undefined;
 }
 
-export async function createSession(data: {
+async function createSession(data: {
   name: string;
   workspaceId: string;
   tags?: string[] | null;
@@ -150,7 +150,7 @@ export async function createSession(data: {
   return row;
 }
 
-export async function getLatestSessionByAgentType(agentType: string): Promise<Session | undefined> {
+async function getLatestSessionByAgentType(agentType: string): Promise<Session | undefined> {
   const row = await prisma.session.findFirst({
     where: { agentType },
     orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }]
@@ -158,7 +158,7 @@ export async function getLatestSessionByAgentType(agentType: string): Promise<Se
   return row ?? undefined;
 }
 
-export async function updateSession(
+async function updateSession(
   id: string,
   patch: {
     sessionId?: string | null;
@@ -243,7 +243,7 @@ export async function updateSession(
 }
 
 /** Point a session at a git worktree (orchestrator parallel step) or back at the workspace (null). */
-export async function setSessionWorktreePath(id: string, worktreePath: string | null): Promise<void> {
+async function setSessionWorktreePath(id: string, worktreePath: string | null): Promise<void> {
   await prisma.session.updateMany({ where: { id }, data: { worktreePath } });
 }
 
@@ -252,7 +252,7 @@ export async function setSessionWorktreePath(id: string, worktreePath: string | 
  * reshuffle session lists). Returns undefined when the row is missing or
  * already has the requested value.
  */
-export async function setSessionUnread(id: string, unread: boolean): Promise<Session | undefined> {
+async function setSessionUnread(id: string, unread: boolean): Promise<Session | undefined> {
   const existingSession = await prisma.session.findUnique({
     where: { id },
     select: { unread: true }
@@ -266,7 +266,7 @@ export async function setSessionUnread(id: string, unread: boolean): Promise<Ses
   });
 }
 
-export async function listSessionMessages(sessionId: string): Promise<ChatMessage[]> {
+async function listSessionMessages(sessionId: string): Promise<ChatMessage[]> {
   const rows = await prisma.sessionMessage.findMany({
     where: { sessionId },
     orderBy: { position: 'asc' }
@@ -274,7 +274,7 @@ export async function listSessionMessages(sessionId: string): Promise<ChatMessag
   return rows.map(sessionMessageRowToChat);
 }
 
-export async function listSessionMessagesPage(
+async function listSessionMessagesPage(
   sessionId: string,
   offset: number,
   limit: number
@@ -301,7 +301,7 @@ export async function listSessionMessagesPage(
  * Append an ACP-style `sessionUpdate: "plan"` event into chat history so the
  * Plan tab survives reload (same persistence path Claude ACP plan updates use).
  */
-export async function appendSessionPlanUpdate(sessionId: string, line: string): Promise<boolean> {
+async function appendSessionPlanUpdate(sessionId: string, line: string): Promise<boolean> {
   const session = await prisma.session.findUnique({ where: { id: sessionId } });
   if (!session) return false;
 
@@ -353,7 +353,7 @@ export async function appendSessionPlanUpdate(sessionId: string, line: string): 
   return true;
 }
 
-export async function persistSessionMessages(
+async function persistSessionMessages(
   sessionId: string,
   messages: ChatMessage[],
   patch?: {
@@ -409,7 +409,7 @@ export async function persistSessionMessages(
   return row ?? undefined;
 }
 
-export async function recordSessionUsage(
+async function recordSessionUsage(
   sessionId: string,
   workspaceId: string,
   usage: SessionUsageSnapshot
@@ -438,7 +438,7 @@ export async function recordSessionUsage(
   ]);
 }
 
-export async function listSessionUsage(sessionId: string, limit = 50): Promise<SessionUsageTurn[]> {
+async function listSessionUsage(sessionId: string, limit = 50): Promise<SessionUsageTurn[]> {
   const rows = await prisma.sessionUsage.findMany({
     where: { sessionId },
     orderBy: { createdAt: 'desc' },
@@ -457,15 +457,15 @@ export async function listSessionUsage(sessionId: string, limit = 50): Promise<S
   }));
 }
 
-export async function summarizeWorkspaceUsage(workspaceId: string): Promise<WorkspaceUsageSummary> {
+async function summarizeWorkspaceUsage(workspaceId: string): Promise<WorkspaceUsageSummary> {
   return summarizeUsageWhere({ workspaceId });
 }
 
-export async function summarizeSessionUsage(sessionId: string): Promise<WorkspaceUsageSummary> {
+async function summarizeSessionUsage(sessionId: string): Promise<WorkspaceUsageSummary> {
   return summarizeUsageWhere({ sessionId });
 }
 
-export async function listSessionQueue(sessionId: string): Promise<ChatQueueItem[]> {
+async function listSessionQueue(sessionId: string): Promise<ChatQueueItem[]> {
   const rows = await prisma.sessionPromptQueue.findMany({
     where: { sessionId },
     orderBy: [{ position: 'asc' }, { createdAt: 'asc' }]
@@ -473,7 +473,7 @@ export async function listSessionQueue(sessionId: string): Promise<ChatQueueItem
   return rows.map(toChatQueueItem);
 }
 
-export async function enqueueSessionQueueItem(data: {
+async function enqueueSessionQueueItem(data: {
   sessionId: string;
   text: string;
   model: string;
@@ -495,7 +495,7 @@ export async function enqueueSessionQueueItem(data: {
   return toChatQueueItem(rows[0]!);
 }
 
-export async function dequeueNextSessionQueueItem(sessionId: string): Promise<ChatQueueItem | undefined> {
+async function dequeueNextSessionQueueItem(sessionId: string): Promise<ChatQueueItem | undefined> {
   const rows = await prisma.$queryRaw<QueueRow[]>`
     DELETE FROM session_prompt_queue
     WHERE id = (
@@ -509,12 +509,12 @@ export async function dequeueNextSessionQueueItem(sessionId: string): Promise<Ch
   return rows[0] ? toChatQueueItem(rows[0]) : undefined;
 }
 
-export async function deleteSessionQueueItem(sessionId: string, id: string): Promise<boolean> {
+async function deleteSessionQueueItem(sessionId: string, id: string): Promise<boolean> {
   const result = await prisma.sessionPromptQueue.deleteMany({ where: { sessionId, id } });
   return result.count > 0;
 }
 
-export async function updateSessionQueueItemText(sessionId: string, id: string, text: string): Promise<boolean> {
+async function updateSessionQueueItemText(sessionId: string, id: string, text: string): Promise<boolean> {
   const updated = await prisma.$transaction(async (tx) => {
     const existingQueueItem = await tx.sessionPromptQueue.findFirst({ where: { sessionId, id } });
     if (!existingQueueItem) {
@@ -538,7 +538,7 @@ export async function updateSessionQueueItemText(sessionId: string, id: string, 
   return !!updated;
 }
 
-export async function moveSessionQueueItemToFront(sessionId: string, id: string): Promise<boolean> {
+async function moveSessionQueueItemToFront(sessionId: string, id: string): Promise<boolean> {
   const updated = await prisma.$transaction(async (tx) => {
     const existingQueueItem = await tx.sessionPromptQueue.findFirst({ where: { sessionId, id } });
     if (!existingQueueItem) {

@@ -4,34 +4,28 @@ import { Type } from '@sinclair/typebox';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
 
 // classes
 import { jwtPreHandler } from '../classes/auth';
-import {
-  config,
-  getVibeApiKeyStatus,
-  isClaudeAvailable,
-  isCodexAcpAvailable,
-  isVibeCliAvailable
-} from '../classes/config';
+import { config } from '../classes/config';
 import { db } from '../classes/database';
 import { sessionManager } from '../classes/sessionManager';
+import { looksLikeOpenAiApiKey } from '../classes/openCodeProviders';
 import {
-  cursorAuthErrorCheck,
-  cursorAuthTimeoutCheck,
-  isAuthRequiredError,
-  isTimeoutError,
-  type CursorAuthCheck
-} from '../classes/agentError';
-import { hasAnyOpenCodeAuth, looksLikeOpenAiApiKey } from '../classes/openCodeProviders';
+  checkCursorAuth,
+  clearCursorAuthCache,
+  codexAuthenticated,
+  CODEX_AUTH_FILE,
+  CURSOR_AUTH_FILE,
+  openCodeAuthenticated,
+  OPENCODE_AUTH_FILE,
+  OPENCODE_LEGACY_AUTH_FILE
+} from '../classes/agentAuthStatus';
 import {
   clearCursorUsageSummaryCache,
   getCursorUsageSummary
 } from '../classes/cursorUsageSummary';
-
-// types
-import type { AgentType } from '../@types/index';
+import { logger } from '../classes/logger';
 
 const cursorUsageBucketSchema = Type.Object({
   enabled: Type.Boolean(),
@@ -53,75 +47,6 @@ const cursorUsageSummaryResponseSchema = Type.Object({
   error: Type.Optional(Type.String()),
   fetchedAt: Type.Optional(Type.Number())
 });
-
-const CURSOR_AUTH_FILE = '.config/cursor/auth.json';
-// OpenCode stores provider credentials in its XDG data dir. `config.agentEnv()` sets
-// XDG_DATA_HOME=/config/.local/share for spawned OpenCode processes.
-const OPENCODE_AUTH_FILE = '.local/share/opencode/auth.json';
-const OPENCODE_LEGACY_AUTH_FILE = '.opencode/auth.json';
-const CODEX_AUTH_FILE = '.codex/auth.json';
-
-/** spawnSync(`cursor status`) blocks the event loop — cache so status/capabilities stay cheap. */
-const CURSOR_AUTH_TTL_MS = 30_000;
-let cursorAuthCache: { result: CursorAuthCheck; at: number } | null = null;
-
-export const clearCursorAuthCache = (): void => {
-  cursorAuthCache = null;
-};
-
-export const checkCursorAuth = (): CursorAuthCheck => {
-  const authPath = join(config.configDir, CURSOR_AUTH_FILE);
-
-  if (existsSync(authPath)) {
-    const authenticated: CursorAuthCheck = { authenticated: true, status: 'authenticated' };
-    cursorAuthCache = { result: authenticated, at: Date.now() };
-    return authenticated;
-  }
-  if (cursorAuthCache && Date.now() - cursorAuthCache.at < CURSOR_AUTH_TTL_MS) {
-    return cursorAuthCache.result;
-  }
-  const env = config.agentEnv();
-  const result = spawnSync(config.cursorCommand, ['status'], {
-    encoding: 'utf8',
-    timeout: 5000,
-    cwd: config.configDir,
-    env: { ...process.env, ...env },
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-  const out = [result.stdout, result.stderr].filter(Boolean).join('\n');
-  const combinedError = [result.error, out].filter(Boolean).join('\n');
-
-  let check: CursorAuthCheck;
-  if (result.error && isTimeoutError(result.error)) {
-    check = cursorAuthTimeoutCheck();
-  } else if (isTimeoutError(combinedError)) {
-    check = cursorAuthTimeoutCheck();
-  } else if (isAuthRequiredError(out)) {
-    check = {
-      authenticated: false,
-      status: 'unauthenticated',
-      message: 'Cursor CLI is not authenticated. Log in to Cursor, then try again.'
-    };
-  } else if (result.error) {
-    check = cursorAuthErrorCheck(result.error.message);
-  } else if (result.status !== 0) {
-    check = cursorAuthErrorCheck(out.trim() || `Cursor status exited with code ${result.status}`);
-  } else if (out.trim() === '') {
-    check = cursorAuthErrorCheck('Cursor status returned no output.');
-  } else {
-    check = { authenticated: true, status: 'authenticated' };
-  }
-  cursorAuthCache = { result: check, at: Date.now() };
-  return check;
-};
-
-export const cursorAuthenticated = (): boolean => {
-  return checkCursorAuth().authenticated;
-};
-
-export const openCodeAuthenticated = (): boolean => {
-  return hasAnyOpenCodeAuth(config.configDir);
-};
 
 export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
   const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
@@ -287,7 +212,7 @@ export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
           'utf8'
         );
       } catch (err) {
-        console.error('[opencode-login] write error:', err);
+        logger.error({ err }, 'opencode-login: write error');
         return reply.send({ ok: false });
       }
       const ok = openCodeAuthenticated();
@@ -327,7 +252,7 @@ export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
         if (!existsSync(authDir)) mkdirSync(authDir, { recursive: true });
         writeFileSync(authPath, JSON.stringify({ oauth_token: trimmed }, null, 2), 'utf8');
       } catch (err) {
-        console.error('[codex-login] write error:', err);
+        logger.error({ err }, 'codex-login: write error');
         return reply.send({ ok: false });
       }
       return reply.send({ ok: codexAuthenticated() });
@@ -380,43 +305,3 @@ export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 }
-
-
-export const codexAuthenticated = (): boolean => {
-  const authPath = join(config.configDir, CODEX_AUTH_FILE);
-  if (!existsSync(authPath)) return false;
-  try {
-    const data = JSON.parse(readFileSync(authPath, 'utf8'));
-    const token = data?.oauth_token ?? data?.token ?? data?.access_token;
-    return typeof token === 'string' && token.trim().length > 0;
-  } catch {
-    return false;
-  }
-};
-
-/** Whether an agent is installed and logged in (same rules as /api/settings/agent-capabilities). */
-export const isAgentAuthenticated = (
-  agentType: AgentType,
-  claudeToken: string | null | undefined
-): boolean => {
-  switch (agentType) {
-    case 'claude':
-      // Claude is available via ACP when a token is stored; the ACP package is always present
-      return isClaudeAvailable(config.configDir) && !!claudeToken;
-    case 'cursor-agent': {
-      const { status } = checkCursorAuth();
-      return status === 'authenticated' || status === 'timeout';
-    }
-    case 'open-code':
-      return openCodeAuthenticated();
-    case 'codex':
-      // Codex needs both the ACP binary (shipped in the image) and a stored API key
-      return isCodexAcpAvailable(config.configDir) && codexAuthenticated();
-    case 'mistral-vibe':
-      return (
-        isVibeCliAvailable(config.configDir) && getVibeApiKeyStatus(config.configDir).configured
-      );
-    default:
-      return false;
-  }
-};

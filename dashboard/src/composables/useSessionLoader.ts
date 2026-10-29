@@ -121,5 +121,3 @@ export function useSessionLoader(options: UseSessionLoaderOptions) {
     retrySessionIfFailed
   };
 }
-
-export type UseSessionLoader = ReturnType<typeof useSessionLoader>;

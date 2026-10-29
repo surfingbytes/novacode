@@ -73,7 +73,7 @@ describe('ChatComposer send controls', () => {
         disconnect(): void {
           return;
         }
-      } as typeof ResizeObserver;
+      };
     }
   });
 

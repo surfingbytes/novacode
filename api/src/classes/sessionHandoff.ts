@@ -1,104 +1,114 @@
+// classes
+import { db } from './database';
+import { assistantTextFromEvents } from './assistantText';
+import { getActiveRun } from './chatEngine';
+import { drainQueue, enqueuePrompt, runServerPromptInSession } from './chatQueue';
+import { broadcastChat } from './chatSockets';
+import { BadRequestError, ConflictError, NotFoundError } from './httpErrors';
+import { logger } from './logger';
+import { HANDOFF_SUMMARY_PROMPT, HANDOFF_TARGET_CONFIG_KEY, setInternalConfigValue } from './sessionHandoffConfig';
+import { broadcastSessionListUpsert } from './sessionListBroadcast';
+import { createSessionWithAgent } from './sessionService';
+import { maybeNameUntitledSession } from './sessionTitle';
+
 // types
-import type { SessionHandoffSource } from '../@types/index';
+import type { AgentType } from '../@types/index';
 
-/** Stored on the new chat: source chat + handoff summary, injected on its first prompt. */
-export const HANDOFF_CONTEXT_CONFIG_KEY = '__novaHandoffContext';
-/** Stored on the source chat: id of the chat that continues it. */
-export const HANDOFF_TARGET_CONFIG_KEY = '__novaContinuedIn';
+interface ContinueInNewChatInput {
+  sessionId: string;
+  text: string;
+  imagePaths: string[];
+}
 
-/** Sent to the source chat so its agent writes the summary from its own context. */
-export const HANDOFF_SUMMARY_PROMPT = [
-  'The user is continuing this work in a new chat with a fresh context. Write the handoff note',
-  'the new chat will start from. Do not run tools, do not change files, just answer.',
-  '',
-  'Include only what is needed to continue correctly, not a recap of the whole conversation:',
-  '- Goal: what the user is trying to achieve overall.',
-  '- Decisions and constraints: what was agreed or ruled out, and why when it matters.',
-  '- Current state: what is done, what is in progress; relevant files with short notes.',
-  '- Open items: what remains, in order.',
-  '- Gotchas: non-obvious findings, failed approaches and pitfalls, so they are not repeated.',
-  '',
-  'Leave out resolved tangents, full tool output and anything the new chat can read from',
-  'the repository itself. Be dense and specific (paths, names, commands).',
-  'Reply with the handoff note only, no preamble.',
-].join('\n');
+const handoffsInFlight = new Set<string>();
 
-export function parseHandoffContext(value: unknown): SessionHandoffSource | null {
-  if (typeof value !== 'string' || !value.trim()) return null;
+/**
+ * Check that the session can be continued and start the handoff in the
+ * background (the summary turn can take minutes). Throws 404 / 409 / 400.
+ */
+export async function startContinueInNewChat(
+  opts: ContinueInNewChatInput & { workspaceId: string }
+): Promise<void> {
+  const { workspaceId, sessionId, text, imagePaths } = opts;
+  const session = await db.getSession(sessionId);
+  if (!session || session.workspaceId !== workspaceId) {
+    throw new NotFoundError('Session not found');
+  }
+  if (getActiveRun(sessionId) || handoffsInFlight.has(sessionId)) {
+    throw new ConflictError('Agent is busy');
+  }
+  if ((await db.listSessionMessagesPage(sessionId, 0, 1)).messages.length === 0) {
+    throw new BadRequestError('Nothing to continue from yet');
+  }
+  handoffsInFlight.add(sessionId);
+  void continueInNewChat({ sessionId, text, imagePaths });
+}
+
+/**
+ * "Continue in new chat": the source chat's own agent writes a handoff note (a
+ * normal visible turn), then a new chat with the same agent/model/mode starts
+ * with that note as hidden first-prompt context and the user's prompt queued.
+ * Open source-chat sockets get handoff-ready / handoff-failed.
+ */
+async function continueInNewChat(opts: ContinueInNewChatInput): Promise<void> {
+  const { sessionId, text, imagePaths } = opts;
+  const fail = (message: string): void => {
+    broadcastChat(sessionId, { type: 'handoff-failed', message });
+  };
   try {
-    const parsed = JSON.parse(value) as Partial<SessionHandoffSource>;
-    if (
-      typeof parsed.sessionId !== 'string' ||
-      typeof parsed.summary !== 'string' ||
-      !parsed.summary.trim()
-    ) {
-      return null;
+    const result = await runServerPromptInSession({ sessionId, text: HANDOFF_SUMMARY_PROMPT });
+    if (result.error) {
+      fail(`Handoff summary failed: ${result.error}`);
+      return;
     }
-    return {
-      sessionId: parsed.sessionId,
-      sessionName: typeof parsed.sessionName === 'string' ? parsed.sessionName : '',
-      summary: parsed.summary,
-    };
-  } catch {
-    return null;
-  }
-}
-
-export function serializeHandoffContext(context: SessionHandoffSource): string {
-  return JSON.stringify({
-    sessionId: context.sessionId,
-    sessionName: context.sessionName,
-    summary: context.summary,
-  });
-}
-
-/** Handoff links read from a raw sessionConfigJson. */
-export function extractHandoffLinksFromConfig(configJson: string | null | undefined): {
-  continuedFrom: SessionHandoffSource | null;
-  continuedInSessionId: string | null;
-} {
-  const empty = { continuedFrom: null, continuedInSessionId: null };
-  if (!configJson) return empty;
-  try {
-    const parsed = JSON.parse(configJson) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return empty;
-    const obj = parsed as Record<string, unknown>;
-    const target = obj[HANDOFF_TARGET_CONFIG_KEY];
-    return {
-      continuedFrom: parseHandoffContext(obj[HANDOFF_CONTEXT_CONFIG_KEY]),
-      continuedInSessionId: typeof target === 'string' && target ? target : null,
-    };
-  } catch {
-    return empty;
-  }
-}
-
-/** Raw sessionConfigJson with one internal key set, other keys kept. */
-export function setInternalConfigValue(
-  configJson: string | null | undefined,
-  key: string,
-  value: string
-): string {
-  let obj: Record<string, unknown> = {};
-  try {
-    const parsed = configJson ? JSON.parse(configJson) as unknown : null;
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      obj = parsed as Record<string, unknown>;
+    const lastAssistant = [...(result.messages ?? [])].reverse().find((message) => message.role === 'assistant');
+    const summary = assistantTextFromEvents(lastAssistant?.events).trim();
+    if (!summary) {
+      fail('Handoff summary came back empty');
+      return;
     }
-  } catch {
-    // malformed config: start over with just this key
-  }
-  return JSON.stringify({ ...obj, [key]: value });
-}
 
-export function buildHandoffContextPrefix(context: SessionHandoffSource | null): string {
-  if (!context) return '';
-  return [
-    'This chat continues an earlier chat. Nova Code attached the handoff note that chat wrote.',
-    `Previous chat: ${context.sessionName.trim() || 'Untitled session'}`,
-    '',
-    '## Handoff Note',
-    '',
-    context.summary.trim(),
-  ].join('\n');
+    const source = await db.getSession(sessionId);
+    if (!source) {
+      fail('Session not found');
+      return;
+    }
+    const created = await createSessionWithAgent({
+      workspaceId: source.workspaceId,
+      name: '',
+      tags: Array.isArray(source.tags) ? (source.tags as string[]) : null,
+      agentType: (source.agentType as AgentType | null) ?? undefined,
+      modelSelection: source.modelSelection,
+      sessionMode: source.sessionMode,
+      approvalPolicy: source.approvalPolicy,
+      handoffContext: { sessionId, sessionName: source.name, summary }
+    });
+    if (!created.session) {
+      fail(created.error ?? 'Failed to create chat');
+      return;
+    }
+    const target = created.session;
+    broadcastSessionListUpsert(target.workspaceId, target);
+
+    const linked = await db.updateSession(sessionId, {
+      sessionConfigJson: setInternalConfigValue(source.sessionConfigJson, HANDOFF_TARGET_CONFIG_KEY, target.id)
+    });
+    if (linked) broadcastSessionListUpsert(linked.workspaceId, linked);
+
+    await enqueuePrompt({
+      sessionId: target.id,
+      text,
+      model: target.modelSelection ?? 'auto',
+      mode: target.sessionMode ?? 'default',
+      imagePaths
+    });
+    void maybeNameUntitledSession(target.id, text, imagePaths);
+    broadcastChat(sessionId, { type: 'handoff-ready', sessionId: target.id });
+    await drainQueue(target.id);
+  } catch (err) {
+    logger.warn({ err }, 'chat: continue in new chat failed');
+    fail('Failed to continue in new chat');
+  } finally {
+    handoffsInFlight.delete(sessionId);
+  }
 }

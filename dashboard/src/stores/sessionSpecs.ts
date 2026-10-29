@@ -39,11 +39,17 @@ export const useSessionSpecsStore = defineStore('sessionSpecs', () => {
     return data.status;
   }
 
+  /** Logout: drop cached spec status. */
+  function reset(): void {
+    statusBySession.value = {};
+  }
+
   return {
     statusBySession,
     forSession,
     applyStatus,
     fetchSpec,
-    createSpec
+    createSpec,
+    reset
   };
 });

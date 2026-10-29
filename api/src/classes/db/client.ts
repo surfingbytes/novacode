@@ -3,28 +3,19 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 
 // classes
-import { ensureDatabaseUrl } from '../../env';
+import { config } from '../config';
 import { PrismaClient } from '../../generated/client/client';
-
-ensureDatabaseUrl();
 
 // --------------------------------------------- Setup ---------------------------------------------
 
-function getDatabaseUrl(): string {
-  const url = process.env['DATABASE_URL'];
-  if (!url) {
-    throw new Error('DATABASE_URL is not set (ensureDatabaseUrl should run first)');
-  }
-  return url;
-}
-
-const pool = new Pool({ connectionString: getDatabaseUrl() });
+// The URL is passed straight to pg; it is never written to process.env.
+const pool = new Pool({ connectionString: config.databaseUrl });
 const adapter = new PrismaPg(pool);
 export const prisma = new PrismaClient({ adapter });
 
 // --------------------------------------------- Health ---------------------------------------------
 
-export async function pingDatabase(): Promise<void> {
+async function pingDatabase(): Promise<void> {
   await prisma.$queryRaw`SELECT 1`;
 }
 

@@ -14,11 +14,7 @@ import { getGlobalRulesDir } from './globalRules';
 import { buildAgentRulesPrefix } from './ruleFiles';
 import { isPathUnderBrowseRoot, resolveWorkspaceAbsolutePath } from './workspacePaths';
 import { isUnderWorktreesRoot } from './gitWorktrees';
-import { runClaudeAcp, cancelClaudeAcp } from './claudeAcp';
-import { runVibeAcp, cancelVibeAcp } from './vibeAcp';
-import { runCursorAcp, cancelCursorAcp } from './cursorAcp';
-import { runOpenCodeAcp, cancelOpenCodeAcp } from './openCodeAcp';
-import { runCodexAcp, cancelCodexAcp } from './codexAcp';
+import { getAgentAdapter } from './agents';
 import { sendTaskDonePush } from './push';
 import { normalizeSessionMode } from './sessionMode';
 import { normalizeApprovalPolicy } from './approvalPolicy';
@@ -34,13 +30,13 @@ import type {
 import { computeLastListPreview } from './chatPreview';
 import { extractStreamNotificationPreview } from './chatStreamPreviewFromEvents';
 import { broadcastSessionListUpsert } from './sessionListBroadcast';
-import { classifyAgentError, type AgentErrorCode, type AgentErrorDetail } from './agentError';
+import { classifyAgentError, type AgentErrorCode } from './agentError';
 import {
   buildLinkedPlanContextPrefix,
   extractLinkedPlanContextFromConfig,
   mergeInternalSessionConfig,
 } from './linkedPlanContext';
-import { buildHandoffContextPrefix, extractHandoffLinksFromConfig } from './sessionHandoff';
+import { buildHandoffContextPrefix, extractHandoffLinksFromConfig } from './sessionHandoffConfig';
 import {
   claimClaudePlanForSession,
   claudePlanFileIdsFromEventLines,
@@ -105,6 +101,9 @@ export type BusySubagents = { running: number; total: number };
 // --------------------------------------------- State ---------------------------------------------
 
 const activeRuns = new Map<string, ActiveRun>();
+/** Background turn promises (resolve after cleanup), by session id. */
+const runCompletions = new Map<string, Promise<void>>();
+const CANCEL_ALL_RUNS_WAIT_MS = 10_000;
 const busySubscribers = new Set<
   (sessionId: string, workspaceId: string, busy: boolean, subagents?: BusySubagents | null) => void
 >();
@@ -191,14 +190,6 @@ function parseBackgroundTasksLine(line: string): BusySubagents | null {
   } catch {
     return null;
   }
-}
-
-export function addSubscriber(sessionId: string, subscriber: ChatSubscriber): void {
-  activeRuns.get(sessionId)?.subscribers.add(subscriber);
-}
-
-export function removeSubscriber(sessionId: string, subscriber: ChatSubscriber): void {
-  activeRuns.get(sessionId)?.subscribers.delete(subscriber);
 }
 
 export function cancelRun(sessionId: string): void {
@@ -400,7 +391,7 @@ export function setActiveRunApprovalPolicy(
   }
 }
 
-export function requestAcpPermissionForSession(
+function requestAcpPermissionForSession(
   sessionId: string,
   params: RequestPermissionRequest
 ): Promise<RequestPermissionResponse> {
@@ -546,7 +537,7 @@ function validateQuestionAnswers(
   return normalized;
 }
 
-export function requestAcpAskQuestionForSession(
+function requestAcpAskQuestionForSession(
   sessionId: string,
   params: AcpAskQuestionParams
 ): Promise<AcpAskQuestionResponse> {
@@ -798,21 +789,12 @@ export async function dispatchPrompt(
 
   let cancelled = false;
   let currentAcpSessionId = session.sessionId ?? null;
+  const adapter = getAgentAdapter(agentType);
 
   const run: ActiveRun = {
     cancel: () => {
       cancelled = true;
-      if (agentType === 'mistral-vibe') {
-        cancelVibeAcp(sessionId);
-      } else if (agentType === 'cursor-agent') {
-        cancelCursorAcp(sessionId);
-      } else if (agentType === 'open-code') {
-        cancelOpenCodeAcp(sessionId);
-      } else if (agentType === 'codex') {
-        cancelCodexAcp(sessionId);
-      } else if (currentAcpSessionId) {
-        cancelClaudeAcp(currentAcpSessionId);
-      }
+      void adapter.cancel(sessionId);
     },
     workspaceId: session.workspaceId,
     agentType,
@@ -907,107 +889,33 @@ export async function dispatchPrompt(
     emit(JSON.stringify({ type: 'session_config_sync', ...sync }));
   }
 
-  // Run agent via ACP in background (non-blocking)
-  void (async () => {
+  const runTurn = async (): Promise<void> => {
     logger.info({ agentType, sessionId, acpSessionId: currentAcpSessionId }, 'dispatching to agent via ACP');
 
-    let result: {
-      acpSessionId: string;
-      stopReason?: string;
-      error?: string;
-      errorDetail?: AgentErrorDetail;
-    };
-
-    if (agentType === 'mistral-vibe') {
-      result = await runVibeAcp(
-        { acpSessionId: currentAcpSessionId, cwd: workspacePath, promptText: agentPrompt, attachments, mode: sessionMode, getRulesPrefix, additionalDirectories },
-        onEvent,
-        sessionId,
-        onConfigSync,
-        (permission) => requestAcpPermissionForSession(sessionId, permission)
-      );
-    } else if (agentType === 'cursor-agent') {
-      result = await runCursorAcp(
-        {
-          acpSessionId: currentAcpSessionId,
-          cwd: workspacePath,
-          promptText: agentPrompt,
-          attachments,
-          model,
-          mode: sessionMode,
-          configJson: sessionConfig,
-          getRulesPrefix,
-          additionalDirectories,
-        },
-        onEvent,
-        sessionId,
-        onConfigSync,
-        (permission) => requestAcpPermissionForSession(sessionId, permission),
-        (question) => requestAcpAskQuestionForSession(sessionId, question)
-      );
-    } else if (agentType === 'open-code') {
-      result = await runOpenCodeAcp(
-        {
-          acpSessionId: currentAcpSessionId,
-          cwd: workspacePath,
-          promptText: agentPrompt,
-          attachments,
-          model,
-          mode: sessionMode,
-          configJson: sessionConfig,
-          getRulesPrefix,
-          additionalDirectories,
-        },
-        onEvent,
-        sessionId,
-        onConfigSync,
-        (permission) => requestAcpPermissionForSession(sessionId, permission)
-      );
-    } else if (agentType === 'codex') {
-      result = await runCodexAcp(
-        {
-          acpSessionId: currentAcpSessionId,
-          cwd: workspacePath,
-          promptText: agentPrompt,
-          attachments,
-          model,
-          mode: sessionMode,
-          configJson: sessionConfig,
-          getRulesPrefix,
-          additionalDirectories,
-        },
-        onEvent,
-        sessionId,
-        onConfigSync,
-        (permission) => requestAcpPermissionForSession(sessionId, permission)
-      );
-    } else {
-      result = await runClaudeAcp(
-        {
-          novaSessionId: sessionId,
-          acpSessionId: currentAcpSessionId,
-          cwd: workspacePath,
-          promptText: agentPrompt,
-          attachments,
-          claudeToken,
-          model,
-          mode: sessionMode,
-          configJson: sessionConfig,
-          getRulesPrefix,
-          additionalDirectories,
-          onSessionId: (id) => {
-            currentAcpSessionId = id;
-            run.acpSessionId = id;
-            // Stop pressed during session startup (before the ACP session id was
-            // known) — honour it as soon as the id arrives instead of dropping it.
-            if (cancelled) cancelClaudeAcp(id);
-          },
-        },
-        onEvent,
-        onConfigSync,
-        (permission) => requestAcpPermissionForSession(sessionId, permission)
-      );
-    }
+    const result = await adapter.run({
+      novaSessionId: sessionId,
+      acpSessionId: currentAcpSessionId,
+      cwd: workspacePath,
+      promptText: agentPrompt,
+      attachments,
+      claudeToken,
+      model,
+      mode: sessionMode,
+      configJson: sessionConfig,
+      getRulesPrefix,
+      additionalDirectories,
+      onSessionId: (id) => {
+        currentAcpSessionId = id;
+        run.acpSessionId = id;
+        // Stop pressed during session startup (before the ACP session id was
+        // known) — honour it as soon as the id arrives instead of dropping it.
+        if (cancelled) void adapter.cancel(sessionId);
+      },
+      onEvent,
+      onConfigSync,
+      onRequestPermission: (permission) => requestAcpPermissionForSession(sessionId, permission),
+      onAskQuestion: (question) => requestAcpAskQuestionForSession(sessionId, question),
+    });
 
     if (result.error && !cancelled) {
       logger.error({ sessionId, agentType, error: truncateLogText(result.error) }, 'ACP error');
@@ -1100,15 +1008,104 @@ export async function dispatchPrompt(
     } catch (err) {
       logger.error({ err, sessionId }, 'Failed to send task completion push');
     }
+  };
 
-    cancelPendingApprovals(run);
-    cancelPendingQuestions(run);
-    activeRuns.delete(sessionId);
-    emitBusy(sessionId, session.workspaceId, false, null);
-    broadcast((sub) => sub.onDone(currentMessages));
+  /** Save the crash as a stderr event on this turn's assistant message so the chat shows it. */
+  const recordRunFailure = async (err: unknown): Promise<{ message: string; code?: AgentErrorCode }> => {
+    const rawMessage = err instanceof Error ? err.message : String(err);
+    logger.error({ err, sessionId, agentType }, 'Agent run crashed');
+    const classifiedError = classifyAgentError(rawMessage, { agentLabel: 'Agent', fallbackMessage: 'Agent run failed' });
+    const stderrEvent = JSON.stringify({ type: 'stderr', text: rawMessage || classifiedError.message });
+    assistantEvents.push(stderrEvent);
+    run.bufferedLines.push(stderrEvent);
+    broadcastSafely((sub) => sub.onStream(stderrEvent));
+    if (currentMessages.length === userPosition + 1) {
+      currentMessages.push({ role: 'assistant', events: assistantEvents, createdAt: new Date().toISOString() });
+    }
+    try {
+      const preview = computeLastListPreview(currentMessages);
+      const fresh = await db.persistSessionMessages(sessionId, currentMessages, {
+        ...(preview
+          ? { lastPreviewText: preview.lastPreviewText, lastPreviewRole: preview.lastPreviewRole }
+          : { lastPreviewText: null, lastPreviewRole: null }),
+      }, { fromPosition: userPosition });
+      if (fresh) broadcastSessionListUpsert(fresh.workspaceId, fresh);
+    } catch (persistErr) {
+      logger.error({ err: persistErr, sessionId }, 'Failed to save agent run error');
+    }
+    return { message: classifiedError.message, code: classifiedError.code };
+  };
+
+  const broadcastSafely = (fn: (sub: ChatSubscriber) => void): void => {
+    for (const sub of run.subscribers) {
+      try {
+        fn(sub);
+      } catch (err) {
+        logger.warn({ err, sessionId }, 'Chat subscriber threw');
+      }
+    }
+  };
+
+  // Run agent via ACP in background (non-blocking). Cleanup and exactly one terminal
+  // broadcast happen even when the adapter throws.
+  const completion = (async (): Promise<void> => {
+    let failure: { message: string; code?: AgentErrorCode } | null = null;
+    try {
+      await runTurn();
+    } catch (err) {
+      failure = await recordRunFailure(err).catch(() => ({ message: 'Agent run failed' }));
+    } finally {
+      cancelPendingApprovalsSafely(run, sessionId);
+      if (activeRuns.get(sessionId) === run) {
+        activeRuns.delete(sessionId);
+        runCompletions.delete(sessionId);
+      }
+      emitBusy(sessionId, session.workspaceId, false, null);
+      if (failure) {
+        const { message, code } = failure;
+        broadcastSafely((sub) => sub.onError(message, code));
+      } else {
+        broadcastSafely((sub) => sub.onDone(currentMessages));
+      }
+    }
   })();
+  runCompletions.set(sessionId, completion);
 
   return {};
+}
+
+function cancelPendingApprovalsSafely(run: ActiveRun, sessionId: string): void {
+  try {
+    cancelPendingApprovals(run);
+  } catch (err) {
+    logger.warn({ err, sessionId }, 'Failed to cancel pending approvals');
+  }
+  try {
+    cancelPendingQuestions(run);
+  } catch (err) {
+    logger.warn({ err, sessionId }, 'Failed to cancel pending questions');
+  }
+}
+
+/** Cancel every active run and wait (bounded) for them to finish their cleanup. */
+export async function cancelAllRuns(reason: string): Promise<void> {
+  const sessionIds = [...activeRuns.keys()];
+  if (sessionIds.length === 0) return;
+  logger.info({ reason, count: sessionIds.length }, 'cancelling all active runs');
+  const completions = sessionIds.map((id) => runCompletions.get(id)).filter((p): p is Promise<void> => !!p);
+  for (const id of sessionIds) cancelRun(id);
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([
+    Promise.allSettled(completions),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        logger.warn({ reason }, 'cancelAllRuns timed out waiting for runs to finish');
+        resolve();
+      }, CANCEL_ALL_RUNS_WAIT_MS);
+      timer.unref?.();
+    }),
+  ]);
+  clearTimeout(timer);
 }
 
 // dispatch a prompt and block until the run completes — used by orchestrator to sequence subtasks
@@ -1162,7 +1159,7 @@ export function dispatchPromptAndWait(opts: {
 
 // ------------------------------------------ Claude Auto-Continue Scheduler ------------------------------------------
 
-export async function checkClaudeAutoContinue(): Promise<void> {
+async function checkClaudeAutoContinue(): Promise<void> {
   logger.debug('Checking for Claude sessions to auto-continue');
 
   try {
@@ -1210,5 +1207,19 @@ export async function checkClaudeAutoContinue(): Promise<void> {
 }
 
 const AUTO_CONTINUE_INTERVAL_MS = 60 * 1000;
-setInterval(checkClaudeAutoContinue, AUTO_CONTINUE_INTERVAL_MS);
-checkClaudeAutoContinue().catch((err) => logger.error({ err }, 'Auto-continue checker failed to start'));
+let autoContinueTimer: NodeJS.Timeout | undefined;
+
+/**
+ * Start the periodic Claude auto-continue check. Called from `index.ts` once the server is up;
+ * importing this module (tests, `buildApp`) must not touch the database or start timers.
+ */
+export function startClaudeAutoContinue(): void {
+  if (autoContinueTimer) return;
+  autoContinueTimer = setInterval(() => void checkClaudeAutoContinue(), AUTO_CONTINUE_INTERVAL_MS);
+  void checkClaudeAutoContinue();
+}
+
+export function stopClaudeAutoContinue(): void {
+  clearInterval(autoContinueTimer);
+  autoContinueTimer = undefined;
+}

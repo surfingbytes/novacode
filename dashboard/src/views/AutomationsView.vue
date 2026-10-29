@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // node_modules
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 
 // components
@@ -12,11 +12,13 @@ import PageHeader from '@/components/layout/PageHeader.vue';
 import ListPageSkeleton from '@/components/ui/ListPageSkeleton.vue';
 
 // api
-import { automationsApi, isGloballyToasted, workspaceApi } from '@/classes/api';
+import { automationsApi, workspaceApi } from '@/classes/api';
+import { notifyApiError } from '@/lib/notifyApiError';
 import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 
 // composables
 import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
+import { usePolling } from '@/composables/usePolling';
 
 // stores
 import { useToastStore } from '@/stores/toasts';
@@ -81,9 +83,6 @@ const bDeleting = ref(false);
 // triggering
 const triggeringId = ref<string | null>(null);
 
-// polling handle
-let pollHandle: ReturnType<typeof setInterval> | null = null;
-
 // -------------------------------------------------- Computed --------------------------------------------------
 
 const deleteConfirmDescription = computed(() =>
@@ -132,36 +131,36 @@ async function fetchRuns(automationId: string): Promise<void> {
     const response = await automationsApi.listRuns(automationId, 50);
     runs.value = response.data ?? [];
   } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Load runs failed');
+    notifyApiError(err, 'Load runs failed');
   } finally {
     bRunsLoading.value = false;
   }
 }
 
-function startPoll(): void {
-  pollHandle = setInterval(async () => {
-    if (selectedAutomation.value) {
-      // refresh automations list + runs silently
-      try {
-        const response = await automationsApi.list();
-        automations.value = response.data ?? [];
-        // update selected automation object
-        const updated = automations.value.find((a) => a.id === selectedAutomation.value!.id);
-        if (updated) {
-          selectedAutomation.value = updated;
-        }
-      } catch {
-        // Background poll; the next tick retries and the last good list stays shown.
+// refresh automations list + selected runs silently
+async function pollSelected(): Promise<void> {
+  if (selectedAutomation.value) {
+    try {
+      const response = await automationsApi.list();
+      automations.value = response.data ?? [];
+      // update selected automation object
+      const updated = automations.value.find((a) => a.id === selectedAutomation.value!.id);
+      if (updated) {
+        selectedAutomation.value = updated;
       }
-      try {
-        const response = await automationsApi.listRuns(selectedAutomation.value.id, 50);
-        runs.value = response.data ?? [];
-      } catch {
-        // Background poll; the next tick retries and the last good runs stay shown.
-      }
+    } catch {
+      // Background poll; the next tick retries and the last good list stays shown.
     }
-  }, 15_000);
+    try {
+      const response = await automationsApi.listRuns(selectedAutomation.value.id, 50);
+      runs.value = response.data ?? [];
+    } catch {
+      // Background poll; the next tick retries and the last good runs stay shown.
+    }
+  }
 }
+
+const poll = usePolling(pollSelected, 15_000);
 
 // --- create/edit form modal ---
 function openCreateForm(): void {
@@ -265,7 +264,7 @@ async function triggerNow(a: Automation): Promise<void> {
     // wait a bit then refresh runs
     setTimeout(() => {
       if (selectedAutomation.value?.id === a.id) {
-        fetchRuns(a.id);
+        void fetchRuns(a.id);
       }
     }, 2000);
   } catch {
@@ -291,13 +290,7 @@ function changedFilesList(run: AutomationRun): Array<{ status: string; file: str
 onMounted(async () => {
   ensureAgentCapabilitiesLoaded();
   await fetchAll();
-  startPoll();
-});
-
-onUnmounted(() => {
-  if (pollHandle) {
-    clearInterval(pollHandle);
-  }
+  poll.start();
 });
 </script>
 

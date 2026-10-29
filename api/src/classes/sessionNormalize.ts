@@ -1,4 +1,4 @@
-import { extractHandoffLinksFromConfig } from './sessionHandoff';
+import { extractHandoffLinksFromConfig } from './sessionHandoffConfig';
 import { parseSessionUsageJson } from './sessionUsage';
 import type { SessionHandoffSource, SessionUsageSnapshot } from '../@types/index';
 

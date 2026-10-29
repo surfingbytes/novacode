@@ -1,5 +1,8 @@
 // node_modules
-import { onUnmounted, ref, watch, type Ref } from 'vue';
+import { getCurrentScope, onScopeDispose, ref, watch, type Ref } from 'vue';
+
+// composables
+import { usePolling } from '@/composables/usePolling';
 
 // classes
 import { forgeApi } from '@/classes/api';
@@ -29,21 +32,7 @@ export function useCiStatus(opts: {
 } {
   const status = ref<CiStatusResponse | null>(null);
   const bLoading = ref<boolean>(false);
-  let timer: ReturnType<typeof setTimeout> | null = null;
   let generation = 0;
-
-  const clearTimer = (): void => {
-    if (timer) clearTimeout(timer);
-    timer = null;
-  };
-
-  const schedule = (): void => {
-    clearTimer();
-    if (!opts.active.value || document.visibilityState !== 'visible') return;
-    // Not configured: check again rarely in case a forge gets set up in another tab.
-    const delay = status.value && !status.value.configured ? 120_000 : ciPollIntervalMs(status.value);
-    timer = setTimeout(() => void refresh(), delay);
-  };
 
   const refresh = async (): Promise<void> => {
     const gen = ++generation;
@@ -57,17 +46,14 @@ export function useCiStatus(opts: {
     } catch {
       // keep the last known status; transient API errors should not blank the badge
     } finally {
-      if (gen === generation) {
-        bLoading.value = false;
-        schedule();
-      }
+      if (gen === generation) bLoading.value = false;
     }
   };
 
-  const onVisibility = (): void => {
-    if (document.visibilityState === 'visible' && opts.active.value) void refresh();
-    else clearTimer();
-  };
+  // Not configured: check again rarely in case a forge gets set up in another tab.
+  const poll = usePolling(refresh, () =>
+    status.value && !status.value.configured ? 120_000 : ciPollIntervalMs(status.value)
+  );
 
   const trigger = opts.trigger ?? ref(null);
   watch(
@@ -75,18 +61,21 @@ export function useCiStatus(opts: {
     ([, , active], previous) => {
       const [prevWorkspace, prevRepo] = previous ?? [];
       if (prevWorkspace !== opts.workspaceId.value || prevRepo !== opts.repo.value) status.value = null;
-      if (active) void refresh();
-      else clearTimer();
+      poll.stop();
+      if (!active) return;
+      // Direct refresh (not poll.trigger) so a new repo is fetched even while an older request is in flight.
+      if (document.visibilityState !== 'hidden') void refresh();
+      poll.start();
     },
     { immediate: true }
   );
 
-  document.addEventListener('visibilitychange', onVisibility);
-  onUnmounted(() => {
-    generation++;
-    clearTimer();
-    document.removeEventListener('visibilitychange', onVisibility);
-  });
+  if (getCurrentScope()) {
+    onScopeDispose(() => {
+      generation++;
+      poll.stop();
+    });
+  }
 
   return { status, bLoading, refresh };
 }

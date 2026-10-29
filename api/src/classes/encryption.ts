@@ -1,24 +1,30 @@
 // node_modules
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto';
+
+// classes
+import { config, decodeEncryptionKey, ENCRYPTION_KEY_BYTES } from './config';
 
 const ALGO = 'aes-256-gcm';
 const IV_LEN = 12;
 const AUTH_TAG_LEN = 16;
-const KEY_LEN = 32;
+const KEY_LEN = ENCRYPTION_KEY_BYTES;
 
 async function getEncryptionKey(): Promise<Buffer> {
-  const envKey = process.env['ENCRYPTION_KEY'];
+  const envKey = config.encryptionKey;
   if (envKey) {
-    const buf = Buffer.from(envKey, 'hex');
-    if (buf.length === KEY_LEN) {
-      return buf;
+    const key = decodeEncryptionKey(envKey);
+    if (key) {
+      return key;
     }
-    const b64 = Buffer.from(envKey, 'base64');
-    if (b64.length === KEY_LEN) {
-      return b64;
-    }
+    throw new Error('ENCRYPTION_KEY must be 32 bytes, hex or base64 encoded');
   }
-  throw new Error('ENCRYPTION_KEY environment variable is required');
+  // ENCRYPTION_KEY is optional (not provisioned by the compose/install files): derive a key
+  // from the always-required JWT_SECRET. Rotating JWT_SECRET then invalidates stored ciphertext.
+  const jwtSecret = config.jwtSecret.trim();
+  if (jwtSecret) {
+    return Buffer.from(hkdfSync('sha256', jwtSecret, '', 'novacode:encryption-key', KEY_LEN));
+  }
+  throw new Error('ENCRYPTION_KEY or JWT_SECRET environment variable is required');
 }
 
 export async function encrypt(plaintext: string): Promise<string> {

@@ -2,7 +2,7 @@
 import type { FastifyInstance } from 'fastify';
 import { Type } from '@sinclair/typebox';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
-import { mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { join, extname, basename } from 'node:path';
 import { existsSync } from 'node:fs';
 import convertHeic from 'heic-convert';
@@ -11,14 +11,12 @@ import convertHeic from 'heic-convert';
 import { jwtPreHandler, authenticateToken, extractRequestToken } from '../classes/auth';
 import { db } from '../classes/database';
 import { config } from '../classes/config';
+import { IMAGE_DIR } from '../classes/sessionImages';
 
 // --------------------------------------------- Config ---------------------------------------------
 
 const SessionParamsSchema = Type.Object({ sessionId: Type.String() });
 const ImageParamsSchema = Type.Object({ sessionId: Type.String(), filename: Type.String() });
-const ImageQuerySchema = Type.Object({ token: Type.Optional(Type.String()) });
-
-const IMAGE_DIR = join(config.configDir, 'prompt-images');
 
 /** HEIC/HEIF are accepted on upload then converted to JPEG for agents + browsers. */
 const HEIC_EXTENSIONS = new Set(['.heic', '.heif']);
@@ -152,19 +150,6 @@ async function heicBufferToJpeg(buf: Buffer): Promise<Buffer> {
   return Buffer.from(new Uint8Array(output));
 }
 
-// --------------------------------------------- Helpers ---------------------------------------------
-
-export async function deleteSessionImages(sessionId: string): Promise<void> {
-  const dir = join(IMAGE_DIR, sessionId);
-  // guard: only delete inside IMAGE_DIR
-  if (!dir.startsWith(IMAGE_DIR + '/')) return;
-  try {
-    await rm(dir, { recursive: true, force: true });
-  } catch {
-    // non-critical — ignore if directory doesn't exist
-  }
-}
-
 // --------------------------------------------- Routes ---------------------------------------------
 
 export async function imageRoutes(fastify: FastifyInstance): Promise<void> {
@@ -185,7 +170,7 @@ export async function imageRoutes(fastify: FastifyInstance): Promise<void> {
 
       const session = await db.getSession(sessionId);
       if (!session) {
-        return reply.status(404).send({ error: 'Session not found' });
+        return reply.code(404).send({ error: 'Session not found' });
       }
 
       let ext = resolveExtension(body.mimeType, body.filename);
@@ -193,7 +178,7 @@ export async function imageRoutes(fastify: FastifyInstance): Promise<void> {
       const dir = join(IMAGE_DIR, sessionId);
 
       if (!dir.startsWith(IMAGE_DIR + '/')) {
-        return reply.status(400).send({ error: 'Invalid session ID' });
+        return reply.code(400).send({ error: 'Invalid session ID' });
       }
 
       await mkdir(dir, { recursive: true });
@@ -205,7 +190,7 @@ export async function imageRoutes(fastify: FastifyInstance): Promise<void> {
           buf = await heicBufferToJpeg(raw);
           ext = '.jpg';
         } catch {
-          return reply.status(400).send({ error: 'Failed to convert HEIC image' });
+          return reply.code(400).send({ error: 'Failed to convert HEIC image' });
         }
       }
 
@@ -213,37 +198,37 @@ export async function imageRoutes(fastify: FastifyInstance): Promise<void> {
       const filePath = join(dir, filename);
       await writeFile(filePath, buf);
 
-      return reply.status(201).send({ path: filePath, filename });
+      return reply.code(201).send({ path: filePath, filename });
     }
   );
 
   // GET /api/sessions/:sessionId/images/:filename — serve an uploaded image.
-  // Cookie (dashboard) or Bearer, with a query-token fallback for old <img> URLs.
+  // Cookie (dashboard) or Bearer only — no query-token fallback.
   fastifyInstance.get(
     '/api/sessions/:sessionId/images/:filename',
-    { schema: { params: ImageParamsSchema, querystring: ImageQuerySchema } },
+    { schema: { params: ImageParamsSchema } },
     async (request, reply) => {
-      const token = extractRequestToken(request) ?? request.query.token ?? '';
+      const token = extractRequestToken(request) ?? '';
       const user = await authenticateToken(token);
       if (!user) {
-        return reply.status(401).send({ error: 'Unauthorized' });
+        return reply.code(401).send({ error: 'Unauthorized' });
       }
       const { sessionId, filename } = request.params;
 
       const dir = join(IMAGE_DIR, sessionId);
       if (!dir.startsWith(IMAGE_DIR + '/')) {
-        return reply.status(400).send({ error: 'Invalid session ID' });
+        return reply.code(400).send({ error: 'Invalid session ID' });
       }
 
       // prevent path traversal via filename
       const safeName = basename(filename);
       const filePath = join(dir, safeName);
       if (!filePath.startsWith(dir + '/')) {
-        return reply.status(400).send({ error: 'Invalid filename' });
+        return reply.code(400).send({ error: 'Invalid filename' });
       }
 
       if (!existsSync(filePath)) {
-        return reply.status(404).send({ error: 'Image not found' });
+        return reply.code(404).send({ error: 'Image not found' });
       }
 
       const contentType = EXT_TO_CONTENT_TYPE[extname(safeName).toLowerCase()] ?? 'application/octet-stream';

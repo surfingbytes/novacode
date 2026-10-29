@@ -66,7 +66,7 @@ const emit = defineEmits<{
 
     <Transition name="fade">
       <div v-if="bShowArchived" class="mt-4">
-        <div class="grid-view" v-if="viewMode === 'grid'">
+        <div v-if="viewMode === 'grid'" class="grid-view">
           <TransitionGroup name="list-stagger" tag="div" class="grid-view-items">
             <SessionCard
               v-for="(session, index) in sessions"
@@ -112,7 +112,7 @@ const emit = defineEmits<{
           </template>
         </div>
 
-        <div v-else class="list-view" :ref="setListViewEl">
+        <div v-else :ref="setListViewEl" class="list-view">
           <TransitionGroup name="list-stagger" tag="div" class="list-view-items">
             <SessionCard
               v-for="(session, index) in sessions"

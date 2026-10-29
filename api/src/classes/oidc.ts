@@ -9,13 +9,14 @@ import {
 import jwt from 'jsonwebtoken';
 
 // classes
+import { config } from './config';
 import {
   isSecureRequest,
   parseCookieHeader
 } from './sessionCookie';
 
-export const OIDC_PENDING_COOKIE_NAME = 'nc_oidc';
-export const OIDC_PENDING_MAX_AGE_SEC = 10 * 60;
+const OIDC_PENDING_COOKIE_NAME = 'nc_oidc';
+const OIDC_PENDING_MAX_AGE_SEC = 10 * 60;
 const DISCOVERY_TTL_MS = 10 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 10_000;
 const JWT_CLOCK_TOLERANCE_SEC = 30;
@@ -229,7 +230,7 @@ async function parseDiscovery(payload: unknown): Promise<DiscoveryDocument> {
   };
 }
 
-export async function fetchOidcDiscovery(
+async function fetchOidcDiscovery(
   issuer: string,
   fetchFn: FetchFn = fetch
 ): Promise<DiscoveryDocument> {
@@ -321,7 +322,7 @@ export function clearOidcPendingCookieHeader(secure: boolean): string {
 }
 
 function jwtSecret(): string {
-  const secret = (process.env['JWT_SECRET'] ?? '').trim();
+  const secret = config.jwtSecret.trim();
   if (!secret) {
     throw new Error('JWT_SECRET environment variable is required');
   }

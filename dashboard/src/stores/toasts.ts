@@ -49,6 +49,11 @@ export const useToastStore = defineStore('toasts', () => {
     push('info', text);
   };
 
+  /** Logout: drop toasts that may mention the previous user's data. */
+  const reset = (): void => {
+    toasts.value = [];
+  };
+
   // -------------------------------------------------- Export --------------------------------------------------
   return {
     // data
@@ -58,6 +63,7 @@ export const useToastStore = defineStore('toasts', () => {
     push,
     error,
     success,
-    info
+    info,
+    reset
   };
 });

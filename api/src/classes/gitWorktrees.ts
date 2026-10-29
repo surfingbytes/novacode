@@ -1,5 +1,4 @@
 // node_modules
-import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -7,6 +6,10 @@ import { basename, dirname, join, relative, resolve } from 'node:path';
 
 // classes
 import { config } from './config';
+import { GitCommandError, runGit } from './runGit';
+
+/** Worktree checkouts, merges and patch applies touch many files; give them more than the default 30 s. */
+const MERGE_TIMEOUT_MS = 120_000;
 
 /**
  * Git plumbing for parallel orchestrator runs: every step works in its own
@@ -33,30 +36,27 @@ export interface GitResult {
   stderr: string;
 }
 
-export function git(
+export async function git(
   cwd: string,
   args: string[],
-  opts: { env?: Record<string, string>; input?: string } = {}
+  opts: { env?: Record<string, string>; input?: string; timeoutMs?: number } = {}
 ): Promise<GitResult> {
-  return new Promise((resolvePromise) => {
-    const child = spawn('git', args, {
-      cwd,
-      env: { ...process.env, ...opts.env, GIT_TERMINAL_PROMPT: '0' },
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (chunk) => (stdout += chunk));
-    child.stderr.on('data', (chunk) => (stderr += chunk));
-    child.on('error', (err) => resolvePromise({ code: -1, stdout, stderr: stderr || err.message }));
-    child.on('close', (code) => resolvePromise({ code: code ?? -1, stdout, stderr }));
-    // git may exit without reading stdin; an unhandled EPIPE here would crash the process
-    child.stdin.on('error', () => {});
-    child.stdin.end(opts.input ?? '');
-  });
+  try {
+    const { stdout, stderr } = await runGit(args, { cwd, env: opts.env, input: opts.input, timeoutMs: opts.timeoutMs });
+    return { code: 0, stdout, stderr };
+  } catch (err) {
+    if (err instanceof GitCommandError) {
+      return { code: err.code ?? -1, stdout: err.stdout, stderr: err.stderr || err.message };
+    }
+    return { code: -1, stdout: '', stderr: (err as Error).message };
+  }
 }
 
-async function gitOk(cwd: string, args: string[], opts: { env?: Record<string, string>; input?: string } = {}): Promise<string> {
+async function gitOk(
+  cwd: string,
+  args: string[],
+  opts: { env?: Record<string, string>; input?: string; timeoutMs?: number } = {}
+): Promise<string> {
   const result = await git(cwd, args, opts);
   if (result.code !== 0) {
     throw new Error(`git ${args[0]} failed: ${(result.stderr || result.stdout).trim() || `exit ${result.code}`}`);
@@ -127,7 +127,7 @@ export async function addWorktree(repoRoot: string, dir: string, branch: string,
   await rm(dir, { recursive: true, force: true });
   await git(repoRoot, ['worktree', 'prune']);
   await mkdir(dirname(dir), { recursive: true });
-  await gitOk(repoRoot, ['worktree', 'add', '--force', '-B', branch, dir, base]);
+  await gitOk(repoRoot, ['worktree', 'add', '--force', '-B', branch, dir, base], { timeoutMs: MERGE_TIMEOUT_MS });
 }
 
 /**
@@ -177,7 +177,7 @@ export async function unmergedFiles(dir: string): Promise<string[]> {
   return result.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
 }
 
-export function isMergeInProgress(dir: string): Promise<boolean> {
+function isMergeInProgress(dir: string): Promise<boolean> {
   return git(dir, ['rev-parse', '-q', '--verify', 'MERGE_HEAD']).then((result) => result.code === 0);
 }
 
@@ -189,7 +189,10 @@ export async function mergeBranch(
   baseEnv: Record<string, string>
 ): Promise<{ ok: true } | { ok: false; conflicts: string[]; error: string }> {
   const env = await identityEnv(dir, baseEnv);
-  const result = await git(dir, ['merge', '--no-ff', '--no-edit', '-m', message, branch], { env });
+  const result = await git(dir, ['merge', '--no-ff', '--no-edit', '-m', message, branch], {
+    env,
+    timeoutMs: MERGE_TIMEOUT_MS
+  });
   if (result.code === 0) return { ok: true };
   return { ok: false, conflicts: await unmergedFiles(dir), error: (result.stderr || result.stdout).trim() };
 }
@@ -224,9 +227,12 @@ export async function applyCommitRangeToWorkingTree(
   const diff = await git(repoRoot, ['diff', '--binary', from, to]);
   if (diff.code !== 0) return { ok: false, error: diff.stderr.trim() || 'git diff failed' };
   if (!diff.stdout.trim()) return { ok: true, bChanged: false };
-  const plain = await git(repoRoot, ['apply', '--whitespace=nowarn'], { input: diff.stdout });
+  const plain = await git(repoRoot, ['apply', '--whitespace=nowarn'], { input: diff.stdout, timeoutMs: MERGE_TIMEOUT_MS });
   if (plain.code === 0) return { ok: true, bChanged: true };
-  const threeWay = await git(repoRoot, ['apply', '--3way', '--whitespace=nowarn'], { input: diff.stdout });
+  const threeWay = await git(repoRoot, ['apply', '--3way', '--whitespace=nowarn'], {
+    input: diff.stdout,
+    timeoutMs: MERGE_TIMEOUT_MS
+  });
   if (threeWay.code === 0) return { ok: true, bChanged: true };
   return { ok: false, error: (threeWay.stderr || plain.stderr).trim() || 'git apply failed' };
 }

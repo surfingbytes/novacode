@@ -6,7 +6,6 @@ import { db } from './database';
 import { isPathUnderBrowseRoot, resolveWorkspaceAbsolutePath } from './workspacePaths';
 import {
   deleteRuleFile,
-  isRuleFileHiddenFromUi,
   listRuleFiles,
   readRuleFile,
   renameRuleFile,
@@ -28,8 +27,6 @@ export type WorkspaceRuleErrorCode =
 export type WorkspaceRuleResult<T> =
   | { ok: true; value: T }
   | { ok: false; code: WorkspaceRuleErrorCode; message: string };
-
-export const isWorkspaceRuleHiddenFromUi = isRuleFileHiddenFromUi;
 
 async function getWorkspaceRulesDir(workspaceId: string): Promise<WorkspaceRuleResult<string>> {
   const workspace = await db.getWorkspace(workspaceId);

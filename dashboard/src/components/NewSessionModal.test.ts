@@ -57,9 +57,9 @@ describe('NewSessionModal', () => {
 
     const overlay = document.body.querySelector('.fixed.inset-0');
     expect(overlay).toBeTruthy();
-    expect(overlay!.contains(agentGroup!)).toBe(true);
+    expect(overlay!.contains(agentGroup)).toBe(true);
 
-    expect(document.getElementById('host')!.contains(agentGroup!)).toBe(false);
+    expect(document.getElementById('host')!.contains(agentGroup)).toBe(false);
     expect(document.getElementById('host')!.querySelector('basemodal')).toBeNull();
   });
 

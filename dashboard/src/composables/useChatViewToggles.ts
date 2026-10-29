@@ -24,15 +24,15 @@ export interface UseChatViewTogglesOptions {
 
 // -------------------------------------------------- Helpers --------------------------------------------------
 
-export function readHideThinkingFromLs(): boolean {
+function readHideThinkingFromLs(): boolean {
   return safeGetItem(HIDE_THINKING_LS_KEY) === '1';
 }
 
-export function readHideToolCallsFromLs(): boolean {
+function readHideToolCallsFromLs(): boolean {
   return safeGetItem(HIDE_TOOL_CALLS_LS_KEY) === '1';
 }
 
-export function persistChatToggle(key: string, checked: boolean): void {
+function persistChatToggle(key: string, checked: boolean): void {
   if (checked) safeSetItem(key, '1');
   else safeRemoveItem(key);
 }
@@ -78,5 +78,3 @@ export function useChatViewToggles(options: UseChatViewTogglesOptions = {}) {
     collapseAllToolOutputs
   };
 }
-
-export type UseChatViewToggles = ReturnType<typeof useChatViewToggles>;

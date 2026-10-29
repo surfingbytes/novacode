@@ -9,7 +9,7 @@ import type { PushSubscriptionModel as PushSubscription } from '../../generated/
 
 // --------------------------------------------- Push Subscriptions ---------------------------------------------
 
-export async function upsertPushSubscription(data: {
+async function upsertPushSubscription(data: {
   userId: string;
   endpoint: string;
   p256dh: string;
@@ -49,21 +49,21 @@ export async function upsertPushSubscription(data: {
   });
 }
 
-export async function deletePushSubscriptionByEndpoint(endpoint: string): Promise<void> {
+async function deletePushSubscriptionByEndpoint(endpoint: string): Promise<void> {
   await prisma.pushSubscription.deleteMany({ where: { endpoint } });
 }
 
-export async function listPushSubscriptionsByUser(userId: string): Promise<PushSubscription[]> {
+async function listPushSubscriptionsByUser(userId: string): Promise<PushSubscription[]> {
   return prisma.pushSubscription.findMany({ where: { userId } });
 }
 
-export async function listPushSubscriptions(kind?: 'task' | 'ci'): Promise<PushSubscription[]> {
+async function listPushSubscriptions(kind?: 'task' | 'ci'): Promise<PushSubscription[]> {
   if (kind === 'task') return prisma.pushSubscription.findMany({ where: { notifyTasks: true } });
   if (kind === 'ci') return prisma.pushSubscription.findMany({ where: { notifyCi: true } });
   return prisma.pushSubscription.findMany();
 }
 
-export async function hasCiPushSubscriptions(): Promise<boolean> {
+async function hasCiPushSubscriptions(): Promise<boolean> {
   return (await prisma.pushSubscription.count({ where: { notifyCi: true } })) > 0;
 }
 

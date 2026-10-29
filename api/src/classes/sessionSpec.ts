@@ -14,7 +14,7 @@ const TEMPLATE_MARKER = '<!-- nova-spec:';
 /** Session list writes can land a moment after the spec file; ignore that gap. */
 const CHAT_NEWER_TOLERANCE_MS = 5_000;
 
-export function specsRootDir(): string {
+function specsRootDir(): string {
   return join(config.configDir, 'specs');
 }
 

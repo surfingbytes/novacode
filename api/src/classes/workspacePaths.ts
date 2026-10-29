@@ -1,5 +1,5 @@
 // node_modules
-import { join, normalize, resolve } from 'node:path';
+import { normalize, resolve } from 'node:path';
 
 // classes
 import { config } from './config';
@@ -43,13 +43,4 @@ export function relativizeToBrowseRoot(absolutePath: string): string {
     throw new Error('Path is outside the workspace browse root');
   }
   return absNorm.slice(rootNorm.length + 1);
-}
-
-/** Join browse root with a relative path using POSIX-style normalization for display/cwd. */
-export function joinBrowseRoot(relativePath: string): string {
-  const rel = normalizeWorkspaceRelativePath(relativePath);
-  if (rel === '.') {
-    return resolve(config.workspaceBrowseRoot);
-  }
-  return join(resolve(config.workspaceBrowseRoot), rel);
 }

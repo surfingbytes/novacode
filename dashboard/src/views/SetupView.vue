@@ -1,18 +1,19 @@
 <script setup lang="ts">
 // node_modules
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, defineAsyncComponent } from 'vue';
 import { useRouter } from 'vue-router';
 
 // components
-import AppTerminal from '@/components/AppTerminal.vue';
 import BaseModal from '@/components/BaseModal.vue';
+
+// composables
+import { useAgentAuth, type ApiKeyAgent } from '@/composables/useAgentAuth';
 
 // stores
 import { useAuthStore } from '@/stores/auth';
-import { useToastStore } from '@/stores/toasts';
 
 // api
-import { authApi, agentAuthApi, isGloballyToasted, settingsApi } from '@/classes/api';
+import { authApi, settingsApi } from '@/classes/api';
 
 
 // classes
@@ -28,10 +29,12 @@ import {
   syncPushSubscription
 } from '@/lib/notifications';
 
+// -------------------------------------------------- Components --------------------------------------------------
+const AppTerminal = defineAsyncComponent(() => import('@/components/AppTerminal.vue'));
+
 // -------------------------------------------------- Store --------------------------------------------------
 const router = useRouter();
 const auth = useAuthStore();
-const toastStore = useToastStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const step = ref<1 | 2 | 3 | 4>(1);
@@ -49,34 +52,34 @@ const bSavingProfile = ref<boolean>(false);
 const bAccountCreated = ref<boolean>(false);
 
 // Step 2: AI Agents
-const bClaudeAuthenticated = ref<boolean>(false);
-const bCursorAuthenticated = ref<boolean>(false);
-const bVibeConfigured = ref<boolean>(false);
-const bOpenCodeAuthenticated = ref<boolean>(false);
-const bCodexAuthenticated = ref<boolean>(false);
-const bStartingClaudeLogin = ref<boolean>(false);
-const bStartingCursorLogin = ref<boolean>(false);
-const bLoggingOutClaude = ref<boolean>(false);
-const bLoggingOutCursor = ref<boolean>(false);
-const authKind = ref<'claude' | 'cursor' | null>(null);
-const authSessionId = ref<string | null>(null);
-const authCode = ref<string>('');
-const authUrl = ref<string | null>(null);
-const bClaudeAuthSuccess = ref<boolean>(false);
-const claudeAuthError = ref<string>('');
-const authTerminalRef = ref<InstanceType<typeof AppTerminal> | null>(null);
-// Vibe (Mistral) API key
+const {
+  status: agentStatus,
+  cursorAuthMessage,
+  refreshAll: refreshAuthStatus,
+  isBusy,
+  startCursorLogin,
+  startClaudeLogin,
+  submitAuthCode,
+  onAuthTokenFound,
+  logoutCursor,
+  logoutClaude,
+  saveApiKey,
+  clearApiKey,
+  authSessionId,
+  authCode,
+  authUrl,
+  authTerminalRef,
+  bClaudeAuthSuccess,
+  claudeAuthError,
+  openAuthUrl,
+  dismissAuthTerminal,
+  onAuthSessionEnded
+} = useAgentAuth();
 const vibeApiKey = ref<string>('');
-const bSavingVibeKey = ref<boolean>(false);
-const bClearingVibeKey = ref<boolean>(false);
 const vibeKeyError = ref<string>('');
 const openCodeApiKey = ref<string>('');
-const bSavingOpenCodeKey = ref<boolean>(false);
-const bClearingOpenCodeKey = ref<boolean>(false);
 const openCodeKeyError = ref<string>('');
 const codexApiKey = ref<string>('');
-const bSavingCodexKey = ref<boolean>(false);
-const bClearingCodexKey = ref<boolean>(false);
 const codexKeyError = ref<string>('');
 
 // Step 3: Git Credentials
@@ -108,11 +111,7 @@ const passwordMismatch = computed((): boolean => {
 
 const canProceedStep2 = computed(
   (): boolean =>
-    bClaudeAuthenticated.value ||
-    bCursorAuthenticated.value ||
-    bVibeConfigured.value ||
-    bOpenCodeAuthenticated.value ||
-    bCodexAuthenticated.value
+    Object.values(agentStatus).some((entry) => entry.authenticated)
 );
 
 const stepStatuses = computed<Record<1 | 2 | 3 | 4, 'complete' | 'active' | 'pending'>>(() => ({
@@ -155,240 +154,22 @@ const handleStep1Next = async (): Promise<void> => {
   }
 };
 
-// --- agent auth ---
-const refreshAuthStatus = async (): Promise<void> => {
-  try {
-    const cursorResponse = await agentAuthApi.cursorStatus();
-    bCursorAuthenticated.value = cursorResponse.data.authenticated;
-  } catch {
-    // Best-effort status probe; the agent card just shows not-connected.
-  }
-  try {
-    const claudeResponse = await agentAuthApi.claudeStatus();
-    bClaudeAuthenticated.value = claudeResponse.data.authenticated;
-  } catch {
-    // Best-effort status probe; the agent card just shows not-connected.
-  }
-  try {
-    const vibeResponse = await settingsApi.getVibeApiKeyStatus();
-    bVibeConfigured.value = vibeResponse.data.configured;
-  } catch {
-    // Best-effort status probe; the agent card just shows not-connected.
-  }
-  try {
-    const openCodeResponse = await agentAuthApi.openCodeStatus();
-    bOpenCodeAuthenticated.value = openCodeResponse.data.authenticated;
-  } catch {
-    // Best-effort status probe; the agent card just shows not-connected.
-  }
-  try {
-    const codexResponse = await agentAuthApi.codexStatus();
-    bCodexAuthenticated.value = codexResponse.data.authenticated;
-  } catch {
-    // Best-effort status probe; the agent card just shows not-connected.
-  }
-};
+// --- API-key agents (Vibe, OpenCode, Codex) ---
+const apiKeyInputs = { vibe: vibeApiKey, opencode: openCodeApiKey, codex: codexApiKey };
+const apiKeyErrors = { vibe: vibeKeyError, opencode: openCodeKeyError, codex: codexKeyError };
 
-const startCursorLogin = async (): Promise<void> => {
-  bStartingCursorLogin.value = true;
-  try {
-    authUrl.value = null;
-    authCode.value = '';
-    authKind.value = 'cursor';
-    const response = await agentAuthApi.cursorLogin();
-    authSessionId.value = response.data.sessionId;
-  } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Cursor login failed');
-  } finally {
-    bStartingCursorLogin.value = false;
-  }
-};
-
-const startClaudeLogin = async (): Promise<void> => {
-  bStartingClaudeLogin.value = true;
-  try {
-    authUrl.value = null;
-    authCode.value = '';
-    authKind.value = 'claude';
-    const response = await agentAuthApi.claudeLogin();
-    authSessionId.value = response.data.sessionId;
-  } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Claude login failed');
-  } finally {
-    bStartingClaudeLogin.value = false;
-  }
-};
-
-const logoutCursor = async (): Promise<void> => {
-  bLoggingOutCursor.value = true;
-  try {
-    await agentAuthApi.cursorLogout();
-    await refreshAuthStatus();
-  } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Cursor logout failed');
-  } finally {
-    bLoggingOutCursor.value = false;
-  }
-};
-
-const logoutClaude = async (): Promise<void> => {
-  bLoggingOutClaude.value = true;
-  try {
-    await agentAuthApi.claudeLogout();
-    await refreshAuthStatus();
-  } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Claude logout failed');
-  } finally {
-    bLoggingOutClaude.value = false;
-  }
-};
-
-const submitAuthCode = async (): Promise<void> => {
-  const code = authCode.value.trim();
-  if (!code) {
+const saveAgentApiKey = async (agent: ApiKeyAgent): Promise<void> => {
+  const key = apiKeyInputs[agent].value.trim();
+  if (!key || isBusy(agent, 'save')) return;
+  apiKeyErrors[agent].value = '';
+  const error = await saveApiKey(agent, key);
+  if (error) {
+    apiKeyErrors[agent].value = error;
     return;
   }
-  authTerminalRef.value?.sendInput(code);
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  authTerminalRef.value?.sendInput('\r');
-  authCode.value = '';
+  apiKeyInputs[agent].value = '';
 };
 
-const onAuthTokenFound = async (token: string): Promise<void> => {
-  if (authKind.value !== 'claude') {
-    return;
-  }
-  const trimmedToken = token.trim();
-  if (!trimmedToken) {
-    return;
-  }
-  try {
-    claudeAuthError.value = '';
-    const response = await agentAuthApi.claudeSaveToken(trimmedToken);
-    if (response.data?.ok) {
-      bClaudeAuthSuccess.value = true;
-      dismissAuthTerminal();
-      setTimeout(() => {
-        bClaudeAuthSuccess.value = false;
-      }, 3000);
-    } else {
-      claudeAuthError.value = 'Failed to save Claude token.';
-    }
-    await refreshAuthStatus();
-  } catch {
-    claudeAuthError.value = 'Failed to save Claude token.';
-  }
-};
-
-const openAuthUrl = (url: string): void => {
-  authUrl.value = url;
-  window.open(url, '_blank', 'noopener,noreferrer');
-};
-
-const dismissAuthTerminal = (): void => {
-  authSessionId.value = null;
-  authUrl.value = null;
-  authCode.value = '';
-  authKind.value = null;
-  void refreshAuthStatus();
-};
-
-const onAuthSessionEnded = (): void => {
-  refreshAuthStatus();
-};
-
-// --- Vibe (Mistral) API key ---
-const saveVibeApiKey = async (): Promise<void> => {
-  const key = vibeApiKey.value.trim();
-  if (!key) return;
-  bSavingVibeKey.value = true;
-  vibeKeyError.value = '';
-  try {
-    await settingsApi.setVibeApiKey(key);
-    vibeApiKey.value = '';
-    await refreshAuthStatus();
-  } catch {
-    vibeKeyError.value = 'Failed to save API key.';
-  } finally {
-    bSavingVibeKey.value = false;
-  }
-};
-
-const clearVibeApiKey = async (): Promise<void> => {
-  bClearingVibeKey.value = true;
-  try {
-    await settingsApi.clearVibeApiKey();
-    await refreshAuthStatus();
-  } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Remove API key failed');
-  } finally {
-    bClearingVibeKey.value = false;
-  }
-};
-
-const saveOpenCodeApiKey = async (): Promise<void> => {
-  const key = openCodeApiKey.value.trim();
-  if (!key) return;
-  bSavingOpenCodeKey.value = true;
-  openCodeKeyError.value = '';
-  try {
-    const response = await agentAuthApi.openCodeLogin(key);
-    if (!response.data?.ok) {
-      openCodeKeyError.value = 'Authentication failed. Check your API key and try again.';
-      return;
-    }
-    openCodeApiKey.value = '';
-    await refreshAuthStatus();
-  } catch {
-    openCodeKeyError.value = 'Failed to save API key.';
-  } finally {
-    bSavingOpenCodeKey.value = false;
-  }
-};
-
-const clearOpenCodeApiKey = async (): Promise<void> => {
-  bClearingOpenCodeKey.value = true;
-  try {
-    await agentAuthApi.openCodeLogout();
-    await refreshAuthStatus();
-  } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Remove API key failed');
-  } finally {
-    bClearingOpenCodeKey.value = false;
-  }
-};
-
-const saveCodexApiKey = async (): Promise<void> => {
-  const key = codexApiKey.value.trim();
-  if (!key) return;
-  bSavingCodexKey.value = true;
-  codexKeyError.value = '';
-  try {
-    const response = await agentAuthApi.codexLogin(key);
-    if (!response.data?.ok) {
-      codexKeyError.value = 'Authentication failed. Check your API key and try again.';
-      return;
-    }
-    codexApiKey.value = '';
-    await refreshAuthStatus();
-  } catch {
-    codexKeyError.value = 'Failed to save API key.';
-  } finally {
-    bSavingCodexKey.value = false;
-  }
-};
-
-const clearCodexApiKey = async (): Promise<void> => {
-  bClearingCodexKey.value = true;
-  try {
-    await agentAuthApi.codexLogout();
-    await refreshAuthStatus();
-  } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Remove API key failed');
-  } finally {
-    bClearingCodexKey.value = false;
-  }
-};
 
 // --- git setup ---
 const handleStep3Next = async (): Promise<void> => {
@@ -442,7 +223,7 @@ const handleFinish = async (): Promise<void> => {
 
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 onMounted((): void => {
-  refreshAuthStatus();
+  void refreshAuthStatus();
 });
 </script>
 
@@ -670,31 +451,31 @@ onMounted((): void => {
                 </div>
                 <span
                   class="inline-flex items-center text-xs px-2.5 py-1 rounded-full border flex-shrink-0 font-medium"
-                  :class="bCursorAuthenticated
+                  :class="agentStatus.cursor.authenticated
                     ? 'bg-success/10 text-success border-success/20'
                     : 'bg-warning/10 text-warning border-warning/20'"
                 >
-                  <span class="w-1.5 h-1.5 rounded-full mr-1.5" :class="bCursorAuthenticated ? 'bg-success' : 'bg-warning'"></span>
-                  {{ bCursorAuthenticated ? 'Authenticated' : 'Not authenticated' }}
+                  <span class="w-1.5 h-1.5 rounded-full mr-1.5" :class="agentStatus.cursor.authenticated ? 'bg-success' : 'bg-warning'"></span>
+                  {{ agentStatus.cursor.authenticated ? 'Authenticated' : 'Not authenticated' }}
                 </span>
               </div>
               <div class="flex items-center gap-3">
                 <button
-                  v-if="!bCursorAuthenticated"
+                  v-if="!agentStatus.cursor.authenticated"
                   class="flex items-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all"
-                  :disabled="bStartingCursorLogin"
+                  :disabled="isBusy('cursor', 'login')"
                   @click="startCursorLogin"
                 >
-                  <div v-if="bStartingCursorLogin" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  <div v-if="isBusy('cursor', 'login')" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
                   Login to Cursor
                 </button>
                 <button
                   v-else
                   class="flex items-center gap-2 bg-fg/[0.05] hover:bg-fg/[0.09] disabled:opacity-50 disabled:cursor-not-allowed border border-fg/[0.1] text-text-primary text-sm font-medium px-4 py-2.5 rounded-lg transition-all"
-                  :disabled="bLoggingOutCursor"
+                  :disabled="isBusy('cursor', 'logout')"
                   @click="logoutCursor"
                 >
-                  <div v-if="bLoggingOutCursor" class="w-3.5 h-3.5 border-2 border-fg/30 border-t-fg rounded-full animate-spin"></div>
+                  <div v-if="isBusy('cursor', 'logout')" class="w-3.5 h-3.5 border-2 border-fg/30 border-t-fg rounded-full animate-spin"></div>
                   Logout
                 </button>
                 <a
@@ -704,6 +485,9 @@ onMounted((): void => {
                   class="text-xs text-primary hover:text-primary-hover transition-colors"
                 >Manage account &rarr;</a>
               </div>
+              <p v-if="cursorAuthMessage && !agentStatus.cursor.authenticated" class="text-xs text-text-muted mt-2">
+                {{ cursorAuthMessage }}
+              </p>
             </div>
 
             <!-- Claude Card -->
@@ -717,31 +501,31 @@ onMounted((): void => {
                 </div>
                 <span
                   class="inline-flex items-center text-xs px-2.5 py-1 rounded-full border flex-shrink-0 font-medium"
-                  :class="bClaudeAuthenticated
+                  :class="agentStatus.claude.authenticated
                     ? 'bg-success/10 text-success border-success/20'
                     : 'bg-warning/10 text-warning border-warning/20'"
                 >
-                  <span class="w-1.5 h-1.5 rounded-full mr-1.5" :class="bClaudeAuthenticated ? 'bg-success' : 'bg-warning'"></span>
-                  {{ bClaudeAuthenticated ? 'Authenticated' : 'Not authenticated' }}
+                  <span class="w-1.5 h-1.5 rounded-full mr-1.5" :class="agentStatus.claude.authenticated ? 'bg-success' : 'bg-warning'"></span>
+                  {{ agentStatus.claude.authenticated ? 'Authenticated' : 'Not authenticated' }}
                 </span>
               </div>
               <div class="flex items-center gap-3">
                 <button
-                  v-if="!bClaudeAuthenticated"
+                  v-if="!agentStatus.claude.authenticated"
                   class="flex items-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all"
-                  :disabled="bStartingClaudeLogin"
+                  :disabled="isBusy('claude', 'login')"
                   @click="startClaudeLogin"
                 >
-                  <div v-if="bStartingClaudeLogin" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  <div v-if="isBusy('claude', 'login')" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
                   Login to Claude
                 </button>
                 <button
                   v-else
                   class="flex items-center gap-2 bg-fg/[0.05] hover:bg-fg/[0.09] disabled:opacity-50 disabled:cursor-not-allowed border border-fg/[0.1] text-text-primary text-sm font-medium px-4 py-2.5 rounded-lg transition-all"
-                  :disabled="bLoggingOutClaude"
+                  :disabled="isBusy('claude', 'logout')"
                   @click="logoutClaude"
                 >
-                  <div v-if="bLoggingOutClaude" class="w-3.5 h-3.5 border-2 border-fg/30 border-t-fg rounded-full animate-spin"></div>
+                  <div v-if="isBusy('claude', 'logout')" class="w-3.5 h-3.5 border-2 border-fg/30 border-t-fg rounded-full animate-spin"></div>
                   Logout
                 </button>
                 <a
@@ -768,16 +552,16 @@ onMounted((): void => {
                 </div>
                 <span
                   class="inline-flex items-center text-xs px-2.5 py-1 rounded-full border flex-shrink-0 font-medium"
-                  :class="bVibeConfigured
+                  :class="agentStatus.vibe.authenticated
                     ? 'bg-success/10 text-success border-success/20'
                     : 'bg-warning/10 text-warning border-warning/20'"
                 >
-                  <span class="w-1.5 h-1.5 rounded-full mr-1.5" :class="bVibeConfigured ? 'bg-success' : 'bg-warning'"></span>
-                  {{ bVibeConfigured ? 'Configured' : 'Not configured' }}
+                  <span class="w-1.5 h-1.5 rounded-full mr-1.5" :class="agentStatus.vibe.authenticated ? 'bg-success' : 'bg-warning'"></span>
+                  {{ agentStatus.vibe.authenticated ? 'Configured' : 'Not configured' }}
                 </span>
               </div>
 
-              <div v-if="!bVibeConfigured" class="flex items-center gap-2">
+              <div v-if="!agentStatus.vibe.authenticated" class="flex items-center gap-2">
                 <div class="input-wrap flex-1">
                   <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></span>
                   <input
@@ -785,15 +569,15 @@ onMounted((): void => {
                     type="password"
                     placeholder="Mistral API key"
                     autocomplete="off"
-                    @keydown.enter="saveVibeApiKey"
+                    @keydown.enter="saveAgentApiKey('vibe')"
                   />
                 </div>
                 <button
                   class="flex items-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all shrink-0"
-                  :disabled="bSavingVibeKey || !vibeApiKey.trim()"
-                  @click="saveVibeApiKey"
+                  :disabled="isBusy('vibe', 'save') || !vibeApiKey.trim()"
+                  @click="saveAgentApiKey('vibe')"
                 >
-                  <div v-if="bSavingVibeKey" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  <div v-if="isBusy('vibe', 'save')" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
                   <span v-else>Save</span>
                 </button>
               </div>
@@ -801,10 +585,10 @@ onMounted((): void => {
               <div v-else class="flex items-center gap-3">
                 <button
                   class="flex items-center gap-2 bg-fg/[0.05] hover:bg-fg/[0.09] disabled:opacity-50 disabled:cursor-not-allowed border border-fg/[0.1] text-text-primary text-sm font-medium px-4 py-2.5 rounded-lg transition-all"
-                  :disabled="bClearingVibeKey"
-                  @click="clearVibeApiKey"
+                  :disabled="isBusy('vibe', 'clear')"
+                  @click="clearApiKey('vibe')"
                 >
-                  <div v-if="bClearingVibeKey" class="w-3.5 h-3.5 border-2 border-fg/30 border-t-fg rounded-full animate-spin"></div>
+                  <div v-if="isBusy('vibe', 'clear')" class="w-3.5 h-3.5 border-2 border-fg/30 border-t-fg rounded-full animate-spin"></div>
                   Remove key
                 </button>
                 <a
@@ -830,16 +614,16 @@ onMounted((): void => {
                 </div>
                 <span
                   class="inline-flex items-center text-xs px-2.5 py-1 rounded-full border flex-shrink-0 font-medium"
-                  :class="bOpenCodeAuthenticated
+                  :class="agentStatus.opencode.authenticated
                     ? 'bg-success/10 text-success border-success/20'
                     : 'bg-warning/10 text-warning border-warning/20'"
                 >
-                  <span class="w-1.5 h-1.5 rounded-full mr-1.5" :class="bOpenCodeAuthenticated ? 'bg-success' : 'bg-warning'"></span>
-                  {{ bOpenCodeAuthenticated ? 'Configured' : 'Not configured' }}
+                  <span class="w-1.5 h-1.5 rounded-full mr-1.5" :class="agentStatus.opencode.authenticated ? 'bg-success' : 'bg-warning'"></span>
+                  {{ agentStatus.opencode.authenticated ? 'Configured' : 'Not configured' }}
                 </span>
               </div>
 
-              <div v-if="!bOpenCodeAuthenticated" class="flex items-center gap-2">
+              <div v-if="!agentStatus.opencode.authenticated" class="flex items-center gap-2">
                 <div class="input-wrap flex-1">
                   <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></span>
                   <input
@@ -847,15 +631,15 @@ onMounted((): void => {
                     type="password"
                     placeholder="OpenCode API key"
                     autocomplete="off"
-                    @keydown.enter="saveOpenCodeApiKey"
+                    @keydown.enter="saveAgentApiKey('opencode')"
                   />
                 </div>
                 <button
                   class="flex items-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all shrink-0"
-                  :disabled="bSavingOpenCodeKey || !openCodeApiKey.trim()"
-                  @click="saveOpenCodeApiKey"
+                  :disabled="isBusy('opencode', 'save') || !openCodeApiKey.trim()"
+                  @click="saveAgentApiKey('opencode')"
                 >
-                  <div v-if="bSavingOpenCodeKey" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  <div v-if="isBusy('opencode', 'save')" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
                   <span v-else>Save</span>
                 </button>
               </div>
@@ -863,10 +647,10 @@ onMounted((): void => {
               <div v-else class="flex items-center gap-3">
                 <button
                   class="flex items-center gap-2 bg-fg/[0.05] hover:bg-fg/[0.09] disabled:opacity-50 disabled:cursor-not-allowed border border-fg/[0.1] text-text-primary text-sm font-medium px-4 py-2.5 rounded-lg transition-all"
-                  :disabled="bClearingOpenCodeKey"
-                  @click="clearOpenCodeApiKey"
+                  :disabled="isBusy('opencode', 'clear')"
+                  @click="clearApiKey('opencode')"
                 >
-                  <div v-if="bClearingOpenCodeKey" class="w-3.5 h-3.5 border-2 border-fg/30 border-t-fg rounded-full animate-spin"></div>
+                  <div v-if="isBusy('opencode', 'clear')" class="w-3.5 h-3.5 border-2 border-fg/30 border-t-fg rounded-full animate-spin"></div>
                   Remove key
                 </button>
               </div>
@@ -886,16 +670,16 @@ onMounted((): void => {
                 </div>
                 <span
                   class="inline-flex items-center text-xs px-2.5 py-1 rounded-full border flex-shrink-0 font-medium"
-                  :class="bCodexAuthenticated
+                  :class="agentStatus.codex.authenticated
                     ? 'bg-success/10 text-success border-success/20'
                     : 'bg-warning/10 text-warning border-warning/20'"
                 >
-                  <span class="w-1.5 h-1.5 rounded-full mr-1.5" :class="bCodexAuthenticated ? 'bg-success' : 'bg-warning'"></span>
-                  {{ bCodexAuthenticated ? 'Configured' : 'Not configured' }}
+                  <span class="w-1.5 h-1.5 rounded-full mr-1.5" :class="agentStatus.codex.authenticated ? 'bg-success' : 'bg-warning'"></span>
+                  {{ agentStatus.codex.authenticated ? 'Configured' : 'Not configured' }}
                 </span>
               </div>
 
-              <div v-if="!bCodexAuthenticated" class="flex items-center gap-2">
+              <div v-if="!agentStatus.codex.authenticated" class="flex items-center gap-2">
                 <div class="input-wrap flex-1">
                   <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></span>
                   <input
@@ -903,15 +687,15 @@ onMounted((): void => {
                     type="password"
                     placeholder="OpenAI API key"
                     autocomplete="off"
-                    @keydown.enter="saveCodexApiKey"
+                    @keydown.enter="saveAgentApiKey('codex')"
                   />
                 </div>
                 <button
                   class="flex items-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-all shrink-0"
-                  :disabled="bSavingCodexKey || !codexApiKey.trim()"
-                  @click="saveCodexApiKey"
+                  :disabled="isBusy('codex', 'save') || !codexApiKey.trim()"
+                  @click="saveAgentApiKey('codex')"
                 >
-                  <div v-if="bSavingCodexKey" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  <div v-if="isBusy('codex', 'save')" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
                   <span v-else>Save</span>
                 </button>
               </div>
@@ -919,10 +703,10 @@ onMounted((): void => {
               <div v-else class="flex items-center gap-3">
                 <button
                   class="flex items-center gap-2 bg-fg/[0.05] hover:bg-fg/[0.09] disabled:opacity-50 disabled:cursor-not-allowed border border-fg/[0.1] text-text-primary text-sm font-medium px-4 py-2.5 rounded-lg transition-all"
-                  :disabled="bClearingCodexKey"
-                  @click="clearCodexApiKey"
+                  :disabled="isBusy('codex', 'clear')"
+                  @click="clearApiKey('codex')"
                 >
-                  <div v-if="bClearingCodexKey" class="w-3.5 h-3.5 border-2 border-fg/30 border-t-fg rounded-full animate-spin"></div>
+                  <div v-if="isBusy('codex', 'clear')" class="w-3.5 h-3.5 border-2 border-fg/30 border-t-fg rounded-full animate-spin"></div>
                   Remove key
                 </button>
                 <a

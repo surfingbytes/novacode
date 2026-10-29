@@ -12,9 +12,9 @@ import {
   parseHandoffContext,
   serializeHandoffContext,
   setInternalConfigValue,
-} from './sessionHandoff';
+} from './sessionHandoffConfig';
 
-describe('sessionHandoff', () => {
+describe('sessionHandoffConfig', () => {
   const context = { sessionId: 'nova-1', sessionName: 'Fix login', summary: 'Goal: wire submit.' };
 
   it('round-trips the handoff context', () => {

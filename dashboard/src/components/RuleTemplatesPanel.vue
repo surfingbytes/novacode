@@ -251,7 +251,7 @@ function formatDate(iso: string): string {
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 
 onMounted(() => {
-  fetchTemplates();
+  void fetchTemplates();
 });
 </script>
 

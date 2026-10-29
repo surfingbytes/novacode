@@ -233,7 +233,7 @@ export function resolveStoredThemeId(themeId: string): string {
   return legacyMap[themeId] ?? (themes.find(t => t.id === themeId) ? themeId : DEFAULT_THEME_ID);
 }
 
-export function migrateLegacyThemeLocalStorage(): void {
+function migrateLegacyThemeLocalStorage(): void {
   for (const key of ['theme', 'darkTheme', 'lightTheme'] as const) {
     const v = safeGetItem(key);
     if (v) {

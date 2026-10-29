@@ -72,5 +72,3 @@ export function useStoreSessionSync(options: UseStoreSessionSyncOptions) {
     liveBusySubagents
   };
 }
-
-export type UseStoreSessionSync = ReturnType<typeof useStoreSessionSync>;

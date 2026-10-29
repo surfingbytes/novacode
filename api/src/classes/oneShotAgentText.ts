@@ -3,11 +3,8 @@ import { randomUUID } from 'node:crypto';
 
 // classes
 import { getAgentModels } from './agentModels';
-import { closeClaudeAcpForNovaSession, runClaudeAcp } from './claudeAcp';
-import { cancelCodexAcp, runCodexAcp } from './codexAcp';
-import { cancelCursorAcp, runCursorAcp } from './cursorAcp';
-import { cancelOpenCodeAcp, runOpenCodeAcp } from './openCodeAcp';
-import { cancelVibeAcp, runVibeAcp } from './vibeAcp';
+import { closeClaudeAcpForNovaSession } from './claudeAcp';
+import { getAgentAdapter } from './agents';
 import type { AcpPermissionHandler } from './acpSubprocessRunner';
 import { appendAssistantText, assistantTextFromEvents } from './assistantText';
 
@@ -16,13 +13,6 @@ import { pickInexpensiveModel } from '@novacode/shared';
 import type { AgentType, ChatMessage } from '../@types';
 
 export { appendAssistantText } from './assistantText';
-
-export {
-  ONE_SHOT_AGENT_TYPES,
-  isOneShotAgentType,
-  resolveAutomaticOneShotAgentType,
-  resolveOneShotAgentType
-} from '@novacode/shared';
 
 const denyAllPermission: AcpPermissionHandler = () => ({
   outcome: { outcome: 'cancelled' }
@@ -33,7 +23,7 @@ const SESSION_TITLE_PROMPT_MAX_CHARS = 1500;
 const COMMIT_MESSAGE_SUBJECT_MAX_LENGTH = 72;
 const COMMIT_MESSAGE_BODY_MAX_CHARS = 400;
 /** Hard cap so reverse proxies (often ~60s) return an app error instead of a dropped connection. */
-export const ONE_SHOT_AGENT_TIMEOUT_MS = 45_000;
+const ONE_SHOT_AGENT_TIMEOUT_MS = 45_000;
 const RULES_PREAMBLE_RE =
   /\b(?:i(?:'ve| have)? loaded|rules? (?:are |were )?loaded|the following rules|workspace rules\b.*\bapply|i will follow|follow them as)\b/i;
 const PAYWALL_TEXT_RE =
@@ -52,14 +42,6 @@ export async function resolveOneShotModel(
   } catch {
     return 'auto';
   }
-}
-
-/** Final text of the last assistant message: stored content, else rebuilt from its raw agent events. */
-export function lastAssistantText(messages: ChatMessage[] | undefined): string {
-  const last = [...(messages ?? [])].reverse().find((message) => message.role === 'assistant');
-  if (!last) return '';
-  if (last.content?.trim()) return last.content;
-  return assistantTextFromEvents(last.events);
 }
 
 export function cleanGeneratedAgentText(raw: string): string {
@@ -222,24 +204,13 @@ export function extractFirstAssistantText(messages: ChatMessage[]): string {
   return '';
 }
 
+/** One-shot runs have no Nova session row: the embedded Claude agent is disposed by run id. */
 async function cancelOneShotRun(agentType: AgentType, runId: string): Promise<void> {
   if (agentType === 'claude') {
     await closeClaudeAcpForNovaSession(runId);
     return;
   }
-  if (agentType === 'open-code') {
-    cancelOpenCodeAcp(runId);
-    return;
-  }
-  if (agentType === 'codex') {
-    cancelCodexAcp(runId);
-    return;
-  }
-  if (agentType === 'mistral-vibe') {
-    cancelVibeAcp(runId);
-    return;
-  }
-  cancelCursorAcp(runId);
+  await getAgentAdapter(agentType).cancel(runId);
 }
 
 export async function runOneShotAgentText(params: {
@@ -262,57 +233,19 @@ export async function runOneShotAgentText(params: {
 
   const runAgent = async (): Promise<string> => {
     let result: { error?: string };
-
-    if (params.agentType === 'open-code') {
-      result = await runOpenCodeAcp(
-        { acpSessionId: null, cwd: params.cwd, promptText: params.promptText, model: params.model },
+    try {
+      result = await getAgentAdapter(params.agentType).run({
+        novaSessionId: runId,
+        acpSessionId: null,
+        cwd: params.cwd,
+        promptText: params.promptText,
+        model: params.model,
+        claudeToken: params.claudeToken,
         onEvent,
-        runId,
-        undefined,
-        permission
-      );
-    } else if (params.agentType === 'codex') {
-      result = await runCodexAcp(
-        { acpSessionId: null, cwd: params.cwd, promptText: params.promptText, model: params.model },
-        onEvent,
-        runId,
-        undefined,
-        permission
-      );
-    } else if (params.agentType === 'mistral-vibe') {
-      result = await runVibeAcp(
-        { acpSessionId: null, cwd: params.cwd, promptText: params.promptText },
-        onEvent,
-        runId,
-        undefined,
-        permission
-      );
-    } else if (params.agentType === 'claude') {
-      try {
-        result = await runClaudeAcp(
-          {
-            novaSessionId: runId,
-            acpSessionId: null,
-            cwd: params.cwd,
-            promptText: params.promptText,
-            model: params.model,
-            claudeToken: params.claudeToken
-          },
-          onEvent,
-          undefined,
-          permission
-        );
-      } finally {
-        await closeClaudeAcpForNovaSession(runId);
-      }
-    } else {
-      result = await runCursorAcp(
-        { acpSessionId: null, cwd: params.cwd, promptText: params.promptText, model: params.model },
-        onEvent,
-        runId,
-        undefined,
-        permission
-      );
+        onRequestPermission: permission
+      });
+    } finally {
+      if (params.agentType === 'claude') await closeClaudeAcpForNovaSession(runId);
     }
 
     if (result.error) {

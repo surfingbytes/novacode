@@ -5,7 +5,7 @@ import { countTabStatus, deriveTabStatus, formatTabTitle } from '@/utils/tabStat
 type TestSession = Parameters<typeof countTabStatus>[0][number];
 
 function session(overrides: Partial<TestSession> & { id: string }): TestSession {
-  return { archived: false, ...overrides } as TestSession;
+  return { archived: false, ...overrides };
 }
 
 const unread = (candidate: { unread?: boolean }): boolean => candidate.unread === true;

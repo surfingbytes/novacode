@@ -2,16 +2,18 @@
 import type { FastifyInstance } from 'fastify';
 import { Type } from '@sinclair/typebox';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
-import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { existsSync } from 'node:fs';
+import { FileListResponseSchema, FilePathResponseSchema, FileReadResponseSchema } from '@novacode/shared';
 
 // classes
 import { authenticateToken, extractRequestToken, jwtPreHandler } from '../classes/auth';
 import { db } from '../classes/database';
-import { isDotEntry, resolveInsideWorkspace } from '../classes/workspaceFs';
+import { isDotEntry, MAX_FILE_READ_BYTES, resolveRealInsideWorkspace } from '../classes/workspaceFs';
 import { resolveWorkspaceAbsolutePath } from '../classes/workspacePaths';
 import { resolveToolImagePath } from '../classes/toolImagePath';
+import { fsHttpError, PayloadTooLargeError } from '../classes/httpErrors';
 
 async function workspaceBase(
   workspaceId: string
@@ -26,11 +28,6 @@ async function workspaceBase(
 export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
   const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
 
-  const FileEntrySchema = Type.Object({
-    name: Type.String(),
-    path: Type.String(),
-    isDirectory: Type.Boolean()
-  });
 
   // GET /api/workspaces/:workspaceId/files/list?path=&hidden=
   fastifyInstance.get(
@@ -44,11 +41,9 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
           hidden: Type.Optional(Type.String())
         }),
         response: {
-          200: Type.Object({
-            path: Type.String(),
-            entries: Type.Array(FileEntrySchema)
-          }),
+          200: FileListResponseSchema,
           404: Type.Object({ error: Type.String() }),
+          403: Type.Object({ error: Type.String() }),
           400: Type.Object({ error: Type.String() })
         }
       }
@@ -62,9 +57,9 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
       const query = request.query as { path?: string; hidden?: string };
       const relativePath = query.path ?? '';
       const bShowHidden = query.hidden === '1' || query.hidden === 'true';
-      const resolved = resolveInsideWorkspace(base.basePath, relativePath);
+      const resolved = await resolveRealInsideWorkspace(base.basePath, relativePath);
       if ('error' in resolved) {
-        return reply.code(400).send({ error: resolved.error });
+        return reply.code(resolved.status).send({ error: resolved.error });
       }
 
       if (!existsSync(resolved.absolutePath)) {
@@ -93,8 +88,7 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
           entries: mapped
         };
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to list directory';
-        return reply.code(400).send({ error: message });
+        throw fsHttpError(err);
       }
     }
   );
@@ -108,12 +102,10 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         params: Type.Object({ workspaceId: Type.String() }),
         querystring: Type.Object({ path: Type.String({ minLength: 1 }) }),
         response: {
-          200: Type.Object({
-            content: Type.String(),
-            path: Type.String(),
-            encoding: Type.Union([Type.Literal('utf8'), Type.Literal('base64')])
-          }),
+          200: FileReadResponseSchema,
+          413: Type.Object({ error: Type.String() }),
           404: Type.Object({ error: Type.String() }),
+          403: Type.Object({ error: Type.String() }),
           400: Type.Object({ error: Type.String() })
         }
       }
@@ -124,9 +116,9 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(base.status).send({ error: base.error });
       }
       const relativePath = (request.query as { path: string }).path;
-      const resolved = resolveInsideWorkspace(base.basePath, relativePath);
+      const resolved = await resolveRealInsideWorkspace(base.basePath, relativePath);
       if ('error' in resolved) {
-        return reply.code(400).send({ error: resolved.error });
+        return reply.code(resolved.status).send({ error: resolved.error });
       }
       if (!resolved.relativePath) {
         return reply.code(400).send({ error: 'Invalid path' });
@@ -136,6 +128,10 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       try {
+        const fileStat = await stat(resolved.absolutePath);
+        if (fileStat.size > MAX_FILE_READ_BYTES) {
+          throw new PayloadTooLargeError('File too large');
+        }
         const buffer = await readFile(resolved.absolutePath);
         const isBinary = buffer.subarray(0, 8192).includes(0);
         if (isBinary) {
@@ -147,8 +143,7 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         }
         return { content: buffer.toString('utf8'), path: relativePath, encoding: 'utf8' as const };
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to read file';
-        return reply.code(400).send({ error: message });
+        throw fsHttpError(err);
       }
     }
   );
@@ -165,8 +160,9 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
           content: Type.String()
         }),
         response: {
-          200: Type.Object({ path: Type.String() }),
+          200: FilePathResponseSchema,
           404: Type.Object({ error: Type.String() }),
+          403: Type.Object({ error: Type.String() }),
           400: Type.Object({ error: Type.String() })
         }
       }
@@ -177,9 +173,9 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(base.status).send({ error: base.error });
       }
       const { path: relativePath, content } = request.body as { path: string; content: string };
-      const resolved = resolveInsideWorkspace(base.basePath, relativePath);
+      const resolved = await resolveRealInsideWorkspace(base.basePath, relativePath);
       if ('error' in resolved) {
-        return reply.code(400).send({ error: resolved.error });
+        return reply.code(resolved.status).send({ error: resolved.error });
       }
       if (!resolved.relativePath) {
         return reply.code(400).send({ error: 'Invalid path' });
@@ -190,8 +186,7 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         await writeFile(resolved.absolutePath, content, 'utf8');
         return { path: relativePath };
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to write file';
-        return reply.code(400).send({ error: message });
+        throw fsHttpError(err);
       }
     }
   );
@@ -205,8 +200,9 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         params: Type.Object({ workspaceId: Type.String() }),
         body: Type.Object({ path: Type.String({ minLength: 1 }) }),
         response: {
-          200: Type.Object({ path: Type.String() }),
+          200: FilePathResponseSchema,
           404: Type.Object({ error: Type.String() }),
+          403: Type.Object({ error: Type.String() }),
           400: Type.Object({ error: Type.String() })
         }
       }
@@ -217,9 +213,9 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(base.status).send({ error: base.error });
       }
       const relativePath = (request.body as { path: string }).path;
-      const resolved = resolveInsideWorkspace(base.basePath, relativePath);
+      const resolved = await resolveRealInsideWorkspace(base.basePath, relativePath);
       if ('error' in resolved) {
-        return reply.code(400).send({ error: resolved.error });
+        return reply.code(resolved.status).send({ error: resolved.error });
       }
       if (!resolved.relativePath) {
         return reply.code(400).send({ error: 'Invalid path' });
@@ -228,8 +224,7 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         await mkdir(resolved.absolutePath, { recursive: true });
         return { path: resolved.relativePath };
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to create folder';
-        return reply.code(400).send({ error: message });
+        throw fsHttpError(err);
       }
     }
   );
@@ -246,8 +241,9 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
           to: Type.String({ minLength: 1 })
         }),
         response: {
-          200: Type.Object({ path: Type.String() }),
+          200: FilePathResponseSchema,
           404: Type.Object({ error: Type.String() }),
+          403: Type.Object({ error: Type.String() }),
           400: Type.Object({ error: Type.String() })
         }
       }
@@ -258,13 +254,13 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(base.status).send({ error: base.error });
       }
       const { from, to } = request.body as { from: string; to: string };
-      const source = resolveInsideWorkspace(base.basePath, from);
-      const target = resolveInsideWorkspace(base.basePath, to);
+      const source = await resolveRealInsideWorkspace(base.basePath, from);
+      const target = await resolveRealInsideWorkspace(base.basePath, to);
       if ('error' in source) {
-        return reply.code(400).send({ error: source.error });
+        return reply.code(source.status).send({ error: source.error });
       }
       if ('error' in target) {
-        return reply.code(400).send({ error: target.error });
+        return reply.code(target.status).send({ error: target.error });
       }
       if (!source.relativePath || !target.relativePath) {
         return reply.code(400).send({ error: 'Invalid path' });
@@ -280,8 +276,7 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         await rename(source.absolutePath, target.absolutePath);
         return { path: target.relativePath };
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to rename';
-        return reply.code(400).send({ error: message });
+        throw fsHttpError(err);
       }
     }
   );
@@ -295,8 +290,9 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         params: Type.Object({ workspaceId: Type.String() }),
         querystring: Type.Object({ path: Type.String({ minLength: 1 }) }),
         response: {
-          200: Type.Object({ path: Type.String() }),
+          200: FilePathResponseSchema,
           404: Type.Object({ error: Type.String() }),
+          403: Type.Object({ error: Type.String() }),
           400: Type.Object({ error: Type.String() })
         }
       }
@@ -307,9 +303,9 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(base.status).send({ error: base.error });
       }
       const relativePath = (request.query as { path: string }).path;
-      const resolved = resolveInsideWorkspace(base.basePath, relativePath);
+      const resolved = await resolveRealInsideWorkspace(base.basePath, relativePath);
       if ('error' in resolved) {
-        return reply.code(400).send({ error: resolved.error });
+        return reply.code(resolved.status).send({ error: resolved.error });
       }
       if (!resolved.relativePath) {
         return reply.code(400).send({ error: 'Cannot delete the workspace root' });
@@ -321,23 +317,22 @@ export async function fileRoutes(fastify: FastifyInstance): Promise<void> {
         await rm(resolved.absolutePath, { recursive: true });
         return { path: resolved.relativePath };
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to delete';
-        return reply.code(400).send({ error: message });
+        throw fsHttpError(err);
       }
     }
   );
 
   // GET /api/files/tool-image?path= — image a tool read, shown on demand in the chat.
-  // Cookie (dashboard) or Bearer, with a query-token fallback for <img> URLs.
+  // Cookie (dashboard) or Bearer only — no query-token fallback.
   fastifyInstance.get(
     '/api/files/tool-image',
     {
       schema: {
-        querystring: Type.Object({ path: Type.String({ minLength: 1 }), token: Type.Optional(Type.String()) })
+        querystring: Type.Object({ path: Type.String({ minLength: 1 }) })
       }
     },
     async (request, reply) => {
-      const token = extractRequestToken(request) ?? request.query.token ?? '';
+      const token = extractRequestToken(request) ?? '';
       if (!(await authenticateToken(token))) {
         return reply.code(401).send({ error: 'Unauthorized' });
       }

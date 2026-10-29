@@ -9,18 +9,18 @@ import type { RoleTemplateModel as RoleTemplate } from '../../generated/client/m
 
 // --------------------------------------------- Role Templates ---------------------------------------------
 
-export async function listRoleTemplates(): Promise<RoleTemplate[]> {
+async function listRoleTemplates(): Promise<RoleTemplate[]> {
   return prisma.roleTemplate.findMany({
     orderBy: [{ name: 'asc' }, { createdAt: 'asc' }]
   });
 }
 
-export async function getRoleTemplate(id: string): Promise<RoleTemplate | undefined> {
+async function getRoleTemplate(id: string): Promise<RoleTemplate | undefined> {
   const row = await prisma.roleTemplate.findUnique({ where: { id } });
   return row ?? undefined;
 }
 
-export async function findRoleTemplateByName(name: string): Promise<RoleTemplate | undefined> {
+async function findRoleTemplateByName(name: string): Promise<RoleTemplate | undefined> {
   const trimmed = name?.trim();
   if (!trimmed) {
     return undefined;
@@ -29,7 +29,7 @@ export async function findRoleTemplateByName(name: string): Promise<RoleTemplate
   return row ?? undefined;
 }
 
-export async function createRoleTemplate(data: {
+async function createRoleTemplate(data: {
   name: string;
   description?: string | null;
   content: string;
@@ -47,7 +47,7 @@ export async function createRoleTemplate(data: {
   });
 }
 
-export async function updateRoleTemplate(
+async function updateRoleTemplate(
   id: string,
   patch: {
     name?: string;
@@ -82,7 +82,7 @@ export async function updateRoleTemplate(
   });
 }
 
-export async function deleteRoleTemplate(id: string): Promise<boolean> {
+async function deleteRoleTemplate(id: string): Promise<boolean> {
   try {
     await prisma.roleTemplate.delete({ where: { id } });
     return true;

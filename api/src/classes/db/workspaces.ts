@@ -12,7 +12,7 @@ import type { WorkspaceModel as Workspace } from '../../generated/client/models/
 
 // --------------------------------------------- Workspaces ---------------------------------------------
 
-export async function listWorkspaces(opts?: { includeArchived?: boolean }): Promise<Workspace[]> {
+async function listWorkspaces(opts?: { includeArchived?: boolean }): Promise<Workspace[]> {
   const rows = await prisma.workspace.findMany({
     where: opts?.includeArchived ? undefined : { archived: false },
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
@@ -20,12 +20,12 @@ export async function listWorkspaces(opts?: { includeArchived?: boolean }): Prom
   return rows;
 }
 
-export async function getWorkspace(id: string): Promise<Workspace | undefined> {
+async function getWorkspace(id: string): Promise<Workspace | undefined> {
   const row = await prisma.workspace.findUnique({ where: { id } });
   return row ?? undefined;
 }
 
-export async function createWorkspace(data: {
+async function createWorkspace(data: {
   name: string;
   path: string;
   group?: string | null;
@@ -67,7 +67,7 @@ export async function createWorkspace(data: {
   return row;
 }
 
-export async function updateWorkspace(
+async function updateWorkspace(
   id: string,
   patch: {
     name?: string;
@@ -147,7 +147,7 @@ export async function updateWorkspace(
   return row;
 }
 
-export async function reorderWorkspaces(ids: string[]): Promise<void> {
+async function reorderWorkspaces(ids: string[]): Promise<void> {
   await prisma.$transaction(
     ids.map((id, index) =>
       prisma.workspace.update({ where: { id }, data: { sortOrder: index } })
@@ -155,7 +155,7 @@ export async function reorderWorkspaces(ids: string[]): Promise<void> {
   );
 }
 
-export async function archiveWorkspace(id: string, archived: boolean): Promise<Workspace | undefined> {
+async function archiveWorkspace(id: string, archived: boolean): Promise<Workspace | undefined> {
   const existingWorkspace = await prisma.workspace.findUnique({ where: { id } });
   if (!existingWorkspace) {
     return undefined;
@@ -169,12 +169,17 @@ export async function archiveWorkspace(id: string, archived: boolean): Promise<W
   });
 }
 
-export async function deleteWorkspace(id: string): Promise<boolean> {
+export type DeleteWorkspaceResult = { ok: true } | { ok: false; reason: 'not_found' } | { ok: false; reason: 'error'; error: unknown };
+
+export async function deleteWorkspace(id: string): Promise<DeleteWorkspaceResult> {
   try {
     await prisma.workspace.delete({ where: { id } });
-    return true;
-  } catch {
-    return false;
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+      return { ok: false, reason: 'not_found' };
+    }
+    return { ok: false, reason: 'error', error };
   }
 }
 

@@ -8,6 +8,7 @@ import { db } from '../classes/database';
 import { jwtPreHandler } from '../classes/auth';
 import { runAutomation } from '../classes/automationScheduler';
 import { AGENT_ROUTE_RATE_LIMIT } from '../classes/rateLimits';
+import { logger } from '../classes/logger';
 
 // -------------------------------------------------- Schemas --------------------------------------------------
 
@@ -49,7 +50,7 @@ export async function automationRoutes(fastifyBase: FastifyInstance): Promise<vo
     async (request, reply) => {
       const { workspaceId } = request.params;
       const workspace = await db.getWorkspace(workspaceId);
-      if (!workspace) return reply.status(404).send({ error: 'Workspace not found' });
+      if (!workspace) return reply.code(404).send({ error: 'Workspace not found' });
       const list = await db.listAutomationsByWorkspace(workspaceId);
       return reply.send(list);
     }
@@ -65,13 +66,13 @@ export async function automationRoutes(fastifyBase: FastifyInstance): Promise<vo
     },
     async (request, reply) => {
     const body = request.body;
-    if (!body.workspaceId) return reply.status(400).send({ error: 'workspaceId is required' });
-    if (!body.prompt?.trim()) return reply.status(400).send({ error: 'prompt is required' });
+    if (!body.workspaceId) return reply.code(400).send({ error: 'workspaceId is required' });
+    if (!body.prompt?.trim()) return reply.code(400).send({ error: 'prompt is required' });
     if (!body.intervalMinutes || body.intervalMinutes < 1)
-      return reply.status(400).send({ error: 'intervalMinutes must be >= 1' });
+      return reply.code(400).send({ error: 'intervalMinutes must be >= 1' });
 
     const workspace = await db.getWorkspace(body.workspaceId);
-    if (!workspace) return reply.status(404).send({ error: 'Workspace not found' });
+    if (!workspace) return reply.code(404).send({ error: 'Workspace not found' });
 
     const automation = await db.createAutomation({
       name: body.name?.trim() || `Automation ${new Date().toISOString()}`,
@@ -81,7 +82,7 @@ export async function automationRoutes(fastifyBase: FastifyInstance): Promise<vo
       intervalMinutes: body.intervalMinutes,
       enabled: body.enabled ?? true
     });
-    return reply.status(201).send(automation);
+    return reply.code(201).send(automation);
   });
 
   // GET /api/automations/:id — get single automation
@@ -91,7 +92,7 @@ export async function automationRoutes(fastifyBase: FastifyInstance): Promise<vo
     async (request, reply) => {
       const { id } = request.params;
       const automation = await db.getAutomation(id);
-      if (!automation) return reply.status(404).send({ error: 'Automation not found' });
+      if (!automation) return reply.code(404).send({ error: 'Automation not found' });
       return reply.send(automation);
     }
   );
@@ -104,10 +105,10 @@ export async function automationRoutes(fastifyBase: FastifyInstance): Promise<vo
       const { id } = request.params;
       const body = request.body;
       const automation = await db.getAutomation(id);
-      if (!automation) return reply.status(404).send({ error: 'Automation not found' });
+      if (!automation) return reply.code(404).send({ error: 'Automation not found' });
 
       if (body.intervalMinutes !== undefined && body.intervalMinutes < 1)
-        return reply.status(400).send({ error: 'intervalMinutes must be >= 1' });
+        return reply.code(400).send({ error: 'intervalMinutes must be >= 1' });
 
       // when interval changes, recalculate nextRunAt
       let nextRunAt: string | undefined;
@@ -130,9 +131,9 @@ export async function automationRoutes(fastifyBase: FastifyInstance): Promise<vo
     async (request, reply) => {
       const { id } = request.params;
       const automation = await db.getAutomation(id);
-      if (!automation) return reply.status(404).send({ error: 'Automation not found' });
+      if (!automation) return reply.code(404).send({ error: 'Automation not found' });
       await db.deleteAutomation(id);
-      return reply.status(204).send();
+      return reply.code(204).send();
     }
   );
 
@@ -147,14 +148,14 @@ export async function automationRoutes(fastifyBase: FastifyInstance): Promise<vo
     async (request, reply) => {
       const { id } = request.params;
       const automation = await db.getAutomation(id);
-      if (!automation) return reply.status(404).send({ error: 'Automation not found' });
+      if (!automation) return reply.code(404).send({ error: 'Automation not found' });
 
       // run in background
       runAutomation(id).catch((err) => {
-        console.error(`[automations] trigger error for ${id}:`, err);
+        logger.error({ err, automationId: id }, 'automations: trigger error');
       });
 
-      return reply.status(202).send({ ok: true });
+      return reply.code(202).send({ ok: true });
     }
   );
 
@@ -172,7 +173,7 @@ export async function automationRoutes(fastifyBase: FastifyInstance): Promise<vo
       const { id } = request.params;
       const { limit } = request.query;
       const automation = await db.getAutomation(id);
-      if (!automation) return reply.status(404).send({ error: 'Automation not found' });
+      if (!automation) return reply.code(404).send({ error: 'Automation not found' });
       const runs = await db.listRunsByAutomation(id, limit ? parseInt(limit, 10) : 20);
       return reply.send(runs);
     }
@@ -188,10 +189,10 @@ export async function automationRoutes(fastifyBase: FastifyInstance): Promise<vo
     async (request, reply) => {
       const { id, runId } = request.params;
       const automation = await db.getAutomation(id);
-      if (!automation) return reply.status(404).send({ error: 'Automation not found' });
+      if (!automation) return reply.code(404).send({ error: 'Automation not found' });
       const run = await db.getAutomationRun(runId);
       if (!run || run.automationId !== id)
-        return reply.status(404).send({ error: 'Run not found' });
+        return reply.code(404).send({ error: 'Run not found' });
       return reply.send(run);
     }
   );

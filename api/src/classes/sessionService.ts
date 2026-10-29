@@ -1,13 +1,13 @@
 // classes
 import { db } from './database';
 import type { AgentErrorCode } from './agentError';
-import { MODE_SENTINEL } from './agentModes';
+import { MODE_SENTINEL } from './agents/sessionOptions';
 import { normalizeApprovalPolicy } from './approvalPolicy';
 import {
   LINKED_PLAN_CONTEXT_CONFIG_KEY,
   serializeLinkedPlanContext
 } from './linkedPlanContext';
-import { HANDOFF_CONTEXT_CONFIG_KEY, serializeHandoffContext } from './sessionHandoff';
+import { HANDOFF_CONTEXT_CONFIG_KEY, serializeHandoffContext } from './sessionHandoffConfig';
 
 // types
 import type { SessionModel as Session } from '../generated/client/models/Session';

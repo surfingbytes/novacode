@@ -70,6 +70,7 @@ Nova Code was originally created by [Jonah Fintz](https://github.com/JonahFintzD
 ## Requirements
 
 - **Docker + Docker Compose** (recommended) — or Node.js 24 + PostgreSQL 17 for a manual install
+- PostgreSQL must allow `CREATE EXTENSION pg_trgm` (the stock `postgres:17` image does); search uses trigram indexes, and queries shorter than 3 characters fall back to a sequential scan (expected)
 - **Agent CLIs** — the Docker image includes Cursor Agent, Claude Code, Mistral Vibe, OpenCode, and Codex. Authenticate each agent you use from **Settings → Integrations** (see [Agent setup](#agent-setup)).
 - Directories you want to work on must appear under `/data-root` in the container (with the stock compose, that is everything under `~/.novacode/data` on the host, or extra bind mounts you add)
 
@@ -300,7 +301,7 @@ VITE_API_URL=http://localhost:3000/api npm run dev:dashboard
 stream-parsing logic used by **both** the API and the dashboard (previously two
 hand-synced copies). It builds to `shared/dist` (dual CJS/ESM) via the root
 `postinstall`; rebuild after editing with `npm run build -w @novacode/shared`.
-Useful root scripts: `npm run build`, `npm run typecheck`, `npm run test`, `npm run lint:check`.
+Useful root scripts: `npm run build`, `npm run typecheck`, `npm run test`, `npm run lint:check`, `npm run knip` (unused files/exports/dependencies).
 GitHub Actions runs test, typecheck, and lint before building the image.
 
 ### Docker (split services)

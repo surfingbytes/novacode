@@ -8,10 +8,10 @@ import { logger } from './logger';
 const CURSOR_AUTH_FILE = '.config/cursor/auth.json';
 const USAGE_SUMMARY_URL = 'https://cursor.com/api/usage-summary';
 /** Usage numbers change slowly; keep dashboard/session polls from hammering Cursor. */
-export const CURSOR_USAGE_SUMMARY_TTL_MS = 5 * 60 * 1000;
+const CURSOR_USAGE_SUMMARY_TTL_MS = 5 * 60 * 1000;
 const FAILURE_CACHE_TTL_MS = 60_000;
 
-export interface CursorUsageBucket {
+interface CursorUsageBucket {
   enabled: boolean;
   usedCents: number;
   limitCents: number | null;
@@ -44,7 +44,7 @@ export function clearCursorUsageSummaryCache(): void {
   memoryCache = null;
 }
 
-export function readCursorAccessToken(configDir: string): string | null {
+function readCursorAccessToken(configDir: string): string | null {
   const path = join(configDir, CURSOR_AUTH_FILE);
   if (!existsSync(path)) return null;
   try {
@@ -131,7 +131,7 @@ export function parseUsageSummaryJson(json: unknown): Omit<
   };
 }
 
-export async function fetchCursorUsageSummaryFresh(
+async function fetchCursorUsageSummaryFresh(
   accessToken: string
 ): Promise<CursorUsageSummaryResult> {
   const cookie = buildWorkosSessionCookie(accessToken);

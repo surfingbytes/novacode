@@ -36,11 +36,11 @@ export async function roleTemplateRoutes(fastify: FastifyInstance): Promise<void
 
       const name = body.name?.trim();
       if (!name) {
-        return reply.status(400).send({ error: 'name is required' });
+        return reply.code(400).send({ error: 'name is required' });
       }
       const content = body.content;
       if (!content || typeof content !== 'string' || !content.trim()) {
-        return reply.status(400).send({ error: 'content is required' });
+        return reply.code(400).send({ error: 'content is required' });
       }
 
       const existing = await db.findRoleTemplateByName(name);
@@ -56,7 +56,7 @@ export async function roleTemplateRoutes(fastify: FastifyInstance): Promise<void
         content
       });
 
-      return reply.status(201).send(created);
+      return reply.code(201).send(created);
     }
   );
 
@@ -69,7 +69,7 @@ export async function roleTemplateRoutes(fastify: FastifyInstance): Promise<void
 
       const existing = await db.getRoleTemplate(templateId);
       if (!existing) {
-        return reply.status(404).send({ error: 'Role template not found' });
+        return reply.code(404).send({ error: 'Role template not found' });
       }
 
       const body = request.body;
@@ -77,7 +77,7 @@ export async function roleTemplateRoutes(fastify: FastifyInstance): Promise<void
       if (body.name !== undefined) {
         const trimmedName = body.name.trim();
         if (!trimmedName) {
-          return reply.status(400).send({ error: 'name cannot be empty' });
+          return reply.code(400).send({ error: 'name cannot be empty' });
         }
         if (trimmedName !== existing.name) {
           const conflict = await db.findRoleTemplateByName(trimmedName);
@@ -91,7 +91,7 @@ export async function roleTemplateRoutes(fastify: FastifyInstance): Promise<void
 
       if (body.content !== undefined) {
         if (!body.content || !String(body.content).trim()) {
-          return reply.status(400).send({ error: 'content cannot be empty' });
+          return reply.code(400).send({ error: 'content cannot be empty' });
         }
       }
 
@@ -102,7 +102,7 @@ export async function roleTemplateRoutes(fastify: FastifyInstance): Promise<void
       });
 
       if (!updated) {
-        return reply.status(500).send({ error: 'Failed to update role template' });
+        return reply.code(500).send({ error: 'Failed to update role template' });
       }
 
       return reply.send(updated);
@@ -118,15 +118,15 @@ export async function roleTemplateRoutes(fastify: FastifyInstance): Promise<void
 
       const existing = await db.getRoleTemplate(templateId);
       if (!existing) {
-        return reply.status(404).send({ error: 'Role template not found' });
+        return reply.code(404).send({ error: 'Role template not found' });
       }
 
       const success = await db.deleteRoleTemplate(templateId);
       if (!success) {
-        return reply.status(500).send({ error: 'Failed to delete role template' });
+        return reply.code(500).send({ error: 'Failed to delete role template' });
       }
 
-      return reply.status(204).send();
+      return reply.code(204).send();
     }
   );
 }

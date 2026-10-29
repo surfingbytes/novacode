@@ -7,7 +7,10 @@
 import { ref, type Ref } from 'vue';
 
 // classes
-import { isGloballyToasted, sessionsApi } from '@/classes/api';
+import { sessionsApi } from '@/classes/api';
+
+// lib
+import { notifyApiError } from '@/lib/notifyApiError';
 
 // types
 import type { ApprovalPolicy, Session } from '@/@types/index';
@@ -18,7 +21,6 @@ export interface UseApprovalPolicyOptions {
   workspaceId: () => string;
   sessionId: () => string;
   session: Ref<Session | null>;
-  toastStore: { error: (message: string) => void };
 }
 
 // -------------------------------------------------- Helpers --------------------------------------------------
@@ -62,7 +64,7 @@ export function useApprovalPolicy(options: UseApprovalPolicyOptions) {
       if (seq !== approvalPolicySaveSeq) return;
       approvalPolicy.value = prev;
       session.value = prevSession;
-      if (!isGloballyToasted(err)) options.toastStore.error('Failed to update approval policy');
+      notifyApiError(err, 'Failed to update approval policy');
     } finally {
       if (seq === approvalPolicySaveSeq) bSavingApprovalPolicy.value = false;
     }
@@ -77,5 +79,3 @@ export function useApprovalPolicy(options: UseApprovalPolicyOptions) {
     onApprovalPolicyChange
   };
 }
-
-export type UseApprovalPolicy = ReturnType<typeof useApprovalPolicy>;

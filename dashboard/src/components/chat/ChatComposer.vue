@@ -238,7 +238,7 @@ function send(): void {
   emit('send', { text, imagePaths });
   promptText.value = '';
   pendingImages.value = [];
-  nextTick(() => textareaEl.value?.focus());
+  void nextTick(() => textareaEl.value?.focus());
 }
 
 function continueInNewChat(): void {
@@ -332,7 +332,7 @@ function selectMode(id: string): void {
 function startQueueEdit(item: ChatQueueItem): void {
   editingQueueItemId.value = item.id;
   editingQueueText.value = item.text;
-  nextTick(() => {
+  void nextTick(() => {
     const el = queueListRef.value?.querySelector('textarea');
     el?.focus();
     el?.setSelectionRange(el.value.length, el.value.length);
@@ -398,7 +398,7 @@ function syncPromptLayoutBreakpoint(): void {
     promptCompactMql?.matches ??
     window.matchMedia('(max-width: 767px) and (orientation: portrait)').matches;
   if (wasCompact !== bPromptCompactLayout.value) {
-    nextTick(() => resizeTextarea());
+    void nextTick(() => resizeTextarea());
   }
 }
 
@@ -409,8 +409,8 @@ function measurePromptMultiline(el: HTMLTextAreaElement): boolean {
   const box = promptInputBoxRef.value;
   if (!box) return false;
 
-  const modeEl = box.querySelector('.prompt-mode') as HTMLElement | null;
-  const attachEl = box.querySelector('.prompt-attach') as HTMLElement | null;
+  const modeEl = box.querySelector<HTMLElement>('.prompt-mode');
+  const attachEl = box.querySelector<HTMLElement>('.prompt-attach');
   const modeWidth = modeEl?.offsetWidth ?? 0;
   const attachWidth = attachEl?.offsetWidth ?? 36;
   const boxStyles = getComputedStyle(box);
@@ -444,7 +444,7 @@ function resizeTextarea(): void {
   bPromptMultiline.value = nextMultiline;
 
   if (multilineChanged) {
-    nextTick(() => {
+    void nextTick(() => {
       requestAnimationFrame(() => {
         if (textareaEl.value) applyTextareaHeight(textareaEl.value);
       });
@@ -473,7 +473,7 @@ function observePromptInputBox(): void {
 // -------------------------------------------------- Watchers --------------------------------------------------
 
 watch(promptText, () => {
-  nextTick(() => resizeTextarea());
+  void nextTick(() => resizeTextarea());
 });
 
 watch(
@@ -493,7 +493,7 @@ onMounted(() => {
   promptCompactMql.addEventListener('change', syncPromptLayoutBreakpoint);
   document.addEventListener('click', handleDocumentClick);
   document.addEventListener('keydown', handleDocumentKeydown);
-  nextTick(() => {
+  void nextTick(() => {
     resizeTextarea();
     observePromptInputBox();
   });
@@ -621,8 +621,8 @@ defineExpose({
         <button
           type="button"
           aria-label="Remove attachment"
-          @click.stop="pendingImages.splice(i, 1)"
           class="absolute -top-1.5 -right-1.5 w-5 h-5 bg-destructive text-on-accent rounded-full text-xs flex items-center justify-center leading-none shadow-sm"
+          @click.stop="pendingImages.splice(i, 1)"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
         </button>
@@ -694,23 +694,23 @@ defineExpose({
         <textarea
           ref="textareaEl"
           v-model="promptText"
-          @keydown.enter="onKeydown"
-          @keydown.esc="onEscapeKeydown"
-          @paste="onPaste"
           :placeholder="promptPlaceholder"
           rows="1"
           aria-label="Message"
           class="prompt-textarea w-full min-w-0 resize-none bg-transparent text-text-primary placeholder-text-muted text-sm px-2 py-1.5 leading-5 rounded-none border-0 shadow-none focus:outline-none focus:ring-0 box-border"
           style="height: 32px; max-height: 160px; overflow-y: auto"
+          @keydown.enter="onKeydown"
+          @keydown.esc="onEscapeKeydown"
+          @paste="onPaste"
         ></textarea>
         <button
           type="button"
-          @click="onAttachClick"
           :disabled="bIsStreaming"
           title="Attach file"
           aria-label="Attach file"
           class="prompt-attach button is-transparent is-icon h-[36px]! px-0! aspect-square! shrink-0"
           :class="bPromptUseCompactMultiline ? 'mb-0.5' : 'mb-[3px]'"
+          @click="onAttachClick"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
         </button>
@@ -725,11 +725,11 @@ defineExpose({
       <button
         v-if="bIsStreaming && !bPrimaryIsStop"
         type="button"
-        @click="emit('cancel')"
         :disabled="!bWsConnected"
         aria-label="Stop"
         title="Stop (Esc)"
         class="button is-icon is-transparent !h-[44px] !w-[44px] !min-w-[44px] shrink-0 !rounded-md !p-0 !text-destructive hover:!bg-destructive/10"
+        @click="emit('cancel')"
       >
         <svg
           width="18"
@@ -750,12 +750,12 @@ defineExpose({
       <div ref="sendMenuRef" class="relative flex shrink-0">
         <button
           type="button"
-          @click="onPrimaryClick"
           :disabled="bPrimaryDisabled"
           :aria-label="primaryActionLabel"
           :title="primaryActionLabel"
           class="button is-icon !h-[44px] !w-[44px] !min-w-[44px] shrink-0 !rounded-md !rounded-r-none !p-0"
           :class="bPrimaryIsStop ? 'is-transparent !text-destructive hover:!bg-destructive/10' : 'is-primary'"
+          @click="onPrimaryClick"
         >
           <svg
             v-if="bPrimaryIsStop"

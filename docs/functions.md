@@ -21,7 +21,8 @@ Optional features include **scheduled automations**, **role templates**, and **b
 - **Login**: Password-based login sets an **httpOnly session cookie** (7-day JWT, sliding refresh on `/api/auth/validate`). The JSON body still includes `token` for scripts; the dashboard does not keep it in `localStorage`. `GET /api/auth/login-options` tells the login page whether to show the password form, an OIDC button, or auto-redirect to the IdP.
 - **OIDC / SSO**: When `OIDC_ISSUER`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET` are set, `GET /api/auth/oidc/start` begins an authorization-code + PKCE flow using the issuer discovery document. `GET /api/auth/oidc/callback` verifies the `id_token` and signs the same session cookie for the existing local user (not a new account). `AUTH_LOCAL_LOGIN=false` hides password login; with OIDC configured the login page redirects straight to the IdP.
 - **Account**: Password change, username change, and **API keys** (`GET`/`POST`/`DELETE /api/auth/api-tokens`). Keys are stored as SHA-256 hashes; the plaintext `nck_…` token is returned only on create. Send it as `Authorization: Bearer` (or the WebSocket `bearer.<token>` subprotocol). `POST /api/auth/logout` clears the session cookie.
-- **REST auth**: Session cookie, JWT Bearer, **or** an API key. There is no separate unscoped “service account”.
+- **REST auth**: Session cookie, JWT Bearer, **or** an API key. There is no separate unscoped “service account”, and no `?token=` query auth (file and image downloads use the cookie too).
+- **WebSocket auth**: Every WS route goes through `acceptWebSocket`: first the Origin check (`isAllowedWsOrigin` — no `Origin`, an allowed CORS origin, or the server's own host; otherwise close 4003), then auth (4001). A socket is registered for broadcasts only after both pass.
 - **Claude token setup**: `POST /api/agent-auth/claude/login` spawns a `claude setup-token` PTY session; the terminal overlay auto-detects the token and saves it via `POST /api/agent-auth/claude/token`. `GET /api/agent-auth/claude/status` and `DELETE /api/agent-auth/claude/logout` complete the flow.
 - **Mistral Vibe key setup**: Stored via `PUT /api/settings/vibe-api-key`; status checked with `GET /api/settings/vibe-api-key`; cleared with `DELETE /api/settings/vibe-api-key`.
 
@@ -66,6 +67,7 @@ Optional features include **scheduled automations**, **role templates**, and **b
 - **Chat engine**: Coordinates **active runs**, subscribers, **prompt dispatch**, cancellation, and persistence of **message history** (including streaming JSON lines from agents). On **cancel**, subprocess ACP agents receive `session/cancel` and a short grace period to settle the turn before the subprocess is killed, and the ACP session id resolved mid-turn is still persisted so the next prompt resumes via `session/load`; if a `session/load` fails and the agent falls back to a fresh session, a `session_reset_notice` event is persisted into the chat stream and shown as a notice in the dashboard.
 - **Claude ACP integration**: Prompts are dispatched to `ClaudeAcpAgent` from `@agentclientprotocol/claude-agent-acp` (in-process, no subprocess). ACP `SessionNotification` objects (`{ sessionId, update }`) are serialised as-is and forwarded to the dashboard; **no conversion to a legacy format is performed**. The frontend detects ACP events by `typeof event.sessionId === 'string' && event.update` and handles `agent_message_chunk`, `tool_call`, and `tool_call_update` natively. Legacy cursor-style events stored in older sessions are still parsed for backward compatibility. All tool permissions are auto-approved by the embedded ACP client proxy.
 - **Subprocess ACP agents** (`cursorAcp.ts`, `vibeAcp.ts`, `openCodeAcp.ts`, `codexAcp.ts`): Use `acpSubprocessRunner.ts` (`ClientSideConnection` + `ndJsonStream` from `@agentclientprotocol/sdk`) to talk to a per-prompt ACP subprocess over stdio. They emit the same `SessionNotification` shape as Claude — the frontend handles all agents identically. History replay events from `session/load` are discarded so only the current turn's events reach the dashboard.
+- **Agent adapter registry**: One `AgentAdapter` per agent type (`api/src/classes/agents/`) covers spawning, running a turn and probing models/modes; callers use `getAgentAdapter(type)` instead of switching on the agent type.
 - **Agent availability**: `claudeAvailable` requires the ACP package and a stored OAuth token. `mistralVibeAvailable` requires both `vibe-acp --version` succeeding and a Mistral API key in `VIBE_HOME/.env`. `openCodeAvailable` requires OpenCode auth. `codexAvailable` requires `codex-acp --version` succeeding and a Codex API key in `CODEX_HOME/auth.json`.
 - **Todo lists**: ACP `tool_call`s carrying `rawInput.todos`/`rawOutput.todos` (opencode's `todowrite` sends a structured object; Claude's `TodoWrite` likewise; vibe's `todo` tool sends JSON *strings* — both carriers are unwrapped) and Cursor's legacy `updateTodosToolCall` are parsed into normalized `todos` display items (`TODO_STATUS_*` statuses). The message stream keeps a compact one-line `Todos: done/total` trace; the live list itself is shown in a collapsible **Tasks** panel in the chat tab — a strip above the composer on mobile, a closable right-side column on desktop — derived from the latest todos item, so it works for live runs and history replay. Panel expand/close state persists in localStorage.
 - **Workspace and global rules injection**: When building prompts, the server prepends **global rule files** then **workspace rule files** (see §7) for all agents. Workspace rules take precedence when they conflict.
@@ -76,7 +78,8 @@ Optional features include **scheduled automations**, **role templates**, and **b
 
 - **PTY-based sessions**: `node-pty` runs agent processes (`PtyProcess`) with environment forwarded from `AGENT_ENV_*` and config (`HOME` under `/config`, Cursor/Claude config dirs, etc.).
 - **WebSocket** `/api/ws/session/:id` for terminal I/O and session lifecycle (session cookie or Bearer).
-- **Session manager**: Short-lived **auth PTYs** (e.g. Cursor login) are managed separately from normal chat sessions.
+- **Session manager**: Short-lived **auth PTYs** (e.g. Cursor login) are managed separately from normal chat sessions. Idle ones are killed and dropped after 10 minutes; exited ones stay readable for 60 s.
+- **Child process env**: Agents, CLIs and git get `childEnv()` — an allowlisted env from `config.agentEnv()`, never a copy of `process.env`. Server secrets (`JWT_SECRET`, `ENCRYPTION_KEY`, `POSTGRES_PASSWORD`, `DATABASE_URL`, VAPID keys) are moved out of `process.env` at boot.
 
 ---
 
@@ -93,6 +96,7 @@ Optional features include **scheduled automations**, **role templates**, and **b
 - **Repository discovery** under the workspace (nested repos, depth limits, skip directories like `node_modules`).
 - **Status**: Per-repo file status, ahead counts, etc.
 - **Diffs**, **commit**, **push/pull/fetch**, **branch checkout/create**, and **discard**.
+- **`runGit`**: Every git call has a hard timeout (default 30 s, then SIGKILL) and never prompts for credentials. Remote commands (`fetch`, `pull`, `push`, `clone`, `ls-remote`) answer 502 on auth/network failures and timeouts.
 - **Commit history**: `GET .../log` lists recent commits; `GET .../show` returns a patch. The Git pane has a Changes / History toggle.
 - **CI providers** (optional): **Settings → Git → CI providers** holds any number of connections — **Gitea / Forgejo**, **GitHub** (incl. Enterprise Server) and **GitLab** (incl. self-managed) — each with URL, token and optional *remote hosts* (`forge.json` in the config dir; env `FORGE_URL` + `FORGE_TOKEN` + optional `FORGE_PROVIDER` / `FORGE_NAME` / `FORGE_REMOTE_HOSTS` adds one read-only connection). Saving tests the connection first (Gitea vs Forgejo is detected from the version).
 - **Workspace → connection**: The git remote's host picks the connection (server URL host or a listed remote host). An unknown private host falls back to the only self-hosted connection when there is exactly one. The workspace dialog can pin a connection and/or repo path (`forgeConnectionId`, `forgeRepo`) — e.g. a GitHub mirror built on Gitea. GitLab keeps nested group paths (`group/sub/project`).
@@ -104,7 +108,7 @@ Optional features include **scheduled automations**, **role templates**, and **b
 
 ## 9. File browser
 
-- **List** directory contents (`GET .../files/list?path=&hidden=`) and **read/write** text files **within the workspace** path only (path traversal checks). Names starting with `.` are hidden unless `hidden=1`.
+- **List** directory contents (`GET .../files/list?path=&hidden=`) and **read/write** text files **within the workspace** path only (path traversal checks; symlinks are resolved, so a link pointing outside the workspace is refused). Reads above 5 MB (`MAX_FILE_READ_BYTES`) answer **413**. Names starting with `.` are hidden unless `hidden=1`.
 - **Create folder** (`POST .../files/mkdir`), **rename** (`POST .../files/rename`), and **delete** (`DELETE .../files?path=`, recursive). The workspace root cannot be deleted.
 - Used by the dashboard **Files** view (show-hidden toggle, new file/folder, context-menu rename/delete).
 
@@ -176,7 +180,11 @@ Optional features include **scheduled automations**, **role templates**, and **b
 ## 15. Health and operations
 
 - **`GET /api/health`**: Unauthenticated; returns `status` (`ok` / `degraded`), **uptime**, and **dbOk** after a simple DB check. While the container entrypoint is still running, a tiny progress server binds the same port and serves a “Starting Nova Code” page; `/api/health` is **503** with `status: starting` until Fastify takes over (so Docker `HEALTHCHECK` still waits).
-- **Graceful shutdown**: On `SIGTERM`/`SIGINT`, broadcasts **server-shutdown** over WebSockets, stops the automation scheduler, waits briefly, stops auth PTYs, closes Fastify.
+- **Graceful shutdown**: On `SIGTERM`/`SIGINT`, stops accepting connections, broadcasts **server-shutdown** over WebSockets, stops the automation scheduler and CI watcher, cancels orchestrator and chat runs, closes ACP sessions, PTYs and terminals, then Fastify and the DB. A failing part doesn't stop the rest; after a 15 s deadline the process exits anyway.
+- **Error handler**: Central Fastify error handler. `HttpError`s keep their status, Fastify 4xx (validation, body limit, rate limit) keep theirs, and anything else is logged and answered with a generic `500 Internal server error` — 5xx responses no longer leak internals.
+- **Search indexes**: Workspace, session, message and orchestrator search use `pg_trgm` GIN indexes (the migration creates the extension).
+- **CI** (`.github/workflows/docker.yml`): tests, typecheck, `lint:check` (type-checked ESLint for the dashboard) and `npm run knip` (unused files/exports/dependencies) run before the image build.
+- **Production image**: The runtime stage only gets production API dependencies (`npm ci --omit=dev`). `gh` is installed from the pinned GitHub release `.deb`.
 
 ---
 
@@ -184,7 +192,9 @@ Optional features include **scheduled automations**, **role templates**, and **b
 
 - **Views**: Home (workspace list), workspace detail (sessions list, **Files**, **Git**, **Rules**), **Session** (chat), **Orchestrator**, **Automations**, **Settings** (including **Rules** and **Templates**), **Account**, **Login**, **Setup** (wizard: Profile → AI Agents [Cursor, Claude, Vibe, OpenCode, Codex] → Git → Finalize).
 - **Session snapshot cache**: The session view persists the last known chat messages + session detail (incl. plan documents) per session in `localStorage` (`nova:sessionCache:*`, latest 50 messages, `imageDataUrls` stripped). On mount or session switch the snapshot renders instantly (stale-while-revalidate) while REST + the chat WebSocket refresh it in parallel — the socket never waits on the session GET; the loading skeleton appears whenever there are no messages to show yet (an empty snapshot never masks in-flight history with the empty state, and empty writes never clobber a non-empty snapshot unless the emptiness is server-confirmed). A **Connecting…/Reconnecting…** pill shows whenever the chat socket isn't connected. Token validation on navigation is non-blocking so a poor connection can't delay first paint.
-- **PWA**: Service worker (`sw.ts`) and Vite PWA plugin for installable/offline-capable behavior where configured.
+- **PWA**: Service worker (`sw.ts`) and Vite PWA plugin for installable/offline-capable behavior where configured. Only the app shell is precached; heavy lazy chunks (Monaco, Mermaid, md-editor, workers) are cached on first use (`nova-assets`).
+- **Chat markdown**: Rendered HTML is sanitized with DOMPurify (own instance; only external http(s) links open in a new tab). The CSP `script-src` is `'self' blob:` with no `'unsafe-inline'` / `'unsafe-eval'` (`contentSecurityPolicy.ts`; `style-src` still allows inline styles).
+- **Error toasts**: The axios interceptor shows a toast for 403 and 5xx responses; 401 logs out.
 - **Terminal**: **xterm.js** for terminal rendering in the session experience.
 
 ---

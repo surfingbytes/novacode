@@ -266,7 +266,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
               useSessionSpecsStore().applyStatus(messagePayload.status);
             }
           } else if (messagePayload.type === 'refresh') {
-            fetchAllSessions();
+            void fetchAllSessions();
           } else if (messagePayload.type === 'server-shutdown') {
             // Managed socket reconnects with backoff; nothing else to do here.
           }
@@ -366,6 +366,23 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     workspaces.value = workspaces.value.filter((workspace) => workspace.id !== id);
   };
 
+  /** Logout: drop all user data and the sessions socket so the next login starts fresh and reconnects. */
+  function reset(): void {
+    sessionSocket?.close();
+    sessionSocket = null;
+    workspaces.value = [];
+    bIsLoading.value = false;
+    bWorkspacesLoadFailed.value = false;
+    activeWorkspaceId.value = null;
+    allSessions.value = [];
+    bSessionsLoading.value = false;
+    bSessionsLoadFailed.value = false;
+    sessionsInitialized = false;
+    workspacesInitialized = false;
+    workspacesInitPromise = null;
+    sessionsInitPromise = null;
+  }
+
   const reorderWorkspaces = async (ids: string[]): Promise<void> => {
     await workspaceApi.reorder(ids);
     const byId = new Map(workspaces.value.map((workspace) => [workspace.id, workspace]));
@@ -396,11 +413,13 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     reloadIfLoadFailed,
     markSessionRead,
     upsertSession,
+    removeSession,
     createWorkspace,
     updateWorkspace,
     toggleFavorite,
     archiveWorkspace,
     deleteWorkspace,
-    reorderWorkspaces
+    reorderWorkspaces,
+    reset
   };
 });

@@ -8,11 +8,17 @@ vi.mock('@/classes/api', () => ({
   sessionsApi: {
     continueInNewChat: vi.fn()
   },
-  apiErrorMessage: (_err: unknown, fallback: string) => fallback
+}));
+
+vi.mock('@/lib/notifyApiError', () => ({
+  notifyApiError: vi.fn()
 }));
 
 // classes
 import { sessionsApi } from '@/classes/api';
+
+// lib
+import { notifyApiError } from '@/lib/notifyApiError';
 
 // composables
 import { useSessionHandoff } from './useSessionHandoff';
@@ -44,6 +50,18 @@ function mountHandoff(allSessions: Partial<Session>[], session: Partial<Session>
 describe('useSessionHandoff', () => {
   beforeEach(() => {
     vi.mocked(sessionsApi.continueInNewChat).mockReset();
+    vi.mocked(notifyApiError).mockReset();
+  });
+
+  it('reports a failed handoff request through notifyApiError', async () => {
+    const err = new Error('boom');
+    vi.mocked(sessionsApi.continueInNewChat).mockRejectedValueOnce(err);
+    const { handoff, toastStore, promptText } = mountHandoff([{ id: 's1' }]);
+    await handoff.onContinueInNewChat({ text: 'go', imagePaths: [] });
+    expect(handoff.bHandoffPending.value).toBe(false);
+    expect(promptText.value).toBe('draft text');
+    expect(notifyApiError).toHaveBeenCalledWith(err, 'Failed to continue in new chat');
+    expect(toastStore.error).not.toHaveBeenCalled();
   });
 
   it('names the continued-in session from the store, with a fallback for blank names', () => {

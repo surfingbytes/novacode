@@ -1,15 +1,19 @@
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { logger } from './logger';
 
 const PRIVATE_NAME = 'id_ed25519';
 const PUBLIC_NAME = 'id_ed25519.pub';
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Ensures ~/.ssh under configDir exists with an ed25519 keypair and a minimal ssh config.
  * Idempotent; safe at API startup. Keys persist on the config volume.
  */
-export function ensureSshKey(configDir: string): void {
+export async function ensureSshKey(configDir: string): Promise<void> {
   const sshDir = join(configDir, '.ssh');
   const privatePath = join(sshDir, PRIVATE_NAME);
   const publicPath = join(sshDir, PUBLIC_NAME);
@@ -20,13 +24,15 @@ export function ensureSshKey(configDir: string): void {
   }
 
   if (!existsSync(privatePath)) {
-    const result = spawnSync(
-      'ssh-keygen',
-      ['-t', 'ed25519', '-N', '', '-f', privatePath, '-C', 'novacode@container'],
-      { encoding: 'utf8' }
-    );
-    if (result.status !== 0) {
-      console.error('[ssh] ssh-keygen failed:', result.stderr || result.stdout || 'unknown error');
+    try {
+      await execFileAsync(
+        'ssh-keygen',
+        ['-t', 'ed25519', '-N', '', '-f', privatePath, '-C', 'novacode@container'],
+        { encoding: 'utf8' }
+      );
+    } catch (err) {
+      const { stderr, stdout, message } = err as { stderr?: string; stdout?: string; message?: string };
+      logger.error({ output: stderr || stdout || message || 'unknown error' }, 'ssh-keygen failed');
       return;
     }
     try {
@@ -37,7 +43,7 @@ export function ensureSshKey(configDir: string): void {
     } catch {
       // ignore chmod issues
     }
-    console.log(`[ssh] Generated SSH key at ${privatePath}`);
+    logger.info({ path: privatePath }, 'Generated SSH key');
   }
 
   const configPath = join(sshDir, 'config');

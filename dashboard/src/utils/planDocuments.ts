@@ -48,7 +48,7 @@ export function isPlanEntryDone(entry: Pick<PlanEntry, 'content' | 'status'>): b
   return isPlanEntryCompleted(entry.status) || isPlanContentDone(entry.content);
 }
 
-export function isPlanEntryInProgress(status: string | undefined): boolean {
+function isPlanEntryInProgress(status: string | undefined): boolean {
   if (!status) return false;
   const normalized = status.toLowerCase();
   return (
@@ -92,7 +92,7 @@ function stripMarkdownSyntax(value: string): string {
     .trim();
 }
 
-export function unwrapMarkdownFence(markdown: string): string {
+function unwrapMarkdownFence(markdown: string): string {
   const trimmed = markdown.trim();
   const match = trimmed.match(/^```(?:md|markdown)?\s*\n([\s\S]*?)\n```$/i);
   return (match?.[1] ?? trimmed).trim();

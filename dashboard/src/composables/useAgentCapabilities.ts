@@ -79,5 +79,3 @@ export function useAgentCapabilities() {
     reload
   };
 }
-
-export type UseAgentCapabilities = ReturnType<typeof useAgentCapabilities>;

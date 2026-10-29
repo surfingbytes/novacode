@@ -4,6 +4,8 @@ import vue from '@vitejs/plugin-vue';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { fileURLToPath, URL } from 'node:url';
+// lib
+import { chunkFileName, HEAVY_CHUNK_GLOB_IGNORES } from './src/lib/buildChunkNames';
 
 export default defineConfig({
   plugins: [
@@ -39,35 +41,12 @@ export default defineConfig({
           }
         ]
       },
-      workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
-        maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
-        navigateFallback: 'index.html',
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'google-fonts-cache',
-              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
-              cacheableResponse: { statuses: [0, 200] }
-            }
-          },
-          {
-            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'gstatic-fonts-cache',
-              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
-              cacheableResponse: { statuses: [0, 200] }
-            }
-          }
-        ]
-      },
       injectManifest: {
         // 'es' (default) makes the plugin pass the deprecated rolldown inlineDynamicImports option
         rollupFormat: 'iife',
-        maximumFileSizeToCacheInBytes: 15 * 1024 * 1024
+        // App shell only; heavy lazy chunks are cached at runtime by sw.ts (nova-assets)
+        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        globIgnores: HEAVY_CHUNK_GLOB_IGNORES
       }
     })
   ],
@@ -77,7 +56,12 @@ export default defineConfig({
     }
   },
   build: {
-    target: 'es2024'
+    target: 'es2024',
+    rolldownOptions: {
+      output: {
+        chunkFileNames: chunkFileName
+      }
+    }
   },
   server: {
     host: true,

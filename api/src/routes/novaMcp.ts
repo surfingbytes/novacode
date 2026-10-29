@@ -17,9 +17,8 @@ import {
 import { readSessionSpec, specHasContent, writeSessionSpec } from '../classes/sessionSpec';
 import { buildPlanSubtasks, validatePlanSteps } from '../classes/orchestratorPlan';
 import { parseSubtasksPayloadString, serializeSubtasksPayload } from '../classes/orchestratorPayload';
-import { broadcastOrchestratorUpsert } from './ws';
-import { publishSpecStatus } from './sessionSpec';
-import { updateOrchestratorAndBroadcast } from './orchestrator';
+import { broadcastOrchestratorUpsert, updateOrchestratorAndBroadcast } from '../classes/orchestratorEvents';
+import { publishSpecStatus } from '../classes/sessionSpecStatus';
 import { markStepNeedsInput } from '../classes/orchestratorRunner';
 
 // -------------------------------------------- Tools --------------------------------------------
@@ -43,7 +42,7 @@ const STEP_SCHEMA = {
   required: ['name', 'prompt']
 };
 
-export const NOVA_MCP_TOOLS: NovaMcpTool[] = [
+const NOVA_MCP_TOOLS: NovaMcpTool[] = [
   {
     name: 'spec_read',
     description: "Read this chat's spec file (the agreed requirements the final verify step checks against).",
@@ -235,19 +234,19 @@ export async function novaMcpRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastifyInstance.post(NOVA_MCP_PATH, { schema: { body: JsonRpcBodySchema } }, async (request, reply) => {
     const sessionId = verifyNovaMcpToken(request.headers.authorization);
-    if (!sessionId) return reply.status(401).send({ error: 'Invalid Nova MCP token' });
-    if (!isNovaMcpEnabled()) return reply.status(403).send({ error: 'Nova MCP is turned off in Settings' });
+    if (!sessionId) return reply.code(401).send({ error: 'Invalid Nova MCP token' });
+    if (!isNovaMcpEnabled()) return reply.code(403).send({ error: 'Nova MCP is turned off in Settings' });
 
     const body = request.body as JsonRpcRequest | JsonRpcRequest[] | undefined;
     const messages = Array.isArray(body) ? body : body && typeof body === 'object' ? [body] : [];
     if (messages.length === 0) {
-      return reply.status(400).send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
+      return reply.code(400).send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
     }
     const responses = (
       await Promise.all(messages.map((message) => handleNovaMcpMessage(sessionId, message, NOVA_MCP_TOOLS, callNovaTool)))
     ).filter((response): response is Record<string, unknown> => response !== null);
 
-    if (responses.length === 0) return reply.status(202).send();
+    if (responses.length === 0) return reply.code(202).send();
     return reply.type('application/json').send(Array.isArray(body) ? responses : responses[0]);
   });
 
@@ -256,7 +255,7 @@ export async function novaMcpRoutes(fastify: FastifyInstance): Promise<void> {
     fastify.route({
       method,
       url: NOVA_MCP_PATH,
-      handler: async (_request, reply) => reply.status(405).header('Allow', 'POST').send()
+      handler: async (_request, reply) => reply.code(405).header('Allow', 'POST').send()
     });
   }
 }

@@ -8,6 +8,7 @@ import ConfirmModal from '@/components/ConfirmModal.vue';
 import ContextMenu from '@/components/ContextMenu.vue';
 import SessionEditModal from '@/components/SessionEditModal.vue';
 import NewSessionModal from '@/components/NewSessionModal.vue';
+import PromptModal from '@/components/PromptModal.vue';
 import ListPageSkeleton from '@/components/ui/ListPageSkeleton.vue';
 import EmptyState from '@/components/ui/EmptyState.vue';
 import SessionListToolbar from './session-list/SessionListToolbar.vue';
@@ -18,14 +19,16 @@ import SessionListMultiselectBar from './session-list/SessionListMultiselectBar.
 
 // composables
 import { useLongPress } from '@/composables/useLongPress';
+import { useOrchestratorActions } from '@/composables/useOrchestratorActions';
+import { useSessionListActions } from '@/composables/useSessionListActions';
 
 // stores
 import { useWorkspacesStore } from '@/stores/workspaces';
-import { useToastStore } from '@/stores/toasts';
 import { useOrchestratorsStore } from '@/stores/orchestrators';
 
 // classes
-import { isGloballyToasted, sessionsApi, orchestratorApi } from '@/classes/api';
+import { sessionsApi, orchestratorApi } from '@/classes/api';
+import { notifyApiError } from '@/lib/notifyApiError';
 import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 import { subtasksFromStoredJson } from '@/utils/orchestratorPayload';
 
@@ -45,7 +48,6 @@ const props = defineProps<{
 
 // -------------------------------------------------- Store --------------------------------------------------
 const store = useWorkspacesStore();
-const toastStore = useToastStore();
 const orchestratorsStore = useOrchestratorsStore();
 const route = useRoute();
 const router = useRouter();
@@ -57,10 +59,10 @@ const orchestrators = computed<Orchestrator[]>(() =>
 const bOrchestratorsLoading = ref(false);
 /** After first successful fetch; avoids showing step sessions at top level before orchestrator data exists. */
 const bOrchestratorsInitialFetched = ref(false);
-const sessionToDelete = ref<Session | null>(null);
-const bDeletingSession = ref(false);
-const sessionToEdit = ref<Session | null>(null);
-const bSavingEdit = ref(false);
+const sessionActions = useSessionListActions();
+const orchestratorActions = useOrchestratorActions();
+const { sessionToEdit, sessionPendingDelete } = sessionActions;
+const { orchestratorToEdit, orchestratorPendingDelete } = orchestratorActions;
 const viewMode = ref<'list' | 'grid'>(
   (safeGetItem('sessionsViewMode') as 'list' | 'grid') ?? 'list'
 );
@@ -254,9 +256,9 @@ const combinedItems = computed<CombinedItem[]>(() => {
 
 const showDeleteModal = (item: CombinedItem): void => {
   if (item.kind === 'session') {
-    sessionToDelete.value = item.session;
+    sessionActions.requestRemove(item.session);
   } else {
-    orchestratorToDelete.value = item.orchestrator;
+    orchestratorActions.requestRemove(item.orchestrator);
   }
 };
 
@@ -447,36 +449,6 @@ const fetchOrchestrators = async (opts?: { silent?: boolean }): Promise<void> =>
   }
 };
 
-const deleteSession = async (): Promise<void> => {
-  if (!sessionToDelete.value || !props.workspace) return;
-  bDeletingSession.value = true;
-  try {
-    await sessionsApi.remove(props.workspace.id, sessionToDelete.value.id);
-    sessionToDelete.value = null;
-  } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Failed to delete session');
-  } finally {
-    bDeletingSession.value = false;
-  }
-};
-
-const orchestratorToDelete = ref<Orchestrator | null>(null);
-const bDeletingOrchestrator = ref(false);
-
-const deleteOrchestrator = async (): Promise<void> => {
-  if (!orchestratorToDelete.value || !props.workspace) return;
-  bDeletingOrchestrator.value = true;
-  try {
-    await orchestratorApi.remove(props.workspace.id, orchestratorToDelete.value.id);
-    orchestratorsStore.removeOrchestrator(orchestratorToDelete.value.id, props.workspace.id);
-    orchestratorToDelete.value = null;
-  } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Failed to delete orchestrator');
-  } finally {
-    bDeletingOrchestrator.value = false;
-  }
-};
-
 const bulkDeleteCombinedDescription = computed((): string => {
   const nS = selectedIds.value.size;
   const nO = orchestratorSelectedIds.value.size;
@@ -498,11 +470,14 @@ const bulkDeleteCombined = async (): Promise<void> => {
   try {
     if (sessionIds.length > 0) {
       await sessionsApi.bulkDelete(props.workspace.id, sessionIds);
+      for (const id of sessionIds) {
+        store.removeSession(id);
+      }
       selectedIds.value = new Set();
     }
     if (orchIds.length > 0) {
       const orchSet = new Set(orchIds);
-      await Promise.all(orchIds.map((id) => orchestratorApi.remove(props.workspace!.id, id)));
+      await Promise.all(orchIds.map((id) => orchestratorApi.remove(props.workspace.id, id)));
       for (const id of orchSet) {
         orchestratorsStore.removeOrchestrator(id, props.workspace.id);
       }
@@ -510,51 +485,9 @@ const bulkDeleteCombined = async (): Promise<void> => {
     }
     bShowBulkDeleteCombined.value = false;
   } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Failed to delete selection');
+    notifyApiError(err, 'Failed to delete selection');
   } finally {
     bBulkDeletingCombined.value = false;
-  }
-};
-
-const saveEditSession = async (payload: {
-  name: string;
-  tags?: string[] | null;
-}): Promise<void> => {
-  if (!sessionToEdit.value || !props.workspace) return;
-  bSavingEdit.value = true;
-  try {
-    await sessionsApi.update(props.workspace.id, sessionToEdit.value.id, payload);
-    sessionToEdit.value = null;
-  } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Failed to update session');
-  } finally {
-    bSavingEdit.value = false;
-  }
-};
-
-const toggleArchive = async (session: Session): Promise<void> => {
-  if (!props.workspace) return;
-  try {
-    const nextArchived = !session.archived;
-    await sessionsApi.update(props.workspace.id, session.id, {
-      archived: nextArchived
-    });
-  } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Failed to toggle archive');
-  }
-};
-
-const toggleArchiveOrchestrator = async (orchestrator: Orchestrator): Promise<void> => {
-  if (!props.workspace) return;
-  try {
-    const nextArchived = !orchestrator.archived;
-    const { data } = await orchestratorApi.update(props.workspace.id, orchestrator.id, {
-      archived: nextArchived
-    });
-    const idx = orchestrators.value.findIndex((o) => o.id === orchestrator.id);
-    if (idx >= 0 && data) orchestrators.value[idx] = data;
-  } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Failed to toggle orchestrator archive');
   }
 };
 
@@ -575,15 +508,14 @@ const onMultiselectArchive = async (): Promise<void> => {
           const { data } = await orchestratorApi.update(props.workspace.id, id, {
             archived: wantArchived
           });
-          const idx = orchestrators.value.findIndex((o) => o.id === id);
-          if (idx >= 0 && data) orchestrators.value[idx] = data;
+          if (data) orchestratorsStore.upsertOrchestrator(data);
         })
       );
     }
     selectedIds.value = new Set();
     orchestratorSelectedIds.value = new Set();
   } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Failed to archive selection');
+    notifyApiError(err, 'Failed to archive selection');
   } finally {
     bBulkArchiving.value = false;
   }
@@ -616,80 +548,21 @@ function onContextMenuPick(key: string): void {
   fn?.(key);
 }
 
-function contextItemsForSession(session: Session): ContextMenuItem[] {
-  const arch = session.archived;
-  return [
-    { key: 'open', label: 'Open', icon: 'open_in_new' },
-    { key: 'edit', label: 'Edit…', icon: 'edit' },
-    {
-      key: 'archive',
-      label: arch ? 'Unarchive' : 'Archive',
-      icon: arch ? 'unarchive' : 'inventory_2'
-    },
-    { key: 'delete', label: 'Delete…', icon: 'delete', danger: true }
-  ];
-}
-
-function contextItemsForOrchestrator(orchestrator: Orchestrator): ContextMenuItem[] {
-  const arch = orchestrator.archived === true;
-  return [
-    { key: 'open', label: 'Open', icon: 'open_in_new' },
-    {
-      key: 'archive',
-      label: arch ? 'Unarchive' : 'Archive',
-      icon: arch ? 'unarchive' : 'inventory_2'
-    },
-    { key: 'delete', label: 'Delete…', icon: 'delete', danger: true }
-  ];
-}
-
 function onSessionContextMenu(e: MouseEvent, session: Session): void {
-  openContextMenu(e, contextItemsForSession(session), (key) => {
-    const wid = workspaceId.value;
-    if (key === 'open') {
-      router.push({ name: 'session', params: { id: wid, sessionId: session.id } });
-      return;
-    }
-    if (key === 'edit') {
-      sessionToEdit.value = session;
-      return;
-    }
-    if (key === 'archive') {
-      void toggleArchive(session);
-      return;
-    }
-    if (key === 'delete') {
-      showDeleteModal({ kind: 'session', session });
-    }
-  });
+  openContextMenu(e, sessionActions.menuItems(session), (key) => sessionActions.pick(session, key));
 }
 
 function onOrchestratorContextMenu(e: MouseEvent, orchestrator: Orchestrator): void {
-  openContextMenu(e, contextItemsForOrchestrator(orchestrator), (key) => {
-    const wid = workspaceId.value;
-    if (key === 'open') {
-      router.push({ name: 'orchestrator', params: { id: wid, orchestratorId: orchestrator.id } });
-      return;
-    }
-    if (key === 'archive') {
-      void toggleArchiveOrchestrator(orchestrator);
-      return;
-    }
-    if (key === 'delete') {
-      showDeleteModal({
-        kind: 'orchestrator',
-        orchestrator,
-        nestedSessions: orderedNestedSessions(orchestrator)
-      });
-    }
-  });
+  openContextMenu(e, orchestratorActions.menuItems(orchestrator), (key) =>
+    orchestratorActions.pick(orchestrator, key)
+  );
 }
 
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 onMounted(() => {
-  ensureData();
+  void ensureData();
   ensureAgentCapabilitiesLoaded();
-  fetchOrchestrators();
+  void fetchOrchestrators();
   consumeNewSessionQuery();
 
   // Keep the fixed bar aligned with the list when layout changes.
@@ -704,8 +577,8 @@ onBeforeUnmount(() => {
 watch(workspaceId, (id) => {
   if (!id) return;
   bOrchestratorsInitialFetched.value = false;
-  ensureData();
-  fetchOrchestrators();
+  void ensureData();
+  void fetchOrchestrators();
 });
 
 function consumeNewSessionQuery(): void {
@@ -809,9 +682,9 @@ watch(
       :workspace-id="workspaceId"
       @session-context-menu="onSessionContextMenu"
       @orchestrator-context-menu="onOrchestratorContextMenu"
-      @edit="sessionToEdit = $event"
-      @archive="toggleArchive"
-      @archive-orchestrator="toggleArchiveOrchestrator"
+      @edit="sessionActions.edit"
+      @archive="sessionActions.toggleArchive"
+      @archive-orchestrator="orchestratorActions.toggleArchive"
       @delete="showDeleteModal"
     />
     <div v-else-if="viewMode === 'list'" ref="listViewRef" class="list-view shrink-0">
@@ -823,9 +696,9 @@ watch(
         :b-selection-active="selectionActive || orchestratorSelectionActive"
         @session-context-menu="onSessionContextMenu"
         @orchestrator-context-menu="onOrchestratorContextMenu"
-        @edit="sessionToEdit = $event"
-        @archive="toggleArchive"
-        @archive-orchestrator="toggleArchiveOrchestrator"
+        @edit="sessionActions.edit"
+        @archive="sessionActions.toggleArchive"
+        @archive-orchestrator="orchestratorActions.toggleArchive"
         @delete="showDeleteModal"
         @toggle-select="toggleSelect"
         @toggle-select-orchestrator="toggleSelectOrchestrator"
@@ -857,8 +730,8 @@ watch(
       @update:b-show-archived="bShowArchived = $event"
       @session-context-menu="onSessionContextMenu"
       @orchestrator-context-menu="onOrchestratorContextMenu"
-      @archive="toggleArchive"
-      @archive-orchestrator="toggleArchiveOrchestrator"
+      @archive="sessionActions.toggleArchive"
+      @archive-orchestrator="orchestratorActions.toggleArchive"
       @delete="showDeleteModal"
       @toggle-select="toggleSelect"
       @toggle-select-orchestrator="toggleSelectOrchestrator"
@@ -880,17 +753,17 @@ watch(
   />
 
   <ConfirmModal
-    :model-value="sessionToDelete !== null"
+    :model-value="sessionPendingDelete !== null"
     title="Delete session"
-    :description="`Delete '${sessionToDelete?.name}'? This cannot be undone.`"
+    :description="`Delete '${sessionPendingDelete?.name}'? This cannot be undone.`"
     confirm-label="Delete"
-    :loading="bDeletingSession"
+    :loading="sessionActions.bDeleting.value"
     @update:model-value="
       (v) => {
-        if (!v) sessionToDelete = null;
+        if (!v) sessionPendingDelete = null;
       }
     "
-    @confirm="deleteSession"
+    @confirm="sessionActions.confirmRemove"
   />
 
   <ConfirmModal
@@ -908,30 +781,45 @@ watch(
   />
 
   <ConfirmModal
-    :model-value="orchestratorToDelete !== null"
+    :model-value="orchestratorPendingDelete !== null"
     title="Delete orchestrator"
-    :description="`Delete '${orchestratorToDelete?.name}'? Step sessions created for this plan will be removed too. This cannot be undone.`"
+    :description="`Delete '${orchestratorPendingDelete?.name}'? Step sessions created for this plan will be removed too. This cannot be undone.`"
     confirm-label="Delete"
-    :loading="bDeletingOrchestrator"
+    :loading="orchestratorActions.bDeleting.value"
     @update:model-value="
       (v) => {
-        if (!v) orchestratorToDelete = null;
+        if (!v) orchestratorPendingDelete = null;
       }
     "
-    @confirm="deleteOrchestrator"
+    @confirm="orchestratorActions.confirmRemove"
   />
 
   <SessionEditModal
     :model-value="sessionToEdit !== null"
     :session="sessionToEdit"
-    :loading="bSavingEdit"
+    :loading="sessionActions.bSavingEdit.value"
     :existing-tags="sessionTags"
     @update:model-value="
       (v) => {
         if (!v) sessionToEdit = null;
       }
     "
-    @save="saveEditSession"
+    @save="sessionActions.saveEdit"
+  />
+
+  <PromptModal
+    :model-value="orchestratorToEdit !== null"
+    title="Edit orchestrator name"
+    label="Name"
+    :initial-value="orchestratorToEdit?.name ?? ''"
+    confirm-label="Save"
+    :loading="orchestratorActions.bSavingEdit.value"
+    @update:model-value="
+      (v) => {
+        if (!v) orchestratorToEdit = null;
+      }
+    "
+    @confirm="orchestratorActions.saveEdit"
   />
 
   <NewSessionModal

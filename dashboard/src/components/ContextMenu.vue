@@ -113,7 +113,7 @@ watch(
   (isOpen) => {
     if (isOpen) {
       pos.value = { x: props.x, y: props.y };
-      nextTick(() => clampMenu());
+      void nextTick(() => clampMenu());
       bindGlobal();
     } else {
       unbindGlobal();
@@ -128,7 +128,7 @@ watch(
       return;
     }
     pos.value = { x: props.x, y: props.y };
-    nextTick(() => clampMenu());
+    void nextTick(() => clampMenu());
   }
 );
 

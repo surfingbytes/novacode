@@ -1,0 +1,101 @@
+// node_modules
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { FastifyInstance } from 'fastify';
+
+const mocks = vi.hoisted(() => ({
+  pingDatabase: vi.fn()
+}));
+
+// No database: keep the real helpers, replace `db` with the one call /api/health makes.
+vi.mock('./classes/database', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./classes/database')>()),
+  db: {
+    pingDatabase: (...args: unknown[]) => mocks.pingDatabase(...args)
+  }
+}));
+
+// app
+import { buildApp } from './app';
+import { NotFoundError } from './classes/httpErrors';
+
+let app: FastifyInstance;
+const logLines: string[] = [];
+
+beforeAll(async () => {
+  app = await buildApp({ logger: { level: 'error', stream: { write: (line: string) => logLines.push(line) } } });
+  app.get('/api/test/not-found', async () => {
+    throw new NotFoundError('Widget not found');
+  });
+  app.get('/api/test/crash', async () => {
+    throw new Error('secret path /x');
+  });
+  app.get('/api/test/validated', { schema: { querystring: { type: 'object', required: ['n'] } } }, async () => ({}));
+  await app.ready();
+});
+
+afterAll(async () => {
+  await app.close();
+});
+
+describe('buildApp', () => {
+  it('serves /api/health without listening', async () => {
+    mocks.pingDatabase.mockResolvedValue(undefined);
+
+    const res = await app.inject({ url: '/api/health' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ status: 'ok', dbOk: true });
+    expect(app.server.listening).toBe(false);
+  });
+
+  it('reports degraded health when the database ping fails', async () => {
+    mocks.pingDatabase.mockRejectedValue(new Error('down'));
+
+    const res = await app.inject({ url: '/api/health' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ status: 'degraded', dbOk: false });
+  });
+
+  it('registers the API routes behind auth', async () => {
+    expect(app.hasRoute({ method: 'GET', url: '/api/workspaces' })).toBe(true);
+
+    const res = await app.inject({ url: '/api/workspaces' });
+
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('answers a thrown HttpError with its status and message', async () => {
+    const res = await app.inject({ url: '/api/test/not-found' });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: 'Widget not found' });
+  });
+
+  it('hides unexpected errors behind a generic 500 and logs them', async () => {
+    logLines.length = 0;
+
+    const res = await app.inject({ url: '/api/test/crash' });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: 'Internal server error' });
+    const logged = logLines.map((line) => JSON.parse(line) as Record<string, unknown>).find((l) => l['reqId']);
+    expect(logged).toMatchObject({ level: 50 });
+    expect(JSON.stringify(logged)).toContain('secret path /x');
+    expect(logged?.['stack']).toEqual(expect.stringContaining('Error: secret path /x'));
+  });
+
+  it('answers schema validation failures with 400 { error }', async () => {
+    const res = await app.inject({ url: '/api/test/validated' });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: expect.stringContaining('n') });
+  });
+
+  it('answers unknown /api paths with 404 JSON', async () => {
+    const res = await app.inject({ url: '/api/nope' });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: 'Not found' });
+  });
+});

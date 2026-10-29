@@ -50,5 +50,3 @@ export function useClaudeLimitPopup() {
     loadClaudeAutoContinueSetting
   };
 }
-
-export type UseClaudeLimitPopup = ReturnType<typeof useClaudeLimitPopup>;

@@ -34,7 +34,7 @@ export function normalizeCursorPlanStatus(status: unknown): CursorPlanEntry['sta
   return 'pending';
 }
 
-export function cursorPlanEntryFromUnknown(value: unknown): CursorPlanEntry | null {
+function cursorPlanEntryFromUnknown(value: unknown): CursorPlanEntry | null {
   if (typeof value === 'string') {
     const content = value.trim();
     return content ? { content, status: 'pending' } : null;
@@ -60,7 +60,7 @@ export function cursorPlanEntryFromUnknown(value: unknown): CursorPlanEntry | nu
   };
 }
 
-export function stringProp(obj: Record<string, unknown>, keys: string[]): string | undefined {
+function stringProp(obj: Record<string, unknown>, keys: string[]): string | undefined {
   for (const key of keys) {
     const value = obj[key];
     if (typeof value === 'string' && value.trim()) {
@@ -70,7 +70,7 @@ export function stringProp(obj: Record<string, unknown>, keys: string[]): string
   return undefined;
 }
 
-export function looksLikeRichPlanMarkdown(value: string): boolean {
+function looksLikeRichPlanMarkdown(value: string): boolean {
   const text = value.trim();
   if (!text) return false;
   const headingCount = (text.match(/^#{1,3}\s+/gm) ?? []).length;
@@ -79,7 +79,7 @@ export function looksLikeRichPlanMarkdown(value: string): boolean {
   return headingCount >= 2 || (headingCount >= 1 && hasPlanSections);
 }
 
-export function findRichPlanMarkdown(value: unknown, depth = 0): string | undefined {
+function findRichPlanMarkdown(value: unknown, depth = 0): string | undefined {
   if (depth > 5 || value == null) return undefined;
   if (typeof value === 'string') {
     return looksLikeRichPlanMarkdown(value) ? value.trim() : undefined;
@@ -105,7 +105,7 @@ export function findRichPlanMarkdown(value: unknown, depth = 0): string | undefi
   return undefined;
 }
 
-export function extractCursorPlanEntries(params: unknown): CursorPlanEntry[] {
+function extractCursorPlanEntries(params: unknown): CursorPlanEntry[] {
   if (typeof params === 'string' || Array.isArray(params)) {
     const values = Array.isArray(params) ? params : [params];
     return values

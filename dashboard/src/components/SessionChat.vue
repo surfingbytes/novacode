@@ -1,12 +1,9 @@
 <script setup lang="ts">
 // node_modules
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick, watch, defineAsyncComponent } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
 // components
-import FilesView from '@/components/workspace/FilesComponent.vue';
-import GitView from '@/components/workspace/GitView.vue';
-import AppTerminal from '@/components/AppTerminal.vue';
 import OrchestratorPanel from '@/components/OrchestratorPanel.vue';
 import ClaudeLimitPopup from '@/components/ClaudeLimitPopup.vue';
 import ChatHandoffBanner from '@/components/chat/ChatHandoffBanner.vue';
@@ -59,6 +56,11 @@ import { useOrchestratorsStore } from '@/stores/orchestrators';
 // types
 import type { Session } from '@/@types/index';
 
+// tab-only views load lazily so the session chunk stays small
+const FilesView = defineAsyncComponent(() => import('@/components/workspace/FilesComponent.vue'));
+const GitView = defineAsyncComponent(() => import('@/components/workspace/GitView.vue'));
+const AppTerminal = defineAsyncComponent(() => import('@/components/AppTerminal.vue'));
+
 // -------------------------------------------------- Props --------------------------------------------------
 const props = defineProps<{
   workspaceId: string;
@@ -91,8 +93,8 @@ const orchestratorsStore = useOrchestratorsStore();
 const initialCache = readSessionCache(props.workspaceId, props.sessionId);
 const session = ref<Session | null>(initialCache?.session ?? null);
 const sessionChatRootRef = ref<HTMLElement | null>(null);
-const chatListRef = ref<InstanceType<typeof ChatMessageList> | null>(null);
-const composerRef = ref<InstanceType<typeof ChatComposer> | null>(null);
+const chatListRef = ref<InstanceType<typeof ChatMessageList>>();
+const composerRef = ref<InstanceType<typeof ChatComposer>>();
 const lightboxSrc = ref<string | null>(null);
 
 const {
@@ -123,8 +125,7 @@ const { approvalPolicy, bSavingApprovalPolicy, applySessionApprovalPolicy, onApp
   useApprovalPolicy({
     workspaceId: () => props.workspaceId,
     sessionId: () => props.sessionId,
-    session,
-    toastStore
+    session
   });
 
 const {
@@ -485,7 +486,7 @@ watch(activeTab, (tab) => {
   syncSessionQuery();
   if (tab === 'chat') {
     chatSocket.ensureConnected();
-    nextTick(() => {
+    void nextTick(() => {
       composerRef.value?.resizeTextarea();
       composerRef.value?.observePromptInputBox();
     });
@@ -681,13 +682,13 @@ onUnmounted(() => {
               :agent-type="session?.agentType"
               :user-name="auth.username"
               :viewport-height="viewportHeight"
+              :send-approval-response="chatSocket.sendApprovalResponse"
+              :send-question-response="chatSocket.sendQuestionResponse"
               @load-older="chatSocket.loadOlderMessages"
               @toggle-tool-output="toggleToolOutput"
               @open-plan="planDocs.openPlan"
               @open-file="openWorkspaceFile"
               @lightbox="(src) => (lightboxSrc = src)"
-              :send-approval-response="chatSocket.sendApprovalResponse"
-              :send-question-response="chatSocket.sendQuestionResponse"
               @chat-error-action="handleChatErrorAction"
             />
 

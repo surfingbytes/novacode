@@ -1,5 +1,5 @@
 export type AgentErrorCode = 'auth_required' | 'rate_limited' | 'timeout' | 'unknown';
-export type CursorAuthStatus = 'authenticated' | 'unauthenticated' | 'timeout' | 'error';
+type CursorAuthStatus = 'authenticated' | 'unauthenticated' | 'timeout' | 'error';
 
 export interface ClassifiedAgentError {
   code: AgentErrorCode;
@@ -56,7 +56,7 @@ function errorParts(value: unknown): string[] {
   return [String(value)];
 }
 
-export function errorText(value: unknown): string {
+function errorText(value: unknown): string {
   return errorParts(value).join('\n').trim();
 }
 
@@ -144,7 +144,7 @@ export function isAuthRequiredError(
  * Detect Cursor capacity/rate-limit failures from structured fields first, then
  * from machine status tokens (`resource_exhausted`, `RetriableError`) in the payload.
  */
-export function isRateLimitedError(
+function isRateLimitedError(
   value: unknown,
   detail?: AgentErrorDetail
 ): boolean {

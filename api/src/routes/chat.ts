@@ -4,300 +4,39 @@ import { Type, type Static } from '@sinclair/typebox';
 import type { WebSocket } from 'ws';
 
 // classes
-import { jwtPreHandler, rejectUnauthorizedWebSocket } from '../classes/auth';
-import { assistantTextFromEvents } from '../classes/assistantText';
+import { jwtPreHandler } from '../classes/auth';
 import { db } from '../classes/database';
-import { WS_ROUTE_RATE_LIMIT } from '../classes/rateLimits';
-import { broadcastSessionListUpsert } from '../classes/sessionListBroadcast';
+import { AGENT_ROUTE_RATE_LIMIT, WS_ROUTE_RATE_LIMIT } from '../classes/rateLimits';
+import { acceptWebSocket } from '../classes/wsAccept';
+import { startContinueInNewChat } from '../classes/sessionHandoff';
+import { maybeNameUntitledSession } from '../classes/sessionTitle';
 import {
-  HANDOFF_SUMMARY_PROMPT,
-  HANDOFF_TARGET_CONFIG_KEY,
-  setInternalConfigValue
-} from '../classes/sessionHandoff';
-import { createSessionWithAgent } from '../classes/sessionService';
-import { markSessionRead } from '../classes/sessionUnread';
-import { resolveWorkspaceAbsolutePath } from '../classes/workspacePaths';
-import {
-  buildSessionTitlePrompt,
-  buildSessionTitlePromptFromAssistant,
-  cleanSessionTitle,
-  extractFirstAssistantText,
-  resolveAutomaticOneShotAgentType,
-  resolveOneShotModel,
-  runOneShotAgentText
-} from '../classes/oneShotAgentText';
-import { isAgentAuthenticated } from './agentAuth';
-import {
-  getActiveSessionIds as _getActiveSessionIds,
-  getActiveBusySubagents as _getActiveBusySubagents,
   getActiveRun,
   cancelRun,
-  dispatchPrompt,
-  dispatchPromptAndWait,
   respondToAcpPermission,
-  respondToAcpAskQuestion,
-  subscribeBusy,
-  type ChatSubscriber
+  respondToAcpAskQuestion
 } from '../classes/chatEngine';
+import {
+  installChatRunBroadcast,
+  registerChatSocket,
+  sendChat as send,
+  unregisterChatSocket
+} from '../classes/chatSockets';
+import {
+  broadcastQueueUpdate,
+  deleteQueueItem,
+  drainQueue,
+  editQueueItem,
+  enqueuePrompt,
+  loadQueue,
+  pushQueueItemToFront
+} from '../classes/chatQueue';
+import { logger } from '../classes/logger';
 
 // types
-import type {
-  AgentType,
-  ChatMessage,
-  ChatApprovalRequest,
-  ChatQuestionRequest,
-  ChatQueueItem,
-  ChatWsClientMessage,
-  ChatWsServerMessage
-} from '../@types/index';
-
-export function getActiveSessionIds(): Set<string> {
-  return _getActiveSessionIds();
-}
-
-export function getActiveBusySubagents(sessionId: string): { running: number; total: number } | null {
-  return _getActiveBusySubagents(sessionId);
-}
-
-export { cancelRun };
+import type { ChatMessage, ChatWsClientMessage } from '../@types/index';
 
 const HISTORY_PAGE_SIZE = 50;
-const chatSessionClients = new Map<string, Set<WebSocket>>();
-const queueWorkers = new Set<string>();
-
-/** True when at least one chat WebSocket is connected to this session (a viewer). */
-export function hasChatSessionViewers(sessionId: string): boolean {
-  return (chatSessionClients.get(sessionId)?.size ?? 0) > 0;
-}
-
-// ---------------------------------- Socket Helpers ----------------------------------
-function send(socket: WebSocket, message: ChatWsServerMessage): void {
-  if (socket.readyState === 1) {
-    socket.send(JSON.stringify(message));
-  }
-}
-
-function registerChatSocket(sessionId: string, socket: WebSocket): void {
-  let socketSet = chatSessionClients.get(sessionId);
-  if (!socketSet) {
-    socketSet = new Set<WebSocket>();
-    chatSessionClients.set(sessionId, socketSet);
-  }
-  socketSet.add(socket);
-  void markSessionRead(sessionId);
-}
-
-function unregisterChatSocket(sessionId: string, socket: WebSocket): void {
-  const socketSet = chatSessionClients.get(sessionId);
-  if (!socketSet) {
-    return;
-  }
-  socketSet.delete(socket);
-  if (socketSet.size === 0) {
-    chatSessionClients.delete(sessionId);
-  }
-}
-
-function broadcastChat(sessionId: string, message: ChatWsServerMessage): void {
-  const socketSet = chatSessionClients.get(sessionId);
-  if (!socketSet) {
-    return;
-  }
-  const payload = JSON.stringify(message);
-  for (const socket of socketSet) {
-    if (socket.readyState === 1) {
-      socket.send(payload);
-    }
-  }
-}
-
-// ---------------------------------- Queue Helpers ----------------------------------
-async function loadQueue(sessionId: string): Promise<ChatQueueItem[]> {
-  return db.listSessionQueue(sessionId);
-}
-
-async function broadcastQueueUpdate(sessionId: string): Promise<void> {
-  const queue = await loadQueue(sessionId);
-  broadcastChat(sessionId, { type: 'queue-updated', queue });
-}
-
-async function tryProcessQueue(sessionId: string): Promise<void> {
-  if (queueWorkers.has(sessionId)) {
-    return;
-  }
-  queueWorkers.add(sessionId);
-  try {
-    if (getActiveRun(sessionId)) {
-      return;
-    }
-    const next = await db.dequeueNextSessionQueueItem(sessionId);
-    if (!next) {
-      await broadcastQueueUpdate(sessionId);
-      return;
-    }
-    await broadcastQueueUpdate(sessionId);
-    broadcastChat(sessionId, {
-      type: 'prompt-started',
-      queueItemId: next.id,
-      prompt: {
-        text: next.text,
-        imagePaths: next.imagePaths,
-        createdAt: next.createdAt
-      }
-    });
-    const sub: ChatSubscriber = {
-      // Stream/done/error delivery to chat sockets is handled by the run's
-      // session-broadcast subscriber (installed via the busy hook below);
-      // this subscriber only sequences the queue.
-      onStream: () => {},
-      onDone: (messages) => {
-        void broadcastQueueUpdate(sessionId);
-        void maybeNameUntitledSessionFromAssistant(sessionId, messages);
-        void tryProcessQueue(sessionId);
-      },
-      onError: () => {
-        void broadcastQueueUpdate(sessionId);
-        void tryProcessQueue(sessionId);
-      },
-      onHistory: () => {}
-    };
-    const result = await dispatchPrompt({
-      sessionId,
-      text: next.text,
-      model: next.model,
-      mode: next.mode,
-      imagePaths: next.imagePaths,
-      subscriber: sub
-    });
-    if (result.error) {
-      // Queue item was already removed. Put it back when the user message was not
-      // persisted, otherwise the prompt vanishes while session title naming still runs.
-      if (result.requeue !== false) {
-        await db.enqueueSessionQueueItem({
-          sessionId,
-          text: next.text,
-          model: next.model,
-          mode: next.mode,
-          imagePaths: next.imagePaths
-        });
-        await broadcastQueueUpdate(sessionId);
-      }
-      broadcastChat(sessionId, { type: 'error', message: result.error, code: result.errorCode });
-      // Do not immediately retry: permanent errors would loop, and "Agent is busy"
-      // is drained when the active run's onDone calls tryProcessQueue.
-    }
-  } finally {
-    queueWorkers.delete(sessionId);
-  }
-}
-
-/**
- * Run a server-initiated prompt as a normal turn of the session (same agent,
- * model and conversation) and wait for it. Open chats see it like a sent message.
- * Prompts the user queued meanwhile run afterwards.
- */
-export async function runServerPromptInSession(opts: {
-  sessionId: string;
-  text: string;
-  timeoutMs?: number;
-}): Promise<{ error?: string; messages?: ChatMessage[] }> {
-  const { sessionId, text } = opts;
-  if (getActiveRun(sessionId)) {
-    return { error: 'Agent is busy' };
-  }
-  const session = await db.getSession(sessionId);
-  if (!session) {
-    return { error: 'Session not found' };
-  }
-  broadcastChat(sessionId, {
-    type: 'prompt-started',
-    prompt: { text, createdAt: new Date().toISOString() }
-  });
-  const result = await dispatchPromptAndWait({
-    sessionId,
-    text,
-    model: session.modelSelection,
-    mode: session.sessionMode,
-    timeoutMs: opts.timeoutMs
-  });
-  void tryProcessQueue(sessionId);
-  return result;
-}
-
-const handoffsInFlight = new Set<string>();
-
-/**
- * "Continue in new chat": the source chat's own agent writes a handoff note (a
- * normal visible turn), then a new chat with the same agent/model/mode starts
- * with that note as hidden first-prompt context and the user's prompt queued.
- * Open source-chat sockets get handoff-ready / handoff-failed.
- */
-async function continueInNewChat(opts: {
-  sessionId: string;
-  text: string;
-  imagePaths: string[];
-}): Promise<void> {
-  const { sessionId, text, imagePaths } = opts;
-  const fail = (message: string): void => {
-    broadcastChat(sessionId, { type: 'handoff-failed', message });
-  };
-  try {
-    const result = await runServerPromptInSession({ sessionId, text: HANDOFF_SUMMARY_PROMPT });
-    if (result.error) {
-      fail(`Handoff summary failed: ${result.error}`);
-      return;
-    }
-    const lastAssistant = [...(result.messages ?? [])].reverse().find((message) => message.role === 'assistant');
-    const summary = assistantTextFromEvents(lastAssistant?.events).trim();
-    if (!summary) {
-      fail('Handoff summary came back empty');
-      return;
-    }
-
-    const source = await db.getSession(sessionId);
-    if (!source) {
-      fail('Session not found');
-      return;
-    }
-    const created = await createSessionWithAgent({
-      workspaceId: source.workspaceId,
-      name: '',
-      tags: Array.isArray(source.tags) ? (source.tags as string[]) : null,
-      agentType: (source.agentType as AgentType | null) ?? undefined,
-      modelSelection: source.modelSelection,
-      sessionMode: source.sessionMode,
-      approvalPolicy: source.approvalPolicy,
-      handoffContext: { sessionId, sessionName: source.name, summary }
-    });
-    if (!created.session) {
-      fail(created.error ?? 'Failed to create chat');
-      return;
-    }
-    const target = created.session;
-    broadcastSessionListUpsert(target.workspaceId, target);
-
-    const linked = await db.updateSession(sessionId, {
-      sessionConfigJson: setInternalConfigValue(source.sessionConfigJson, HANDOFF_TARGET_CONFIG_KEY, target.id)
-    });
-    if (linked) broadcastSessionListUpsert(linked.workspaceId, linked);
-
-    await db.enqueueSessionQueueItem({
-      sessionId: target.id,
-      text,
-      model: target.modelSelection ?? 'auto',
-      mode: target.sessionMode ?? 'default',
-      imagePaths
-    });
-    void maybeNameUntitledSession(target.id, text, imagePaths);
-    broadcastChat(sessionId, { type: 'handoff-ready', sessionId: target.id });
-    await tryProcessQueue(target.id);
-  } catch (err) {
-    console.warn('[chat] continue in new chat failed:', err);
-    fail('Failed to continue in new chat');
-  } finally {
-    handoffsInFlight.delete(sessionId);
-  }
-}
 
 function paginateMessages(allMessages: ChatMessage[], offset: number): { messages: ChatMessage[]; hasMore: boolean } {
   const total = allMessages.length;
@@ -317,90 +56,6 @@ async function loadSessionMessages(sessionId: string): Promise<ChatMessage[]> {
   return db.listSessionMessages(sessionId);
 }
 
-const namingInFlight = new Set<string>();
-
-async function generateAndApplySessionTitle(
-  sessionId: string,
-  promptText: string
-): Promise<void> {
-  const current = await db.getSession(sessionId);
-  if (!current || current.name.trim() !== '') {
-    return;
-  }
-  if (namingInFlight.has(sessionId)) {
-    return;
-  }
-  namingInFlight.add(sessionId);
-  try {
-    const workspace = await db.getWorkspace(current.workspaceId);
-    if (!workspace) {
-      return;
-    }
-    const user = await db.getFirstUser();
-    const agentType = resolveAutomaticOneShotAgentType(
-      user?.utilityAgentType,
-      [current.agentType, workspace.defaultAgentType],
-      (candidate) => isAgentAuthenticated(candidate, user?.claudeToken)
-    );
-    const cwd = resolveWorkspaceAbsolutePath(workspace.path);
-    const model = await resolveOneShotModel(user?.utilityModelSelection, agentType);
-    const raw = await runOneShotAgentText({
-      agentType,
-      cwd,
-      promptText,
-      model,
-      claudeToken: user?.claudeToken ?? null,
-      runIdPrefix: 'session-title',
-      denyTools: true
-    });
-    const title = cleanSessionTitle(raw);
-    if (!title) {
-      console.warn('[chat] skipped unusable session title', { agentType, model });
-      return;
-    }
-    const latest = await db.getSession(sessionId);
-    if (!latest || latest.name.trim() !== '') {
-      return;
-    }
-    const updated = await db.updateSession(sessionId, { name: title });
-    if (updated) {
-      broadcastSessionListUpsert(updated.workspaceId, updated);
-    }
-  } catch (error) {
-    console.warn('[chat] failed to generate session title:', error);
-  } finally {
-    namingInFlight.delete(sessionId);
-  }
-}
-
-async function maybeNameUntitledSession(
-  sessionId: string,
-  text: string,
-  imagePaths: string[]
-): Promise<void> {
-  if (!text.trim()) {
-    // Image-only prompts have no usable text. Wait for the first assistant
-    // reply and name from that in maybeNameUntitledSessionFromAssistant.
-    return;
-  }
-  await generateAndApplySessionTitle(sessionId, buildSessionTitlePrompt(text, imagePaths.length));
-}
-
-async function maybeNameUntitledSessionFromAssistant(
-  sessionId: string,
-  messages: ChatMessage[]
-): Promise<void> {
-  const firstUser = messages.find((message) => message.role === 'user');
-  if (!firstUser || firstUser.content?.trim() || !firstUser.imagePaths?.length) {
-    return;
-  }
-  const assistantText = extractFirstAssistantText(messages);
-  if (!assistantText) {
-    return;
-  }
-  await generateAndApplySessionTitle(sessionId, buildSessionTitlePromptFromAssistant(assistantText));
-}
-
 // ---------------------------------- Schemas ----------------------------------
 const ContinueInNewChatParamsSchema = Type.Object({
   workspaceId: Type.String(),
@@ -416,38 +71,7 @@ const ChatSocketParamsSchema = Type.Object({ id: Type.String() });
 
 // ---------------------------------- Routes ----------------------------------
 export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
-  // Install once: give EVERY run (queue-dispatched, orchestrator, automation,
-  // auto-continue) a single session-wide broadcast subscriber, attached
-  // synchronously at run start (busy fires before the agent emits anything).
-  // This is the ONLY live-delivery path — per-socket subscribers on top of it
-  // would deliver every line twice to mid-run joiners.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const globalAny = globalThis as any;
-  if (!globalAny.__chatBroadcastHookInstalled) {
-    globalAny.__chatBroadcastHookInstalled = true;
-    // busy=true re-fires on every subagent count update; attach once per run.
-    const runsWithBroadcast = new WeakSet<object>();
-    subscribeBusy((sessionId, _workspaceId, busy) => {
-      if (!busy) return;
-      const run = getActiveRun(sessionId);
-      if (!run || runsWithBroadcast.has(run)) return;
-      runsWithBroadcast.add(run);
-      run.subscribers.add({
-        onStream: (line) => broadcastChat(sessionId, { type: 'stream', data: line }),
-        onDone: () => broadcastChat(sessionId, { type: 'done' }),
-        onError: (message, code) => broadcastChat(sessionId, { type: 'error', message, code }),
-        onHistory: () => {},
-        onApprovalRequested: (approval: ChatApprovalRequest) =>
-          broadcastChat(sessionId, { type: 'approval-requested', approval }),
-        onApprovalResolved: (approvalRequestId: string) =>
-          broadcastChat(sessionId, { type: 'approval-resolved', approvalRequestId }),
-        onQuestionRequested: (question: ChatQuestionRequest) =>
-          broadcastChat(sessionId, { type: 'question-requested', question }),
-        onQuestionResolved: (questionRequestId: string) =>
-          broadcastChat(sessionId, { type: 'question-resolved', questionRequestId })
-      });
-    });
-  }
+  installChatRunBroadcast();
 
   // POST /api/workspaces/:workspaceId/sessions/:sessionId/continue-in-new-chat
   // Answers 202 at once: the summary turn can take minutes, completion is pushed
@@ -456,6 +80,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
     '/api/workspaces/:workspaceId/sessions/:sessionId/continue-in-new-chat',
     {
       preHandler: jwtPreHandler,
+      config: { rateLimit: AGENT_ROUTE_RATE_LIMIT },
       schema: { params: ContinueInNewChatParamsSchema, body: ContinueInNewChatBodySchema }
     },
     async (request, reply) => {
@@ -466,21 +91,10 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
         ? body.imagePaths.filter((path): path is string => typeof path === 'string')
         : [];
       if (!text && imagePaths.length === 0) {
-        return reply.status(400).send({ error: 'Prompt is required' });
+        return reply.code(400).send({ error: 'Prompt is required' });
       }
-      const session = await db.getSession(sessionId);
-      if (!session || session.workspaceId !== workspaceId) {
-        return reply.status(404).send({ error: 'Session not found' });
-      }
-      if (getActiveRun(sessionId) || handoffsInFlight.has(sessionId)) {
-        return reply.status(409).send({ error: 'Agent is busy' });
-      }
-      if ((await db.listSessionMessagesPage(sessionId, 0, 1)).messages.length === 0) {
-        return reply.status(400).send({ error: 'Nothing to continue from yet' });
-      }
-      handoffsInFlight.add(sessionId);
-      void continueInNewChat({ sessionId, text, imagePaths });
-      return reply.status(202).send({ ok: true });
+      await startContinueInNewChat({ workspaceId, sessionId, text, imagePaths });
+      return reply.code(202).send({ ok: true });
     }
   );
 
@@ -492,11 +106,15 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
       schema: { params: ChatSocketParamsSchema }
     },
     async (socket: WebSocket, request) => {
-    if (await rejectUnauthorizedWebSocket(socket, request)) {
+    if (!(await acceptWebSocket(socket, request))) {
       return;
     }
 
     const { id } = request.params as Static<typeof ChatSocketParamsSchema>;
+    // Attached before any await so a socket closing mid-load is always unregistered.
+    socket.on('close', () => {
+      unregisterChatSocket(id, socket);
+    });
     const session = await db.getSession(id);
     if (!session) {
       socket.close(4004, 'Session not found');
@@ -517,6 +135,9 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
         const pageResult = await db.listSessionMessagesPage(id, 0, HISTORY_PAGE_SIZE);
         queue = await loadQueue(id);
         existingRun = getActiveRun(id);
+        if (socket.readyState !== socket.OPEN) {
+          return;
+        }
         if (!existingRun) {
           registerChatSocket(id, socket);
           send(socket, {
@@ -527,6 +148,9 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
           });
         }
       }
+    }
+    if (socket.readyState !== socket.OPEN) {
+      return;
     }
     if (existingRun) {
       // Snapshot the buffer, replay it, THEN register for the session broadcast:
@@ -610,8 +234,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
           if (!clientMessage.queueItemId) {
             return;
           }
-          await db.deleteSessionQueueItem(id, clientMessage.queueItemId);
-          await broadcastQueueUpdate(id);
+          await deleteQueueItem(id, clientMessage.queueItemId);
           return;
         }
 
@@ -619,8 +242,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
           if (!clientMessage.queueItemId || typeof clientMessage.text !== 'string') {
             return;
           }
-          await db.updateSessionQueueItemText(id, clientMessage.queueItemId, clientMessage.text.trim());
-          await broadcastQueueUpdate(id);
+          await editQueueItem(id, clientMessage.queueItemId, clientMessage.text);
           return;
         }
 
@@ -628,12 +250,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
           if (!clientMessage.queueItemId) {
             return;
           }
-          const moved = await db.moveSessionQueueItemToFront(id, clientMessage.queueItemId);
-          if (moved) {
-            cancelRun(id);
-          }
-          await broadcastQueueUpdate(id);
-          await tryProcessQueue(id);
+          await pushQueueItemToFront(id, clientMessage.queueItemId);
           return;
         }
 
@@ -647,7 +264,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
         }
 
         try {
-          await db.enqueueSessionQueueItem({
+          await enqueuePrompt({
             sessionId: id,
             text,
             model: clientMessage.model ?? session.modelSelection ?? 'auto',
@@ -657,21 +274,17 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
         } catch (err) {
           // Tell the client: it already shows the user turn and a spinner, so a
           // silent failure looked like an agent that never started.
-          console.warn('[chat] failed to enqueue prompt:', err);
+          logger.warn({ err }, 'chat: failed to enqueue prompt');
           send(socket, { type: 'error', message: 'Failed to send prompt, please retry' });
           return;
         }
         // Name only once the prompt is saved, so a failed send leaves no titled empty chat.
         void maybeNameUntitledSession(id, text, imagePaths);
         await broadcastQueueUpdate(id);
-        await tryProcessQueue(id);
+        await drainQueue(id);
       } catch (err) {
-        console.warn('[chat] failed to handle ws message from client:', err);
+        logger.warn({ err }, 'chat: failed to handle ws message from client');
       }
-    });
-
-    socket.on('close', () => {
-      unregisterChatSocket(id, socket);
     });
   });
 }

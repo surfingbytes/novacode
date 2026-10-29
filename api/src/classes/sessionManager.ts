@@ -9,16 +9,22 @@ import { PtyProcess } from './ptyProcess';
 import type { SessionStatus } from '../@types/index';
 
 // in-memory auth session (e.g. Cursor login PTY) — not persisted to DB
-export interface AuthSessionMeta {
+interface AuthSessionMeta {
   id: string;
   title: string;
   status: SessionStatus;
 }
 
+/** Idle auth PTYs (512 KB history each) are killed and dropped after this long. */
+export const AUTH_SESSION_IDLE_TTL_MS = 10 * 60 * 1000;
+/** Exited sessions stay readable briefly so a late viewer still sees the final output. */
+export const AUTH_SESSION_EXIT_RETENTION_MS = 60 * 1000;
+
 interface LiveAuthSession {
   meta: AuthSessionMeta;
   pty: PtyProcess;
   statusSubscribers: Set<(status: SessionStatus) => void>;
+  idleTimer?: ReturnType<typeof setTimeout>;
 }
 
 class SessionManager {
@@ -46,10 +52,44 @@ class SessionManager {
       for (const sub of live.statusSubscribers) {
         sub(live.meta.status);
       }
+      this.schedule(id, AUTH_SESSION_EXIT_RETENTION_MS);
     });
+    pty.subscribe(() => this.touch(id));
 
     this.sessions.set(id, { meta, pty, statusSubscribers: new Set() });
+    this.touch(id);
     return { ...meta };
+  }
+
+  /** Reset the idle TTL (PTY output, client input, a new viewer). */
+  touch(id: string): void {
+    const live = this.sessions.get(id);
+    if (live && !live.pty.exited) {
+      this.schedule(id, AUTH_SESSION_IDLE_TTL_MS);
+    }
+  }
+
+  // kill the PTY (if still running) and forget the session
+  remove(id: string): void {
+    const live = this.sessions.get(id);
+    if (!live) {
+      return;
+    }
+    clearTimeout(live.idleTimer);
+    this.sessions.delete(id);
+    if (!live.pty.exited) {
+      live.pty.kill();
+    }
+  }
+
+  private schedule(id: string, delayMs: number): void {
+    const live = this.sessions.get(id);
+    if (!live) {
+      return;
+    }
+    clearTimeout(live.idleTimer);
+    live.idleTimer = setTimeout(() => this.remove(id), delayMs);
+    live.idleTimer.unref?.();
   }
 
   get(id: string): LiveAuthSession | undefined {
@@ -66,10 +106,8 @@ class SessionManager {
 
   // stop all auth session PTYs on shutdown
   stopAll(): void {
-    for (const live of this.sessions.values()) {
-      if (!live.pty.exited) {
-        live.pty.kill();
-      }
+    for (const id of [...this.sessions.keys()]) {
+      this.remove(id);
     }
   }
 }

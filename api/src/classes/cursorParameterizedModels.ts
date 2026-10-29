@@ -14,6 +14,7 @@ import { client, methods, ndJsonStream, PROTOCOL_VERSION } from '@agentclientpro
 import type { RequestPermissionRequest, RequestPermissionResponse, SessionConfigOption } from '@agentclientprotocol/sdk';
 
 // classes
+import { childEnv, childProcessFailure } from './childEnv';
 import { config } from './config';
 import type { CursorModelOption } from './cursorModels';
 import { createSwrCache, readSwrDiskCache, writeSwrDiskCache } from './swrCache';
@@ -232,8 +233,9 @@ async function withAcpSession<T>(
   const proc: ChildProcess = spawn(config.cursorCommand, ['acp'], {
     cwd: config.configDir,
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, ...config.agentEnv() },
+    env: childEnv(),
   });
+  const spawnFailure = childProcessFailure(proc);
 
   const killProc = () => {
     try {
@@ -250,7 +252,7 @@ async function withAcpSession<T>(
       ({ params }) => autoApprovePermission(params)
     );
 
-    return await app.connectWith(stream, async (ctx) => {
+    return await Promise.race([spawnFailure, app.connectWith(stream, async (ctx) => {
       await ctx.request(methods.agent.initialize, {
         protocolVersion: PROTOCOL_VERSION,
         clientInfo: { name: 'nova-code', version: '1.0.0' },
@@ -259,7 +261,7 @@ async function withAcpSession<T>(
         },
       });
       return run(ctx);
-    });
+    })]);
   } finally {
     killProc();
   }

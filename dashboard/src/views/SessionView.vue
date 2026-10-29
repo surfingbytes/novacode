@@ -200,7 +200,7 @@ function handleSidebarToggle(): void {
 }
 
 function handleBackToWorkspaceSessions(): void {
-  router.push({ name: 'workspace-sessions', params: { id: workspaceId.value } });
+  void router.push({ name: 'workspace-sessions', params: { id: workspaceId.value } });
 }
 
 // ── Visual viewport tracking (mobile keyboard) ──────────────────────────────
@@ -219,8 +219,8 @@ onMounted(() => {
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', onViewportResize);
   }
-  ensureWorkspaceLoaded();
-  store.setActiveWorkspace(workspaceId.value);
+  void ensureWorkspaceLoaded();
+  void store.setActiveWorkspace(workspaceId.value);
   ensureAgentCapabilitiesLoaded();
   window.addEventListener('novacode:new-session', openNewSessionModal);
 });

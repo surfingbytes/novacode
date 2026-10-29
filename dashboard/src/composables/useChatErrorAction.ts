@@ -38,7 +38,7 @@ export function useChatErrorAction(options: UseChatErrorActionOptions) {
   // -------------------------------------------------- Methods --------------------------------------------------
   function handleChatErrorAction(): void {
     if (chatErrorCode.value === 'auth_required') {
-      options.router.push({ name: 'settings' });
+      void options.router.push({ name: 'settings' });
       return;
     }
     if (chatErrorCode.value === 'timeout' || chatErrorCode.value === 'rate_limited') {
@@ -53,5 +53,3 @@ export function useChatErrorAction(options: UseChatErrorActionOptions) {
     handleChatErrorAction
   };
 }
-
-export type UseChatErrorAction = ReturnType<typeof useChatErrorAction>;

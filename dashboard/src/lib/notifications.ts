@@ -129,7 +129,7 @@ async function showNotification(title: string, options: ExtendedNotificationOpti
       await registration.showNotification(title, {
         ...options,
         badge: options.badge ?? DEFAULT_BADGE
-      } as NotificationOptions);
+      });
       return;
     } catch {
       // Fall through to window notifications when SW is not ready.
@@ -139,7 +139,7 @@ async function showNotification(title: string, options: ExtendedNotificationOpti
   const notification = new Notification(title, {
     ...options,
     badge: options.badge ?? DEFAULT_BADGE
-  } as NotificationOptions);
+  });
   notification.onclick = () => {
     const targetUrl = typeof options.data === 'object' ? (options.data as { url?: string }).url : undefined;
     if (targetUrl) {

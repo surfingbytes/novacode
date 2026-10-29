@@ -7,10 +7,10 @@ import ConfirmModal from '@/components/ConfirmModal.vue';
 import ListPageSkeleton from '@/components/ui/ListPageSkeleton.vue';
 
 // classes
-import { workspaceRulesApi, globalRulesApi, roleTemplatesApi, isGloballyToasted } from '@/classes/api';
+import { workspaceRulesApi, globalRulesApi, roleTemplatesApi } from '@/classes/api';
+import { notifyApiError } from '@/lib/notifyApiError';
 
 // stores
-import { useToastStore } from '@/stores/toasts';
 
 // types
 import type { WorkspaceRuleFileSummary, RoleTemplate } from '@/@types/index';
@@ -23,7 +23,6 @@ const props = defineProps<{
   hideHeader?: boolean;
 }>();
 
-const toastStore = useToastStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 
@@ -336,9 +335,7 @@ async function deleteFile(): Promise<void> {
       message?: string;
     };
     deleteError.value = caughtError.response?.data?.error ?? caughtError.message ?? 'Failed to delete rule file';
-    if (!isGloballyToasted(e)) {
-      toastStore.error(deleteError.value);
-    }
+    notifyApiError(e, 'Failed to delete rule file');
   } finally {
     bDeleting.value = false;
   }

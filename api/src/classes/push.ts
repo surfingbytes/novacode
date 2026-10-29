@@ -6,6 +6,7 @@ import { join } from 'node:path';
 // classes
 import { db } from './database';
 import { config } from './config';
+import { logger } from './logger';
 
 export interface PushPayload {
   title: string;
@@ -76,7 +77,7 @@ export function ensureVapidKeys(): void {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   writeFileSync(filePath, JSON.stringify(keys, null, 2) + '\n', 'utf8');
   vapidKeys = { publicKey: keys.publicKey, privateKey: keys.privateKey };
-  console.log(`[push] Generated VAPID keys and saved to ${filePath}`);
+  logger.info({ path: filePath }, 'Generated VAPID keys');
 }
 
 function getVapidKeys(): { publicKey: string; privateKey: string } | null {

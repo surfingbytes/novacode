@@ -10,7 +10,7 @@ export interface TabStatusCounts {
   attention: number;
 }
 
-export const BASE_TAB_TITLE = 'Nova Code';
+const BASE_TAB_TITLE = 'Nova Code';
 
 type CountableSession = Pick<Session, 'id' | 'archived' | 'busy' | 'unread'>;
 

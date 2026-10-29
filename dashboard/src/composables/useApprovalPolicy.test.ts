@@ -6,12 +6,18 @@ import { ref } from 'vue';
 vi.mock('@/classes/api', () => ({
   sessionsApi: {
     update: vi.fn()
-  },
-  isGloballyToasted: () => false
+  }
+}));
+
+vi.mock('@/lib/notifyApiError', () => ({
+  notifyApiError: vi.fn()
 }));
 
 // classes
 import { sessionsApi } from '@/classes/api';
+
+// lib
+import { notifyApiError } from '@/lib/notifyApiError';
 
 // composables
 import { normalizeApprovalPolicy, useApprovalPolicy } from './useApprovalPolicy';
@@ -31,15 +37,14 @@ describe('useApprovalPolicy', () => {
   });
 
   it('rolls back the policy and session when the save fails', async () => {
-    vi.mocked(sessionsApi.update).mockRejectedValueOnce(new Error('boom'));
+    const err = new Error('boom');
+    vi.mocked(sessionsApi.update).mockRejectedValueOnce(err);
     const original = { id: 's1', approvalPolicy: 'ask' } as Session;
     const session = ref<Session | null>(original);
-    const toastStore = { error: vi.fn() };
     const policy = useApprovalPolicy({
       workspaceId: () => 'w1',
       sessionId: () => 's1',
-      session,
-      toastStore
+      session
     });
 
     await policy.onApprovalPolicyChange('allow_all');
@@ -47,6 +52,6 @@ describe('useApprovalPolicy', () => {
     expect(policy.approvalPolicy.value).toBe('ask');
     expect(session.value).toEqual(original);
     expect(policy.bSavingApprovalPolicy.value).toBe(false);
-    expect(toastStore.error).toHaveBeenCalledWith('Failed to update approval policy');
+    expect(notifyApiError).toHaveBeenCalledWith(err, 'Failed to update approval policy');
   });
 });

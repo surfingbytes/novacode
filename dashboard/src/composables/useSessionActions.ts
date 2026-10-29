@@ -8,7 +8,8 @@ import { ref, type ComputedRef, type Ref } from 'vue';
 import type { Router } from 'vue-router';
 
 // classes
-import { apiErrorMessage, isGloballyToasted, sessionsApi } from '@/classes/api';
+import { sessionsApi } from '@/classes/api';
+import { notifyApiError } from '@/lib/notifyApiError';
 import { sessionChatToMarkdown, sessionExportFilename } from '@/utils/sessionChatMarkdown';
 
 // types
@@ -28,7 +29,6 @@ export interface UseSessionActionsOptions {
   router: Router;
   workspacesStore: { upsertSession: (session: Session) => void };
   toastStore: {
-    error: (message: string) => void;
     info: (message: string) => void;
     success: (message: string) => void;
   };
@@ -81,9 +81,10 @@ export function useSessionActions(options: UseSessionActionsOptions) {
         payload
       );
       session.value = updated;
+      options.workspacesStore.upsertSession(updated);
       bShowEditModal.value = false;
     } catch (err) {
-      if (!isGloballyToasted(err)) toastStore.error('Failed to update session');
+      notifyApiError(err, 'Failed to update session');
     } finally {
       bSavingEdit.value = false;
     }
@@ -93,9 +94,12 @@ export function useSessionActions(options: UseSessionActionsOptions) {
     bDeletingSession.value = true;
     try {
       await sessionsApi.remove(options.workspaceId(), options.sessionId());
-      options.router.push({ name: 'workspace-sessions', params: { id: options.workspaceId() } });
+      await options.router.push({
+        name: 'workspace-sessions',
+        params: { id: options.workspaceId() }
+      });
     } catch (err) {
-      if (!isGloballyToasted(err)) toastStore.error('Failed to delete session');
+      notifyApiError(err, 'Failed to delete session');
       bDeletingSession.value = false;
       bShowDeleteModal.value = false;
     }
@@ -109,7 +113,7 @@ export function useSessionActions(options: UseSessionActionsOptions) {
       await options.deletePlan(plan);
       bShowDeletePlanModal.value = false;
     } catch (err) {
-      if (!isGloballyToasted(err)) toastStore.error('Failed to delete plan');
+      notifyApiError(err, 'Failed to delete plan');
     } finally {
       bDeletingPlan.value = false;
     }
@@ -124,8 +128,9 @@ export function useSessionActions(options: UseSessionActionsOptions) {
         { archived: !session.value.archived }
       );
       session.value = updated;
+      options.workspacesStore.upsertSession(updated);
     } catch (err) {
-      if (!isGloballyToasted(err)) toastStore.error('Failed to toggle archive');
+      notifyApiError(err, 'Failed to toggle archive');
     }
   }
 
@@ -140,7 +145,7 @@ export function useSessionActions(options: UseSessionActionsOptions) {
       session.value = updated;
       options.workspacesStore.upsertSession(updated);
     } catch (err: unknown) {
-      toastStore.error(apiErrorMessage(err, 'Failed to update favorite'));
+      notifyApiError(err, 'Failed to update favorite');
     }
   }
 
@@ -162,5 +167,3 @@ export function useSessionActions(options: UseSessionActionsOptions) {
     toggleFavorite
   };
 }
-
-export type UseSessionActions = ReturnType<typeof useSessionActions>;

@@ -19,7 +19,9 @@ import { useToastStore } from '@/stores/toasts';
 
 // utils
 import { renderMd } from '@/utils/chatDisplayItems';
-import { isAxiosError } from 'axios';
+
+// lib
+import { notifyApiError } from '@/lib/notifyApiError';
 
 // -------------------------------------------------- Props --------------------------------------------------
 
@@ -74,14 +76,6 @@ const renderedSpec = computed(() => renderMd(specContent.value ?? ''));
 
 // -------------------------------------------------- Methods --------------------------------------------------
 
-function errorMessage(err: unknown, fallback: string): string {
-  if (isAxiosError(err)) {
-    const message = (err.response?.data as { error?: string } | undefined)?.error;
-    if (message) return message;
-  }
-  return fallback;
-}
-
 async function loadStatus(): Promise<void> {
   try {
     await specsStore.fetchSpec(props.workspaceId, props.sessionId);
@@ -109,7 +103,7 @@ async function openSpec(): Promise<void> {
     specContent.value = await specsStore.fetchSpec(props.workspaceId, props.sessionId);
   } catch (err) {
     specContent.value = null;
-    toastStore.error(errorMessage(err, 'Failed to load the spec'));
+    notifyApiError(err, 'Failed to load the spec');
   } finally {
     bSpecLoading.value = false;
   }

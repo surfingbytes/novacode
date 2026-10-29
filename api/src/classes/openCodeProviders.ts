@@ -2,13 +2,16 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+// classes
+import { BadRequestError, UpstreamError } from './httpErrors';
+
 const OPENCODE_CONFIG_FILE = '.config/opencode/opencode.json';
 const OPENCODE_AUTH_FILE = '.local/share/opencode/auth.json';
 const OPENCODE_LEGACY_AUTH_FILE = '.opencode/auth.json';
 
-export type OpenCodeProviderAdapter = 'openai-compatible' | 'openai' | 'custom';
+type OpenCodeProviderAdapter = 'openai-compatible' | 'openai' | 'custom';
 
-export interface OpenCodeProviderModel {
+interface OpenCodeProviderModel {
   id: string;
   name: string;
 }
@@ -138,7 +141,7 @@ function npmForInput(input: SaveOpenCodeProviderInput): string {
 function validateProviderId(id: string): string {
   const trimmed = id.trim();
   if (!/^[a-z0-9][a-z0-9._-]{1,62}$/i.test(trimmed)) {
-    throw new Error('Provider id must be 2-63 characters and use letters, numbers, dots, underscores, or hyphens.');
+    throw new BadRequestError('Provider id must be 2-63 characters and use letters, numbers, dots, underscores, or hyphens.');
   }
   return trimmed;
 }
@@ -152,7 +155,7 @@ function validateUrl(rawUrl: string): string {
     }
     return trimmed.replace(/\/+$/, '');
   } catch {
-    throw new Error('Base URL must be a valid HTTP or HTTPS URL.');
+    throw new BadRequestError('Base URL must be a valid HTTP or HTTPS URL.');
   }
 }
 
@@ -191,23 +194,28 @@ function normalizeModels(models: OpenCodeProviderModel[]): OpenCodeProviderModel
     .filter((model) => model.id);
   for (const model of normalized) {
     if (!/^[a-z0-9][a-z0-9._:/@+-]*$/i.test(model.id)) {
-      throw new Error(`Invalid model id: ${model.id}`);
+      throw new BadRequestError(`Invalid model id: ${model.id}`);
     }
   }
   return normalized;
 }
 
-export async function discoverOpenAiCompatibleModels(
+async function discoverOpenAiCompatibleModels(
   baseURL: string,
   apiKey: string
 ): Promise<OpenCodeProviderModel[]> {
   const url = `${baseURL.replace(/\/+$/, '')}/models`;
-  const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${apiKey}` },
-    signal: AbortSignal.timeout(15_000)
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(15_000)
+    });
+  } catch (err) {
+    throw new UpstreamError('Could not reach the API to list models.', { expose: true, cause: err });
+  }
   if (!response.ok) {
-    throw new Error(`Could not list models from the API (${response.status}).`);
+    throw new UpstreamError(`Could not list models from the API (${response.status}).`, { expose: true });
   }
   const body: unknown = await response.json();
   const records =
@@ -276,7 +284,7 @@ export async function saveOpenCodeProvider(
   const baseURL = validateUrl(input.baseURL);
   const npm = npmForInput(input);
   if (!npm) {
-    throw new Error('Provider package is required for custom adapters.');
+    throw new BadRequestError('Provider package is required for custom adapters.');
   }
 
   let models = normalizeModels(input.models ?? []);
@@ -285,14 +293,14 @@ export async function saveOpenCodeProvider(
 
   if (models.length === 0 && input.adapter === 'openai-compatible') {
     if (!apiKey) {
-      throw new Error('API key required to load models, or add at least one model id.');
+      throw new BadRequestError('API key required to load models, or add at least one model id.');
     }
     models = await discoverOpenAiCompatibleModels(baseURL, apiKey);
     if (models.length === 0) {
-      throw new Error('The API returned no chat models. Add model ids manually.');
+      throw new BadRequestError('The API returned no chat models. Add model ids manually.');
     }
   } else if (models.length === 0 && input.adapter !== 'openai') {
-    throw new Error('At least one model id is required.');
+    throw new BadRequestError('At least one model id is required.');
   }
 
   const configRoot = readJsonObject(configPath(configDir));
@@ -337,19 +345,6 @@ export function deleteOpenCodeProvider(configDir: string, id: string): void {
   delete providers[providerId];
   writeJsonObject(configPath(configDir), configRoot);
 
-  const auth = readAuth(configDir);
-  delete auth[providerId];
-  writeAuth(configDir, auth);
-
-  const legacyAuth = authMap(readJsonObject(legacyAuthPath(configDir)));
-  if (legacyAuth[providerId]) {
-    delete legacyAuth[providerId];
-    writeJsonObject(legacyAuthPath(configDir), legacyAuth);
-  }
-}
-
-export function deleteOpenCodeProviderAuth(configDir: string, id: string): void {
-  const providerId = validateProviderId(id);
   const auth = readAuth(configDir);
   delete auth[providerId];
   writeAuth(configDir, auth);

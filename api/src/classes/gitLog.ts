@@ -1,13 +1,8 @@
-export interface GitLogCommit {
-  hash: string;
-  shortHash: string;
-  author: string;
-  date: string;
-  subject: string;
-}
+// types
+import type { GitCommit } from '@novacode/shared';
 
-export function parseGitLog(stdout: string): GitLogCommit[] {
-  const commits: GitLogCommit[] = [];
+export function parseGitLog(stdout: string): GitCommit[] {
+  const commits: GitCommit[] = [];
   for (const line of stdout.split('\n')) {
     if (!line.trim()) {
       continue;

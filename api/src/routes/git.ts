@@ -2,315 +2,58 @@
 import type { FastifyInstance } from 'fastify';
 import { Type } from '@sinclair/typebox';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { readdir, rm } from 'node:fs/promises';
-import path from 'node:path';
+import { rm } from 'node:fs/promises';
+import {
+  GitBranchesResponseSchema,
+  GitCheckoutResponseSchema,
+  GitCommitMessageResponseSchema,
+  GitCommitResponseSchema,
+  GitCreateBranchResponseSchema,
+  GitDiffResponseSchema,
+  GitDiscardResponseSchema,
+  GitFetchResponseSchema,
+  GitLogResponseSchema,
+  GitPullResponseSchema,
+  GitPushResponseSchema,
+  GitShowResponseSchema,
+  GitStatusResponseSchema
+} from '@novacode/shared';
 
 // classes
 import { jwtPreHandler } from '../classes/auth';
 import { db } from '../classes/database';
-import { config } from '../classes/config';
-import { sshEnvForGit } from '../classes/sshKey';
 import {
   buildCommitMessagePrompt,
   cleanCommitMessage,
   isPaywallText,
-  resolveAutomaticOneShotAgentType,
   resolveOneShotModel,
   runOneShotAgentText
 } from '../classes/oneShotAgentText';
-import { isAgentAuthenticated } from './agentAuth';
+import { resolveAuthenticatedOneShotAgentType } from '../classes/agentAuthStatus';
 import { parseGitLog } from '../classes/gitLog';
 import { markCiWatchPushed } from '../classes/ciWatcher';
-import { resolveWorkspaceAbsolutePath } from '../classes/workspacePaths';
+import { AGENT_ROUTE_RATE_LIMIT } from '../classes/rateLimits';
+import { ensureSafeGitArg, gitHttpError, runGit } from '../classes/runGit';
+import {
+  ensureBranchName,
+  fileDiff,
+  getBranchMeta,
+  getRepoStatus,
+  getWorkspaceRepos,
+  gitIdentityEnv,
+  listBranches,
+  maybeGitOutput,
+  resolvePushRemote,
+  resolveWorkspaceGitContext,
+  safeRepoFilePath,
+  toRepoRelativePath
+} from '../classes/gitWorkspace';
+import { BadRequestError, ConflictError, NotFoundError, UpstreamError } from '../classes/httpErrors';
 
-const execFileAsync = promisify(execFile);
 const COMMIT_MESSAGE_DIFF_MAX_CHARS = 60_000;
 const COMMIT_MESSAGE_FILE_DIFF_MAX_CHARS = 12_000;
-
-interface RepoStatusFile {
-  status: string;
-  file: string;
-  repo: string;
-}
-
-interface RepoStatus {
-  repo: string;
-  currentBranch: string;
-  upstreamBranch: string | null;
-  aheadCount: number;
-  behindCount: number;
-  detached: boolean;
-  dirty: boolean;
-  files: RepoStatusFile[];
-}
-
-interface BranchInfo {
-  name: string;
-  current: boolean;
-  upstream: string | null;
-}
-
-interface WorkspaceGitContext {
-  workspace: {
-    path: string;
-    gitUserName?: string | null;
-    gitUserEmail?: string | null;
-    defaultAgentType?: string | null;
-  };
-  baseCwd: string;
-  repo: string;
-  cwd: string;
-  repoPaths: string[];
-}
-
-function gitEnv(workspace: {
-  gitUserName?: string | null;
-  gitUserEmail?: string | null;
-}): Record<string, string> {
-  const env: Record<string, string> = { ...(process.env as Record<string, string>) };
-  env['HOME'] = config.configDir;
-  Object.assign(env, sshEnvForGit(config.configDir));
-  if (workspace.gitUserName) {
-    env['GIT_AUTHOR_NAME'] = workspace.gitUserName;
-    env['GIT_COMMITTER_NAME'] = workspace.gitUserName;
-  }
-  if (workspace.gitUserEmail) {
-    env['GIT_AUTHOR_EMAIL'] = workspace.gitUserEmail;
-    env['GIT_COMMITTER_EMAIL'] = workspace.gitUserEmail;
-  }
-  return env;
-}
-
-async function isGitRepo(cwd: string): Promise<boolean> {
-  try {
-    const { stdout } = await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], { cwd });
-    return stdout.trim() === 'true';
-  } catch {
-    return false;
-  }
-}
-
-async function discoverGitRepos(baseCwd: string): Promise<string[]> {
-  const repos = new Set<string>();
-  const skipDirs = new Set(['.git', 'node_modules', '.next', 'dist', 'build', '.cache']);
-  /** Only the workspace root and immediate child directories are scanned for `.git` (no deeper nesting). */
-  const maxDepth = 1;
-
-  if (await isGitRepo(baseCwd)) repos.add('');
-
-  const walk = async (dir: string, depth: number): Promise<void> => {
-    if (depth > maxDepth) return;
-    let entries: Array<{ name: string; isDirectory: () => boolean }>;
-    try {
-      entries = (await readdir(dir, { withFileTypes: true, encoding: 'utf8' })) as Array<{
-        name: string;
-        isDirectory: () => boolean;
-      }>;
-    } catch {
-      return;
-    }
-
-    const hasGit = entries.some((entry) => entry.name === '.git');
-    if (hasGit) {
-      const rel = path.relative(baseCwd, dir).replace(/\\/g, '/');
-      repos.add(rel === '.' ? '' : rel);
-    }
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      if (skipDirs.has(entry.name)) continue;
-      const child = path.join(dir, entry.name);
-      await walk(child, depth + 1);
-    }
-  };
-
-  await walk(baseCwd, 0);
-
-  return [...repos].sort((a, b) => a.localeCompare(b));
-}
-
-function repoCwd(baseCwd: string, repo: string): string {
-  return repo ? path.join(baseCwd, repo) : baseCwd;
-}
-
-function gitErrorMessage(err: unknown): string {
-  const gitErr = err as NodeJS.ErrnoException & { stderr?: string; stdout?: string };
-  return gitErr.stderr?.trim() || gitErr.stdout?.trim() || (err as Error).message;
-}
-
-async function gitOutput(cwd: string, args: string[], env?: Record<string, string>): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, { cwd, env });
-  return stdout.trim();
-}
-
-export async function maybeGitOutput(
-  cwd: string,
-  args: string[],
-  fallback: string,
-  env?: Record<string, string>
-): Promise<string> {
-  try {
-    return await gitOutput(cwd, args, env);
-  } catch {
-    return fallback;
-  }
-}
-
-function ensureSafeGitArg(value: string, label: string): void {
-  if (!value.trim()) throw new Error(`${label} is required`);
-  if (value.includes('\0') || value.startsWith('-')) throw new Error(`Invalid ${label}`);
-}
-
-async function ensureBranchName(cwd: string, branch: string): Promise<void> {
-  ensureSafeGitArg(branch, 'branch name');
-  await execFileAsync('git', ['check-ref-format', '--branch', branch], { cwd });
-}
-
-/** Prefer origin; otherwise the first configured remote. */
-export async function resolvePushRemote(cwd: string): Promise<string> {
-  const remotesRaw = await maybeGitOutput(cwd, ['remote'], '');
-  const remotes = remotesRaw
-    .split('\n')
-    .map((r) => r.trim())
-    .filter(Boolean);
-  if (remotes.length === 0) throw new Error('No git remotes configured');
-  if (remotes.includes('origin')) return 'origin';
-  return remotes[0];
-}
-
-export async function resolveWorkspaceGitContext(
-  workspaceId: string,
-  repo = ''
-): Promise<WorkspaceGitContext | null> {
-  const workspace = await db.getWorkspace(workspaceId);
-  if (!workspace) return null;
-
-  const baseCwd = resolveWorkspaceAbsolutePath(workspace.path);
-  const repoPaths = await discoverGitRepos(baseCwd);
-
-  if (repoPaths.length === 0) throw new Error('No Git repositories found');
-  if (!repoPaths.includes(repo)) throw new Error('Repository not found in workspace');
-
-  return {
-    workspace,
-    baseCwd,
-    repo,
-    cwd: repoCwd(baseCwd, repo),
-    repoPaths
-  };
-}
-
-export async function getBranchMeta(cwd: string): Promise<{
-  currentBranch: string;
-  upstreamBranch: string | null;
-  aheadCount: number;
-  behindCount: number;
-  detached: boolean;
-}> {
-  const branch = await maybeGitOutput(cwd, ['branch', '--show-current'], '');
-  const detached = !branch;
-  const currentBranch = branch || (await maybeGitOutput(cwd, ['rev-parse', '--short', 'HEAD'], 'HEAD'));
-  const upstream = await maybeGitOutput(
-    cwd,
-    ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
-    ''
-  );
-
-  let aheadCount = 0;
-  let behindCount = 0;
-  if (upstream) {
-    const counts = await maybeGitOutput(cwd, ['rev-list', '--left-right', '--count', 'HEAD...@{upstream}'], '');
-    const [ahead, behind] = counts.split(/\s+/);
-    aheadCount = parseInt(ahead, 10) || 0;
-    behindCount = parseInt(behind, 10) || 0;
-  }
-
-  return {
-    currentBranch,
-    upstreamBranch: upstream || null,
-    aheadCount,
-    behindCount,
-    detached
-  };
-}
-
-async function getRepoStatus(baseCwd: string, repo: string): Promise<RepoStatus> {
-  const cwd = repoCwd(baseCwd, repo);
-  const { stdout } = await execFileAsync('git', ['status', '--porcelain', '-u'], { cwd });
-  const files = stdout
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => {
-      const repoFile = line.slice(3).trim();
-      const workspaceFile = repo ? `${repo}/${repoFile}` : repoFile;
-      return {
-        status: line.slice(0, 2).trim(),
-        file: workspaceFile,
-        repo
-      };
-    });
-
-  const branchMeta = await getBranchMeta(cwd);
-
-  return { repo, ...branchMeta, dirty: files.length > 0, files };
-}
-
-function toRepoRelativePath(repo: string, workspaceFile: string): string {
-  if (!repo) return workspaceFile;
-  const prefix = `${repo}/`;
-  if (workspaceFile.startsWith(prefix)) return workspaceFile.slice(prefix.length);
-  return workspaceFile;
-}
-
-function safeRepoFilePath(cwd: string, repoFile: string): string {
-  const absolute = path.resolve(cwd, repoFile);
-  const root = path.resolve(cwd);
-  if (absolute !== root && !absolute.startsWith(root + path.sep)) {
-    throw new Error('File path escapes repository');
-  }
-  return absolute;
-}
-
-async function listBranches(cwd: string): Promise<{
-  branches: BranchInfo[];
-  remoteBranches: string[];
-  currentBranch: string;
-  upstreamBranch: string | null;
-  detached: boolean;
-}> {
-  const meta = await getBranchMeta(cwd);
-  const localRaw = await maybeGitOutput(
-    cwd,
-    ['for-each-ref', '--format=%(refname:short)%00%(upstream:short)%00%(HEAD)', 'refs/heads'],
-    ''
-  );
-  const branches = localRaw
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => {
-      const [name, upstream, head] = line.split('\0');
-      return {
-        name,
-        upstream: upstream || null,
-        current: head === '*' || name === meta.currentBranch
-      };
-    });
-  const remoteRaw = await maybeGitOutput(cwd, ['for-each-ref', '--format=%(refname:short)', 'refs/remotes'], '');
-  const remoteBranches = remoteRaw
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line && !line.endsWith('/HEAD'));
-
-  return {
-    branches,
-    remoteBranches,
-    currentBranch: meta.currentBranch,
-    upstreamBranch: meta.upstreamBranch,
-    detached: meta.detached
-  };
-}
+/** fetch / pull / push talk to the remote and may be slow. */
+const GIT_NETWORK_TIMEOUT_MS = 120_000;
 
 export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
   const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
@@ -323,46 +66,17 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
       schema: {
         params: Type.Object({ workspaceId: Type.String() }),
         response: {
-          200: Type.Object({
-            files: Type.Array(
-              Type.Object({
-                status: Type.String(),
-                file: Type.String(),
-                repo: Type.String()
-              })
-            ),
-            aheadCount: Type.Number(),
-            repos: Type.Array(
-              Type.Object({
-                repo: Type.String(),
-                currentBranch: Type.String(),
-                upstreamBranch: Type.Union([Type.String(), Type.Null()]),
-                aheadCount: Type.Number(),
-                behindCount: Type.Number(),
-                detached: Type.Boolean(),
-                dirty: Type.Boolean(),
-                files: Type.Array(
-                  Type.Object({
-                    status: Type.String(),
-                    file: Type.String(),
-                    repo: Type.String()
-                  })
-                )
-              })
-            )
-          }),
+          200: GitStatusResponseSchema,
           404: Type.Object({ error: Type.String() }),
           400: Type.Object({ error: Type.String() })
         }
       }
     },
     async (request, reply) => {
-      const workspace = await db.getWorkspace(request.params.workspaceId);
-      if (!workspace) return reply.code(404).send({ error: 'Workspace not found' });
-
       try {
-        const baseCwd = resolveWorkspaceAbsolutePath(workspace.path);
-        const repoPaths = await discoverGitRepos(baseCwd);
+        const workspaceRepos = await getWorkspaceRepos(request.params.workspaceId);
+        if (!workspaceRepos) return reply.code(404).send({ error: 'Workspace not found' });
+        const { baseCwd, repoPaths } = workspaceRepos;
         const repos = await Promise.all(repoPaths.map((repo) => getRepoStatus(baseCwd, repo)));
         const files = repos.flatMap((repo) => repo.files);
         const aheadCount = repos.reduce((sum, repo) => sum + repo.aheadCount, 0);
@@ -373,7 +87,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         }
         return { files, aheadCount, repos };
       } catch (err) {
-        return reply.code(400).send({ error: (err as Error).message });
+        throw gitHttpError(err);
       }
     }
   );
@@ -391,7 +105,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
           repo: Type.Optional(Type.String())
         }),
         response: {
-          200: Type.Object({ diff: Type.String() }),
+          200: GitDiffResponseSchema,
           404: Type.Object({ error: Type.String() }),
           400: Type.Object({ error: Type.String() })
         }
@@ -406,45 +120,9 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
 
         const repoFile = toRepoRelativePath(context.repo, file);
         safeRepoFilePath(context.cwd, repoFile);
-        const opts = {
-          cwd: context.cwd,
-          maxBuffer: 5 * 1024 * 1024
-        };
-
-        // Untracked file: diff against /dev/null
-        if (status === '??') {
-          let diff = '';
-          try {
-            await execFileAsync('git', ['diff', '--no-index', '/dev/null', repoFile], opts);
-          } catch (err) {
-            // git diff --no-index exits with code 1 when differences exist; stdout still has the diff
-            diff = (err as NodeJS.ErrnoException & { stdout?: string }).stdout ?? '';
-          }
-          return { diff };
-        }
-
-        // Try combined staged + unstaged diff vs HEAD
-        const { stdout: headDiff } = await execFileAsync(
-          'git',
-          ['diff', 'HEAD', '--', repoFile],
-          opts
-        ).catch((error) => {
-          console.log('error', error);
-          return { stdout: '' };
-        });
-
-        if (headDiff.trim()) return { diff: headDiff };
-
-        // Fallback: staged-only (new file added with git add)
-        const { stdout: cachedDiff } = await execFileAsync(
-          'git',
-          ['diff', '--cached', '--', repoFile],
-          opts
-        ).catch(() => ({ stdout: '' }));
-
-        return { diff: cachedDiff };
+        return { diff: await fileDiff(context.cwd, repoFile, status === '??') };
       } catch (err) {
-        return reply.code(400).send({ error: gitErrorMessage(err) });
+        throw gitHttpError(err);
       }
     }
   );
@@ -454,6 +132,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
     '/api/git/workspace/:workspaceId/commit-message',
     {
       preHandler: jwtPreHandler,
+      config: { rateLimit: AGENT_ROUTE_RATE_LIMIT },
       schema: {
         params: Type.Object({ workspaceId: Type.String() }),
         body: Type.Object({
@@ -461,7 +140,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
           repo: Type.Optional(Type.String())
         }),
         response: {
-          200: Type.Object({ message: Type.String() }),
+          200: GitCommitMessageResponseSchema,
           404: Type.Object({ error: Type.String() }),
           400: Type.Object({ error: Type.String() })
         }
@@ -483,32 +162,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
           const repoFile = toRepoRelativePath(context.repo, file);
           safeRepoFilePath(context.cwd, repoFile);
           const fileStatus = statusByFile.get(file) ?? statusByFile.get(repoFile) ?? '';
-          const opts = { cwd: context.cwd, maxBuffer: 5 * 1024 * 1024 };
-          let diff = '';
-
-          if (fileStatus === '??') {
-            try {
-              await execFileAsync('git', ['diff', '--no-index', '/dev/null', repoFile], opts);
-            } catch (err) {
-              diff = (err as NodeJS.ErrnoException & { stdout?: string }).stdout ?? '';
-            }
-          } else {
-            const { stdout: headDiff } = await execFileAsync(
-              'git',
-              ['diff', 'HEAD', '--', repoFile],
-              opts
-            ).catch(() => ({ stdout: '' }));
-            if (headDiff.trim()) {
-              diff = headDiff;
-            } else {
-              const { stdout: cachedDiff } = await execFileAsync(
-                'git',
-                ['diff', '--cached', '--', repoFile],
-                opts
-              ).catch(() => ({ stdout: '' }));
-              diff = cachedDiff;
-            }
-          }
+          let diff = await fileDiff(context.cwd, repoFile, fileStatus === '??');
 
           if (!diff.trim()) continue;
           if (diff.length > COMMIT_MESSAGE_FILE_DIFF_MAX_CHARS) {
@@ -528,10 +182,10 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         if (!diff) return reply.code(400).send({ error: 'No diff found for selected files' });
 
         const user = await db.getFirstUser();
-        const agentType = resolveAutomaticOneShotAgentType(
+        const agentType = await resolveAuthenticatedOneShotAgentType(
           user?.utilityAgentType,
           [context.workspace.defaultAgentType],
-          (candidate) => isAgentAuthenticated(candidate, user?.claudeToken)
+          user?.claudeToken
         );
         const raw = await runOneShotAgentText({
           agentType,
@@ -541,18 +195,20 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
           claudeToken: user?.claudeToken ?? null,
           runIdPrefix: 'git-commit-message',
           denyTools: true
+        }).catch((err: unknown) => {
+          throw new UpstreamError(`AI (${agentType}): ${(err as Error).message}`, { expose: true, cause: err });
         });
         const message = cleanCommitMessage(raw);
         if (!message) {
           const error = isPaywallText(raw)
             ? `${agentType}: ${raw.trim().split('\n')[0]}`
             : `AI (${agentType}) did not return a commit message`;
-          return reply.code(400).send({ error });
+          throw new UpstreamError(error, { expose: true });
         }
 
         return { message };
       } catch (err) {
-        return reply.code(400).send({ error: gitErrorMessage(err) });
+        throw gitHttpError(err);
       }
     }
   );
@@ -568,19 +224,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
           repo: Type.Optional(Type.String())
         }),
         response: {
-          200: Type.Object({
-            branches: Type.Array(
-              Type.Object({
-                name: Type.String(),
-                current: Type.Boolean(),
-                upstream: Type.Union([Type.String(), Type.Null()])
-              })
-            ),
-            remoteBranches: Type.Array(Type.String()),
-            currentBranch: Type.String(),
-            upstreamBranch: Type.Union([Type.String(), Type.Null()]),
-            detached: Type.Boolean()
-          }),
+          200: GitBranchesResponseSchema,
           404: Type.Object({ error: Type.String() }),
           400: Type.Object({ error: Type.String() })
         }
@@ -595,7 +239,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         if (!context) return reply.code(404).send({ error: 'Workspace not found' });
         return await listBranches(context.cwd);
       } catch (err) {
-        return reply.code(400).send({ error: gitErrorMessage(err) });
+        throw gitHttpError(err);
       }
     }
   );
@@ -611,11 +255,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
           repo: Type.Optional(Type.String())
         }),
         response: {
-          200: Type.Object({
-            output: Type.String(),
-            upToDate: Type.Boolean(),
-            behindCount: Type.Number()
-          }),
+          200: GitFetchResponseSchema,
           404: Type.Object({ error: Type.String() }),
           400: Type.Object({ error: Type.String() })
         }
@@ -629,18 +269,13 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         );
         if (!context) return reply.code(404).send({ error: 'Workspace not found' });
 
-        const opts = {
-          cwd: context.cwd,
-          env: gitEnv(context.workspace),
-          timeout: 60_000
-        };
-        const { stdout, stderr } = await execFileAsync('git', ['fetch'], opts);
+        const { stdout, stderr } = await runGit(['fetch'], { cwd: context.cwd, timeoutMs: GIT_NETWORK_TIMEOUT_MS });
         const { behindCount, upstreamBranch } = await getBranchMeta(context.cwd);
         const output = (stdout + '\n' + stderr).trim();
         const upToDate = !upstreamBranch || behindCount === 0;
         return { output, upToDate, behindCount };
       } catch (err) {
-        return reply.code(400).send({ error: gitErrorMessage(err) });
+        throw gitHttpError(err);
       }
     }
   );
@@ -656,11 +291,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
           repo: Type.Optional(Type.String())
         }),
         response: {
-          200: Type.Object({
-            output: Type.String(),
-            upToDate: Type.Boolean(),
-            commitCount: Type.Number()
-          }),
+          200: GitPullResponseSchema,
           404: Type.Object({ error: Type.String() }),
           400: Type.Object({ error: Type.String() })
         }
@@ -674,19 +305,15 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         );
         if (!context) return reply.code(404).send({ error: 'Workspace not found' });
 
-        const opts = {
-          cwd: context.cwd,
-          env: gitEnv(context.workspace),
-          timeout: 60_000
-        };
-        await execFileAsync('git', ['fetch'], opts);
+        const opts = { cwd: context.cwd, timeoutMs: GIT_NETWORK_TIMEOUT_MS };
+        await runGit(['fetch'], opts);
         const { behindCount } = await getBranchMeta(context.cwd);
-        const { stdout, stderr } = await execFileAsync('git', ['pull', '--ff-only'], opts);
+        const { stdout, stderr } = await runGit(['pull', '--ff-only'], opts);
         const output = (stdout + '\n' + stderr).trim();
         const upToDate = behindCount === 0;
         return { output, upToDate, commitCount: upToDate ? 0 : behindCount };
       } catch (err) {
-        return reply.code(400).send({ error: gitErrorMessage(err) });
+        throw gitHttpError(err);
       }
     }
   );
@@ -704,7 +331,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
           repo: Type.Optional(Type.String())
         }),
         response: {
-          200: Type.Object({ branch: Type.String() }),
+          200: GitCheckoutResponseSchema,
           404: Type.Object({ error: Type.String() }),
           400: Type.Object({ error: Type.String() })
         }
@@ -725,18 +352,15 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         if (remoteBranch) {
           ensureSafeGitArg(remoteBranch, 'remote branch');
           const { remoteBranches } = await listBranches(context.cwd);
-          if (!remoteBranches.includes(remoteBranch)) throw new Error('Remote branch not found');
+          if (!remoteBranches.includes(remoteBranch)) throw new NotFoundError('Remote branch not found');
           args.splice(1, 1, '--track', remoteBranch);
         }
 
-        await execFileAsync('git', args, {
-          cwd: context.cwd,
-          env: gitEnv(context.workspace)
-        });
+        await runGit(args, { cwd: context.cwd });
         const branch = await maybeGitOutput(context.cwd, ['branch', '--show-current'], request.body.branch);
         return { branch };
       } catch (err) {
-        return reply.code(400).send({ error: gitErrorMessage(err) });
+        throw gitHttpError(err);
       }
     }
   );
@@ -755,7 +379,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
           repo: Type.Optional(Type.String())
         }),
         response: {
-          200: Type.Object({ branch: Type.String(), checkedOut: Type.Boolean() }),
+          200: GitCreateBranchResponseSchema,
           404: Type.Object({ error: Type.String() }),
           400: Type.Object({ error: Type.String() })
         }
@@ -775,14 +399,11 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
 
         const args = request.body.checkout ? ['switch', '-c', request.body.branch] : ['branch', request.body.branch];
         if (startPoint) args.push(startPoint);
-        await execFileAsync('git', args, {
-          cwd: context.cwd,
-          env: gitEnv(context.workspace)
-        });
+        await runGit(args, { cwd: context.cwd });
 
         return { branch: request.body.branch, checkedOut: request.body.checkout === true };
       } catch (err) {
-        return reply.code(400).send({ error: gitErrorMessage(err) });
+        throw gitHttpError(err);
       }
     }
   );
@@ -799,7 +420,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
           repo: Type.Optional(Type.String())
         }),
         response: {
-          200: Type.Object({ discarded: Type.Array(Type.String()) }),
+          200: GitDiscardResponseSchema,
           404: Type.Object({ error: Type.String() }),
           400: Type.Object({ error: Type.String() })
         }
@@ -821,10 +442,10 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         const untrackedFiles: string[] = [];
 
         for (const workspaceFile of request.body.files) {
-          const repoFile = toRepoRelativePath(context.repo, workspaceFile);
+          const repoFile = ensureSafeGitArg(toRepoRelativePath(context.repo, workspaceFile), 'file path');
           safeRepoFilePath(context.cwd, repoFile);
           const fileStatus = statusByRepoPath.get(repoFile);
-          if (!fileStatus) throw new Error(`No pending change found for ${workspaceFile}`);
+          if (!fileStatus) throw new BadRequestError(`No pending change found for ${workspaceFile}`);
           if (fileStatus === '??') {
             untrackedFiles.push(repoFile);
           } else {
@@ -833,7 +454,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         }
 
         if (trackedFiles.length > 0) {
-          await execFileAsync('git', ['restore', '--source=HEAD', '--staged', '--worktree', '--', ...trackedFiles], {
+          await runGit(['restore', '--source=HEAD', '--staged', '--worktree', '--', ...trackedFiles], {
             cwd: context.cwd
           });
         }
@@ -843,7 +464,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
 
         return { discarded: request.body.files };
       } catch (err) {
-        return reply.code(400).send({ error: gitErrorMessage(err) });
+        throw gitHttpError(err);
       }
     }
   );
@@ -861,7 +482,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
           repo: Type.Optional(Type.String())
         }),
         response: {
-          200: Type.Object({ hash: Type.String(), message: Type.String() }),
+          200: GitCommitResponseSchema,
           404: Type.Object({ error: Type.String() }),
           400: Type.Object({ error: Type.String() })
         }
@@ -875,25 +496,24 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         );
         if (!context) return reply.code(404).send({ error: 'Workspace not found' });
 
-        const env = gitEnv(context.workspace);
-        const opts = { cwd: context.cwd, env };
+        const opts = { cwd: context.cwd, env: gitIdentityEnv(context.workspace) };
         const filesToStage = request.body.files;
         if (filesToStage && filesToStage.length > 0) {
           const repoRelativeFiles = filesToStage.map((file) => {
-            const repoFile = toRepoRelativePath(context.repo, file);
+            const repoFile = ensureSafeGitArg(toRepoRelativePath(context.repo, file), 'file path');
             safeRepoFilePath(context.cwd, repoFile);
             return repoFile;
           });
-          await execFileAsync('git', ['add', '--', ...repoRelativeFiles], opts);
+          await runGit(['add', '--', ...repoRelativeFiles], opts);
         } else {
-          await execFileAsync('git', ['add', '-A'], opts);
+          await runGit(['add', '-A'], opts);
         }
-        await execFileAsync('git', ['commit', '-m', request.body.message], opts);
-        const { stdout } = await execFileAsync('git', ['log', '-1', '--format=%H %s'], opts);
+        await runGit(['commit', '-m', request.body.message], opts);
+        const { stdout } = await runGit(['log', '-1', '--format=%H %s'], opts);
         const [hash, ...rest] = stdout.trim().split(' ');
         return { hash, message: rest.join(' ') };
       } catch (err) {
-        return reply.code(400).send({ error: gitErrorMessage(err) });
+        throw gitHttpError(err);
       }
     }
   );
@@ -909,7 +529,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
           repo: Type.Optional(Type.String())
         }),
         response: {
-          200: Type.Object({ output: Type.String() }),
+          200: GitPushResponseSchema,
           404: Type.Object({ error: Type.String() }),
           400: Type.Object({ error: Type.String() })
         }
@@ -924,7 +544,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         if (!context) return reply.code(404).send({ error: 'Workspace not found' });
 
         const { currentBranch, upstreamBranch, detached } = await getBranchMeta(context.cwd);
-        if (detached) throw new Error('Cannot push in detached HEAD state');
+        if (detached) throw new ConflictError('Cannot push in detached HEAD state');
 
         const pushArgs = ['push'];
         if (!upstreamBranch) {
@@ -934,26 +554,15 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
           pushArgs.push('-u', remote, currentBranch);
         }
 
-        const { stdout, stderr } = await execFileAsync('git', pushArgs, {
-          cwd: context.cwd,
-          env: gitEnv(context.workspace),
-          timeout: 30_000
-        });
+        const { stdout, stderr } = await runGit(pushArgs, { cwd: context.cwd, timeoutMs: GIT_NETWORK_TIMEOUT_MS });
         markCiWatchPushed(request.params.workspaceId, context.repo);
         return { output: (stdout + '\n' + stderr).trim() };
       } catch (err) {
-        return reply.code(400).send({ error: gitErrorMessage(err) });
+        throw gitHttpError(err);
       }
     }
   );
 
-  const GitLogCommitSchema = Type.Object({
-    hash: Type.String(),
-    shortHash: Type.String(),
-    author: Type.String(),
-    date: Type.String(),
-    subject: Type.String()
-  });
 
   // GET /api/git/workspace/:workspaceId/log — recent commits
   fastifyInstance.get(
@@ -967,7 +576,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
           limit: Type.Optional(Type.String())
         }),
         response: {
-          200: Type.Object({ commits: Type.Array(GitLogCommitSchema) }),
+          200: GitLogResponseSchema,
           404: Type.Object({ error: Type.String() }),
           400: Type.Object({ error: Type.String() })
         }
@@ -982,14 +591,13 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         if (!context) return reply.code(404).send({ error: 'Workspace not found' });
         const parsedLimit = parseInt(request.query.limit ?? '80', 10);
         const limit = Number.isFinite(parsedLimit) ? Math.min(200, Math.max(1, parsedLimit)) : 80;
-        const { stdout } = await execFileAsync(
-          'git',
+        const { stdout } = await runGit(
           ['log', `-n${limit}`, '--date=iso-strict', '--format=%H%x1f%h%x1f%an%x1f%ad%x1f%s'],
-          { cwd: context.cwd, env: gitEnv(context.workspace), timeout: 15_000 }
+          { cwd: context.cwd, timeoutMs: 15_000 }
         );
         return { commits: parseGitLog(stdout) };
       } catch (err) {
-        return reply.code(400).send({ error: gitErrorMessage(err) });
+        throw gitHttpError(err);
       }
     }
   );
@@ -1006,7 +614,7 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
           repo: Type.Optional(Type.String())
         }),
         response: {
-          200: Type.Object({ hash: Type.String(), patch: Type.String() }),
+          200: GitShowResponseSchema,
           404: Type.Object({ error: Type.String() }),
           400: Type.Object({ error: Type.String() })
         }
@@ -1023,19 +631,13 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         if (!/^[0-9a-fA-F]{7,40}$/.test(hash)) {
           return reply.code(400).send({ error: 'Invalid commit hash' });
         }
-        const { stdout } = await execFileAsync(
-          'git',
-          ['show', '--stat', '-p', '--format=commit %H%nAuthor: %an <%ae>%nDate: %ad%n%n%s%n%n%b', hash],
-          {
-            cwd: context.cwd,
-            env: gitEnv(context.workspace),
-            timeout: 15_000,
-            maxBuffer: 2 * 1024 * 1024
-          }
+        const { stdout } = await runGit(
+          ['show', '--stat', '-p', '--format=commit %H%nAuthor: %an <%ae>%nDate: %ad%n%n%s%n%n%b', hash, '--'],
+          { cwd: context.cwd, timeoutMs: 15_000, maxBuffer: 2 * 1024 * 1024 }
         );
         return { hash, patch: stdout };
       } catch (err) {
-        return reply.code(400).send({ error: gitErrorMessage(err) });
+        throw gitHttpError(err);
       }
     }
   );

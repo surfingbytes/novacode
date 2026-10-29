@@ -3,7 +3,8 @@
 import { ref, computed, onMounted } from 'vue';
 
 // classes
-import { apiErrorMessage, isGloballyToasted, settingsApi } from '@/classes/api';
+import { settingsApi } from '@/classes/api';
+import { notifyApiError } from '@/lib/notifyApiError';
 
 // components
 import SettingsForgeSection from '@/components/settings/SettingsForgeSection.vue';
@@ -122,16 +123,14 @@ const saveGitSettings = async (): Promise<void> => {
       bGitSaved.value = false;
     }, 2000);
   } catch (err) {
-    if (!isGloballyToasted(err)) {
-      toastStore.error(apiErrorMessage(err, 'Failed to save git identity'));
-    }
+    notifyApiError(err, 'Failed to save git identity');
   } finally {
     bSavingGit.value = false;
   }
 };
 
 onMounted((): void => {
-  loadSettings();
+  void loadSettings();
 });
 
 defineExpose({ hasUnsavedChanges });

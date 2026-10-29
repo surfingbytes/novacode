@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
 import { sessionsApi, workspaceApi } from '@/classes/api';
+import { createManagedSocket } from '@/lib/wsClient';
 import { useWorkspacesStore } from '@/stores/workspaces';
 import type { Session, Workspace } from '@/@types/index';
 
@@ -224,5 +225,31 @@ describe('workspaces store bootstrap', () => {
 
     expect(workspaceApi.listAll).not.toHaveBeenCalled();
     expect(sessionsApi.listAll).not.toHaveBeenCalled();
+  });
+
+  it('reset() clears data, closes the sessions socket and reconnects on the next init', async () => {
+    vi.mocked(workspaceApi.listAll).mockResolvedValue({ data: [workspaceFixture()] } as never);
+    vi.mocked(sessionsApi.listAll).mockResolvedValue({ data: [sessionFixture()] } as never);
+    vi.mocked(createManagedSocket).mockClear();
+    const store = useWorkspacesStore();
+
+    await store.ensureWorkspacesInitialized();
+    await store.setActiveWorkspace('ws-1');
+    expect(createManagedSocket).toHaveBeenCalledTimes(1);
+    const firstSocket = vi.mocked(createManagedSocket).mock.results[0]?.value as { close: ReturnType<typeof vi.fn> };
+
+    store.reset();
+
+    expect(firstSocket.close).toHaveBeenCalledTimes(1);
+    expect(store.workspaces).toEqual([]);
+    expect(store.allSessions).toEqual([]);
+    expect(store.activeWorkspaceId).toBeNull();
+
+    await store.ensureWorkspacesInitialized();
+    await store.ensureSessionsInitialized();
+
+    expect(store.workspaces).toHaveLength(1);
+    expect(store.allSessions).toHaveLength(1);
+    expect(createManagedSocket).toHaveBeenCalledTimes(2);
   });
 });

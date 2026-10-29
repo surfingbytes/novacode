@@ -16,6 +16,26 @@ RUN --mount=type=cache,target=/root/.npm \
     && npm rebuild node-pty
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Stage 1b: Production-only dependencies of the API for the runtime image.
+# Prisma's postinstalls are rerun so `prisma migrate deploy` has its schema
+# engine and @prisma/client resolves; @novacode/shared stays a symlink to
+# /app/shared. typescript is an optional peer of prisma that npm keeps despite
+# --omit=dev (devOptional), so it is removed explicitly.
+# ─────────────────────────────────────────────────────────────────────────────
+FROM node:24-trixie AS prod-deps
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY shared/package.json shared/
+COPY api/package.json api/
+COPY dashboard/package.json dashboard/
+RUN --mount=type=cache,target=/root/.npm \
+    --mount=type=cache,target=/root/.cache/prisma \
+    npm ci --omit=dev -w novacode-api --ignore-scripts --no-audit --no-fund \
+    && npm rebuild node-pty @prisma/engines @prisma/client \
+    && rm -rf node_modules/typescript node_modules/.bin/tsc node_modules/.bin/tsserver
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: Build shared (dashboard and API both depend on its dist/)
 # ─────────────────────────────────────────────────────────────────────────────
 FROM deps AS shared-build
@@ -54,16 +74,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl bash jq sqlite3 postgresql-client gosu sudo openssh-client ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install GitHub CLI from the official apt repo (Debian's package lags behind)
-ARG GH_VERSION=2.103.0
-RUN mkdir -p -m 755 /etc/apt/keyrings \
-    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-       -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
-    && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-       > /etc/apt/sources.list.d/github-cli.list \
-    && apt-get update && apt-get install -y --no-install-recommends "gh=${GH_VERSION}" \
-    && rm -rf /var/lib/apt/lists/*
+# Install GitHub CLI from the pinned release .deb (the apt repo only keeps the
+# newest version, so pinning there breaks on every gh release)
+ARG GH_VERSION=2.103.3
+RUN arch="$(dpkg --print-architecture)" \
+    && curl -fsSL -o /tmp/gh.deb \
+       "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${arch}.deb" \
+    && dpkg -i /tmp/gh.deb \
+    && rm -f /tmp/gh.deb
 
 # Install Claude Code CLI globally so "Login to Claude" works in the app
 ARG CLAUDE_CODE_VERSION=2.1.285
@@ -103,10 +121,10 @@ WORKDIR /app
 
 # Copy compiled API
 COPY --from=api-builder /app/api/build ./build
-# Hoisted workspace node_modules from the API build so Prisma engines
-# downloaded during `prisma generate` are included. @novacode/shared
-# symlinks to /app/shared.
-COPY --from=api-builder /app/node_modules ./node_modules
+# Production-only hoisted node_modules (no typescript/vitest/eslint).
+# @novacode/shared symlinks to /app/shared; the Prisma client is generated
+# into build/ by the API build.
+COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=api-builder /app/shared ./shared
 COPY --from=api-builder /app/api/package.json ./package.json
 

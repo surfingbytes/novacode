@@ -1,8 +1,9 @@
 // node_modules
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 
+import { resolveDatabaseUrl } from '../env';
 import { sshEnvForGit } from './sshKey';
 import { DEFAULT_WORKSPACE_BROWSE_ROOT } from '@novacode/shared';
 
@@ -12,25 +13,118 @@ function optional(name: string, fallback = ''): string {
   return process.env[name] ?? fallback;
 }
 
+/** Server-only secrets. `scrubServerSecretsFromEnv` moves them out of `process.env` at boot. */
+export const SERVER_SECRET_ENV_KEYS = [
+  'JWT_SECRET',
+  'ENCRYPTION_KEY',
+  'POSTGRES_PASSWORD',
+  'DATABASE_URL',
+  'VAPID_PUBLIC_KEY',
+  'VAPID_PRIVATE_KEY'
+] as const;
+
+type ServerSecretKey = (typeof SERVER_SECRET_ENV_KEYS)[number];
+
+const capturedSecrets: Partial<Record<ServerSecretKey, string>> = {};
+
+/** Live env value wins (tests set it late); after the boot scrub the captured copy is used. */
+function serverSecret(name: ServerSecretKey): string {
+  return process.env[name] ?? capturedSecrets[name] ?? '';
+}
+
+/**
+ * Copies server secrets into `config` and deletes them from `process.env`, so nothing
+ * that inherits the process env (in-process Claude agent, its CLI) can read them.
+ * DATABASE_URL is captured fully resolved, since POSTGRES_PASSWORD is removed too.
+ */
+export function scrubServerSecretsFromEnv(): void {
+  try {
+    capturedSecrets['DATABASE_URL'] = resolveDatabaseUrl();
+  } catch {
+    // no DB settings: db/client reports it when the pool is created
+  }
+  for (const key of SERVER_SECRET_ENV_KEYS) {
+    const value = process.env[key];
+    if (value === undefined) continue;
+    if (key !== 'DATABASE_URL') capturedSecrets[key] = value;
+    delete process.env[key];
+  }
+}
+
 const EXAMPLE_JWT_SECRET = 'change_this_to_a_long_random_string';
 
 export { DEFAULT_WORKSPACE_BROWSE_ROOT };
 
-/** Fail process startup when JWT_SECRET is missing or still the example placeholder. */
-export function assertJwtSecret(): void {
-  const secret = (process.env['JWT_SECRET'] ?? '').trim();
+const MIN_JWT_SECRET_LENGTH = 32;
+export const ENCRYPTION_KEY_BYTES = 32;
+const DEFAULT_PORT = 3000;
+
+/** Fail process startup when JWT_SECRET is missing, too short or still the example placeholder. */
+function assertJwtSecret(): void {
+  const secret = config.jwtSecret.trim();
   if (!secret) {
     throw new Error('JWT_SECRET environment variable is required');
   }
   if (secret === EXAMPLE_JWT_SECRET) {
     throw new Error('JWT_SECRET must be a unique secret, not the example placeholder');
   }
+  if (secret.length < MIN_JWT_SECRET_LENGTH) {
+    throw new Error(
+      `JWT_SECRET must be at least ${MIN_JWT_SECRET_LENGTH} characters (got ${secret.length}); generate one with \`openssl rand -hex 32\``
+    );
+  }
+}
+
+/** Integer port 1–65535, or null when `raw` is anything else. */
+export function parsePort(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const port = Number(trimmed);
+  return port >= 1 && port <= 65535 ? port : null;
+}
+
+/** ENCRYPTION_KEY as 32 raw bytes (hex or base64 encoded), or null when it decodes to another length. */
+export function decodeEncryptionKey(value: string): Buffer | null {
+  const hex = Buffer.from(value, 'hex');
+  if (hex.length === ENCRYPTION_KEY_BYTES) return hex;
+  const b64 = Buffer.from(value, 'base64');
+  if (b64.length === ENCRYPTION_KEY_BYTES) return b64;
+  return null;
+}
+
+/**
+ * Validate boot config; throws one clear message on the first problem.
+ * ENCRYPTION_KEY stays optional (install files don't provision it and the key is
+ * then derived from JWT_SECRET); when set it must decode to 32 bytes.
+ */
+export function assertBootConfig(): void {
+  assertJwtSecret();
+  const rawPort = process.env['PORT'];
+  if (rawPort !== undefined && parsePort(rawPort) === null) {
+    throw new Error(`PORT must be an integer between 1 and 65535 (got "${rawPort}")`);
+  }
+  const encryptionKey = config.encryptionKey;
+  if (encryptionKey && !decodeEncryptionKey(encryptionKey)) {
+    throw new Error(`ENCRYPTION_KEY must be ${ENCRYPTION_KEY_BYTES} bytes, hex or base64 encoded`);
+  }
 }
 
 export const config = {
   // auth: credentials stored in DB, first-use setup creates the initial user
-  jwtSecret: optional('JWT_SECRET'),
-  port: parseInt(optional('PORT', '3000'), 10),
+  get jwtSecret(): string {
+    return serverSecret('JWT_SECRET');
+  },
+  get encryptionKey(): string {
+    return serverSecret('ENCRYPTION_KEY');
+  },
+  /** Postgres connection string, handed to the pg Pool directly (not via process.env). */
+  get databaseUrl(): string {
+    return process.env['DATABASE_URL']?.trim() || capturedSecrets['DATABASE_URL'] || resolveDatabaseUrl();
+  },
+  /** Validated at boot by `assertBootConfig`. */
+  get port(): number {
+    return parsePort(optional('PORT', String(DEFAULT_PORT))) ?? DEFAULT_PORT;
+  },
   /** Cursor CLI. Resolved lazily so local/dev PATH installs and Docker installs both work. */
   get cursorCommand(): string {
     const override = process.env['CURSOR_COMMAND'];
@@ -312,15 +406,12 @@ export function isClaudeAvailable(_configDir: string): boolean {
 }
 
 /**
- * spawnSync CLI probes block the Node event loop. Cache results so hot paths
- * like GET /settings/agent-capabilities cannot freeze the whole API for
- * multiple seconds on every dashboard open.
+ * CLI `--version` probes take seconds. Cache results so hot paths like
+ * GET /settings/agent-capabilities stay fast on every dashboard open.
  */
 const CLI_PROBE_TTL_MS = 60_000;
 type CliProbeCache = { ok: boolean; at: number };
 let vibeCliCache: CliProbeCache | null = null;
-let cursorCliCache: CliProbeCache | null = null;
-let openCodeCliCache: CliProbeCache | null = null;
 let codexCliCache: CliProbeCache | null = null;
 
 function readCliCache(cache: CliProbeCache | null): boolean | undefined {
@@ -330,64 +421,29 @@ function readCliCache(cache: CliProbeCache | null): boolean | undefined {
   return undefined;
 }
 
-/** Clears CLI --version probe caches (tests / after installing an agent). */
-export function clearCliAvailabilityCaches(): void {
-  vibeCliCache = null;
-  cursorCliCache = null;
-  openCodeCliCache = null;
-  codexCliCache = null;
-}
-
-function probeCliVersion(command: string, configDir: string): boolean {
-  // Absolute paths: skip a blocking spawn when the binary is clearly missing.
+async function probeCliVersion(command: string, configDir: string): Promise<boolean> {
+  // Absolute paths: skip the spawn when the binary is clearly missing.
   if (command.startsWith('/') && !existsSync(command)) {
     return false;
   }
-  try {
-    const env = { ...process.env, ...config.agentEnv() };
-    const result = spawnSync(command, ['--version'], {
-      encoding: 'utf8',
-      timeout: 5000,
-      cwd: configDir,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    return result.status === 0;
-  } catch {
-    return false;
-  }
+  return new Promise((resolve) => {
+    execFile(
+      command,
+      ['--version'],
+      { encoding: 'utf8', timeout: 5000, cwd: configDir, env: config.agentEnv() },
+      (err) => resolve(!err)
+    );
+  });
 }
 
 /** True when the vibe-acp ACP server binary is on PATH and exits cleanly for --version. */
-export function isVibeCliAvailable(configDir: string): boolean {
+export async function isVibeCliAvailable(configDir: string): Promise<boolean> {
   const cached = readCliCache(vibeCliCache);
   if (cached !== undefined) {
     return cached;
   }
-  const ok = probeCliVersion(config.vibeAcpCommand, configDir);
+  const ok = await probeCliVersion(config.vibeAcpCommand, configDir);
   vibeCliCache = { ok, at: Date.now() };
-  return ok;
-}
-
-/** True when the Cursor CLI binary is on PATH and exits cleanly for --version. */
-export function isCursorAcpAvailable(configDir: string): boolean {
-  const cached = readCliCache(cursorCliCache);
-  if (cached !== undefined) {
-    return cached;
-  }
-  const ok = probeCliVersion(config.cursorCommand, configDir);
-  cursorCliCache = { ok, at: Date.now() };
-  return ok;
-}
-
-/** True when the open-code-acp ACP server binary is on PATH and exits cleanly for --version. */
-export function isOpenCodeAcpAvailable(configDir: string): boolean {
-  const cached = readCliCache(openCodeCliCache);
-  if (cached !== undefined) {
-    return cached;
-  }
-  const ok = probeCliVersion(config.openCodeAcpCommand, configDir);
-  openCodeCliCache = { ok, at: Date.now() };
   return ok;
 }
 
@@ -404,7 +460,7 @@ export interface AgentRuntimeSettings {
 export const DEFAULT_PROMPT_IDLE_TIMEOUT_MS = 300_000;
 
 /** Default idle time before an unused embedded Claude agent is disposed (15 minutes). */
-export const DEFAULT_CLAUDE_AGENT_IDLE_TIMEOUT_MS = 900_000;
+const DEFAULT_CLAUDE_AGENT_IDLE_TIMEOUT_MS = 900_000;
 
 function nonNegativeMs(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
@@ -573,37 +629,13 @@ function mergeMcpServersIntoClaudeJson(
 }
 
 // ensures /config/.claude.json has hasCompletedOnboarding = true
-export function markClaudeOnboardingComplete(configDir: string): void {
-  const path = join(configDir, '.claude.json');
-  let data: unknown = {};
-  if (existsSync(path)) {
-    try {
-      const raw = readFileSync(path, 'utf8');
-      if (raw.trim()) {
-        data = JSON.parse(raw);
-      }
-    } catch {
-      data = {};
-    }
-  }
-  if (!data || typeof data !== 'object') {
-    data = {};
-  }
-  const obj = data as Record<string, unknown>;
-  if (obj.hasCompletedOnboarding === true) {
-    return;
-  }
-  obj.hasCompletedOnboarding = true;
-  writeFileSync(path, JSON.stringify(obj, null, 2), 'utf8');
-}
 
-
-export function isCodexAcpAvailable(configDir: string): boolean {
+export async function isCodexAcpAvailable(configDir: string): Promise<boolean> {
   const cached = readCliCache(codexCliCache);
   if (cached !== undefined) {
     return cached;
   }
-  const ok = probeCliVersion(config.codexAcpCommand, configDir);
+  const ok = await probeCliVersion(config.codexAcpCommand, configDir);
   codexCliCache = { ok, at: Date.now() };
   return ok;
 }

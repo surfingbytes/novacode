@@ -81,5 +81,3 @@ export function useSessionSnapshotCache(options: UseSessionSnapshotCacheOptions)
     flushSessionCache
   };
 }
-
-export type UseSessionSnapshotCache = ReturnType<typeof useSessionSnapshotCache>;

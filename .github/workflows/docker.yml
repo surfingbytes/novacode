@@ -56,6 +56,9 @@ jobs:
       - name: Lint
         run: npm run lint:check
 
+      - name: Unused code (knip)
+        run: npm run knip
+
   # Image build does not wait for quality. Pull requests skip it.
   # The immutable sha tag is pushed on the default branch; latest is applied
   # only after quality passes.

@@ -174,10 +174,10 @@ startCountdown();
               </p>
             </div>
             <button
-              @click="closePopup"
               class="ml-auto text-text-muted hover:text-text-primary transition-colors"
               title="Close"
               aria-label="Close"
+              @click="closePopup"
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
             </button>
@@ -232,15 +232,15 @@ startCountdown();
           <!-- Actions -->
           <div class="flex gap-2">
             <button
-              @click="closePopup"
               class="flex-1 py-2 px-4 rounded-lg border border-fg/[0.15] text-text-primary hover:bg-fg/[0.06] transition-colors"
+              @click="closePopup"
             >
               Dismiss
             </button>
             <button
-              @click="toggleAutoContinue"
               :disabled="bSaving"
               class="flex-1 py-2 px-4 rounded-lg btn-primary-solid disabled:cursor-not-allowed transition-colors"
+              @click="toggleAutoContinue"
             >
               <span v-if="!bAutoContinueEnabled">Enable Auto-Continue</span>
               <span v-else>Disable Auto-Continue</span>

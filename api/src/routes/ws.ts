@@ -5,14 +5,21 @@ import { Type } from '@sinclair/typebox';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 
 // classes
-import { rejectUnauthorizedWebSocket } from '../classes/auth';
+import { acceptWebSocket } from '../classes/wsAccept';
 import { sessionManager } from '../classes/sessionManager';
 import { db } from '../classes/database';
 import { normalizeSessionForApi } from '../classes/sessionNormalize';
-import { getActiveSessionIds, getActiveBusySubagents, hasChatSessionViewers } from './chat';
-import { subscribeBusy } from '../classes/chatEngine';
+import { getActiveSessionIds, getActiveBusySubagents, subscribeBusy } from '../classes/chatEngine';
+import { hasChatSessionViewers } from '../classes/chatSockets';
+import {
+  broadcastGlobalSessions,
+  broadcastWorkspace,
+  sendJson,
+  trackGlobalSessionClient,
+  trackWorkspaceClient,
+  trackWsClient
+} from '../classes/wsBroadcast';
 import { markSessionFinishedUnread } from '../classes/sessionUnread';
-import { registerSessionListBroadcaster } from '../classes/sessionListBroadcast';
 import { workspaceTerminalManager } from '../classes/workspaceTerminalManager';
 import { WS_ROUTE_RATE_LIMIT } from '../classes/rateLimits';
 
@@ -23,69 +30,24 @@ const SessionIdParamsSchema = Type.Object({ id: Type.String() });
 const TerminalParamsSchema = Type.Object({ workspaceId: Type.String(), sessionId: Type.String() });
 const WorkspaceParamsSchema = Type.Object({ workspaceId: Type.String() });
 
-const wsClients = new Set<WebSocket>();
-const workspaceSessionClients = new Map<string, Set<WebSocket>>();
-const globalSessionClients = new Set<WebSocket>();
-
-function sendJson(socket: WebSocket, msg: unknown): void {
-  if (socket.readyState === socket.OPEN) {
-    socket.send(JSON.stringify(msg));
+/**
+ * Order sessions like the old per-workspace queries: workspace order, then
+ * active before archived, each keeping the incoming (updatedAt desc) order.
+ */
+export function groupSessionsByWorkspace<S extends { workspaceId: string; archived: boolean }>(
+  workspaces: { id: string }[],
+  sessions: S[]
+): S[] {
+  const byWorkspace = new Map<string, { active: S[]; archived: S[] }>();
+  for (const workspace of workspaces) {
+    byWorkspace.set(workspace.id, { active: [], archived: [] });
   }
-}
-
-function broadcastWorkspace(workspaceId: string, msg: unknown): void {
-  const set = workspaceSessionClients.get(workspaceId);
-  if (!set) return;
-  const payload = JSON.stringify(msg);
-  for (const socket of set) {
-    if (socket.readyState === socket.OPEN) socket.send(payload);
+  for (const session of sessions) {
+    const group = byWorkspace.get(session.workspaceId);
+    if (!group) continue;
+    (session.archived ? group.archived : group.active).push(session);
   }
-}
-
-function broadcastGlobalSessions(msg: unknown): void {
-  const payload = JSON.stringify(msg);
-  for (const socket of globalSessionClients) {
-    if (socket.readyState === socket.OPEN) socket.send(payload);
-  }
-}
-
-export function broadcastWorkspaceSessionUpsert(workspaceId: string, session: unknown): void {
-  broadcastWorkspace(workspaceId, { type: 'session-upsert', session });
-  broadcastGlobalSessions({ type: 'session-upsert', session });
-}
-
-registerSessionListBroadcaster(broadcastWorkspaceSessionUpsert);
-
-export function broadcastWorkspaceSessionDeleted(workspaceId: string, id: string): void {
-  broadcastWorkspace(workspaceId, { type: 'session-deleted', id });
-  broadcastGlobalSessions({ type: 'session-deleted', id, workspaceId });
-}
-
-export function broadcastWorkspaceSessionsRefresh(workspaceId: string): void {
-  broadcastWorkspace(workspaceId, { type: 'refresh' });
-  broadcastGlobalSessions({ type: 'refresh' });
-}
-
-/** Push orchestrator run-state changes so dashboards don't need to poll. */
-export function broadcastOrchestratorUpsert(workspaceId: string, orchestrator: unknown): void {
-  broadcastWorkspace(workspaceId, { type: 'orchestrator-upsert', orchestrator });
-  broadcastGlobalSessions({ type: 'orchestrator-upsert', orchestrator });
-}
-
-/** Spec file / spec→orchestrator job state changed for a chat session. */
-export function broadcastSessionSpecStatus(workspaceId: string, status: unknown): void {
-  broadcastWorkspace(workspaceId, { type: 'session-spec-status', status });
-  broadcastGlobalSessions({ type: 'session-spec-status', status });
-}
-
-export function broadcastServerShutdown(): void {
-  const msg: WsServerMessage = { type: 'server-shutdown' };
-  const payload = JSON.stringify(msg);
-  for (const socket of wsClients) {
-    if (socket.readyState === socket.OPEN) {
-      socket.send(payload);
-    }
-  }
+  return [...byWorkspace.values()].flatMap((group) => [...group.active, ...group.archived]);
 }
 
 export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
@@ -117,10 +79,10 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
   }
 
   fastifyInstance.get('/api/ws/session/:id', { websocket: true, config: { rateLimit: WS_ROUTE_RATE_LIMIT }, schema: { params: SessionIdParamsSchema } }, async (socket: WebSocket, request) => {
-    wsClients.add(socket);
-    if (await rejectUnauthorizedWebSocket(socket, request)) {
+    if (!(await acceptWebSocket(socket, request))) {
       return;
     }
+    trackWsClient(socket);
 
     const { id } = request.params;
     const live = sessionManager.get(id);
@@ -157,8 +119,10 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
 
     live.pty?.subscribe(outputHandler);
     sessionManager.subscribeStatus(id, statusHandler);
+    sessionManager.touch(id);
 
     socket.on('message', (raw: Buffer) => {
+      sessionManager.touch(id);
       try {
         const msg = JSON.parse(raw.toString()) as WsClientMessage;
         if (msg.type === 'input' && msg.data !== undefined) {
@@ -172,7 +136,6 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
     });
 
     socket.on('close', () => {
-      wsClients.delete(socket);
       live.pty?.unsubscribe(outputHandler);
       sessionManager.unsubscribeStatus(id, statusHandler);
     });
@@ -182,10 +145,10 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
     '/api/ws/workspaces/:workspaceId/sessions/:sessionId/terminal',
     { websocket: true, config: { rateLimit: WS_ROUTE_RATE_LIMIT }, schema: { params: TerminalParamsSchema } },
     async (socket: WebSocket, request) => {
-      wsClients.add(socket);
-      if (await rejectUnauthorizedWebSocket(socket, request)) {
+      if (!(await acceptWebSocket(socket, request))) {
         return;
       }
+      trackWsClient(socket);
 
       const { workspaceId, sessionId } = request.params;
       const [workspace, session] = await Promise.all([
@@ -194,6 +157,9 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
       ]);
       if (!workspace || !session || session.workspaceId !== workspaceId) {
         socket.close(4004, 'Session not found');
+        return;
+      }
+      if (socket.readyState !== socket.OPEN) {
         return;
       }
 
@@ -241,7 +207,6 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       socket.on('close', () => {
-        wsClients.delete(socket);
         live.pty.unsubscribe(outputHandler);
         workspaceTerminalManager.unsubscribeStatus(sessionId, statusHandler);
       });
@@ -252,24 +217,18 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
     '/api/ws/sessions',
     { websocket: true, config: { rateLimit: WS_ROUTE_RATE_LIMIT } },
     async (socket: WebSocket, request) => {
-      wsClients.add(socket);
-      globalSessionClients.add(socket);
-      if (await rejectUnauthorizedWebSocket(socket, request)) {
+      if (!(await acceptWebSocket(socket, request))) {
         return;
       }
+      trackWsClient(socket);
+      trackGlobalSessionClient(socket);
 
       const busyIds = getActiveSessionIds();
-      const allWorkspaces = await db.listWorkspaces({ includeArchived: true });
-      const byWorkspace = await Promise.all(
-        allWorkspaces.map((w) =>
-          Promise.all([
-            db.listSessionsByWorkspace(w.id, { archived: false }),
-            db.listSessionsByWorkspace(w.id, { archived: true })
-          ])
-        )
-      );
-      const allSessions = byWorkspace
-        .flatMap(([active, archived]) => [...active, ...archived])
+      const [allWorkspaces, sessions] = await Promise.all([
+        db.listWorkspaces({ includeArchived: true }),
+        db.listSessions()
+      ]);
+      const allSessions = groupSessionsByWorkspace(allWorkspaces, sessions)
         .map((s) => ({
           ...normalizeSessionForApi(s),
           busy: busyIds.has(s.id),
@@ -278,11 +237,6 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
       await db.enrichSessionListPreviews(allSessions);
       const orchestrators = await db.listOrchestratorSummaries();
       sendJson(socket, { type: 'global-snapshot', sessions: allSessions, orchestrators });
-
-      socket.on('close', () => {
-        wsClients.delete(socket);
-        globalSessionClients.delete(socket);
-      });
     }
   );
 
@@ -290,10 +244,10 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
     '/api/ws/workspaces/:workspaceId/sessions',
     { websocket: true, config: { rateLimit: WS_ROUTE_RATE_LIMIT }, schema: { params: WorkspaceParamsSchema } },
     async (socket: WebSocket, request) => {
-      wsClients.add(socket);
-      if (await rejectUnauthorizedWebSocket(socket, request)) {
+      if (!(await acceptWebSocket(socket, request))) {
         return;
       }
+      trackWsClient(socket);
 
       const { workspaceId } = request.params;
       const workspace = await db.getWorkspace(workspaceId);
@@ -301,36 +255,25 @@ export async function wsRoutes(fastify: FastifyInstance): Promise<void> {
         socket.close(4004, 'Workspace not found');
         return;
       }
-
-      let set = workspaceSessionClients.get(workspaceId);
-      if (!set) {
-        set = new Set<WebSocket>();
-        workspaceSessionClients.set(workspaceId, set);
+      if (socket.readyState !== socket.OPEN) {
+        return;
       }
-      set.add(socket);
 
-      // initial snapshot (active + archived), with busy flags
+      trackWorkspaceClient(workspaceId, socket);
+
+      // initial snapshot (active + archived), with busy flags — one query, split in memory
       const busyIds = getActiveSessionIds();
-      const [active, archived] = await Promise.all([
-        db.listSessionsByWorkspace(workspaceId, { archived: false }),
-        db.listSessionsByWorkspace(workspaceId, { archived: true })
-      ]);
-      const enrich = (rows: { tags?: unknown }[]) =>
-        rows.map((s) => {
-          const id = (s as { id: string }).id;
-          return {
-            ...normalizeSessionForApi(s),
-            busy: busyIds.has(id),
-            busySubagents: getActiveBusySubagents(id),
-          };
-        });
-      sendJson(socket, { type: 'snapshot', active: enrich(active), archived: enrich(archived) });
-
-      socket.on('close', () => {
-        wsClients.delete(socket);
-        const s = workspaceSessionClients.get(workspaceId);
-        s?.delete(socket);
-        if (s && s.size === 0) workspaceSessionClients.delete(workspaceId);
+      const rows = await db.listSessionsByWorkspace(workspaceId);
+      const enrich = (list: typeof rows) =>
+        list.map((s) => ({
+          ...normalizeSessionForApi(s),
+          busy: busyIds.has(s.id),
+          busySubagents: getActiveBusySubagents(s.id),
+        }));
+      sendJson(socket, {
+        type: 'snapshot',
+        active: enrich(rows.filter((s) => !s.archived)),
+        archived: enrich(rows.filter((s) => s.archived))
       });
     }
   );

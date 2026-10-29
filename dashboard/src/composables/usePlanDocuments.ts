@@ -36,7 +36,7 @@ import type { DisplayItem } from '@/utils/chatDisplayItems';
 
 // -------------------------------------------------- Types --------------------------------------------------
 
-export interface DisplayChatMessage {
+interface DisplayChatMessage {
   msg: { createdAt: string };
   key: string;
   items: DisplayItem[];
@@ -566,5 +566,3 @@ export function usePlanDocuments(ctx: UsePlanDocumentsContext) {
     resetPlanDocuments
   };
 }
-
-export type UsePlanDocuments = ReturnType<typeof usePlanDocuments>;

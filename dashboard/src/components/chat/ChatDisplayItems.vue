@@ -71,8 +71,8 @@ const emit = defineEmits<{
     <div v-if="item.kind === 'text'" class="flex justify-start">
       <div
         class="chat-markdown max-w-full md:max-w-[85%] text-text-primary px-3.5 py-3 rounded-lg text-sm chat-bubble"
-        v-html="item.renderedHtml"
         @click="(e) => emit('markdownClick', e)"
+        v-html="item.renderedHtml"
       ></div>
     </div>
 

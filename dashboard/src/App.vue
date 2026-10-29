@@ -45,11 +45,12 @@ const bShowNavBar = computed(() => !route.meta.public);
 // -------------------------------------------------- Methods --------------------------------------------------
 function setupVisibilityCheck(): void {
   if (document.visibilityState === 'visible') {
-    navigator.serviceWorker?.getRegistration()?.then((reg) => {
-      reg?.update().catch(() => {
+    navigator.serviceWorker
+      ?.getRegistration()
+      .then((reg) => reg?.update())
+      .catch(() => {
         // ignore errors, we'll just retry on next visibility change
       });
-    });
   }
 }
 
@@ -139,6 +140,8 @@ onMounted(async (): Promise<void> => {
     if (!auth.bSignedIn) {
       return;
     }
+    // logout() also resets every data store, closes the sessions socket and
+    // clears cached chat content, so the next login starts clean.
     auth.logout();
     toastStore.info('Your session has expired — please log in again.');
     const currentPath = router.currentRoute.value.fullPath;

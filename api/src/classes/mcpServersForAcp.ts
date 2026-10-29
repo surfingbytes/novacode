@@ -110,7 +110,7 @@ export function partitionMcpClients(
 }
 
 /** Servers that should be probed / considered for agent autoload. */
-export function filterEnabledMcpClients(
+function filterEnabledMcpClients(
   clients: Record<string, McpClientServerConfig>
 ): Record<string, McpClientServerConfig> {
   const out: Record<string, McpClientServerConfig> = {};

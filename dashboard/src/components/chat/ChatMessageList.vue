@@ -635,9 +635,13 @@ function onWindowFindKeydown(event: KeyboardEvent): void {
   void openFind();
 }
 
+function onFindEvent(): void {
+  void openFind();
+}
+
 onMounted(() => {
   window.addEventListener('keydown', onWindowFindKeydown);
-  window.addEventListener(FIND_EVENT, openFind as EventListener);
+  window.addEventListener(FIND_EVENT, onFindEvent);
   if (typeof ResizeObserver !== 'undefined' && messagesContentEl.value) {
     contentResizeObserver = new ResizeObserver(() => {
       followPinnedToBottom();
@@ -648,7 +652,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onWindowFindKeydown);
-  window.removeEventListener(FIND_EVENT, openFind as EventListener);
+  window.removeEventListener(FIND_EVENT, onFindEvent);
   contentResizeObserver?.disconnect();
   contentResizeObserver = null;
   window.clearTimeout(copiedMessageTimer);
@@ -846,8 +850,8 @@ defineExpose({
                 >
                   <div
                     class="chat-markdown chat-bubble max-w-full md:max-w-[85%] text-text-primary px-3.5 py-3 rounded-lg text-sm"
-                    v-html="fallbackHtml"
                     @click="onChatMarkdownClick"
+                    v-html="fallbackHtml"
                   ></div>
                 </div>
               </template>

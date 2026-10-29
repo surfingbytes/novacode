@@ -17,8 +17,9 @@ import {
   parseSubtasksPayloadString,
   serializeSubtasksPayload
 } from '../classes/orchestratorPayload';
-import { deleteSessionImages } from './images';
-import { broadcastOrchestratorUpsert, broadcastWorkspaceSessionsRefresh } from './ws';
+import { deleteSessionImages } from '../classes/sessionImages';
+import { broadcastWorkspaceSessionsRefresh } from '../classes/wsBroadcast';
+import { broadcastOrchestratorUpsert, updateOrchestratorAndBroadcast } from '../classes/orchestratorEvents';
 import { broadcastSessionListUpsert } from '../classes/sessionListBroadcast';
 import { checkRunPreconditions, claimRunResume, finishRunResume, inFlightRunSteps, runOrchestrator } from '../classes/orchestratorRunner';
 
@@ -102,19 +103,6 @@ async function createPlannerSession(workspaceId: string, input: PlannerSessionIn
   return result;
 }
 
-/** Persist an orchestrator patch and push it to subscribed dashboards (no polling needed). */
-export async function updateOrchestratorAndBroadcast(
-  workspaceId: string,
-  orchestratorId: string,
-  patch: Parameters<typeof db.updateOrchestrator>[1]
-): Promise<Awaited<ReturnType<typeof db.updateOrchestrator>>> {
-  const updated = await db.updateOrchestrator(orchestratorId, patch);
-  if (updated) {
-    broadcastOrchestratorUpsert(workspaceId, updated);
-  }
-  return updated;
-}
-
 export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void> {
   const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
 
@@ -134,7 +122,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       const { workspaceId } = request.params;
       const workspace = await db.getWorkspace(workspaceId);
       if (!workspace) {
-        return reply.status(404).send({ error: 'Workspace not found' });
+        return reply.code(404).send({ error: 'Workspace not found' });
       }
       const list = await db.listOrchestratorsByWorkspace(workspaceId);
       return reply.send(list);
@@ -156,7 +144,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       const body = request.body;
       const workspace = await db.getWorkspace(workspaceId);
       if (!workspace) {
-        return reply.status(404).send({ error: 'Workspace not found' });
+        return reply.code(404).send({ error: 'Workspace not found' });
       }
       const name = (body.name && body.name.trim()) || `Task plan ${new Date().toISOString()}`;
       let sourceSessionId: string | null = null;
@@ -165,7 +153,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         // Empty name: the chat gets its usual AI-generated title after the first prompt.
         const planner = await createPlannerSession(workspaceId, body.planner, body.name?.trim() || '');
         if (planner.error || !planner.session) {
-          return reply.status(502).send({ error: planner.error ?? 'Failed to create the planning chat' });
+          return reply.code(502).send({ error: planner.error ?? 'Failed to create the planning chat' });
         }
         sourceSessionId = planner.session.id;
         plannerAgentType = planner.session.agentType as AgentType;
@@ -183,7 +171,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         verifyModel: body.verifyModel?.trim() || null
       });
       broadcastOrchestratorUpsert(workspaceId, orchestrator);
-      return reply.status(201).send(orchestrator);
+      return reply.code(201).send(orchestrator);
     }
   );
 
@@ -199,7 +187,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       const body = request.body;
       const orchestrator = await db.getOrchestrator(orchestratorId);
       if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
-        return reply.status(404).send({ error: 'Orchestrator not found' });
+        return reply.code(404).send({ error: 'Orchestrator not found' });
       }
       const planner = await createPlannerSession(
         workspaceId,
@@ -207,12 +195,12 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         `Plan: ${orchestrator.name}`
       );
       if (planner.error || !planner.session) {
-        return reply.status(502).send({ error: planner.error ?? 'Failed to create the planning chat' });
+        return reply.code(502).send({ error: planner.error ?? 'Failed to create the planning chat' });
       }
       const updated = await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
         sourceSessionId: planner.session.id
       });
-      return reply.status(201).send(updated ?? orchestrator);
+      return reply.code(201).send(updated ?? orchestrator);
     }
   );
 
@@ -227,7 +215,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       const { workspaceId, orchestratorId } = request.params;
       const orchestrator = await db.getOrchestrator(orchestratorId);
       if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
-        return reply.status(404).send({ error: 'Orchestrator not found' });
+        return reply.code(404).send({ error: 'Orchestrator not found' });
       }
       return reply.send(orchestrator);
     }
@@ -245,10 +233,10 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       const body = request.body;
       const orchestrator = await db.getOrchestrator(orchestratorId);
       if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
-        return reply.status(404).send({ error: 'Orchestrator not found' });
+        return reply.code(404).send({ error: 'Orchestrator not found' });
       }
       if (body.isFavorite === true && (body.archived ?? orchestrator.archived)) {
-        return reply.status(400).send({ error: 'Archived orchestrators cannot be favorited' });
+        return reply.code(400).send({ error: 'Archived orchestrators cannot be favorited' });
       }
       const mergedSubtasks =
         'subtasksJson' in body
@@ -282,7 +270,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       const { workspaceId, orchestratorId } = request.params;
       const orchestrator = await db.getOrchestrator(orchestratorId);
       if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
-        return reply.status(404).send({ error: 'Orchestrator not found' });
+        return reply.code(404).send({ error: 'Orchestrator not found' });
       }
       if (!orchestrator.unread) {
         return reply.send(orchestrator);
@@ -303,7 +291,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       const { workspaceId, orchestratorId } = request.params;
       const orchestrator = await db.getOrchestrator(orchestratorId);
       if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
-        return reply.status(404).send({ error: 'Orchestrator not found' });
+        return reply.code(404).send({ error: 'Orchestrator not found' });
       }
       const stepSessionIds = [
         ...new Set([
@@ -317,7 +305,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         broadcastWorkspaceSessionsRefresh(workspaceId);
       }
       await db.deleteOrchestrator(orchestratorId);
-      return reply.status(204).send();
+      return reply.code(204).send();
     }
   );
 
@@ -332,11 +320,11 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       const { workspaceId, orchestratorId } = request.params;
       const orchestrator = await db.getOrchestrator(orchestratorId);
       if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
-        return reply.status(404).send({ error: 'Orchestrator not found' });
+        return reply.code(404).send({ error: 'Orchestrator not found' });
       }
       const workspace = await db.getWorkspace(workspaceId);
       if (!workspace) {
-        return reply.status(404).send({ error: 'Workspace not found' });
+        return reply.code(404).send({ error: 'Workspace not found' });
       }
       const cloned = await db.createOrchestrator({
         workspaceId,
@@ -352,7 +340,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       const updated = await updateOrchestratorAndBroadcast(workspaceId, cloned.id, {
         subtasksJson: serializeSubtasksPayload(clonedPayload)
       });
-      return reply.status(201).send(updated ?? cloned);
+      return reply.code(201).send(updated ?? cloned);
     }
   );
 
@@ -371,15 +359,15 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
 
       const orchestrator = await db.getOrchestrator(orchestratorId);
       if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
-        return reply.status(404).send({ error: 'Orchestrator not found' });
+        return reply.code(404).send({ error: 'Orchestrator not found' });
       }
       const workspace = await db.getWorkspace(workspaceId);
       if (!workspace) {
-        return reply.status(404).send({ error: 'Workspace not found' });
+        return reply.code(404).send({ error: 'Workspace not found' });
       }
 
       if (orchestrator.runStatus === 'running') {
-        return reply.status(409).send({ error: 'Run already in progress' });
+        return reply.code(409).send({ error: 'Run already in progress' });
       }
       const finishing = inFlightRunSteps(orchestratorId);
       if (finishing) {
@@ -391,20 +379,20 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
               runStatus: 'running',
               unread: false
             });
-            return reply.status(202).send(updated ?? orchestrator);
+            return reply.code(202).send(updated ?? orchestrator);
           } finally {
             finishRunResume(orchestratorId);
           }
         }
         const steps = finishing.map((name) => `"${name}"`).join(', ');
-        return reply.status(409).send({
+        return reply.code(409).send({
           error: `The stopped run is still finishing ${steps || 'a step'}. Wait for it to end, or stop that step's agent in its session, then run again.`
         });
       }
 
       const payload = parseSubtasksPayloadString(orchestrator.subtasksJson);
       if (!payload?.subtasks.length) {
-        return reply.status(400).send({
+        return reply.code(400).send({
           error: orchestrator.subtasksJson?.trim()
             ? 'Invalid subtasksJson'
             : 'No steps yet. Ask the planning chat to create the plan first.'
@@ -424,21 +412,21 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         subtasks.forEach((task, index) => task.runResult === 'running' && clearResult(index));
         onlyIndex = findRunnableSteps(subtasks)[0];
         if (onlyIndex === undefined) {
-          return reply.status(400).send({ error: 'No step is ready — every step is done or waits for a failed step.' });
+          return reply.code(400).send({ error: 'No step is ready — every step is done or waits for a failed step.' });
         }
       }
       const startIndex = Math.max(0, body.startIndex ?? 0);
       if (onlyIndex !== undefined && (onlyIndex < 0 || onlyIndex >= subtasks.length)) {
-        return reply.status(400).send({ error: 'Invalid step index.' });
+        return reply.code(400).send({ error: 'Invalid step index.' });
       }
       if (onlyIndex === undefined && startIndex >= subtasks.length) {
-        return reply.status(400).send({ error: 'No steps to run from startIndex.' });
+        return reply.code(400).send({ error: 'No steps to run from startIndex.' });
       }
 
       const options = { mode, ...(onlyIndex !== undefined ? { onlyIndex } : { startIndex }) };
       const blocked = await checkRunPreconditions(resolveWorkspaceAbsolutePath(workspace.path), options);
       if (blocked) {
-        return reply.status(409).send({ error: blocked });
+        return reply.code(409).send({ error: blocked });
       }
 
       if (onlyIndex !== undefined) {
@@ -450,7 +438,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
           subtasks.forEach((task, index) => task.kind === 'verify' && clearResult(index));
         }
         if (subtasks.every((task) => task.runResult === 'done')) {
-          return reply.status(400).send({ error: 'Every step is done. Use "Run all again in parallel" to start over.' });
+          return reply.code(400).send({ error: 'Every step is done. Use "Run all again in parallel" to start over.' });
         }
       } else if (mode === 'parallel' || startIndex === 0) {
         payload.handoffLog = '';
@@ -472,7 +460,7 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       void runOrchestrator(workspaceId, orchestratorId, payload, options);
 
       const updated = await db.getOrchestrator(orchestratorId);
-      return reply.status(202).send(updated);
+      return reply.code(202).send(updated);
     }
   );
 
@@ -488,11 +476,11 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
 
       const orchestrator = await db.getOrchestrator(orchestratorId);
       if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
-        return reply.status(404).send({ error: 'Orchestrator not found' });
+        return reply.code(404).send({ error: 'Orchestrator not found' });
       }
 
       if (orchestrator.runStatus !== 'running') {
-        return reply.status(409).send({ error: 'Orchestrator is not running' });
+        return reply.code(409).send({ error: 'Orchestrator is not running' });
       }
 
       const currentStep = orchestrator.runCurrentStep ?? 0;

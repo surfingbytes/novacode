@@ -37,7 +37,7 @@ export async function globalRuleRoutes(fastify: FastifyInstance): Promise<void> 
   fastifyInstance.get('/api/global-rules', { preHandler: jwtPreHandler }, async (_request, reply) => {
     const result = await listGlobalRuleFiles();
     if (!result.ok) {
-      return reply.status(mapErrorCodeToStatus(result.code)).send({
+      return reply.code(mapErrorCodeToStatus(result.code)).send({
         error: result.message,
         code: result.code
       });
@@ -52,7 +52,7 @@ export async function globalRuleRoutes(fastify: FastifyInstance): Promise<void> 
       const { filename } = request.params;
       const result = await readGlobalRuleFile(filename);
       if (!result.ok) {
-        return reply.status(mapErrorCodeToStatus(result.code)).send({
+        return reply.code(mapErrorCodeToStatus(result.code)).send({
           error: result.message,
           code: result.code
         });
@@ -68,7 +68,7 @@ export async function globalRuleRoutes(fastify: FastifyInstance): Promise<void> 
       const { filename } = request.params;
       const result = await writeGlobalRuleFile(filename, request.body.content);
       if (!result.ok) {
-        return reply.status(mapErrorCodeToStatus(result.code)).send({
+        return reply.code(mapErrorCodeToStatus(result.code)).send({
           error: result.message,
           code: result.code
         });
@@ -84,7 +84,7 @@ export async function globalRuleRoutes(fastify: FastifyInstance): Promise<void> 
       const { filename } = request.params;
       const result = await deleteGlobalRuleFile(filename);
       if (!result.ok) {
-        return reply.status(mapErrorCodeToStatus(result.code)).send({
+        return reply.code(mapErrorCodeToStatus(result.code)).send({
           error: result.message,
           code: result.code
         });
@@ -100,7 +100,7 @@ export async function globalRuleRoutes(fastify: FastifyInstance): Promise<void> 
       const { filename } = request.params;
       const result = await renameGlobalRuleFile(filename, request.body.newFilename);
       if (!result.ok) {
-        return reply.status(mapErrorCodeToStatus(result.code)).send({
+        return reply.code(mapErrorCodeToStatus(result.code)).send({
           error: result.message,
           code: result.code
         });

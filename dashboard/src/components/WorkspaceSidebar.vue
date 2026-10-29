@@ -12,12 +12,15 @@ import OrchestratorProgressRing from '@/components/OrchestratorProgressRing.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue';
 import SessionEditModal from '@/components/SessionEditModal.vue';
 
+import PromptModal from '@/components/PromptModal.vue';
+
 // composables
 import { useLongPress } from '@/composables/useLongPress';
+import { useOrchestratorActions } from '@/composables/useOrchestratorActions';
+import { useSessionListActions } from '@/composables/useSessionListActions';
 
 // stores
 import { useWorkspacesStore } from '@/stores/workspaces';
-import { useToastStore } from '@/stores/toasts';
 import { useOrchestratorsStore } from '@/stores/orchestrators';
 
 // types
@@ -33,9 +36,6 @@ import { isOrchestratorUnread, isSessionUnread } from '@/utils/sessionUnread';
 import { sessionBusyLabel, sessionBusyTitle } from '@/utils/sessionBusyLabel';
 import { tagColorClass as categoryColorClass } from '@/utils/tagColors';
 import { workspaceColor } from '@/utils/workspaceColor';
-
-// classes
-import { orchestratorApi, sessionsApi } from '@/classes/api';
 
 // -------------------------------------------------- Props --------------------------------------------------
 
@@ -61,7 +61,6 @@ const emit = defineEmits<{
 
 const router = useRouter();
 const workspacesStore = useWorkspacesStore();
-const toastStore = useToastStore();
 const orchestratorsStore = useOrchestratorsStore();
 
 // -------------------------------------------------- Constants --------------------------------------------------
@@ -86,12 +85,10 @@ const ctxMenuY = ref(0);
 const ctxMenuItems = ref<ContextMenuItem[]>([]);
 const ctxTarget = ref<CtxTarget | null>(null);
 
-const sessionToEdit = ref<Session | null>(null);
-const bSavingSessionEdit = ref(false);
-const sessionPendingDelete = ref<Session | null>(null);
-const orchestratorPendingDelete = ref<Orchestrator | null>(null);
-const bDeletingSession = ref(false);
-const bDeletingOrchestrator = ref(false);
+const sessionActions = useSessionListActions();
+const orchestratorActions = useOrchestratorActions();
+const { sessionToEdit, sessionPendingDelete } = sessionActions;
+const { orchestratorToEdit, orchestratorPendingDelete } = orchestratorActions;
 
 // -------------------------------------------------- Computed --------------------------------------------------
 
@@ -245,7 +242,7 @@ function open(item: SidebarItem): void {
     if (props.activeKind === 'session' && props.activeId === item.session.id) {
       return;
     }
-    router.push({
+    void router.push({
       name: 'session',
       params: { id: props.workspaceId, sessionId: item.session.id }
     });
@@ -254,55 +251,18 @@ function open(item: SidebarItem): void {
   if (props.activeKind === 'orchestrator' && props.activeId === item.orchestrator.id) {
     return;
   }
-  router.push({
+  void router.push({
     name: 'orchestrator',
     params: { id: props.workspaceId, orchestratorId: item.orchestrator.id }
   });
-}
-
-function sessionContextItems(session: Session): ContextMenuItem[] {
-  const arch = session.archived;
-  return [
-    { key: 'open', label: 'Open', icon: 'open_in_new' },
-    { key: 'edit', label: 'Edit…', icon: 'edit' },
-    {
-      key: 'archive',
-      label: arch ? 'Unarchive' : 'Archive',
-      icon: arch ? 'unarchive' : 'inventory_2'
-    },
-    { key: 'delete', label: 'Delete…', icon: 'delete', danger: true }
-  ];
-}
-
-function orchestratorContextItems(orch: Orchestrator): ContextMenuItem[] {
-  const arch = orch.archived === true;
-  return [
-    { key: 'open', label: 'Open', icon: 'open_in_new' },
-    ...(arch
-      ? []
-      : [
-          {
-            key: 'favorite',
-            label: orch.isFavorite ? 'Remove favorite' : 'Add to favorites',
-            icon: 'star'
-          }
-        ]),
-    { key: 'clone', label: 'Clone', icon: 'content_copy' },
-    {
-      key: 'archive',
-      label: arch ? 'Unarchive' : 'Archive',
-      icon: arch ? 'unarchive' : 'inventory_2'
-    },
-    { key: 'delete', label: 'Delete…', icon: 'delete', danger: true }
-  ];
 }
 
 function openCtxMenu(target: CtxTarget, x: number, y: number): void {
   ctxTarget.value = target;
   ctxMenuItems.value =
     target.kind === 'session'
-      ? sessionContextItems(target.session)
-      : orchestratorContextItems(target.orchestrator);
+      ? sessionActions.menuItems(target.session)
+      : orchestratorActions.menuItems(target.orchestrator);
   ctxMenuX.value = x;
   ctxMenuY.value = y;
   bCtxMenuOpen.value = true;
@@ -348,156 +308,24 @@ function onRowClick(item: SidebarItem): void {
   }
 }
 
-async function toggleSessionArchived(session: Session): Promise<void> {
-  try {
-    const { data: updatedSession } = await sessionsApi.update(props.workspaceId, session.id, {
-      archived: !session.archived
-    });
-    if (updatedSession) {
-      workspacesStore.upsertSession(updatedSession);
-    }
-  } catch {
-    toastStore.error(
-      session.archived ? 'Failed to unarchive session' : 'Failed to archive session'
-    );
-  }
-}
-
 function onCtxPick(key: string): void {
   const target = ctxTarget.value;
   if (!target) {
     return;
   }
-
-  if (target.kind === 'session') {
-    const session = target.session;
-    if (key === 'open') {
-      open({ kind: 'session', session });
-      return;
-    }
-    if (key === 'edit') {
-      sessionToEdit.value = session;
-      return;
-    }
-    if (key === 'archive') {
-      void toggleSessionArchived(session);
-      return;
-    }
-    if (key === 'delete') {
-      sessionPendingDelete.value = session;
-    }
-    return;
-  }
-
-  const orchestrator = target.orchestrator;
   if (key === 'open') {
-    open({
-      kind: 'orchestrator',
-      orchestrator,
-      nestedSessions: orderedNestedSessions(orchestrator)
-    });
+    // Row navigation: closes the mobile drawer and skips the active item
+    open(
+      target.kind === 'session'
+        ? { kind: 'session', session: target.session }
+        : { kind: 'orchestrator', orchestrator: target.orchestrator, nestedSessions: [] }
+    );
     return;
   }
-  if (key === 'favorite') {
-    void orchestratorApi
-      .update(props.workspaceId, orchestrator.id, { isFavorite: !orchestrator.isFavorite })
-      .then(({ data: updatedOrchestrator }) => {
-        if (updatedOrchestrator) {
-          orchestratorsStore.upsertOrchestrator(updatedOrchestrator);
-        }
-      })
-      .catch(() => toastStore.error('Failed to update favorite'));
-    return;
-  }
-  if (key === 'clone') {
-    void orchestratorApi
-      .clone(props.workspaceId, orchestrator.id)
-      .then(({ data: cloned }) => {
-        if (!cloned) {
-          return;
-        }
-        orchestratorsStore.upsertOrchestrator(cloned);
-        router.push({
-          name: 'orchestrator',
-          params: { id: props.workspaceId, orchestratorId: cloned.id }
-        });
-      })
-      .catch(() => toastStore.error('Failed to clone plan'));
-    return;
-  }
-  if (key === 'archive') {
-    void orchestratorApi
-      .update(props.workspaceId, orchestrator.id, { archived: !(orchestrator.archived === true) })
-      .then(({ data: updatedOrchestrator }) => {
-        if (updatedOrchestrator) {
-          orchestratorsStore.upsertOrchestrator(updatedOrchestrator);
-        }
-      })
-      .catch(() =>
-        toastStore.error(
-          orchestrator.archived
-            ? 'Failed to unarchive orchestrator'
-            : 'Failed to archive orchestrator'
-        )
-      );
-    return;
-  }
-  if (key === 'delete') {
-    orchestratorPendingDelete.value = orchestrator;
-  }
-}
-
-async function saveSessionEdit(payload: { name: string; tags?: string[] | null }): Promise<void> {
-  if (!sessionToEdit.value) {
-    return;
-  }
-  bSavingSessionEdit.value = true;
-  try {
-    await sessionsApi.update(props.workspaceId, sessionToEdit.value.id, payload);
-    sessionToEdit.value = null;
-  } catch {
-    toastStore.error('Failed to update session');
-  } finally {
-    bSavingSessionEdit.value = false;
-  }
-}
-
-async function confirmDeleteSession(): Promise<void> {
-  if (!sessionPendingDelete.value) {
-    return;
-  }
-  bDeletingSession.value = true;
-  try {
-    const deletedId = sessionPendingDelete.value.id;
-    await sessionsApi.remove(props.workspaceId, deletedId);
-    sessionPendingDelete.value = null;
-    if (props.activeKind === 'session' && props.activeId === deletedId) {
-      router.push({ name: 'workspace-sessions', params: { id: props.workspaceId } });
-    }
-  } catch {
-    toastStore.error('Failed to delete session');
-  } finally {
-    bDeletingSession.value = false;
-  }
-}
-
-async function confirmDeleteOrchestrator(): Promise<void> {
-  if (!orchestratorPendingDelete.value) {
-    return;
-  }
-  bDeletingOrchestrator.value = true;
-  try {
-    const deletedId = orchestratorPendingDelete.value.id;
-    await orchestratorApi.remove(props.workspaceId, deletedId);
-    orchestratorsStore.removeOrchestrator(deletedId, props.workspaceId);
-    orchestratorPendingDelete.value = null;
-    if (props.activeKind === 'orchestrator' && props.activeId === deletedId) {
-      router.push({ name: 'workspace-sessions', params: { id: props.workspaceId } });
-    }
-  } catch {
-    toastStore.error('Failed to delete orchestrator');
-  } finally {
-    bDeletingOrchestrator.value = false;
+  if (target.kind === 'session') {
+    sessionActions.pick(target.session, key);
+  } else {
+    orchestratorActions.pick(target.orchestrator, key);
   }
 }
 
@@ -918,10 +746,21 @@ watch(
   <SessionEditModal
     :model-value="sessionToEdit !== null"
     :session="sessionToEdit"
-    :loading="bSavingSessionEdit"
+    :loading="sessionActions.bSavingEdit.value"
     :existing-tags="existingSessionTags"
     @update:model-value="(show) => !show && (sessionToEdit = null)"
-    @save="saveSessionEdit"
+    @save="sessionActions.saveEdit"
+  />
+
+  <PromptModal
+    :model-value="orchestratorToEdit !== null"
+    title="Edit orchestrator name"
+    label="Name"
+    :initial-value="orchestratorToEdit?.name ?? ''"
+    confirm-label="Save"
+    :loading="orchestratorActions.bSavingEdit.value"
+    @update:model-value="(show) => !show && (orchestratorToEdit = null)"
+    @confirm="orchestratorActions.saveEdit"
   />
 
   <ConfirmModal
@@ -929,9 +768,9 @@ watch(
     title="Delete session"
     :description="`Delete '${sessionPendingDelete?.name ?? ''}'? This cannot be undone.`"
     confirm-label="Delete"
-    :loading="bDeletingSession"
+    :loading="sessionActions.bDeleting.value"
     @update:model-value="(show) => !show && (sessionPendingDelete = null)"
-    @confirm="confirmDeleteSession"
+    @confirm="sessionActions.confirmRemove"
   />
 
   <ConfirmModal
@@ -939,9 +778,9 @@ watch(
     title="Delete orchestrator"
     :description="`Delete '${orchestratorPendingDelete?.name ?? ''}'? Step sessions from this plan will be removed too. This cannot be undone.`"
     confirm-label="Delete"
-    :loading="bDeletingOrchestrator"
+    :loading="orchestratorActions.bDeleting.value"
     @update:model-value="(show) => !show && (orchestratorPendingDelete = null)"
-    @confirm="confirmDeleteOrchestrator"
+    @confirm="orchestratorActions.confirmRemove"
   />
 </template>
 

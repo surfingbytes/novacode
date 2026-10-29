@@ -11,7 +11,8 @@ import PageShell from '@/components/layout/PageShell.vue';
 import ConfirmModal from '@/components/ConfirmModal.vue';
 
 // classes
-import { apiErrorMessage, authApi } from '@/classes/api';
+import { authApi } from '@/classes/api';
+import { notifyApiError } from '@/lib/notifyApiError';
 import { relativeTimeShort } from '@/utils/relativeTime';
 import { passwordLengthError, requiredTrimmed } from '@/utils/formValidation';
 import { useInlineFieldErrors } from '@/composables/useInlineFieldErrors';
@@ -141,7 +142,7 @@ async function loadApiTokens(): Promise<void> {
     const response = await authApi.listApiTokens();
     apiTokens.value = response.data;
   } catch (err: unknown) {
-    toastStore.error(apiErrorMessage(err, 'Failed to load API keys'));
+    notifyApiError(err, 'Failed to load API keys');
   } finally {
     bLoadingApiTokens.value = false;
   }
@@ -159,7 +160,7 @@ async function createApiToken(): Promise<void> {
     newApiTokenName.value = '';
     apiTokens.value = [response.data, ...apiTokens.value];
   } catch (err: unknown) {
-    toastStore.error(apiErrorMessage(err, 'Failed to create API key'));
+    notifyApiError(err, 'Failed to create API key');
   } finally {
     bCreatingApiToken.value = false;
   }
@@ -190,7 +191,7 @@ async function confirmRevokeApiToken(): Promise<void> {
     tokenToRevoke.value = null;
     toastStore.success('API key revoked');
   } catch (err: unknown) {
-    toastStore.error(apiErrorMessage(err, 'Failed to revoke API key'));
+    notifyApiError(err, 'Failed to revoke API key');
   } finally {
     bRevokingApiToken.value = false;
   }

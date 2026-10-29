@@ -132,5 +132,3 @@ export function useSessionHeaderInfo(options: UseSessionHeaderInfoOptions) {
     loadRulesCount
   };
 }
-
-export type UseSessionHeaderInfo = ReturnType<typeof useSessionHeaderInfo>;

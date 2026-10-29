@@ -13,7 +13,8 @@ import { useOrchestratorsStore } from '@/stores/orchestrators';
 import { useToastStore } from '@/stores/toasts';
 
 // classes
-import { apiErrorMessage, workspaceApi } from '@/classes/api';
+import { workspaceApi } from '@/classes/api';
+import { notifyApiError } from '@/lib/notifyApiError';
 import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 
 // composables
@@ -68,9 +69,9 @@ watch(workspaceId, (id) => {
   if (!id) {
     return;
   }
-  ensureData();
-  store.setActiveWorkspace(id);
-  fetchOrchestrators();
+  void ensureData();
+  void store.setActiveWorkspace(id);
+  void fetchOrchestrators();
   void fetchWorkspaceUsage();
 });
 watch(bShowArchived, () => {
@@ -102,7 +103,7 @@ const handleToggleFavorite = async (): Promise<void> => {
   try {
     await store.toggleFavorite(current.id);
   } catch (err: unknown) {
-    toastStore.error(apiErrorMessage(err, 'Failed to update favorite'));
+    notifyApiError(err, 'Failed to update favorite');
   }
 };
 
@@ -133,10 +134,10 @@ async function fetchWorkspaceUsage(): Promise<void> {
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 
 onMounted(() => {
-  ensureData();
+  void ensureData();
   ensureAgentCapabilitiesLoaded();
-  store.setActiveWorkspace(workspaceId.value);
-  fetchOrchestrators();
+  void store.setActiveWorkspace(workspaceId.value);
+  void fetchOrchestrators();
   void fetchWorkspaceUsage();
 });
 

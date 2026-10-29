@@ -90,5 +90,3 @@ export function useSessionOrchestrator(options: UseSessionOrchestratorOptions) {
     openOrchestratorPage
   };
 }
-
-export type UseSessionOrchestrator = ReturnType<typeof useSessionOrchestrator>;

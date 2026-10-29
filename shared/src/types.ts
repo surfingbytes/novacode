@@ -6,6 +6,14 @@
  * (e.g. the API sent `claude_limit_detected` frames its own types didn't know).
  */
 
+// types
+import type {
+  CreateWorkspaceBody,
+  UpdateWorkspaceBody,
+  WorkspaceResponse,
+  WorkspaceUsageSummary
+} from './apiSchemas/workspaces.js';
+
 // ---------------------------------- Agents ----------------------------------
 
 export type AgentType = 'cursor-agent' | 'claude' | 'mistral-vibe' | 'open-code' | 'codex';
@@ -282,26 +290,10 @@ export interface ChatWsServerMessage {
 /** Max workspaces that can be marked favorite (sidebar quick-start row). */
 export const MAX_FAVORITE_WORKSPACES = 5;
 
-export interface Workspace {
-  id: string;
-  name: string;
-  path: string;
-  group?: string | null;
-  createdAt: string;
-  gitUserName?: string | null;
-  gitUserEmail?: string | null;
-  color?: string | null;
-  sortOrder?: number | null;
+/** API workspace payload (WorkspaceSchema) with `defaultAgentType` narrowed to known agents. */
+export type Workspace = Omit<WorkspaceResponse, 'defaultAgentType'> & {
   defaultAgentType?: AgentType | null;
-  tags?: string[] | null;
-  archived: boolean;
-  isFavorite: boolean;
-  favoriteOrder?: number | null;
-  /** Forge connection id; null = pick by the git remote's host. */
-  forgeConnectionId?: string | null;
-  /** Repo path on the forge; null = derive from the git remote. */
-  forgeRepo?: string | null;
-}
+};
 
 export interface PlanDocumentSummary {
   id: string;
@@ -367,14 +359,6 @@ export interface SessionUsageTurn extends SessionUsageSnapshot {
   id: string;
   sessionId: string;
   createdAt: string;
-}
-
-export interface WorkspaceUsageSummary {
-  turnCount: number;
-  used: number;
-  size: number;
-  costAmount: number | null;
-  costCurrency: string | null;
 }
 
 /** Token/cost totals for one session (sum of persisted usage turns). */
@@ -685,29 +669,8 @@ export interface SaveOpenCodeProviderPayload {
   apiKey?: string;
 }
 
-export interface CreateWorkspacePayload {
-  name: string;
-  path: string;
-  group?: string | null;
-  gitUserName?: string | null;
-  gitUserEmail?: string | null;
-  color?: string | null;
-  defaultAgentType?: AgentType | null;
-  tags?: string[] | null;
-  forgeRepo?: string | null;
-  forgeConnectionId?: string | null;
-}
+/** Request body of POST /api/workspaces (CreateWorkspaceBodySchema). */
+export type CreateWorkspacePayload = CreateWorkspaceBody;
 
-export interface UpdateWorkspacePayload {
-  name?: string;
-  path?: string;
-  group?: string | null;
-  gitUserName?: string | null;
-  gitUserEmail?: string | null;
-  color?: string | null;
-  defaultAgentType?: AgentType | null;
-  tags?: string[] | null;
-  isFavorite?: boolean;
-  forgeRepo?: string | null;
-  forgeConnectionId?: string | null;
-}
+/** Request body of PUT /api/workspaces/:id (UpdateWorkspaceBodySchema). */
+export type UpdateWorkspacePayload = UpdateWorkspaceBody;

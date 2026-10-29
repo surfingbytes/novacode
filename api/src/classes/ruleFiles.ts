@@ -336,7 +336,7 @@ async function rulesDirSignature(rulesDir: string, files: RuleFileSummary[]): Pr
 }
 
 /** Read injectable rule sections from a directory. Missing dirs and unreadable files are skipped. */
-export async function readRuleSections(rulesDir: string): Promise<RuleFileSection[]> {
+async function readRuleSections(rulesDir: string): Promise<RuleFileSection[]> {
   const listed = await listRuleFiles(rulesDir, { missingDir: 'empty' });
   if (!listed.ok || listed.value.length === 0) {
     ruleSectionsCache.delete(rulesDir);

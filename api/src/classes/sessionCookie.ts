@@ -2,7 +2,7 @@
 
 export const SESSION_COOKIE_NAME = 'nc_session';
 export const JWT_EXPIRES_IN = '7d';
-export const SESSION_MAX_AGE_SEC = 7 * 24 * 60 * 60;
+const SESSION_MAX_AGE_SEC = 7 * 24 * 60 * 60;
 
 export function parseCookieHeader(header: string | undefined): Record<string, string> {
   const out: Record<string, string> = {};

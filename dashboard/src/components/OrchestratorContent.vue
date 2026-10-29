@@ -1,12 +1,10 @@
 <script setup lang="ts">
 // node_modules
-import { ref, computed, onBeforeUnmount, onMounted, watch } from 'vue';
+import { ref, computed, onBeforeUnmount, onMounted, watch, defineAsyncComponent } from 'vue';
 import { useRouter } from 'vue-router';
 
 // components
 import OrchestratorPanel from '@/components/OrchestratorPanel.vue';
-import FilesView from '@/components/workspace/FilesComponent.vue';
-import GitView from '@/components/workspace/GitView.vue';
 import ConfirmModal from '@/components/ConfirmModal.vue';
 import PromptModal from '@/components/PromptModal.vue';
 import EntityDetailHeader from '@/components/ui/EntityDetailHeader.vue';
@@ -15,10 +13,10 @@ import BottomTabBar from '@/components/ui/BottomTabBar.vue';
 
 // classes
 import { orchestratorApi } from '@/classes/api';
+import { notifyApiError } from '@/lib/notifyApiError';
 
 // stores
 import { useWorkspacesStore } from '@/stores/workspaces';
-import { useToastStore } from '@/stores/toasts';
 import { useOrchestratorsStore } from '@/stores/orchestrators';
 
 // utils
@@ -26,6 +24,10 @@ import { setViewingOrchestrator } from '@/utils/sessionUnread';
 
 // types
 import type { Orchestrator } from '@/@types/index';
+
+// tab-only views load lazily so the session chunk stays small
+const FilesView = defineAsyncComponent(() => import('@/components/workspace/FilesComponent.vue'));
+const GitView = defineAsyncComponent(() => import('@/components/workspace/GitView.vue'));
 
 // -------------------------------------------------- Props --------------------------------------------------
 
@@ -46,7 +48,6 @@ const emit = defineEmits<{
 
 const router = useRouter();
 const workspacesStore = useWorkspacesStore();
-const toastStore = useToastStore();
 const orchestratorsStore = useOrchestratorsStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
@@ -92,9 +93,9 @@ async function deleteOrchestrator(): Promise<void> {
   bDeleting.value = true;
   try {
     await orchestratorApi.remove(props.workspaceId, props.orchestratorId);
-    router.push({ name: 'workspace-sessions', params: { id: props.workspaceId } });
-  } catch {
-    toastStore.error('Failed to delete orchestrator');
+    await router.push({ name: 'workspace-sessions', params: { id: props.workspaceId } });
+  } catch (err: unknown) {
+    notifyApiError(err, 'Failed to delete orchestrator');
     bDeleting.value = false;
     bShowDeleteModal.value = false;
   }
@@ -109,8 +110,8 @@ async function toggleArchive(): Promise<void> {
       archived: !orchestrator.value.archived,
     });
     orchestratorsStore.upsertOrchestrator(updated);
-  } catch {
-    toastStore.error('Failed to toggle orchestrator archive');
+  } catch (err: unknown) {
+    notifyApiError(err, 'Failed to toggle orchestrator archive');
   }
 }
 
@@ -123,8 +124,8 @@ async function toggleFavorite(): Promise<void> {
       isFavorite: !orchestrator.value.isFavorite,
     });
     orchestratorsStore.upsertOrchestrator(updated);
-  } catch {
-    toastStore.error('Failed to update favorite');
+  } catch (err: unknown) {
+    notifyApiError(err, 'Failed to update favorite');
   }
 }
 
@@ -154,8 +155,8 @@ async function confirmRename(nextName: string): Promise<void> {
     });
     orchestratorsStore.upsertOrchestrator(updated);
     bShowRenameModal.value = false;
-  } catch {
-    toastStore.error('Failed to rename orchestrator');
+  } catch (err: unknown) {
+    notifyApiError(err, 'Failed to rename orchestrator');
   } finally {
     bRenaming.value = false;
   }
@@ -168,7 +169,7 @@ function updateOrchestratorFromPanel(o: Orchestrator): void {
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 
 onMounted(() => {
-  fetchOrchestrator();
+  void fetchOrchestrator();
 });
 
 watch(
@@ -179,7 +180,7 @@ watch(
     }
     // The orchestrator itself comes from the store (reactive on id change).
     activeTab.value = 'orchestrator';
-    fetchOrchestrator();
+    void fetchOrchestrator();
   },
 );
 

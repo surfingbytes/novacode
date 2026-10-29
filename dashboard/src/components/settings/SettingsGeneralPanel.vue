@@ -7,7 +7,8 @@ import { isOneShotAgentType, pickInexpensiveModel } from '@novacode/shared';
 import AgentModelPicker from '@/components/AgentModelPicker.vue';
 
 // classes
-import { isGloballyToasted, settingsApi } from '@/classes/api';
+import { settingsApi } from '@/classes/api';
+import { notifyApiError } from '@/lib/notifyApiError';
 
 // lib
 import {
@@ -35,7 +36,6 @@ import { isSendOnEnter, setSendOnEnter } from '@/lib/sendOnEnter';
 import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 
 // stores
-import { useToastStore } from '@/stores/toasts';
 
 // types
 import type { AgentModelOption, AgentType } from '@/@types/index';
@@ -44,7 +44,6 @@ import type { AgentModelOption, AgentType } from '@/@types/index';
 import { agentSelectedStyle, agentTypeLabel } from '@/utils/agentTypeMeta';
 
 // -------------------------------------------------- Stores --------------------------------------------------
-const toastStore = useToastStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const activeThemeId = ref<string>(
@@ -151,7 +150,7 @@ const selectTheme = async (themeId: string): Promise<void> => {
   try {
     await settingsApi.update({ theme: themeId });
   } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Save theme failed');
+    notifyApiError(err, 'Save theme failed');
   } finally {
     bSavingTheme.value = false;
   }
@@ -170,7 +169,7 @@ const selectDarkTheme = async (themeId: string): Promise<void> => {
   try {
     await settingsApi.update({ darkTheme: themeId });
   } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Save theme failed');
+    notifyApiError(err, 'Save theme failed');
   } finally {
     bSavingTheme.value = false;
   }
@@ -189,7 +188,7 @@ const selectLightTheme = async (themeId: string): Promise<void> => {
   try {
     await settingsApi.update({ lightTheme: themeId });
   } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Save theme failed');
+    notifyApiError(err, 'Save theme failed');
   } finally {
     bSavingTheme.value = false;
   }
@@ -209,7 +208,7 @@ const toggleAutoTheme = async (): Promise<void> => {
   try {
     await settingsApi.update({ autoTheme: bAutoTheme.value });
   } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Save theme failed');
+    notifyApiError(err, 'Save theme failed');
   } finally {
     bSavingTheme.value = false;
   }
@@ -256,7 +255,7 @@ const saveUtilitySettings = async (): Promise<void> => {
       utilityModelSelection: utilityModelSelection.value
     });
   } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Save utility settings failed');
+    notifyApiError(err, 'Save utility settings failed');
   } finally {
     bSavingUtility.value = false;
   }
@@ -315,7 +314,7 @@ const toggleClaudeAutoContinue = async (): Promise<void> => {
     await settingsApi.update({ claudeAutoContinue: bClaudeAutoContinue.value });
   } catch (err) {
     bClaudeAutoContinue.value = !bClaudeAutoContinue.value;
-    if (!isGloballyToasted(err)) toastStore.error('Save auto-continue failed');
+    notifyApiError(err, 'Save auto-continue failed');
   } finally {
     bSavingClaudeAutoContinue.value = false;
   }
@@ -377,7 +376,7 @@ const loadSettings = async (): Promise<void> => {
 };
 
 onMounted((): void => {
-  loadSettings();
+  void loadSettings();
 });
 </script>
 

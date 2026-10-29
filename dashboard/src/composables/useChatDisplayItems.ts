@@ -71,5 +71,3 @@ export function useChatDisplayItems(options: UseChatDisplayItemsOptions) {
     streamingDisplayItems
   };
 }
-
-export type UseChatDisplayItems = ReturnType<typeof useChatDisplayItems>;

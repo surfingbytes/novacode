@@ -1,0 +1,24 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  // Prisma output (api/src/generated), dist/ and build/ are gitignored, which knip skips by default.
+  "workspaces": {
+    ".": {
+      "entry": [],
+      "project": []
+    },
+    "api": {
+      "entry": ["src/index.ts", "scripts/*.mjs"],
+      "project": ["src/**/*.ts", "scripts/**/*.mjs", "prisma/**/*.prisma"],
+      // Only imported by the gitignored Prisma generated client (src/generated).
+      "ignoreDependencies": ["@prisma/client"]
+    },
+    "dashboard": {
+      "entry": ["index.html"],
+      "project": ["src/**/*.{ts,vue,css}", "*.ts"]
+    },
+    "shared": {
+      "entry": ["src/index.ts", "scripts/*.cjs"],
+      "project": ["src/**/*.ts", "scripts/**/*.cjs"]
+    }
+  }
+}

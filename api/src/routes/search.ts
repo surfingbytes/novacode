@@ -2,33 +2,11 @@
 import type { FastifyInstance } from 'fastify';
 import { Type } from '@sinclair/typebox';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
+import { SearchResponseSchema } from '@novacode/shared';
 
 // classes
 import { jwtPreHandler } from '../classes/auth';
 import { db } from '../classes/database';
-
-const SearchResultSchema = Type.Object({
-  id: Type.String(),
-  name: Type.String(),
-  type: Type.Union([
-    Type.Literal('workspace'),
-    Type.Literal('session'),
-    Type.Literal('orchestrator'),
-    Type.Literal('role-template'),
-    Type.Literal('automation')
-  ]),
-  workspaceId: Type.Optional(Type.String()),
-  workspaceName: Type.Optional(Type.String()),
-  updatedAt: Type.Optional(Type.String())
-});
-
-const SearchResponseSchema = Type.Object({
-  workspaces: Type.Array(SearchResultSchema),
-  sessions: Type.Array(SearchResultSchema),
-  orchestrators: Type.Array(SearchResultSchema),
-  roleTemplates: Type.Array(SearchResultSchema),
-  automations: Type.Array(SearchResultSchema)
-});
 
 export async function searchRoutes(fastify: FastifyInstance): Promise<void> {
   // -------------------------------------------------- Setup --------------------------------------------------
@@ -63,7 +41,7 @@ export async function searchRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.send(results);
       } catch (error) {
         request.log.error({ err: error }, 'Search failed');
-        return reply.status(500).send({ error: 'Failed to perform search' });
+        return reply.code(500).send({ error: 'Failed to perform search' });
       }
     }
   );

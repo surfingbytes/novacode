@@ -1,14 +1,26 @@
 // node_modules
 import { FastifyInstance } from 'fastify';
-import { Type, type Static } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
 import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
+import {
+  CreateSessionBodySchema,
+  PlanUpdateBodySchema,
+  PlanUpdateResponseSchema,
+  SessionBulkArchiveBodySchema,
+  SessionBulkArchiveResponseSchema,
+  SessionBulkDeleteResponseSchema,
+  SessionBulkIdsBodySchema,
+  UpdateSessionBodySchema,
+  type CreateSessionBody,
+  type UpdateSessionBody
+} from '@novacode/shared';
 
 // classes
 import { db, FavoriteLimitError, normalizeTagStringList } from '../classes/database';
 import { normalizeSessionForApi } from '../classes/sessionNormalize';
 import { jwtPreHandler } from '../classes/auth';
 import { createSessionWithAgent } from '../classes/sessionService';
-import { closeAcpSessionForNovaSession } from '../classes/acpSessionClose';
+import { disposeSession } from '../classes/dispose';
 import { mergeInternalSessionConfig } from '../classes/linkedPlanContext';
 import { normalizeApprovalPolicy } from '../classes/approvalPolicy';
 import { appendPlanUpdateToActiveRun, setActiveRunApprovalPolicy } from '../classes/chatEngine';
@@ -21,28 +33,17 @@ import {
 } from '../classes/planDocumentSources';
 import { resolveWorkspaceAbsolutePath } from '../classes/workspacePaths';
 import type { PlanDocumentSummary } from '../classes/planDocuments';
-import { workspaceTerminalManager } from '../classes/workspaceTerminalManager';
-import { getActiveSessionIds, getActiveBusySubagents, cancelRun } from './chat';
-import { deleteSessionImages } from './images';
+import { getActiveSessionIds, getActiveBusySubagents } from '../classes/chatEngine';
 import {
   broadcastWorkspaceSessionDeleted,
   broadcastWorkspaceSessionUpsert,
   broadcastWorkspaceSessionsRefresh
-} from './ws';
+} from '../classes/wsBroadcast';
 import { markSessionRead } from '../classes/sessionUnread';
-
-// types
-import type { AgentType } from '../@types/index';
-import type { LinkedPlanContext } from '../classes/linkedPlanContext';
 
 // -------------------------------------------------- Schemas --------------------------------------------------
 
-// `type: [..., 'null']` instead of Type.Union: AJV coerces inside anyOf branches,
-// which would turn null into '' (or a tag string into a one-element array).
-const NullableString = Type.Unsafe<string | null>({ type: ['string', 'null'] });
-
-/** Tags arrive as a string list, a comma-separated string or null (see parseTagsFromBody). */
-const TagsSchema = Type.Union([NullableString, Type.Array(Type.String())]);
+const ErrorSchema = Type.Object({ error: Type.String() });
 
 const WorkspaceParamsSchema = Type.Object({ workspaceId: Type.String() });
 
@@ -55,53 +56,6 @@ const PlanDocumentParamsSchema = Type.Object({
   workspaceId: Type.String(),
   sessionId: Type.String(),
   planId: Type.String()
-});
-
-const CreateSessionBodySchema = Type.Object({
-  name: Type.Optional(Type.String()),
-  tags: Type.Optional(TagsSchema),
-  agentType: Type.Optional(Type.Unsafe<AgentType>(Type.String())),
-  modelSelection: Type.Optional(NullableString),
-  linkedPlanContext: Type.Optional(
-    Type.Unsafe<LinkedPlanContext | null>({ type: ['object', 'null'] })
-  ),
-  sessionMode: Type.Optional(NullableString),
-  approvalPolicy: Type.Optional(NullableString)
-});
-
-const UpdateSessionBodySchema = Type.Object({
-  name: Type.Optional(Type.String()),
-  tags: Type.Optional(TagsSchema),
-  archived: Type.Optional(Type.Boolean()),
-  isFavorite: Type.Optional(Type.Boolean()),
-  modelSelection: Type.Optional(Type.String()),
-  sessionMode: Type.Optional(Type.String()),
-  approvalPolicy: Type.Optional(Type.String()),
-  sessionConfigJson: Type.Optional(
-    Type.Union([Type.Null(), Type.Record(Type.String(), Type.String())])
-  )
-});
-
-const PlanUpdateBodySchema = Type.Object({
-  title: Type.Optional(Type.String()),
-  markdown: Type.Optional(Type.String()),
-  entries: Type.Optional(
-    Type.Array(
-      Type.Object({
-        content: Type.String(),
-        status: Type.String(),
-        priority: Type.Optional(Type.String())
-      })
-    )
-  ),
-  planId: Type.Optional(Type.String())
-});
-
-const BulkIdsBodySchema = Type.Object({ ids: Type.Array(Type.String()) });
-
-const BulkArchiveBodySchema = Type.Object({
-  ids: Type.Array(Type.String()),
-  archived: Type.Boolean()
 });
 
 // -------------------------------------------------- Helpers --------------------------------------------------
@@ -205,7 +159,7 @@ export async function sessionsRoutes(fastifyBase: FastifyInstance): Promise<void
     },
     async (request, reply) => {
       const { workspaceId } = request.params;
-      const body = request.body as Static<typeof CreateSessionBodySchema>;
+      const body = request.body as CreateSessionBody;
 
       const tagsParsed = parseTagsFromBody(request.body);
       const result = await createSessionWithAgent({
@@ -221,7 +175,7 @@ export async function sessionsRoutes(fastifyBase: FastifyInstance): Promise<void
 
       if (result.error) {
         const status = result.error === 'Workspace not found' ? 404 : 502;
-        return reply.status(status).send({
+        return reply.code(status).send({
           error: result.error === 'Workspace not found' ? result.error : 'Failed to create chat',
           message: result.error,
           ...(result.errorCode ? { code: result.errorCode } : {}),
@@ -229,12 +183,12 @@ export async function sessionsRoutes(fastifyBase: FastifyInstance): Promise<void
         });
       }
       if (!result.session) {
-        return reply.status(500).send({ error: 'Failed to create session' });
+        return reply.code(500).send({ error: 'Failed to create session' });
       }
 
       const normalized = normalizeSessionForApi(result.session);
       broadcastWorkspaceSessionUpsert(workspaceId, normalized);
-      return reply.status(201).send(normalized);
+      return reply.code(201).send(normalized);
     }
   );
 
@@ -275,7 +229,7 @@ export async function sessionsRoutes(fastifyBase: FastifyInstance): Promise<void
       const { workspaceId, sessionId } = request.params;
       const session = await db.getSession(sessionId);
       if (!session || session.workspaceId !== workspaceId) {
-        return reply.status(404).send({ error: 'Session not found' });
+        return reply.code(404).send({ error: 'Session not found' });
       }
       const workspace = await db.getWorkspace(workspaceId);
       const workspacePath = workspace ? resolveWorkspaceAbsolutePath(workspace.path) : null;
@@ -296,7 +250,7 @@ export async function sessionsRoutes(fastifyBase: FastifyInstance): Promise<void
       const { sessionId } = request.params;
       const session = await db.getSession(sessionId);
       if (!session) {
-        return reply.status(404).send({ error: 'Session not found' });
+        return reply.code(404).send({ error: 'Session not found' });
       }
       const updated = await markSessionRead(sessionId);
       return reply.send(normalizeSessionForApi(updated ?? session));
@@ -311,7 +265,7 @@ export async function sessionsRoutes(fastifyBase: FastifyInstance): Promise<void
       const { workspaceId, sessionId } = request.params;
       const session = await db.getSession(sessionId);
       if (!session || session.workspaceId !== workspaceId) {
-        return reply.status(404).send({ error: 'Session not found' });
+        return reply.code(404).send({ error: 'Session not found' });
       }
       const [turns, summary] = await Promise.all([
         db.listSessionUsage(sessionId),
@@ -330,10 +284,10 @@ export async function sessionsRoutes(fastifyBase: FastifyInstance): Promise<void
     },
     async (request, reply) => {
       const { workspaceId, sessionId } = request.params;
-      const body = request.body as Static<typeof UpdateSessionBodySchema>;
+      const body = request.body as UpdateSessionBody;
       const session = await db.getSession(sessionId);
       if (!session || session.workspaceId !== workspaceId) {
-        return reply.status(404).send({ error: 'Session not found' });
+        return reply.code(404).send({ error: 'Session not found' });
       }
       const patch: {
         name?: string;
@@ -377,12 +331,12 @@ export async function sessionsRoutes(fastifyBase: FastifyInstance): Promise<void
         updated = await db.updateSession(sessionId, patch);
       } catch (err: unknown) {
         if (err instanceof FavoriteLimitError) {
-          return reply.status(400).send({ error: err.message });
+          return reply.code(400).send({ error: err.message });
         }
         throw err;
       }
       if (!updated) {
-        return reply.status(500).send({ error: 'Failed to update session' });
+        return reply.code(500).send({ error: 'Failed to update session' });
       }
       if (patch.approvalPolicy !== undefined) {
         setActiveRunApprovalPolicy(sessionId, patch.approvalPolicy);
@@ -403,7 +357,7 @@ export async function sessionsRoutes(fastifyBase: FastifyInstance): Promise<void
       const { workspaceId, sessionId, planId } = request.params;
       const session = await db.getSession(sessionId);
       if (!session || session.workspaceId !== workspaceId) {
-        return reply.status(404).send({ error: 'Session not found' });
+        return reply.code(404).send({ error: 'Session not found' });
       }
       const workspace = await db.getWorkspace(workspaceId);
       const workspacePath = workspace ? resolveWorkspaceAbsolutePath(workspace.path) : null;
@@ -412,9 +366,9 @@ export async function sessionsRoutes(fastifyBase: FastifyInstance): Promise<void
         session.sessionId
       );
       if (!deleted) {
-        return reply.status(404).send({ error: 'Plan document not found' });
+        return reply.code(404).send({ error: 'Plan document not found' });
       }
-      return reply.status(204).send();
+      return reply.code(204).send();
     }
   );
 
@@ -432,11 +386,11 @@ export async function sessionsRoutes(fastifyBase: FastifyInstance): Promise<void
       const { workspaceId, sessionId, planId } = request.params;
       const { markdown } = request.body;
       if (typeof markdown !== 'string' || !markdown.trim()) {
-        return reply.status(400).send({ error: 'markdown is required' });
+        return reply.code(400).send({ error: 'markdown is required' });
       }
       const session = await db.getSession(sessionId);
       if (!session || session.workspaceId !== workspaceId) {
-        return reply.status(404).send({ error: 'Session not found' });
+        return reply.code(404).send({ error: 'Session not found' });
       }
       const workspace = await db.getWorkspace(workspaceId);
       const workspacePath = workspace ? resolveWorkspaceAbsolutePath(workspace.path) : null;
@@ -446,7 +400,7 @@ export async function sessionsRoutes(fastifyBase: FastifyInstance): Promise<void
         markdown
       );
       if (!updated) {
-        return reply.status(404).send({ error: 'Plan document not found' });
+        return reply.code(404).send({ error: 'Plan document not found' });
       }
       return reply.send(updated);
     }
@@ -459,7 +413,11 @@ export async function sessionsRoutes(fastifyBase: FastifyInstance): Promise<void
     '/api/workspaces/:workspaceId/sessions/:sessionId/plan-update',
     {
       preHandler: jwtPreHandler,
-      schema: { params: SessionParamsSchema, body: PlanUpdateBodySchema }
+      schema: {
+        params: SessionParamsSchema,
+        body: PlanUpdateBodySchema,
+        response: { 200: PlanUpdateResponseSchema, 400: ErrorSchema, 404: ErrorSchema, 500: ErrorSchema }
+      }
     },
     async (request, reply) => {
       const { workspaceId, sessionId } = request.params;
@@ -467,11 +425,11 @@ export async function sessionsRoutes(fastifyBase: FastifyInstance): Promise<void
       const markdown = typeof body.markdown === 'string' ? body.markdown.trim() : '';
       const entries = Array.isArray(body.entries) ? body.entries : [];
       if (!markdown && entries.length === 0) {
-        return reply.status(400).send({ error: 'markdown or entries is required' });
+        return reply.code(400).send({ error: 'markdown or entries is required' });
       }
       const session = await db.getSession(sessionId);
       if (!session || session.workspaceId !== workspaceId) {
-        return reply.status(404).send({ error: 'Session not found' });
+        return reply.code(404).send({ error: 'Session not found' });
       }
 
       const title = typeof body.title === 'string' ? body.title.trim() : '';
@@ -501,7 +459,7 @@ export async function sessionsRoutes(fastifyBase: FastifyInstance): Promise<void
         return appended;
       });
       if (!ok) {
-        return reply.status(500).send({ error: 'Failed to persist plan update' });
+        return reply.code(500).send({ error: 'Failed to persist plan update' });
       }
 
       // Disk is source of truth for file-backed agents (incl. Claude after claim).
@@ -530,22 +488,22 @@ export async function sessionsRoutes(fastifyBase: FastifyInstance): Promise<void
     '/api/workspaces/:workspaceId/sessions/bulk-delete',
     {
       preHandler: jwtPreHandler,
-      schema: { params: WorkspaceParamsSchema, body: BulkIdsBodySchema }
+      schema: {
+        params: WorkspaceParamsSchema,
+        body: SessionBulkIdsBodySchema,
+        response: { 200: SessionBulkDeleteResponseSchema, 400: ErrorSchema }
+      }
     },
     async (request, reply) => {
       const { workspaceId } = request.params;
       const { ids } = request.body;
       if (!Array.isArray(ids) || ids.length === 0) {
-        return reply.status(400).send({ error: 'ids must be a non-empty array' });
+        return reply.code(400).send({ error: 'ids must be a non-empty array' });
       }
       for (const id of ids) {
-        cancelRun(id);
-        workspaceTerminalManager.stop(id);
-        await closeAcpSessionForNovaSession(id);
+        await disposeSession(id, workspaceId);
       }
       const count = await db.deleteManySessions(ids, workspaceId);
-      // clean up uploaded images for each session (non-critical)
-      await Promise.all(ids.map((sessionId) => deleteSessionImages(sessionId)));
       broadcastWorkspaceSessionsRefresh(workspaceId);
       return reply.send({ deleted: count });
     }
@@ -556,13 +514,17 @@ export async function sessionsRoutes(fastifyBase: FastifyInstance): Promise<void
     '/api/workspaces/:workspaceId/sessions/bulk-archive',
     {
       preHandler: jwtPreHandler,
-      schema: { params: WorkspaceParamsSchema, body: BulkArchiveBodySchema }
+      schema: {
+        params: WorkspaceParamsSchema,
+        body: SessionBulkArchiveBodySchema,
+        response: { 200: SessionBulkArchiveResponseSchema, 400: ErrorSchema }
+      }
     },
     async (request, reply) => {
       const { workspaceId } = request.params;
       const { ids, archived } = request.body;
       if (!Array.isArray(ids) || ids.length === 0) {
-        return reply.status(400).send({ error: 'ids must be a non-empty array' });
+        return reply.code(400).send({ error: 'ids must be a non-empty array' });
       }
       const count = await db.archiveManySessions(ids, workspaceId, archived);
       broadcastWorkspaceSessionsRefresh(workspaceId);
@@ -580,19 +542,15 @@ export async function sessionsRoutes(fastifyBase: FastifyInstance): Promise<void
       const { workspaceId, sessionId } = request.params;
       const session = await db.getSession(sessionId);
       if (!session || session.workspaceId !== workspaceId) {
-        return reply.status(404).send({ error: 'Session not found' });
+        return reply.code(404).send({ error: 'Session not found' });
       }
-      cancelRun(sessionId);
-      workspaceTerminalManager.stop(sessionId);
-      await closeAcpSessionForNovaSession(sessionId);
+      await disposeSession(sessionId, workspaceId);
       const success = await db.deleteSession(sessionId);
       if (!success) {
-        return reply.status(500).send({ error: 'Failed to delete session' });
+        return reply.code(500).send({ error: 'Failed to delete session' });
       }
-      // clean up uploaded images for this session (non-critical)
-      await deleteSessionImages(sessionId);
       broadcastWorkspaceSessionDeleted(workspaceId, sessionId);
-      return reply.status(204).send();
+      return reply.code(204).send();
     }
   );
 }

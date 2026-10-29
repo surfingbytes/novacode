@@ -1,7 +1,6 @@
 // node_modules
 import axios, { isAxiosError } from 'axios';
 import { getActivePinia } from 'pinia';
-import { safeGetItem } from '@/lib/safeLocalStorage';
 
 // stores
 import { useApiHealthStore } from '@/stores/apiHealth';
@@ -32,7 +31,6 @@ import type {
   AgentModeOption,
   AgentOptionsResponse,
   AgentConfigOption,
-  LinkedPlanContext,
   OpenCodeProvider,
   SaveOpenCodeProviderPayload,
   ApiToken,
@@ -50,19 +48,38 @@ import type {
   CiStatusResponse,
   CiFixPromptResponse
 } from '@/@types/index';
+import type {
+  CreateSessionBody,
+  FileListResponse,
+  FilePathResponse,
+  FileReadResponse,
+  GitBranchesResponse,
+  GitCheckoutResponse,
+  GitCommitMessageResponse,
+  GitCommitResponse,
+  GitCreateBranchResponse,
+  GitDiffResponse,
+  GitDiscardResponse,
+  GitFetchResponse,
+  GitLogResponse,
+  GitPullResponse,
+  GitPushResponse,
+  GitShowResponse,
+  GitStatusResponse,
+  PlanUpdateBody,
+  PlanUpdateResponse,
+  SearchResponse,
+  SessionBulkArchiveResponse,
+  SessionBulkDeleteResponse,
+  UpdateSessionBody,
+  WorkspaceBrowseResponse,
+  WorkspaceMkdirResponse
+} from '@novacode/shared';
 
 // ---------------------------------- HTTP ----------------------------------
 export const http = axios.create({
   baseURL: import.meta.env.VITE_API_URL || location.origin + '/api',
   withCredentials: true
-});
-
-http.interceptors.request.use((requestConfig) => {
-  const token: string | null = safeGetItem('token');
-  if (token) {
-    requestConfig.headers['Authorization'] = `Bearer ${token}`;
-  }
-  return requestConfig;
 });
 
 function touchApiReachability(ok: boolean): void {
@@ -178,7 +195,7 @@ export function apiErrorToastMessage(error: unknown): string | null {
   }
   const base = status === 403 ? 'Forbidden' : `Server error (${status})`;
   const body: unknown = error.response.data;
-  const detail = body && typeof body === 'object' && 'error' in body ? (body as { error: unknown }).error : undefined;
+  const detail = body && typeof body === 'object' && 'error' in body ? (body).error : undefined;
   return typeof detail === 'string' && detail ? `${base}: ${detail}` : base;
 }
 
@@ -222,7 +239,8 @@ http.interceptors.response.use(
         toastApiError(error);
       }
     }
-    return Promise.reject(error);
+    // Async handler: throwing rejects with the original error, whatever axios handed us.
+    throw error;
   }
 );
 
@@ -276,27 +294,19 @@ export const authApi = {
 };
 
 // ---------------------------------- Workspaces ----------------------------------
-export interface BrowseEntry {
-  name: string;
-  path: string;
-  isDirectory: boolean;
-}
-
 export const workspaceApi = {
   list: (): ReturnType<typeof http.get<Workspace[]>> => http.get<Workspace[]>('/workspaces'),
 
-  browse: (
-    path: string
-  ): ReturnType<typeof http.get<{ path: string; root: string; entries: BrowseEntry[] }>> =>
-    http.get<{ path: string; root: string; entries: BrowseEntry[] }>('/workspaces/browse', {
+  browse: (path: string): ReturnType<typeof http.get<WorkspaceBrowseResponse>> =>
+    http.get<WorkspaceBrowseResponse>('/workspaces/browse', {
       params: { path: path || undefined }
     }),
 
   createFolder: (
     parentPath: string,
     name: string
-  ): ReturnType<typeof http.post<{ path: string }>> =>
-    http.post<{ path: string }>('/workspaces/browse/mkdir', {
+  ): ReturnType<typeof http.post<WorkspaceMkdirResponse>> =>
+    http.post<WorkspaceMkdirResponse>('/workspaces/browse/mkdir', {
       path: parentPath,
       name
     }),
@@ -570,73 +580,16 @@ export const agentAuthApi = {
 };
 
 // ---------------------------------- Git (workspace-scoped) ----------------------------------
-export interface GitFile {
-  status: string;
-  file: string;
-  repo: string;
-}
-
-export interface GitCommit {
-  hash: string;
-  shortHash: string;
-  author: string;
-  date: string;
-  subject: string;
-}
-
-export interface GitRepoStatus {
-  repo: string;
-  currentBranch: string;
-  upstreamBranch: string | null;
-  aheadCount: number;
-  behindCount: number;
-  detached: boolean;
-  dirty: boolean;
-  files: GitFile[];
-}
-
-export interface GitBranch {
-  name: string;
-  current: boolean;
-  upstream: string | null;
-}
-
-export interface GitBranchesResponse {
-  branches: GitBranch[];
-  remoteBranches: string[];
-  currentBranch: string;
-  upstreamBranch: string | null;
-  detached: boolean;
-}
-
-export interface GitPullResponse {
-  output: string;
-  upToDate: boolean;
-  commitCount: number;
-}
-
-export interface GitFetchResponse {
-  output: string;
-  upToDate: boolean;
-  behindCount: number;
-}
-
 export const gitApi = {
-  status: (
-    workspaceId: string
-  ): ReturnType<
-    typeof http.get<{ files: GitFile[]; aheadCount: number; repos: GitRepoStatus[] }>
-  > =>
-    http.get<{ files: GitFile[]; aheadCount: number; repos: GitRepoStatus[] }>(
-      `/git/workspace/${workspaceId}/status`
-    ),
+  status: (workspaceId: string): ReturnType<typeof http.get<GitStatusResponse>> =>
+    http.get<GitStatusResponse>(`/git/workspace/${workspaceId}/status`),
   diff: (
     workspaceId: string,
     file: string,
     status?: string,
     repo?: string
-  ): ReturnType<typeof http.get<{ diff: string }>> =>
-    http.get<{ diff: string }>(`/git/workspace/${workspaceId}/diff`, {
+  ): ReturnType<typeof http.get<GitDiffResponse>> =>
+    http.get<GitDiffResponse>(`/git/workspace/${workspaceId}/diff`, {
       params: { file, status, repo }
     }),
   commit: (
@@ -644,8 +597,8 @@ export const gitApi = {
     message: string,
     files?: string[],
     repo?: string
-  ): ReturnType<typeof http.post<{ hash: string; message: string }>> =>
-    http.post<{ hash: string; message: string }>(`/git/workspace/${workspaceId}/commit`, {
+  ): ReturnType<typeof http.post<GitCommitResponse>> =>
+    http.post<GitCommitResponse>(`/git/workspace/${workspaceId}/commit`, {
       message,
       files,
       repo
@@ -654,16 +607,16 @@ export const gitApi = {
     workspaceId: string,
     files: string[],
     repo?: string
-  ): ReturnType<typeof http.post<{ message: string }>> =>
-    http.post<{ message: string }>(
+  ): ReturnType<typeof http.post<GitCommitMessageResponse>> =>
+    http.post<GitCommitMessageResponse>(
       `/git/workspace/${workspaceId}/commit-message`,
       { files, repo },
       // Slightly above the API one-shot wall clock so the server can return a
       // real error instead of the browser reporting a bare Network Error.
       { timeout: 50_000, retryOnNetworkError: true }
     ),
-  push: (workspaceId: string, repo?: string): ReturnType<typeof http.post<{ output: string }>> =>
-    http.post<{ output: string }>(`/git/workspace/${workspaceId}/push`, undefined, {
+  push: (workspaceId: string, repo?: string): ReturnType<typeof http.post<GitPushResponse>> =>
+    http.post<GitPushResponse>(`/git/workspace/${workspaceId}/push`, undefined, {
       params: { repo }
     }),
   branches: (
@@ -686,8 +639,8 @@ export const gitApi = {
     branch: string,
     repo?: string,
     remoteBranch?: string
-  ): ReturnType<typeof http.post<{ branch: string }>> =>
-    http.post<{ branch: string }>(`/git/workspace/${workspaceId}/checkout`, {
+  ): ReturnType<typeof http.post<GitCheckoutResponse>> =>
+    http.post<GitCheckoutResponse>(`/git/workspace/${workspaceId}/checkout`, {
       branch,
       repo,
       remoteBranch
@@ -698,8 +651,8 @@ export const gitApi = {
     repo?: string,
     startPoint?: string,
     checkout = true
-  ): ReturnType<typeof http.post<{ branch: string; checkedOut: boolean }>> =>
-    http.post<{ branch: string; checkedOut: boolean }>(`/git/workspace/${workspaceId}/branches`, {
+  ): ReturnType<typeof http.post<GitCreateBranchResponse>> =>
+    http.post<GitCreateBranchResponse>(`/git/workspace/${workspaceId}/branches`, {
       branch,
       repo,
       startPoint,
@@ -709,15 +662,15 @@ export const gitApi = {
     workspaceId: string,
     files: string[],
     repo?: string
-  ): ReturnType<typeof http.post<{ discarded: string[] }>> =>
-    http.post<{ discarded: string[] }>(`/git/workspace/${workspaceId}/discard`, { files, repo }),
+  ): ReturnType<typeof http.post<GitDiscardResponse>> =>
+    http.post<GitDiscardResponse>(`/git/workspace/${workspaceId}/discard`, { files, repo }),
 
   log: (
     workspaceId: string,
     repo?: string,
     limit?: number
-  ): ReturnType<typeof http.get<{ commits: GitCommit[] }>> =>
-    http.get<{ commits: GitCommit[] }>(`/git/workspace/${workspaceId}/log`, {
+  ): ReturnType<typeof http.get<GitLogResponse>> =>
+    http.get<GitLogResponse>(`/git/workspace/${workspaceId}/log`, {
       params: { repo, limit }
     }),
 
@@ -725,26 +678,20 @@ export const gitApi = {
     workspaceId: string,
     hash: string,
     repo?: string
-  ): ReturnType<typeof http.get<{ hash: string; patch: string }>> =>
-    http.get<{ hash: string; patch: string }>(`/git/workspace/${workspaceId}/show`, {
+  ): ReturnType<typeof http.get<GitShowResponse>> =>
+    http.get<GitShowResponse>(`/git/workspace/${workspaceId}/show`, {
       params: { hash, repo }
     })
 };
 
 // ---------------------------------- Files (workspace-scoped) ----------------------------------
-export interface FileEntry {
-  name: string;
-  path: string;
-  isDirectory: boolean;
-}
-
 export const filesApi = {
   list: (
     workspaceId: string,
     path?: string,
     opts?: { hidden?: boolean }
-  ): ReturnType<typeof http.get<{ path: string; entries: FileEntry[] }>> =>
-    http.get<{ path: string; entries: FileEntry[] }>(`/workspaces/${workspaceId}/files/list`, {
+  ): ReturnType<typeof http.get<FileListResponse>> =>
+    http.get<FileListResponse>(`/workspaces/${workspaceId}/files/list`, {
       params: {
         ...(path ? { path } : {}),
         ...(opts?.hidden ? { hidden: '1' } : {})
@@ -754,33 +701,30 @@ export const filesApi = {
   read: (
     workspaceId: string,
     path: string
-  ): ReturnType<typeof http.get<{ content: string; path: string; encoding: 'utf8' | 'base64' }>> =>
-    http.get<{ content: string; path: string; encoding: 'utf8' | 'base64' }>(
-      `/workspaces/${workspaceId}/files/read`,
-      {
-        params: { path }
-      }
-    ),
+  ): ReturnType<typeof http.get<FileReadResponse>> =>
+    http.get<FileReadResponse>(`/workspaces/${workspaceId}/files/read`, {
+      params: { path }
+    }),
 
   write: (
     workspaceId: string,
     path: string,
     content: string
-  ): ReturnType<typeof http.put<{ path: string }>> =>
-    http.put<{ path: string }>(`/workspaces/${workspaceId}/files/write`, { path, content }),
+  ): ReturnType<typeof http.put<FilePathResponse>> =>
+    http.put<FilePathResponse>(`/workspaces/${workspaceId}/files/write`, { path, content }),
 
-  mkdir: (workspaceId: string, path: string): ReturnType<typeof http.post<{ path: string }>> =>
-    http.post<{ path: string }>(`/workspaces/${workspaceId}/files/mkdir`, { path }),
+  mkdir: (workspaceId: string, path: string): ReturnType<typeof http.post<FilePathResponse>> =>
+    http.post<FilePathResponse>(`/workspaces/${workspaceId}/files/mkdir`, { path }),
 
   rename: (
     workspaceId: string,
     from: string,
     to: string
-  ): ReturnType<typeof http.post<{ path: string }>> =>
-    http.post<{ path: string }>(`/workspaces/${workspaceId}/files/rename`, { from, to }),
+  ): ReturnType<typeof http.post<FilePathResponse>> =>
+    http.post<FilePathResponse>(`/workspaces/${workspaceId}/files/rename`, { from, to }),
 
-  remove: (workspaceId: string, path: string): ReturnType<typeof http.delete<{ path: string }>> =>
-    http.delete<{ path: string }>(`/workspaces/${workspaceId}/files`, { params: { path } })
+  remove: (workspaceId: string, path: string): ReturnType<typeof http.delete<FilePathResponse>> =>
+    http.delete<FilePathResponse>(`/workspaces/${workspaceId}/files`, { params: { path } })
 };
 
 // ---------------------------------- WebSocket ----------------------------------
@@ -805,10 +749,6 @@ export const buildChatWsUrl = (sessionId: string): string => {
 
 export const buildSessionTerminalWsUrl = (workspaceId: string, sessionId: string): string => {
   return `${wsBase()}/ws/workspaces/${workspaceId}/sessions/${sessionId}/terminal`;
-};
-
-export const buildWorkspaceSessionsWsUrl = (workspaceId: string): string => {
-  return `${wsBase()}/ws/workspaces/${workspaceId}/sessions`;
 };
 
 export const buildSessionsWsUrl = (): string => {
@@ -855,31 +795,14 @@ export const sessionsApi = {
 
   create: (
     workspaceId: string,
-    payload: {
-      name?: string;
-      tags?: string[] | null;
-      agentType?: AgentType;
-      modelSelection?: string | null;
-      linkedPlanContext?: LinkedPlanContext | null;
-      sessionMode?: string | null;
-      approvalPolicy?: ApprovalPolicy;
-    }
+    payload: CreateSessionBody
   ): ReturnType<typeof http.post<Session>> =>
     http.post<Session>(`/workspaces/${workspaceId}/sessions`, payload),
 
   update: (
     workspaceId: string,
     sessionId: string,
-    patch: {
-      name?: string;
-      tags?: string[] | null;
-      archived?: boolean;
-      isFavorite?: boolean;
-      modelSelection?: string;
-      sessionMode?: string;
-      approvalPolicy?: ApprovalPolicy;
-      sessionConfigJson?: Record<string, string> | null;
-    }
+    patch: UpdateSessionBody
   ): ReturnType<typeof http.patch<Session>> =>
     http.patch<Session>(`/workspaces/${workspaceId}/sessions/${sessionId}`, patch),
 
@@ -913,27 +836,22 @@ export const sessionsApi = {
   persistPlanUpdate: (
     workspaceId: string,
     sessionId: string,
-    payload: {
-      title?: string;
-      markdown?: string;
-      entries?: Array<{ content: string; status: string; priority?: string }>;
-      planId?: string;
-    }
-  ): ReturnType<typeof http.post<{ ok: boolean }>> =>
-    http.post(`/workspaces/${workspaceId}/sessions/${sessionId}/plan-update`, payload),
+    payload: PlanUpdateBody
+  ): ReturnType<typeof http.post<PlanUpdateResponse>> =>
+    http.post<PlanUpdateResponse>(`/workspaces/${workspaceId}/sessions/${sessionId}/plan-update`, payload),
 
   bulkDelete: (
     workspaceId: string,
     ids: string[]
-  ): ReturnType<typeof http.post<{ deleted: number }>> =>
-    http.post<{ deleted: number }>(`/workspaces/${workspaceId}/sessions/bulk-delete`, { ids }),
+  ): ReturnType<typeof http.post<SessionBulkDeleteResponse>> =>
+    http.post<SessionBulkDeleteResponse>(`/workspaces/${workspaceId}/sessions/bulk-delete`, { ids }),
 
   bulkArchive: (
     workspaceId: string,
     ids: string[],
     archived: boolean
-  ): ReturnType<typeof http.post<{ updated: number }>> =>
-    http.post<{ updated: number }>(`/workspaces/${workspaceId}/sessions/bulk-archive`, {
+  ): ReturnType<typeof http.post<SessionBulkArchiveResponse>> =>
+    http.post<SessionBulkArchiveResponse>(`/workspaces/${workspaceId}/sessions/bulk-archive`, {
       ids,
       archived
     }),
@@ -952,17 +870,13 @@ export const sessionsApi = {
 
   imageUrl: (sessionId: string, filename: string): string => {
     const base = (import.meta.env.VITE_API_URL ?? location.origin + '/api').replace(/\/$/, '');
-    const token = safeGetItem('token') ?? '';
-    const url = `${base}/sessions/${sessionId}/images/${encodeURIComponent(filename)}`;
-    return token ? `${url}?token=${encodeURIComponent(token)}` : url;
+    return `${base}/sessions/${sessionId}/images/${encodeURIComponent(filename)}`;
   },
 
   /** Image a tool read from disk (its base64 copy is not kept in chat history). */
   toolImageUrl: (path: string): string => {
     const base = (import.meta.env.VITE_API_URL ?? location.origin + '/api').replace(/\/$/, '');
-    const token = safeGetItem('token') ?? '';
-    const url = `${base}/files/tool-image?path=${encodeURIComponent(path)}`;
-    return token ? `${url}&token=${encodeURIComponent(token)}` : url;
+    return `${base}/files/tool-image?path=${encodeURIComponent(path)}`;
   }
 };
 
@@ -1143,6 +1057,14 @@ export const automationsApi = {
 
   getRun: (id: string, runId: string): ReturnType<typeof http.get<AutomationRun>> =>
     http.get<AutomationRun>(`/automations/${id}/runs/${runId}`)
+};
+
+// ---------------------------------- Search ----------------------------------
+export const searchApi = {
+  query: async (query: string, signal?: AbortSignal): Promise<SearchResponse> => {
+    const response = await http.get<SearchResponse>('/search', { params: { query }, signal });
+    return response.data;
+  }
 };
 
 // ---------------------------------- Workspace rules ----------------------------------

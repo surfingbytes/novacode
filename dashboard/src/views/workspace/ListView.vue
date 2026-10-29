@@ -18,11 +18,13 @@ import { useWorkspacesStore } from '@/stores/workspaces';
 import { useToastStore } from '@/stores/toasts';
 
 // composables
+import { useAgentAuth } from '@/composables/useAgentAuth';
 import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
 import { useCreateSession } from '@/composables/useCreateSession';
 
 // classes
-import { agentAuthApi, apiErrorMessage, settingsApi } from '@/classes/api';
+import { apiErrorMessage, settingsApi } from '@/classes/api';
+import { notifyApiError } from '@/lib/notifyApiError';
 
 // types
 import type { AgentType, Workspace } from '@/@types/index';
@@ -41,6 +43,8 @@ const {
   bCapabilitiesLoaded,
   ensureLoaded: ensureAgentCapabilitiesLoaded
 } = useAgentCapabilities();
+// Warms the shared agent auth status read by Setup and Settings
+const agentAuth = useAgentAuth();
 const {
   bShowNewSession,
   newSessionWorkspace,
@@ -61,12 +65,6 @@ const confirmingDeleteId = ref<string | null>(null);
 const archivingId = ref<string | null>(null);
 const bShowArchived = ref<boolean>(false);
 
-// First-start overlay: show when no integration is active or no git credentials
-const bFirstStartCheckDone = ref<boolean>(false);
-const bCursorAuthenticated = ref<boolean>(false);
-const bClaudeAuthenticated = ref<boolean>(false);
-const bVibeConfigured = ref<boolean>(false);
-const bHasGitCredentials = ref<boolean>(false);
 const newGroupNames = ref<string[]>([]);
 const bShowWorkspaceDeleteModal = ref<boolean>(false);
 const deletingWorkspace = ref<Workspace | undefined>(undefined);
@@ -174,7 +172,7 @@ const busyWorkspaceIds = computed(() => {
 
 // -------------------------------------------------- Methods --------------------------------------------------
 const openWorkspace = (id: string): void => {
-  router.push(`/workspace/${id}`);
+  void router.push(`/workspace/${id}`);
 };
 
 const workspaceHasBusySession = (id: string): boolean => busyWorkspaceIds.value.has(id);
@@ -235,8 +233,8 @@ const handleArchiveWorkspace = async (workspace: Workspace, archived: boolean): 
   archivingId.value = workspace.id;
   try {
     await store.archiveWorkspace(workspace.id, archived);
-  } catch {
-    toastStore.error(`Failed to ${archived ? 'archive' : 'unarchive'} workspace`);
+  } catch (err: unknown) {
+    notifyApiError(err, `Failed to ${archived ? 'archive' : 'unarchive'} workspace`);
   } finally {
     archivingId.value = null;
   }
@@ -256,7 +254,7 @@ const handleToggleFavorite = async (workspace: Workspace): Promise<void> => {
   try {
     await store.toggleFavorite(workspace.id);
   } catch (err: unknown) {
-    toastStore.error(apiErrorMessage(err, 'Failed to update favorite'));
+    notifyApiError(err, 'Failed to update favorite');
   }
 };
 
@@ -266,10 +264,7 @@ const handleDeleteWorkspace = async (id: string): Promise<void> => {
     await store.deleteWorkspace(id);
     confirmingDeleteId.value = null;
   } catch (err: unknown) {
-    const msg =
-      (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
-      'Failed to delete workspace';
-    toastStore.error(msg);
+    notifyApiError(err, 'Failed to delete workspace');
   } finally {
     deletingId.value = null;
     bShowWorkspaceDeleteModal.value = false;
@@ -330,30 +325,10 @@ function onWorkspaceContextPick(key: string): void {
 
 const fetchFirstStartStatus = async (): Promise<void> => {
   ensureAgentCapabilitiesLoaded();
-  const [cursorResult, claudeResult, vibeResult, settingsResult] = await Promise.allSettled([
-    agentAuthApi.cursorStatus(),
-    agentAuthApi.claudeStatus(),
-    settingsApi.getVibeApiKeyStatus(),
-    settingsApi.get()
-  ]);
-  if (cursorResult.status === 'fulfilled') {
-    bCursorAuthenticated.value = cursorResult.value.data.authenticated;
+  const [, settingsResult] = await Promise.allSettled([agentAuth.refreshAll(), settingsApi.get()]);
+  if (settingsResult.status === 'fulfilled' && settingsResult.value.data.workspaceBrowseRoot) {
+    workspaceBrowseRoot.value = settingsResult.value.data.workspaceBrowseRoot;
   }
-  if (claudeResult.status === 'fulfilled') {
-    bClaudeAuthenticated.value = claudeResult.value.data.authenticated;
-  }
-  if (vibeResult.status === 'fulfilled') {
-    bVibeConfigured.value = vibeResult.value.data.configured;
-  }
-  if (settingsResult.status === 'fulfilled') {
-    const name = settingsResult.value.data.gitUserName?.trim() ?? '';
-    const email = settingsResult.value.data.gitUserEmail?.trim() ?? '';
-    bHasGitCredentials.value = name.length > 0 && email.length > 0;
-    if (settingsResult.value.data.workspaceBrowseRoot) {
-      workspaceBrowseRoot.value = settingsResult.value.data.workspaceBrowseRoot;
-    }
-  }
-  bFirstStartCheckDone.value = true;
 };
 
 // -------------------------------------------------- Lifecycle --------------------------------------------------

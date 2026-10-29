@@ -50,9 +50,9 @@ const emit = defineEmits<{
             type="button"
             class="button is-icon hover:bg-warning/10! hover:border-warning!"
             :disabled="bBulkArchiving"
-            @click="emit('archive')"
             :aria-label="bShouldUnarchive ? 'Unarchive selected' : 'Archive selected'"
             :title="bShouldUnarchive ? 'Unarchive selected' : 'Archive selected'"
+            @click="emit('archive')"
           >
             <svg
               v-if="bShouldUnarchive"
@@ -93,9 +93,9 @@ const emit = defineEmits<{
             v-if="bHasSelection"
             type="button"
             class="button is-icon is-primary"
-            @click="emit('delete')"
             aria-label="Delete selected"
             title="Delete selected"
+            @click="emit('delete')"
           >
             <svg
               viewBox="0 0 24 24"

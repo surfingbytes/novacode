@@ -2,6 +2,13 @@
 // node_modules
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
+import { isCancel } from 'axios';
+
+// classes
+import { searchApi } from '@/classes/api';
+import { notifyApiError } from '@/lib/notifyApiError';
+
+// stores
 
 // utils
 import { relativeTimeShort } from '@/utils/relativeTime';
@@ -37,6 +44,8 @@ const emit = defineEmits<{
 }>();
 
 // -------------------------------------------------- Constants --------------------------------------------------
+const SEARCH_DEBOUNCE_MS = 200;
+
 const SETTINGS_SEARCH_TERMS: string[] = [
   'setting',
   'settings',
@@ -122,6 +131,11 @@ const errorMessage = ref<string | null>(null);
 const modalRef = ref<HTMLElement | null>(null);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const activeResultIndex = ref<number>(-1);
+
+// Non-reactive search request bookkeeping (debounce, cancellation, stale-response guard).
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let searchAbortController: AbortController | null = null;
+let searchRequestCounter = 0;
 
 // -------------------------------------------------- Computed --------------------------------------------------
 const currentWorkspaceId = computed((): string => {
@@ -267,25 +281,21 @@ async function performSearch(): Promise<void> {
     return;
   }
 
+  searchAbortController?.abort();
+  const controller = new AbortController();
+  searchAbortController = controller;
+  const requestId = ++searchRequestCounter;
+
   bLoading.value = true;
   errorMessage.value = null;
 
   try {
     const query = searchQuery.value.trim();
 
-    // Use server-side search API
-    const response = await fetch(`/api/search?query=${encodeURIComponent(query)}`, {
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error(`Search failed: ${response.status} ${response.statusText}`);
+    const data = await searchApi.query(query, controller.signal);
+    if (requestId !== searchRequestCounter) {
+      return;
     }
-
-    const data = await response.json();
 
     // Add client-side navigation shortcuts for non-entity pages.
     const normalizedQuery = query.toLowerCase();
@@ -331,11 +341,44 @@ async function performSearch(): Promise<void> {
       settings: settingsResults
     };
   } catch (error) {
+    if (requestId !== searchRequestCounter || isCancel(error)) {
+      return;
+    }
     console.error('Search failed:', error);
-    errorMessage.value = 'Failed to perform search. Please try again.';
+    // Keep the results already shown; only fall back to the inline error when there is nothing to show.
+    notifyApiError(error, 'Failed to perform search. Please try again.');
+    if (!hasResults.value) {
+      errorMessage.value = 'Failed to perform search. Please try again.';
+    }
   } finally {
-    bLoading.value = false;
+    if (requestId === searchRequestCounter) {
+      bLoading.value = false;
+      searchAbortController = null;
+    }
   }
+}
+
+function cancelPendingSearch(): void {
+  if (searchDebounceTimer !== null) {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = null;
+  }
+  searchAbortController?.abort();
+  searchAbortController = null;
+  searchRequestCounter++;
+  bLoading.value = false;
+}
+
+function scheduleSearch(): void {
+  cancelPendingSearch();
+  if (!searchQuery.value.trim()) {
+    void performSearch();
+    return;
+  }
+  searchDebounceTimer = setTimeout(() => {
+    searchDebounceTimer = null;
+    void performSearch();
+  }, SEARCH_DEBOUNCE_MS);
 }
 
 function handleDocumentKeydown(event: KeyboardEvent): void {
@@ -346,7 +389,7 @@ function handleDocumentKeydown(event: KeyboardEvent): void {
 }
 
 function scrollActiveResultIntoView(): void {
-  nextTick(() => {
+  void nextTick(() => {
     const el = modalRef.value?.querySelector(
       `[data-flat-index="${activeResultIndex.value}"]`
     );
@@ -447,11 +490,11 @@ function navigateToResult(result: SearchResult): void {
       break;
     }
     case 'workspace':
-      router.push({ name: 'workspace-sessions', params: { id: result.id } });
+      void router.push({ name: 'workspace-sessions', params: { id: result.id } });
       break;
     case 'session':
       if (result.workspaceId) {
-        router.push({
+        void router.push({
           name: 'session',
           params: { id: result.workspaceId, sessionId: result.id }
         });
@@ -459,20 +502,20 @@ function navigateToResult(result: SearchResult): void {
       break;
     case 'orchestrator':
       if (result.workspaceId) {
-        router.push({
+        void router.push({
           name: 'orchestrator',
           params: { id: result.workspaceId, orchestratorId: result.id }
         });
       }
       break;
     case 'role-template':
-      router.push({ name: 'settings', query: { tab: 'templates' } });
+      void router.push({ name: 'settings', query: { tab: 'templates' } });
       break;
     case 'automation':
-      router.push('/automations');
+      void router.push('/automations');
       break;
     case 'settings':
-      router.push('/settings');
+      void router.push('/settings');
       break;
   }
 }
@@ -510,7 +553,7 @@ watch(
   searchQuery,
   () => {
     activeResultIndex.value = -1;
-    performSearch();
+    scheduleSearch();
   },
   { immediate: false }
 );
@@ -532,6 +575,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleDocumentKeydown);
+  cancelPendingSearch();
 });
 </script>
 

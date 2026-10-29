@@ -8,7 +8,8 @@ import { computed, ref, watch, type Ref } from 'vue';
 import type { Router } from 'vue-router';
 
 // classes
-import { apiErrorMessage, sessionsApi } from '@/classes/api';
+import { sessionsApi } from '@/classes/api';
+import { notifyApiError } from '@/lib/notifyApiError';
 import { clearSessionPrompt } from '@/lib/pendingSessionPrompt';
 
 // types
@@ -73,7 +74,7 @@ export function useSessionHandoff(options: UseSessionHandoffOptions) {
       clearSessionPrompt(options.workspaceId(), options.sessionId());
     } catch (err) {
       bHandoffPending.value = false;
-      options.toastStore.error(apiErrorMessage(err, 'Failed to continue in new chat'));
+      notifyApiError(err, 'Failed to continue in new chat');
     }
   }
 
@@ -132,5 +133,3 @@ export function useSessionHandoff(options: UseSessionHandoffOptions) {
     resetHandoff
   };
 }
-
-export type UseSessionHandoff = ReturnType<typeof useSessionHandoff>;

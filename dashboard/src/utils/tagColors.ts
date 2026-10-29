@@ -23,6 +23,3 @@ export function tagColorClass(name: string): string {
   }
   return TAG_COLOR_CLASSES[hash % TAG_COLOR_CLASSES.length];
 }
-
-/** @deprecated Legacy name kept for existing call sites. */
-export const categoryColorClass = tagColorClass;

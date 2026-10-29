@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ArrowLeft } from 'lucide-vue-next';
 
-import type { GitCommit, GitFile } from '@/classes/api';
+import type { GitCommit, GitFile } from '@/@types/index';
 import { gitDiffRowClass as diffRowClass, gitStatusBadgeClass as statusBadgeClass } from './gitDisplay';
 
 defineProps<{

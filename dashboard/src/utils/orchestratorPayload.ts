@@ -4,9 +4,8 @@
  */
 export {
   normalizeDependsOn,
-  parseOrchestratorSubtasksJson,
+  parseSubtasksPayloadString,
   remapDependsOnAfterDelete,
-  serializeOrchestratorSubtasksPayload,
+  serializeSubtasksPayload,
   subtasksFromStoredJson
 } from '@novacode/shared';
-export type { OrchestratorSubtasksPayload } from '@novacode/shared';

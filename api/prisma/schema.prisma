@@ -80,6 +80,7 @@ model Workspace {
   orchestrators Orchestrator[]
   automations  Automation[]
 
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "idx_workspaces_name_trgm")
   @@map("workspaces")
 }
 
@@ -116,6 +117,8 @@ model Session {
 
   @@index([orchestratorId])
   @@index([workspaceId, archived, updatedAt(sort: Desc)], map: "idx_sessions_workspace_archived_updated")
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "idx_sessions_name_trgm")
+  @@index([lastPreviewText(ops: raw("gin_trgm_ops"))], type: Gin, map: "idx_sessions_last_preview_trgm")
   @@map("sessions")
 }
 
@@ -134,6 +137,8 @@ model SessionMessage {
 
   @@unique([sessionId, position], map: "session_messages_session_id_position_key")
   @@index([sessionId], map: "idx_session_messages_session_id")
+  @@index([content(ops: raw("gin_trgm_ops"))], type: Gin, map: "idx_session_messages_content_trgm")
+  @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin, map: "idx_session_messages_search_text_trgm")
   @@map("session_messages")
 }
 
@@ -201,6 +206,7 @@ model Orchestrator {
   unread          Boolean   @default(false)
 
   @@index([sourceSessionId])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "idx_orchestrators_name_trgm")
   @@map("orchestrators")
 }
 

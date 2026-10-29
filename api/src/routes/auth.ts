@@ -423,18 +423,13 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
       const generated = generateApiToken();
-      try {
-        const created = await db.createApiToken({
-          userId: request.jwtUser!.id,
-          name,
-          tokenHash: generated.tokenHash,
-          tokenPrefix: generated.tokenPrefix
-        });
-        return reply.code(201).send({ ...created, token: generated.token });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to create API key';
-        return reply.code(400).send({ error: message });
-      }
+      const created = await db.createApiToken({
+        userId: request.jwtUser!.id,
+        name,
+        tokenHash: generated.tokenHash,
+        tokenPrefix: generated.tokenPrefix
+      });
+      return reply.code(201).send({ ...created, token: generated.token });
     }
   );
 

@@ -16,6 +16,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 
 // classes
+import { childEnv, childProcessFailure } from './childEnv';
 import { config, resolvePromptIdleTimeoutMs } from './config';
 import {
   acpAgent,
@@ -54,7 +55,7 @@ import { createSubagentTranscriptWatcher } from './cursorSubagentTranscripts';
 // ---- Re-exports (public API kept on this module) ----
 export type { AcpEventHandler, AcpPermissionHandler, SessionConfigSyncHandler } from './acpSessionHelpers';
 export type { AcpAskQuestionHandler, AcpAskQuestionParams, AcpAskQuestionResponse } from './acpAskQuestion';
-export { isAcpTaskBackgroundLaunch, isAcpTaskToolCall } from './cursorPlanEvents';
+export { isAcpTaskToolCall } from './cursorPlanEvents';
 export { mergeCursorTodos } from './cursorTodoEvents';
 
 /**
@@ -157,6 +158,8 @@ export interface AcpSubprocessRunResult {
 
 interface ActiveRun {
   cancel: () => void;
+  /** SIGTERM the subprocess now (SIGKILL after 2 s), without the cancel grace period. */
+  kill: () => void;
   acpSessionId: string | null;
 }
 
@@ -295,12 +298,13 @@ export async function runAcpSubprocessPrompt(
   onAskQuestion?: AcpAskQuestionHandler
 ): Promise<AcpSubprocessRunResult> {
   const { command, args, cwd, novaSessionId, acpSessionId, promptText, logTag } = params;
-  const env = { ...process.env, ...config.agentEnv() };
   const phase = createPhaseLogger(logTag, novaSessionId);
 
   let proc: ChildProcess;
+  let spawnFailure: Promise<never>;
   try {
-    proc = spawn(command, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], env });
+    proc = spawn(command, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], env: childEnv() });
+    spawnFailure = childProcessFailure(proc);
     phase('spawned');
   } catch (err) {
     const errorDetail = extractAgentErrorDetail(err);
@@ -566,6 +570,7 @@ export async function runAcpSubprocessPrompt(
 
   activeRuns.set(novaSessionId, {
     cancel: cancelRun,
+    kill: killProc,
     get acpSessionId() {
       return sessionIdForCancel;
     },
@@ -576,7 +581,7 @@ export async function runAcpSubprocessPrompt(
   }
 
   try {
-    return await app.connectWith(stream, async (ctx) => {
+    return await Promise.race([spawnFailure, app.connectWith(stream, async (ctx) => {
       ctxRef = ctx;
       const agent = acpAgent(ctx);
 
@@ -790,7 +795,7 @@ export async function runAcpSubprocessPrompt(
         // as soon as the ACP prompt request has completed.
         killProc();
       }
-    });
+    })]);
   } catch (err) {
     resolvePromptSettled();
     clearPromptIdleTimer();
@@ -819,22 +824,47 @@ export function cancelAcpSubprocess(novaSessionId: string): void {
   activeRuns.get(novaSessionId)?.cancel();
 }
 
+/** Kill every ACP subprocess still running a prompt (server shutdown); returns how many. */
+export function killAllAcpSubprocesses(): number {
+  const runs = [...activeRuns.values()];
+  for (const run of runs) run.kill();
+  return runs.length;
+}
+
 export interface CloseAcpSessionParams {
   command: string;
   args: string[];
   cwd: string;
   acpSessionId: string;
   logTag: string;
+  /** Overall deadline; defaults to `CLOSE_ACP_SESSION_TIMEOUT_MS`. */
+  timeoutMs?: number;
+  /** SIGTERM → SIGKILL grace after the deadline; defaults to `CLOSE_ACP_SESSION_KILL_GRACE_MS`. */
+  killGraceMs?: number;
 }
 
-/** Best-effort ACP session teardown (close, then delete if close unsupported). */
-export async function closeAcpSubprocessSession(params: CloseAcpSessionParams): Promise<void> {
-  const { command, args, cwd, acpSessionId, logTag } = params;
-  const env = { ...process.env, ...config.agentEnv() };
+const CLOSE_ACP_SESSION_TIMEOUT_MS = 10_000;
+const CLOSE_ACP_SESSION_KILL_GRACE_MS = 2_000;
 
+/**
+ * Best-effort ACP session teardown (close, then delete if close unsupported). Never rejects:
+ * after `timeoutMs` the subprocess gets SIGTERM (SIGKILL after `killGraceMs`) and this resolves.
+ */
+export async function closeAcpSubprocessSession(params: CloseAcpSessionParams): Promise<void> {
+  const {
+    command,
+    args,
+    cwd,
+    acpSessionId,
+    logTag,
+    timeoutMs = CLOSE_ACP_SESSION_TIMEOUT_MS,
+    killGraceMs = CLOSE_ACP_SESSION_KILL_GRACE_MS
+  } = params;
   let proc: ChildProcess;
+  let spawnFailure: Promise<never>;
   try {
-    proc = spawn(command, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], env });
+    proc = spawn(command, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], env: childEnv() });
+    spawnFailure = childProcessFailure(proc);
   } catch {
     return;
   }
@@ -847,11 +877,16 @@ export async function closeAcpSubprocessSession(params: CloseAcpSessionParams): 
     }
   };
 
+  let deadlineTimer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<'timeout'>((resolve) => {
+    deadlineTimer = setTimeout(() => resolve('timeout'), timeoutMs);
+  });
+
   const stream = ndJsonStream(nodeWritableToWeb(proc.stdin!), nodeReadableToWeb(proc.stdout!));
   const app = buildClientApp();
 
   try {
-    await app.connectWith(stream, async (ctx) => {
+    const outcome = await Promise.race([deadline, spawnFailure, app.connectWith(stream, async (ctx) => {
       const agent = acpAgent(ctx);
       await ctx.request(methods.agent.initialize, {
         protocolVersion: PROTOCOL_VERSION,
@@ -869,10 +904,25 @@ export async function closeAcpSubprocessSession(params: CloseAcpSessionParams): 
         }
       }
       killProc();
-    });
+    })]);
+    if (outcome === 'timeout') {
+      logger.warn({ logTag, timeoutMs }, 'closeAcpSubprocessSession timed out; killing subprocess');
+      killProc();
+      const killTimer = setTimeout(() => {
+        if (proc.exitCode === null && proc.signalCode === null) {
+          try {
+            proc.kill('SIGKILL');
+          } catch {
+            // already dead
+          }
+        }
+      }, killGraceMs);
+      killTimer.unref();
+    }
   } catch (err) {
     logger.warn({ logTag, err }, 'closeAcpSubprocessSession failed');
   } finally {
+    clearTimeout(deadlineTimer);
     killProc();
   }
 }

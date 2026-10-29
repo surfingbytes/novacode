@@ -8,7 +8,7 @@
  *  - open-code:    <workspace>/.opencode/plans/*.md (preferred; matches OpenCode edit allowlist)
  *                  and <XDG_DATA_HOME>/opencode/plans/*.md (legacy / fallback),
  *                  `<!-- acp-session-id -->` header (written via plan-mode prompt
- *                  injection in openCodeAcp.ts)
+ *                  injection in agents/openCode.ts)
  *  - claude:       <configDir>/.claude/plans/*.md — Claude Code plan mode writes these
  *                  without a session comment; Nova stamps `<!-- acp-session-id -->` on
  *                  claim / Write-to-plans / mark-as-done so the file is source of truth

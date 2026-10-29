@@ -14,7 +14,7 @@ function currentColorMode(): 'dark' | 'light' {
 async function ensureMermaid(): Promise<MermaidApi> {
   if (!mermaidApi) {
     const mod = await import('mermaid');
-    mermaidApi = mod.default as MermaidApi;
+    mermaidApi = mod.default;
   }
 
   const theme = currentColorMode();

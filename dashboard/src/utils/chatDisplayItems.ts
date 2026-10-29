@@ -20,21 +20,13 @@ import {
   isToolResultSuccess,
   mergeAssistantTextIntoDisplayItems,
   mergeStreamingTextChunks,
-  normalizeTodoItems,
-  normalizeTodoStatus,
   resolvePlanDisplayTitle,
   todosFromAcpUpdate
 } from '@novacode/shared';
 
 // Parser helpers live in @novacode/shared; re-exported for existing importers.
 export type { TodoDisplayItem };
-export {
-  mergeAssistantTextIntoDisplayItems,
-  mergeStreamingTextChunks,
-  normalizeTodoItems,
-  normalizeTodoStatus,
-  todosFromAcpUpdate
-};
+export { mergeStreamingTextChunks };
 
 // ---------------------------------- Types ----------------------------------
 
@@ -329,7 +321,7 @@ export function createChatStreamParser(hooks: ChatStreamParserHooks = {}) {
         callId: toolCallId,
         toolName: ACP_KIND_TO_NAME[kind ?? ''] ?? 'Tool',
         toolIcon: ACP_KIND_TO_ICON[kind ?? ''] ?? 'build',
-        toolSummary: String(update.title ?? ''),
+        toolSummary: typeof update.title === 'string' ? update.title : '',
         status: 'running'
       });
       return;
@@ -700,7 +692,7 @@ export function prepareDisplayItem(item: DisplayItem): DisplayItem {
 
 // ---------------------------------- Vibe dedup ----------------------------------
 
-export function parseNestedEvent(line: string): Record<string, unknown> | null {
+function parseNestedEvent(line: string): Record<string, unknown> | null {
   let event: Record<string, unknown>;
   try {
     event = JSON.parse(line) as Record<string, unknown>;

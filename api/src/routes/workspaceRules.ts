@@ -46,7 +46,7 @@ export async function workspaceRuleRoutes(fastify: FastifyInstance): Promise<voi
       const result = await listWorkspaceRuleFiles(workspaceId);
       if (!result.ok) {
         const status = mapErrorCodeToStatus(result.code);
-        return reply.status(status).send({ error: result.message, code: result.code });
+        return reply.code(status).send({ error: result.message, code: result.code });
       }
       return reply.send(result.value);
     }
@@ -61,7 +61,7 @@ export async function workspaceRuleRoutes(fastify: FastifyInstance): Promise<voi
       const result = await readWorkspaceRuleFile(workspaceId, filename);
       if (!result.ok) {
         const status = mapErrorCodeToStatus(result.code);
-        return reply.status(status).send({ error: result.message, code: result.code });
+        return reply.code(status).send({ error: result.message, code: result.code });
       }
       return reply.send(result.value);
     }
@@ -76,7 +76,7 @@ export async function workspaceRuleRoutes(fastify: FastifyInstance): Promise<voi
       const result = await writeWorkspaceRuleFile(workspaceId, filename, request.body.content);
       if (!result.ok) {
         const status = mapErrorCodeToStatus(result.code);
-        return reply.status(status).send({ error: result.message, code: result.code });
+        return reply.code(status).send({ error: result.message, code: result.code });
       }
       return reply.send(result.value);
     }
@@ -91,7 +91,7 @@ export async function workspaceRuleRoutes(fastify: FastifyInstance): Promise<voi
       const result = await deleteWorkspaceRuleFile(workspaceId, filename);
       if (!result.ok) {
         const status = mapErrorCodeToStatus(result.code);
-        return reply.status(status).send({ error: result.message, code: result.code });
+        return reply.code(status).send({ error: result.message, code: result.code });
       }
       return reply.send(result.value);
     }
@@ -106,7 +106,7 @@ export async function workspaceRuleRoutes(fastify: FastifyInstance): Promise<voi
       const result = await renameWorkspaceRuleFile(workspaceId, filename, request.body.newFilename);
       if (!result.ok) {
         const status = mapErrorCodeToStatus(result.code);
-        return reply.status(status).send({ error: result.message, code: result.code });
+        return reply.code(status).send({ error: result.message, code: result.code });
       }
       return reply.send(result.value);
     }

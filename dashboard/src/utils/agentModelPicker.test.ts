@@ -117,7 +117,7 @@ describe('buildVisibleOpenCodeModelOptions', () => {
   const customModels = [{ id: 'moonshot/kimi-k3', label: 'Kimi K3' }];
 
   it('shows quick entries plus the current selection when it is not quick-covered', () => {
-    const selected = OPENCODE_CATALOG[5]!;
+    const selected = OPENCODE_CATALOG[5];
     const picker = buildModelPickerState(OPENCODE_CATALOG, selected);
     const quick = buildOpenCodeQuickOptions(OPENCODE_CATALOG, customModels);
     const visible = buildVisibleOpenCodeModelOptions({
@@ -131,11 +131,11 @@ describe('buildVisibleOpenCodeModelOptions', () => {
       'GPT 6.1',
       'Openai GPT 5 5 (Default)',
     ]);
-    expect(visible[2]!.value).toBe(openCodeCurrentValue('openai/gpt-5.5'));
+    expect(visible[2].value).toBe(openCodeCurrentValue('openai/gpt-5.5'));
   });
 
   it('adds all remaining model names when expanded', () => {
-    const selected = OPENCODE_CATALOG[0]!;
+    const selected = OPENCODE_CATALOG[0];
     const picker = buildModelPickerState(OPENCODE_CATALOG, selected);
     const quick = buildOpenCodeQuickOptions(OPENCODE_CATALOG, customModels);
     const visible = buildVisibleOpenCodeModelOptions({
@@ -154,7 +154,7 @@ describe('buildVisibleOpenCodeModelOptions', () => {
   });
 
   it('shows a variant selection with its thinking dimension', () => {
-    const selected = OPENCODE_CATALOG[3]!; // gpt-6-sol-fast
+    const selected = OPENCODE_CATALOG[3]; // gpt-6-sol-fast
     const picker = buildModelPickerState(OPENCODE_CATALOG, selected);
     const quick = buildOpenCodeQuickOptions(OPENCODE_CATALOG, customModels);
     const visible = buildVisibleOpenCodeModelOptions({

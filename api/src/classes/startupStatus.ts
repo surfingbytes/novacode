@@ -1,12 +1,9 @@
 import { writeFileSync } from 'node:fs';
 
-export const STARTUP_STATUS_FILE =
-  process.env['STARTUP_STATUS_FILE']?.trim() || '/tmp/novacode-startup.json';
-export const STARTUP_READY_FILE =
+const STARTUP_READY_FILE =
   process.env['STARTUP_READY_FILE']?.trim() || '/tmp/novacode-ready';
 
-export const STARTUP_STEPS = ['boot', 'config', 'agents', 'database', 'api'] as const;
-export type StartupStep = (typeof STARTUP_STEPS)[number];
+const STARTUP_STEPS = ['boot', 'config', 'agents', 'database', 'api'] as const;
 
 export type StartupStatusPayload = {
   status: 'starting';

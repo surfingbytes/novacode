@@ -60,6 +60,25 @@ describe('ACP native events', () => {
     expect(items[0].text).toBe('| A | B |\n|----------|----------|\n| a  | b |');
   });
 
+  it('uses an empty tool summary when the tool_call title is missing or not a string', () => {
+    const parser = createChatStreamParser();
+    const items: DisplayItem[] = [];
+    for (const [toolCallId, title] of [
+      ['t1', undefined],
+      ['t2', { text: 'x' }],
+      ['t3', 'Read file']
+    ] as const) {
+      parser.processEventLine(
+        JSON.stringify({
+          sessionId: 's1',
+          update: { sessionUpdate: 'tool_call', toolCallId, kind: 'read', title }
+        }),
+        items
+      );
+    }
+    expect(items.map((item) => item.toolSummary)).toEqual(['', '', 'Read file']);
+  });
+
   it('tracks tool_call lifecycle with locations and output', () => {
     const parser = createChatStreamParser();
     const items: DisplayItem[] = [];

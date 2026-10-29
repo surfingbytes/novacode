@@ -256,8 +256,8 @@ onUnmounted(() => {
           <div
             class="chat-markdown plan-markdown text-sm text-text-primary"
             :class="{ 'plan-collapse-done': bCollapseDoneSteps }"
-            v-html="selectedPlanDocument.renderedHtml"
             @click="emit('markdown-click', $event)"
+            v-html="selectedPlanDocument.renderedHtml"
           ></div>
         </div>
         <div

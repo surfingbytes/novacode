@@ -1,7 +1,11 @@
 /// <reference lib="webworker" />
 
 import { clientsClaim } from 'workbox-core';
-import { cleanupOutdatedCaches, precacheAndRoute } from 'workbox-precaching';
+import { CacheableResponsePlugin } from 'workbox-cacheable-response';
+import { ExpirationPlugin } from 'workbox-expiration';
+import { cleanupOutdatedCaches, createHandlerBoundToURL, precacheAndRoute } from 'workbox-precaching';
+import { NavigationRoute, registerRoute } from 'workbox-routing';
+import { CacheFirst } from 'workbox-strategies';
 
 declare let self: ServiceWorkerGlobalScope;
 type SwNotificationAction = { action: string; title: string; icon?: string };
@@ -9,6 +13,34 @@ type SwNotificationAction = { action: string; title: string; icon?: string };
 clientsClaim();
 cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST);
+
+const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
+
+// SPA fallback for offline reloads of client routes (the API server does the same online)
+registerRoute(new NavigationRoute(createHandlerBoundToURL('index.html'), { denylist: [/^\/api\//] }));
+
+// Hashed build assets left out of the precache (Monaco, Mermaid, md-editor chunks, workers)
+registerRoute(
+  ({ url, sameOrigin }) => sameOrigin && /^\/assets\/.+\.(?:js|css)$/.test(url.pathname),
+  new CacheFirst({
+    cacheName: 'nova-assets',
+    plugins: [
+      new CacheableResponsePlugin({ statuses: [200] }),
+      new ExpirationPlugin({ maxEntries: 200, maxAgeSeconds: ONE_YEAR_SECONDS })
+    ]
+  })
+);
+
+registerRoute(
+  ({ url }) => url.origin === 'https://fonts.googleapis.com' || url.origin === 'https://fonts.gstatic.com',
+  new CacheFirst({
+    cacheName: 'google-fonts-cache',
+    plugins: [
+      new CacheableResponsePlugin({ statuses: [0, 200] }),
+      new ExpirationPlugin({ maxEntries: 20, maxAgeSeconds: ONE_YEAR_SECONDS })
+    ]
+  })
+);
 
 self.addEventListener('push', (event) => {
   if (!event.data) return;

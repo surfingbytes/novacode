@@ -2,9 +2,7 @@
  * Orchestrator subtasks payload helpers — canonical shared implementation.
  *
  * Merged from api/src/classes/orchestratorPayload.ts (server-side run logic)
- * and dashboard/src/utils/orchestratorPayload.ts (UI parse/serialize). The
- * dashboard aliases (parseOrchestratorSubtasksJson, …) are kept as thin
- * re-exports so existing call sites can migrate gradually.
+ * and dashboard/src/utils/orchestratorPayload.ts (UI parse/serialize).
  */
 
 // types
@@ -319,11 +317,3 @@ export function appendHandoff(
   }
   return `…(earlier handoff truncated)\n\n${next.slice(-MAX_TOTAL_HANDOFF_CHARS)}`;
 }
-
-// ---------------------------------- Dashboard aliases (legacy names) ----------------------------------
-
-/** @deprecated Use parseSubtasksPayloadString. */
-export const parseOrchestratorSubtasksJson = parseSubtasksPayloadString;
-
-/** @deprecated Use serializeSubtasksPayload. */
-export const serializeOrchestratorSubtasksPayload = serializeSubtasksPayload;

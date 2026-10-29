@@ -10,20 +10,20 @@ import type { AutomationRunModel as AutomationRun } from '../../generated/client
 
 // --------------------------------------------- Automations ---------------------------------------------
 
-export async function listAutomations(): Promise<Automation[]> {
+async function listAutomations(): Promise<Automation[]> {
   return prisma.automation.findMany({ orderBy: { createdAt: 'desc' } });
 }
 
-export async function listAutomationsByWorkspace(workspaceId: string): Promise<Automation[]> {
+async function listAutomationsByWorkspace(workspaceId: string): Promise<Automation[]> {
   return prisma.automation.findMany({ where: { workspaceId }, orderBy: { createdAt: 'desc' } });
 }
 
-export async function getAutomation(id: string): Promise<Automation | undefined> {
+async function getAutomation(id: string): Promise<Automation | undefined> {
   const row = await prisma.automation.findUnique({ where: { id } });
   return row ?? undefined;
 }
 
-export async function createAutomation(data: {
+async function createAutomation(data: {
   name: string;
   workspaceId: string;
   agentType?: string;
@@ -49,7 +49,7 @@ export async function createAutomation(data: {
   });
 }
 
-export async function updateAutomation(
+async function updateAutomation(
   id: string,
   patch: {
     name?: string;
@@ -84,7 +84,7 @@ export async function updateAutomation(
   });
 }
 
-export async function deleteAutomation(id: string): Promise<boolean> {
+async function deleteAutomation(id: string): Promise<boolean> {
   try {
     await prisma.automation.delete({ where: { id } });
     return true;
@@ -93,7 +93,7 @@ export async function deleteAutomation(id: string): Promise<boolean> {
   }
 }
 
-export async function listEnabledAutomationsDue(): Promise<Automation[]> {
+async function listEnabledAutomationsDue(): Promise<Automation[]> {
   const now = new Date().toISOString();
   return prisma.automation.findMany({
     where: {
@@ -104,7 +104,7 @@ export async function listEnabledAutomationsDue(): Promise<Automation[]> {
   });
 }
 
-export async function failStaleAutomationRuns(error = 'Interrupted by server restart'): Promise<number> {
+async function failStaleAutomationRuns(error = 'Interrupted by server restart'): Promise<number> {
   const finishedAt = new Date().toISOString();
   const stale = await prisma.automationRun.updateMany({
     where: { status: 'running' },
@@ -117,8 +117,7 @@ export async function failStaleAutomationRuns(error = 'Interrupted by server res
   return stale.count;
 }
 
-
-export async function listRunsByAutomation(automationId: string, limit = 20): Promise<AutomationRun[]> {
+async function listRunsByAutomation(automationId: string, limit = 20): Promise<AutomationRun[]> {
   return prisma.automationRun.findMany({
     where: { automationId },
     orderBy: { startedAt: 'desc' },
@@ -126,12 +125,12 @@ export async function listRunsByAutomation(automationId: string, limit = 20): Pr
   });
 }
 
-export async function getAutomationRun(id: string): Promise<AutomationRun | undefined> {
+async function getAutomationRun(id: string): Promise<AutomationRun | undefined> {
   const row = await prisma.automationRun.findUnique({ where: { id } });
   return row ?? undefined;
 }
 
-export async function createAutomationRun(automationId: string): Promise<AutomationRun> {
+async function createAutomationRun(automationId: string): Promise<AutomationRun> {
   const id = randomUUID();
   const startedAt = new Date().toISOString();
   return prisma.automationRun.create({
@@ -139,7 +138,7 @@ export async function createAutomationRun(automationId: string): Promise<Automat
   });
 }
 
-export async function updateAutomationRun(
+async function updateAutomationRun(
   id: string,
   patch: {
     status?: string;
@@ -169,7 +168,7 @@ export async function updateAutomationRun(
   });
 }
 
-export async function pruneAutomationRuns(automationId: string, keep = 50): Promise<void> {
+async function pruneAutomationRuns(automationId: string, keep = 50): Promise<void> {
   const extra = await prisma.automationRun.findMany({
     where: { automationId },
     orderBy: { startedAt: 'desc' },

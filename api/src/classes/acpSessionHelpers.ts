@@ -233,7 +233,7 @@ export function autoApprovePermission(
   return { outcome: { outcome: 'cancelled' } };
 }
 
-export function extractConfigSync(update: SessionNotification['update'], sync?: SessionConfigSyncHandler): void {
+function extractConfigSync(update: SessionNotification['update'], sync?: SessionConfigSyncHandler): void {
   if (!sync) return;
   if (update.sessionUpdate === 'current_mode_update') {
     sync({ modeId: update.currentModeId });

@@ -13,19 +13,19 @@ import UiToggle from '@/components/ui/UiToggle.vue';
 
 // classes
 import { apiErrorMessage, orchestratorApi, settingsApi } from '@/classes/api';
+import { notifyApiError } from '@/lib/notifyApiError';
 import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 import {
   normalizeDependsOn,
-  parseOrchestratorSubtasksJson,
+  parseSubtasksPayloadString,
   remapDependsOnAfterDelete,
-  serializeOrchestratorSubtasksPayload
+  serializeSubtasksPayload
 } from '@/utils/orchestratorPayload';
 import { tagColorClass as categoryColorClass } from '@/utils/tagColors';
 import { agentTypeLabel } from '@/utils/agentTypeMeta';
 
 // stores
 import { useOrchestratorsStore } from '@/stores/orchestrators';
-import { useToastStore } from '@/stores/toasts';
 import { useWorkspacesStore } from '@/stores/workspaces';
 
 // types
@@ -60,7 +60,6 @@ const emit = defineEmits<{
 
 const router = useRouter();
 const orchestratorsStore = useOrchestratorsStore();
-const toastStore = useToastStore();
 const workspacesStore = useWorkspacesStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
@@ -95,15 +94,15 @@ const plannerSession = computed(() => {
   return id ? workspacesStore.allSessions.find((session) => session.id === id) ?? null : null;
 });
 const bHasPlanner = computed(() => !!props.orchestrator?.sourceSessionId);
-const workerAgentType = computed<AgentType>(() => (props.orchestrator?.agentType ?? 'cursor-agent') as AgentType);
+const workerAgentType = computed<AgentType>(() => (props.orchestrator?.agentType ?? 'cursor-agent'));
 const bWorkersUsePlannerModel = computed(() => !props.orchestrator?.workerModel);
 const maxParallel = computed(() => props.orchestrator?.maxParallel ?? 3);
 const bVerifyUsesPlanner = computed(() => !props.orchestrator?.verifyAgentType);
 const verifyAgentType = computed<AgentType>(
-  () => (props.orchestrator?.verifyAgentType ?? plannerSession.value?.agentType ?? workerAgentType.value) as AgentType
+  () => (props.orchestrator?.verifyAgentType ?? plannerSession.value?.agentType ?? workerAgentType.value)
 );
 
-const planPayload = computed(() => parseOrchestratorSubtasksJson(props.orchestrator?.subtasksJson));
+const planPayload = computed(() => parseSubtasksPayloadString(props.orchestrator?.subtasksJson));
 const subtasks = computed<SubTask[]>(() => planPayload.value?.subtasks ?? []);
 const sharedContextDisplay = computed(() => planPayload.value?.sharedContext?.trim() ?? '');
 const handoffLogDisplay = computed(() => planPayload.value?.handoffLog?.trim() ?? '');
@@ -186,7 +185,7 @@ const mainRunLabel = computed(() => (preferredRunMode.value === 'parallel' ? 'Ru
 watch(
   () => props.orchestrator?.subtasksJson,
   (json) => {
-    const payload = parseOrchestratorSubtasksJson(json);
+    const payload = parseSubtasksPayloadString(json);
     editedSubtasks.value = payload?.subtasks?.length ? payload.subtasks.map((t) => ({ ...t })) : [];
   },
   { immediate: true }
@@ -341,7 +340,7 @@ function saveEditFromModal() {
   list[i] = next;
   editedSubtasks.value = list;
   closeEditModal();
-  saveSubtasks();
+  void saveSubtasks();
 }
 
 async function saveSubtasks(): Promise<boolean> {
@@ -350,21 +349,21 @@ async function saveSubtasks(): Promise<boolean> {
   }
   bSavingSubtasks.value = true;
   try {
-    const prev = parseOrchestratorSubtasksJson(props.orchestrator.subtasksJson);
+    const prev = parseSubtasksPayloadString(props.orchestrator.subtasksJson);
     const nextPayload = {
       sharedContext: prev?.sharedContext ?? '',
       handoffLog: prev?.handoffLog ?? '',
       subtasks: editedSubtasks.value
     };
     const { data } = await orchestratorApi.update(props.workspaceId, props.orchestratorId, {
-      subtasksJson: serializeOrchestratorSubtasksPayload(nextPayload)
+      subtasksJson: serializeSubtasksPayload(nextPayload)
     });
     if (data) {
       emit('update:orchestrator', data);
     }
     return true;
-  } catch {
-    toastStore.error('Failed to save tasks');
+  } catch (err: unknown) {
+    notifyApiError(err, 'Failed to save tasks');
     return false;
   } finally {
     bSavingSubtasks.value = false;
@@ -384,8 +383,8 @@ async function saveRunSettings(patch: {
     if (data) {
       emit('update:orchestrator', data);
     }
-  } catch {
-    toastStore.error('Failed to save run settings');
+  } catch (err: unknown) {
+    notifyApiError(err, 'Failed to save run settings');
   } finally {
     bSavingSettings.value = false;
   }
@@ -540,7 +539,7 @@ async function startPlanningChat(): Promise<void> {
       });
     }
   } catch (e: unknown) {
-    toastStore.error(apiErrorMessage(e, 'Failed to start a planning chat'));
+    notifyApiError(e, 'Failed to start a planning chat');
   } finally {
     bCreatingPlanner.value = false;
   }
@@ -564,8 +563,8 @@ async function clonePlan() {
         params: { id: props.workspaceId, orchestratorId: data.id }
       });
     }
-  } catch {
-    toastStore.error('Failed to clone plan');
+  } catch (err: unknown) {
+    notifyApiError(err, 'Failed to clone plan');
   } finally {
     bCloning.value = false;
   }
@@ -587,7 +586,7 @@ watch(() => props.orchestratorId, scrollOnOpen);
 
 onMounted(() => {
   document.addEventListener('click', closeRunMenu);
-  scrollOnOpen();
+  void scrollOnOpen();
 });
 
 onBeforeUnmount(() => {
@@ -926,9 +925,9 @@ onBeforeUnmount(() => {
         <div v-if="canEdit && hasEdits" class="flex items-center gap-2">
           <button
             type="button"
-            @click="saveSubtasks"
             :disabled="bSavingSubtasks"
             class="px-3 py-1.5 text-sm font-medium border border-fg/20 text-text-primary rounded-lg hover:bg-fg/[0.06] transition-colors flex items-center gap-2 disabled:opacity-60"
+            @click="saveSubtasks"
           >
             <span
               v-if="bSavingSubtasks"
@@ -1083,9 +1082,9 @@ onBeforeUnmount(() => {
       <div class="flex items-center gap-2">
         <button
           type="button"
-          @click="clonePlan"
           :disabled="bCloning"
           class="px-4 py-2.5 text-sm font-medium border border-fg/20 text-text-primary rounded-lg hover:bg-fg/[0.06] transition-colors flex items-center gap-2 disabled:opacity-60"
+          @click="clonePlan"
         >
           <span
             v-if="bCloning"
@@ -1096,9 +1095,9 @@ onBeforeUnmount(() => {
         <button
           v-if="isRunning"
           type="button"
-          @click="stopTasks"
           :disabled="bStopping"
           class="px-4 py-2.5 text-sm font-medium bg-destructive/80 text-on-accent rounded-lg hover:bg-destructive transition-colors flex items-center gap-2 disabled:opacity-60"
+          @click="stopTasks"
         >
           <span
             v-if="bStopping"

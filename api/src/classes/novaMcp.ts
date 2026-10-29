@@ -94,7 +94,7 @@ process.stdin.on('data', (d) => {
 process.stdin.on('end', () => chain.then(() => process.exit(0)));
 `;
 
-export function novaMcpUrl(): string {
+function novaMcpUrl(): string {
   return `http://127.0.0.1:${config.port}${NOVA_MCP_PATH}`;
 }
 
@@ -102,7 +102,7 @@ export function novaMcpUrl(): string {
  * ACP `mcpServers` entry for a Nova chat session, or null when the server is
  * turned off. `bHttp` = the agent advertised `mcpCapabilities.http`.
  */
-export function novaMcpServerForSession(sessionId: string, bHttp: boolean): McpServer | null {
+function novaMcpServerForSession(sessionId: string, bHttp: boolean): McpServer | null {
   if (!isNovaMcpEnabled() || !config.jwtSecret) return null;
   const token = createNovaMcpToken(sessionId);
   if (bHttp) {

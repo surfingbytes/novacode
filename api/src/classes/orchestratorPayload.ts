@@ -10,12 +10,8 @@ export {
   findRunnableSteps,
   mergeSubtasksJsonPatch,
   normalizeDependsOn,
-  normalizeSubtasksPayload,
   parseSubtasksPayloadString,
-  remapDependsOnAfterDelete,
   serializeSubtasksPayload,
   shouldSkipOrchestratorStep,
-  subtasksFromStoredJson,
   summarizeStepHandoff
 } from '@novacode/shared';
-export type { OrchestratorSubtasksPayload } from '@novacode/shared';

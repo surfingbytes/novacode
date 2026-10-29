@@ -19,7 +19,7 @@ const emit = defineEmits<{
 
 // -------------------------------------------------- Methods --------------------------------------------------
 
-const submit = async (): Promise<void> => {
+const submit = (): void => {
   emit('delete', props.workspace?.id ?? '');
 };
 

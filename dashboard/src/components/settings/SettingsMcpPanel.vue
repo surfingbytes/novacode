@@ -9,10 +9,10 @@ import ModalHeader from '@/components/ModalHeader.vue';
 import UiToggle from '@/components/ui/UiToggle.vue';
 
 // classes
-import { isGloballyToasted, settingsApi } from '@/classes/api';
+import { settingsApi } from '@/classes/api';
+import { notifyApiError } from '@/lib/notifyApiError';
 
 // stores
-import { useToastStore } from '@/stores/toasts';
 
 // types
 import type { McpClientServer, McpConnectivityCheckResult, McpAutoloadStatus } from '@/@types/index';
@@ -20,7 +20,6 @@ import type { McpClientServer, McpConnectivityCheckResult, McpAutoloadStatus } f
 const isMcpEnabled = (server: McpClientServer): boolean => server.enabled !== false;
 
 // -------------------------------------------------- Stores --------------------------------------------------
-const toastStore = useToastStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const mcpClients = ref<Record<string, McpClientServer>>({});
@@ -76,7 +75,7 @@ const toggleNovaMcp = async (enabled: boolean): Promise<void> => {
     bNovaMcpEnabled.value = data.nova.enabled;
   } catch (err) {
     bNovaMcpEnabled.value = previous;
-    if (!isGloballyToasted(err)) toastStore.error('Update Nova MCP failed');
+    notifyApiError(err, 'Update Nova MCP failed');
   } finally {
     bSavingNovaMcp.value = false;
   }
@@ -217,7 +216,7 @@ const deleteMcpClient = async (): Promise<void> => {
     applyAutoload(response.data.autoload);
     pendingDelete.value = null;
   } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Delete MCP server failed');
+    notifyApiError(err, 'Delete MCP server failed');
   } finally {
     bSavingMcpClients.value = false;
   }
@@ -238,7 +237,7 @@ const toggleMcpClientEnabled = async (name: string, enabled: boolean): Promise<v
     mcpClients.value = response.data.servers;
     applyAutoload(response.data.autoload);
   } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Update MCP server failed');
+    notifyApiError(err, 'Update MCP server failed');
   } finally {
     bSavingMcpClients.value = false;
   }
@@ -264,7 +263,7 @@ const runMcpConnectivityCheck = async (): Promise<void> => {
 };
 
 onMounted((): void => {
-  loadMcpClients();
+  void loadMcpClients();
 });
 </script>
 

@@ -27,13 +27,6 @@ export function sessionPromptStorageKey(workspaceId: string, sessionId: string):
   return `${SESSION_PREFIX}${workspaceId}:${sessionId}`;
 }
 
-export function orchestratorPromptStorageKey(
-  workspaceId: string,
-  orchestratorId: string
-): string {
-  return `${ORCHESTRATOR_PREFIX}${workspaceId}:${orchestratorId}`;
-}
-
 function isDraftKey(key: string): boolean {
   return key.startsWith(SESSION_PREFIX) || key.startsWith(ORCHESTRATOR_PREFIX);
 }
@@ -82,11 +75,11 @@ export function persistDraftPrompt(storageKey: string, prompt: string): void {
   }
 }
 
-export function readDraftPrompt(storageKey: string): string | null {
+function readDraftPrompt(storageKey: string): string | null {
   return safeGetItem(storageKey);
 }
 
-export function clearDraftPrompt(storageKey: string): void {
+function clearDraftPrompt(storageKey: string): void {
   safeRemoveItem(storageKey);
   dropFromDraftIndex(storageKey);
 }
@@ -128,25 +121,6 @@ export function clearSessionPrompt(workspaceId: string, sessionId: string): void
   clearDraftPrompt(sessionPromptStorageKey(workspaceId, sessionId));
 }
 
-export function persistOrchestratorPrompt(
-  workspaceId: string,
-  orchestratorId: string,
-  prompt: string
-): void {
-  persistDraftPrompt(orchestratorPromptStorageKey(workspaceId, orchestratorId), prompt);
-}
-
-export function readOrchestratorPrompt(
-  workspaceId: string,
-  orchestratorId: string
-): string | null {
-  return readDraftPrompt(orchestratorPromptStorageKey(workspaceId, orchestratorId));
-}
-
-export function clearOrchestratorPrompt(workspaceId: string, orchestratorId: string): void {
-  clearDraftPrompt(orchestratorPromptStorageKey(workspaceId, orchestratorId));
-}
-
 export function clearDraftsForEntityId(entityId: string): void {
   const suffix = `:${entityId}`;
   for (const key of safeLocalStorageKeys()) {
@@ -159,4 +133,15 @@ export function clearDraftsForEntityId(entityId: string): void {
       pending.delete(key);
     }
   }
+}
+
+/** Drop every session/orchestrator draft, in memory and in localStorage (logout). */
+export function clearAllDraftPrompts(): void {
+  pending.clear();
+  for (const key of safeLocalStorageKeys()) {
+    if (isDraftKey(key)) {
+      safeRemoveItem(key);
+    }
+  }
+  safeRemoveItem(DRAFT_INDEX_KEY);
 }

@@ -15,6 +15,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 
 // classes
+import { claudeTokenSessionMeta } from './childEnv';
 import { applySessionMode, applySessionModel, applySessionConfig } from './acpSessionHelpers';
 import type { AcpSessionResponse } from './acpSessionHelpers';
 import { extractAgentErrorDetail } from './agentError';
@@ -224,6 +225,11 @@ async function disposeAgent(novaSessionId: string, reason: string): Promise<void
   } catch (err) {
     logger.debug({ err, novaSessionId }, 'Claude ACP dispose failed');
   }
+}
+
+/** Dispose every live embedded Claude agent (server shutdown); transcripts stay on disk. */
+export async function disposeAllClaudeAgents(reason: string): Promise<void> {
+  await Promise.allSettled([...agentsByNovaSession.keys()].map((novaSessionId) => disposeAgent(novaSessionId, reason)));
 }
 
 function isTurnInFlight(novaSessionId: string): boolean {
@@ -503,10 +509,6 @@ async function runClaudeAcpTurn(
     ? { additionalDirectories: params.additionalDirectories }
     : {};
 
-  if (claudeToken) {
-    process.env['CLAUDE_CODE_OAUTH_TOKEN'] = claudeToken;
-  }
-
   const agent = await getAgentForNovaSession(novaSessionId);
   // claude-agent-acp supports HTTP MCP; Nova's server is skipped for one-shot runs (no DB session).
   const configuredMcp = await getConfiguredAcpMcpServers(config.configDir);
@@ -519,7 +521,12 @@ async function runClaudeAcpTurn(
   /** True when a brand-new conversation was created (rules must be injected). */
   let isFreshSession = false;
 
-  const sessionParams = { cwd, mcpServers, _meta: CLAUDE_SESSION_META, ...extraDirs };
+  const sessionParams = {
+    cwd,
+    mcpServers,
+    _meta: { claudeCode: { ...CLAUDE_SESSION_META.claudeCode, ...claudeTokenSessionMeta(claudeToken).claudeCode } },
+    ...extraDirs,
+  };
   if (!acpSessionId) {
     const created = await agent.newSession(sessionParams);
     sessionResponse = created;

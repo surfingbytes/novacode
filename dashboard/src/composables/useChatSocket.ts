@@ -595,5 +595,3 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     resetChatState
   };
 }
-
-export type UseChatSocket = ReturnType<typeof useChatSocket>;

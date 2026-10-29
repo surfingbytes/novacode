@@ -17,11 +17,13 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 // classes
 import {
   cancelAcpSubprocess,
+  closeAcpSubprocessSession,
   mergeCursorTodos,
   runAcpSubprocessPrompt,
 } from './acpSubprocessRunner';
 import type { AcpAskQuestionHandler, AcpPermissionHandler } from './acpSubprocessRunner';
 import * as mcpSettings from './mcpServersForAcp';
+import { logger } from './logger';
 
 beforeEach(() => {
   vi.spyOn(mcpSettings, 'getConfiguredAcpMcpServers').mockResolvedValue([]);
@@ -46,17 +48,17 @@ function setupMock(mode: string): { workDir: string; logPath: string } {
   const workDir = mkdtempSync(join(tmpdir(), 'acp-runner-test-'));
   tempDirs.push(workDir);
   const logPath = join(workDir, 'mock-log.ndjson');
-  // The runner forwards process.env to the agent subprocess.
-  process.env.MOCK_MODE = mode;
-  process.env.MOCK_LOG = logPath;
+  // The runner forwards AGENT_ENV_* (prefix stripped) to the agent subprocess, never process.env.
+  process.env.AGENT_ENV_MOCK_MODE = mode;
+  process.env.AGENT_ENV_MOCK_LOG = logPath;
   return { workDir, logPath };
 }
 
 afterEach(() => {
   vi.restoreAllMocks();
-  delete process.env.MOCK_MODE;
-  delete process.env.MOCK_LOG;
-  delete process.env.MOCK_TRANSCRIPTS_DIR;
+  delete process.env.AGENT_ENV_MOCK_MODE;
+  delete process.env.AGENT_ENV_MOCK_LOG;
+  delete process.env.AGENT_ENV_MOCK_TRANSCRIPTS_DIR;
   delete process.env.ACP_PROMPT_IDLE_TIMEOUT_MS;
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
@@ -122,6 +124,25 @@ describe('runAcpSubprocessPrompt', () => {
     expect(result.error).toBeUndefined();
     const call = readMockLog(logPath).find((m) => m.method === (sessionId ? 'session/load' : 'session/new'));
     expect(call?.params?.mcpServers).toEqual(servers);
+  });
+
+  it('returns an error instead of throwing when the agent binary does not exist', async () => {
+    const { workDir } = setupMock('prompt-ok');
+
+    const result = await runAcpSubprocessPrompt(
+      {
+        command: join(workDir, 'no-such-agent'),
+        args: [],
+        cwd: workDir,
+        novaSessionId: 'nova-missing-binary',
+        acpSessionId: null,
+        promptText: 'hello',
+        logTag: 'testAcp',
+      },
+      () => {}
+    );
+
+    expect(result.error).toMatch(/ENOENT/);
   });
 
   it('creates a new ACP session on the first turn and returns its id', async () => {
@@ -506,7 +527,7 @@ describe('runAcpSubprocessPrompt', () => {
     process.env.ACP_PROMPT_IDLE_TIMEOUT_MS = '3000';
     const { workDir } = setupMock('prompt-background-task');
     const transcriptsDir = join(workDir, 'agent-transcripts');
-    process.env.MOCK_TRANSCRIPTS_DIR = transcriptsDir;
+    process.env.AGENT_ENV_MOCK_TRANSCRIPTS_DIR = transcriptsDir;
     const events: Array<Record<string, unknown>> = [];
     const startedAt = Date.now();
 
@@ -545,7 +566,7 @@ describe('runAcpSubprocessPrompt', () => {
   it('settles a background Task on cursor/task when no transcripts dir is configured', async () => {
     process.env.ACP_PROMPT_IDLE_TIMEOUT_MS = '3000';
     const { workDir } = setupMock('prompt-background-task');
-    process.env.MOCK_TRANSCRIPTS_DIR = join(workDir, 'agent-transcripts');
+    process.env.AGENT_ENV_MOCK_TRANSCRIPTS_DIR = join(workDir, 'agent-transcripts');
     const startedAt = Date.now();
 
     const result = await runMock('nova-background-no-dir', null, workDir, () => {}, undefined, undefined, true);
@@ -558,7 +579,7 @@ describe('runAcpSubprocessPrompt', () => {
     process.env.ACP_PROMPT_IDLE_TIMEOUT_MS = '1500';
     const { workDir } = setupMock('prompt-foreground-task');
     const transcriptsDir = join(workDir, 'agent-transcripts');
-    process.env.MOCK_TRANSCRIPTS_DIR = transcriptsDir;
+    process.env.AGENT_ENV_MOCK_TRANSCRIPTS_DIR = transcriptsDir;
     const events: Array<Record<string, unknown>> = [];
 
     const result = await runMock(
@@ -669,5 +690,60 @@ describe('mergeCursorTodos', () => {
       { id: 'b', content: 'second updated', status: 'completed' },
       { id: 'c', content: 'third', status: 'in_progress' },
     ]);
+  });
+});
+
+describe('closeAcpSubprocessSession', () => {
+  function isAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  it('resolves at the deadline and SIGKILLs an agent that ignores SIGTERM', async () => {
+    const { workDir } = setupMock('prompt-ok');
+    const pidPath = join(workDir, 'pid');
+    const warn = vi.spyOn(logger, 'warn');
+    // Never answers initialize and ignores SIGTERM.
+    const script = `require('fs').writeFileSync(${JSON.stringify(pidPath)}, String(process.pid));
+      process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`;
+
+    const startedAt = Date.now();
+    await expect(
+      closeAcpSubprocessSession({
+        command: process.execPath,
+        args: ['-e', script],
+        cwd: workDir,
+        acpSessionId: 'hung-session',
+        logTag: 'testAcp',
+        timeoutMs: 300,
+        killGraceMs: 200
+      })
+    ).resolves.toBeUndefined();
+    expect(Date.now() - startedAt).toBeLessThan(2000);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ logTag: 'testAcp', timeoutMs: 300 }),
+      expect.stringMatching(/timed out/)
+    );
+
+    const pid = Number(readFileSync(pidPath, 'utf8'));
+    expect(isAlive(pid)).toBe(true);
+    await vi.waitFor(() => expect(isAlive(pid)).toBe(false), { timeout: 3000, interval: 50 });
+  });
+
+  it('resolves without throwing when the agent binary does not exist', async () => {
+    const { workDir } = setupMock('prompt-ok');
+    await expect(
+      closeAcpSubprocessSession({
+        command: join(workDir, 'no-such-agent'),
+        args: [],
+        cwd: workDir,
+        acpSessionId: 'missing',
+        logTag: 'testAcp'
+      })
+    ).resolves.toBeUndefined();
   });
 });

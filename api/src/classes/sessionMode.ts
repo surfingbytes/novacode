@@ -1,4 +1,4 @@
-import { MODE_SENTINEL } from './agentModes';
+import { MODE_SENTINEL } from './agents/sessionOptions';
 
 /** Empty/null (or legacy `auto`) session mode → sentinel `default`. */
 export function normalizeSessionMode(mode: string | null | undefined): string {

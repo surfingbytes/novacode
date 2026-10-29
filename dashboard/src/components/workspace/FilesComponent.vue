@@ -8,6 +8,8 @@ import 'md-editor-v3/lib/style.css';
 // classes
 import { filesApi } from '@/classes/api';
 import { buildHtmlPreviewDocument } from '@/lib/htmlPreview';
+import { notifyApiError } from '@/lib/notifyApiError';
+import { createMonacoWorker } from '@/lib/monacoWorkers';
 import { readFilesOpenPath, writeFilesOpenPath } from '@/lib/filesOpenPath';
 import { safeGetItem, safeSetItem } from '@/lib/safeLocalStorage';
 import { DEFAULT_THEME_ID, resolveStoredThemeId, themes } from '@/lib/themes';
@@ -23,15 +25,17 @@ import { useLongPress } from '@/composables/useLongPress';
 import { usePaneLayout } from '@/composables/usePaneLayout';
 
 // stores
-import { useToastStore } from '@/stores/toasts';
 
 // types
-import type { FileEntry } from '@/classes/api';
+import type { FileEntry } from '@/@types/index';
 import { ancestorDirectoryPaths } from '@/utils/workspaceFilePath';
 
 const monacoModule = shallowRef<typeof Monaco | null>(null);
 async function getMonaco(): Promise<typeof Monaco> {
   if (!monacoModule.value) {
+    // Vite does not bundle Monaco's default editor worker URL; Monaco then falls back to a
+    // data: module import, which the CSP blocks. Hand it bundled workers instead.
+    self.MonacoEnvironment ??= { getWorker: (_workerId, label) => createMonacoWorker(label) };
     monacoModule.value = await import('monaco-editor');
   }
   return monacoModule.value;
@@ -59,7 +63,6 @@ const {
   detailVisible
 } = usePaneLayout('novacode:filesSidePanel');
 
-const toastStore = useToastStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
 const entriesByPath = ref<Record<string, FileEntry[]>>({});
@@ -90,6 +93,8 @@ const bShowDiscardModal = ref<boolean>(false);
 /** Action blocked by unsaved changes; runs once the user confirms discarding them. */
 const pendingDiscardAction = ref<(() => void | Promise<void>) | null>(null);
 const bFullscreen = ref<boolean>(false);
+/** md-editor-v3 pulls these extensions from unpkg, which the CSP blocks; keep them off. */
+const mdEditorNoCdnProps = { noMermaid: true, noKatex: true, noHighlight: true, noEcharts: true } as const;
 /** Edit vs rendered preview for markdown / HTML files in the files pane. */
 const contentViewMode = ref<'edit' | 'preview'>('edit');
 const bCreatingFile = ref<boolean>(false);
@@ -314,7 +319,7 @@ const toggleExpand = (entry: FileEntry): void => {
     nextExpandedPaths.add(entry.path);
   }
   expandedPaths.value = nextExpandedPaths;
-  loadList(entry.path);
+  void loadList(entry.path);
 };
 
 function commitOpenPath(path: string | null, bEmit = true): void {
@@ -369,7 +374,7 @@ const downloadFile = (): void => {
   URL.revokeObjectURL(url);
 };
 
-const selectFile = async (entry: FileEntry): Promise<void> => {
+const selectFile = (entry: FileEntry): void => {
   if (entry.isDirectory) {
     return;
   }
@@ -504,7 +509,7 @@ const saveFile = async (): Promise<void> => {
     saveErrorMessage.value =
       errorWithMessage?.response?.data?.error ?? errorWithMessage?.message ?? 'Failed to save file';
     saveResult.value = 'error';
-    toastStore.error(saveErrorMessage.value);
+    notifyApiError(error, 'Failed to save file');
     saveResultTimer = setTimeout(() => (saveResult.value = null), 3000);
   } finally {
     bSaving.value = false;
@@ -725,7 +730,7 @@ function onEntryClick(entry: FileEntry): void {
     toggleExpand(entry);
     return;
   }
-  void selectFile(entry);
+  selectFile(entry);
 }
 
 // -------------------------------------------------- Watchers --------------------------------------------------
@@ -743,7 +748,7 @@ watch(
     if (active) {
       void reloadOpenFileFromDisk();
       if (editorContainerRef.value && !editor) {
-        initEditor();
+        initEditor().catch((err: unknown) => notifyApiError(err, 'Failed to load the editor'));
       }
     }
     if (!active) {
@@ -764,7 +769,7 @@ watch(
 
 watch([fileContent, selectedPath], () => {
   if (editor) {
-    updateEditorContent();
+    updateEditorContent().catch((err: unknown) => notifyApiError(err, 'Failed to load the editor'));
   }
 });
 
@@ -1201,6 +1206,7 @@ onUnmounted((): void => {
             class="border-0!"
             language="en-US"
             :theme="bIsDarkTheme ? 'dark' : 'light'"
+            v-bind="mdEditorNoCdnProps"
           />
         </div>
         <MdEditor
@@ -1210,7 +1216,21 @@ onUnmounted((): void => {
           language="en-US"
           :theme="bIsDarkTheme ? 'dark' : 'light'"
           :preview="false"
-          :toolbars-exclude="['github', 'save', 'preview', 'previewOnly', 'htmlPreview']"
+          :toolbars-exclude="[
+            'github',
+            'save',
+            'preview',
+            'previewOnly',
+            'htmlPreview',
+            // these load scripts from unpkg, which the CSP blocks
+            'fullscreen',
+            'prettier',
+            'mermaid',
+            'katex'
+          ]"
+          v-bind="mdEditorNoCdnProps"
+          no-prettier
+          no-upload-img
         />
         <iframe
           v-else-if="bHtmlPreview"

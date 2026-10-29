@@ -1,6 +1,8 @@
 # API service
 
-JSON under `/api`. The dashboard signs in with an **httpOnly session cookie** (7-day JWT, refreshed on `/api/auth/validate`). Scripts should use a hashed **API key** from **Account → API keys** as `Authorization: Bearer`.
+JSON under `/api`. The dashboard signs in with an **httpOnly session cookie** (7-day JWT, refreshed on `/api/auth/validate`). Scripts should use a hashed **API key** from **Account → API keys** as `Authorization: Bearer`. Cookies and Bearer tokens are the only auth: a `?token=` query parameter is ignored.
+
+WebSocket clients authenticate the same way (cookie, or the `bearer.<token>` subprotocol). An upgrade that sends an `Origin` header must come from an allowed CORS origin or the server's own host, otherwise it is closed with code 4003. Non-browser clients can leave `Origin` out.
 
 Optional **OIDC** (`OIDC_ISSUER` + client id/secret) adds SSO next to password login. Restrict who can open the app in the identity provider (Authentik application assignment, Authelia access rules, and so on) — Nova Code still maps a successful login to the single local owner account.
 

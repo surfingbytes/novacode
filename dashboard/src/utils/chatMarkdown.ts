@@ -1,9 +1,10 @@
 /**
  * Markdown rendering for chat bubbles and plan documents (marked config,
- * fence repair, render cache).
+ * fence repair, HTML sanitizing, render cache).
  */
 
 // node_modules
+import DOMPurify, { type DOMPurify as DOMPurifyInstance } from 'dompurify';
 import { marked, type Tokens } from 'marked';
 
 // ---------------------------------- Markdown ----------------------------------
@@ -52,7 +53,40 @@ marked.use({
   }
 });
 
-export function normalizeMarkdownForRendering(src: string): string {
+// ---------------------------------- Sanitizing ----------------------------------
+
+// http(s), mailto, or relative URLs (no scheme); everything else (javascript:, data:, ...) is dropped.
+const SAFE_URI = /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i;
+
+let purifier: DOMPurifyInstance | null = null;
+
+/** Own DOMPurify instance so the link hook does not leak into mermaid's shared default one. */
+function getPurifier(): DOMPurifyInstance {
+  if (purifier) return purifier;
+  purifier = DOMPurify(window);
+  // Only external http(s) links open in a new tab; DOMPurify strips `target` by default.
+  purifier.addHook('afterSanitizeAttributes', (node) => {
+    if (node.tagName !== 'A') return;
+    const href = node.getAttribute('href');
+    if (href && isExternalHttpUrl(href)) {
+      node.setAttribute('target', '_blank');
+      node.setAttribute('rel', 'noopener noreferrer');
+    } else {
+      node.removeAttribute('target');
+    }
+  });
+  return purifier;
+}
+
+/** Sanitize rendered markdown HTML before it is bound with `v-html`. */
+function sanitizeHtml(html: string): string {
+  return getPurifier().sanitize(html, {
+    ALLOWED_URI_REGEXP: SAFE_URI,
+    USE_PROFILES: { html: true }
+  });
+}
+
+function normalizeMarkdownForRendering(src: string): string {
   const lines = src.replace(/\r\n/g, '\n').split('\n');
   let openFence: { marker: '`' | '~'; length: number } | null = null;
 
@@ -90,7 +124,7 @@ export function renderMd(src: string | undefined): string {
   if (!src) {
     return '';
   }
-  return marked.parse(normalizeMarkdownForRendering(src), { async: false }) as string;
+  return sanitizeHtml(marked.parse(normalizeMarkdownForRendering(src), { async: false }));
 }
 
 const markdownRenderCache = new Map<string, string>();

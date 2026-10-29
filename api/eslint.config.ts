@@ -30,5 +30,22 @@ export default tseslint.config(
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_', ignoreRestSiblings: true }
       ]
     }
+  },
+  {
+    // Classes hold the logic routes call; they must never reach back into routes.
+    files: ['src/classes/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['../routes/*', '**/routes/*'],
+              message: 'Classes must not import routes; move the shared code into src/classes.'
+            }
+          ]
+        }
+      ]
+    }
   }
 );

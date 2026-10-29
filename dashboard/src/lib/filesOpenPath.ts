@@ -6,7 +6,7 @@
  */
 
 // lib
-import { safeGetItem, safeRemoveItem, safeSetItem } from '@/lib/safeLocalStorage';
+import { safeGetItem, safeLocalStorageKeys, safeRemoveItem, safeSetItem } from '@/lib/safeLocalStorage';
 
 const KEY_PREFIX = 'novacode:filesOpenPath:';
 
@@ -30,4 +30,13 @@ export function writeFilesOpenPath(workspaceId: string, path: string | null): vo
     return;
   }
   safeSetItem(key, path.trim());
+}
+
+/** Forget every workspace's last-opened path (logout). */
+export function clearAllFilesOpenPaths(): void {
+  for (const key of safeLocalStorageKeys()) {
+    if (key.startsWith(KEY_PREFIX)) {
+      safeRemoveItem(key);
+    }
+  }
 }

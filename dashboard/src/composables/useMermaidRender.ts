@@ -38,5 +38,3 @@ export function useMermaidRender(root: Ref<HTMLElement | null>) {
     scheduleMermaidRender
   };
 }
-
-export type UseMermaidRender = ReturnType<typeof useMermaidRender>;

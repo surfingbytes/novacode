@@ -22,8 +22,11 @@ import {
   updateForgeConnection
 } from '../classes/forge';
 import { summarizeCiRuns } from '../classes/forgeCi';
+import { ForgeHttpError } from '../classes/forgeClients';
+import { UpstreamError } from '../classes/httpErrors';
+import { gitHttpError } from '../classes/runGit';
 import { observeCiRuns, touchCiWatch } from '../classes/ciWatcher';
-import { getBranchMeta, maybeGitOutput, resolvePushRemote, resolveWorkspaceGitContext } from './git';
+import { getBranchMeta, maybeGitOutput, resolvePushRemote, resolveWorkspaceGitContext } from '../classes/gitWorkspace';
 
 // types
 import type {
@@ -202,11 +205,7 @@ export async function forgeRoutes(fastify: FastifyInstance): Promise<void> {
       const body = request.body as SaveForgeConnectionPayload;
       const test = await testForgeConnection({ provider: body.provider, url: body.url, token: body.token ?? '' });
       if (!test.ok) return reply.code(400).send({ error: test.error ?? 'Connection test failed' });
-      try {
-        return reply.code(201).send(toConnectionStatus(createForgeConnection(config.configDir, body, test)));
-      } catch (err) {
-        return reply.code(400).send({ error: (err as Error).message });
-      }
+      return reply.code(201).send(toConnectionStatus(createForgeConnection(config.configDir, body, test)));
     }
   );
 
@@ -232,13 +231,9 @@ export async function forgeRoutes(fastify: FastifyInstance): Promise<void> {
       const token = resolveTestToken(config.configDir, body.token, id);
       const test = await testForgeConnection({ provider: body.provider, url: body.url, token }, id);
       if (!test.ok) return reply.code(400).send({ error: test.error ?? 'Connection test failed' });
-      try {
-        const updated = updateForgeConnection(config.configDir, id, body, test);
-        if (!updated) return reply.code(404).send({ error: 'Connection not found' });
-        return toConnectionStatus(updated);
-      } catch (err) {
-        return reply.code(400).send({ error: (err as Error).message });
-      }
+      const updated = updateForgeConnection(config.configDir, id, body, test);
+      if (!updated) return reply.code(404).send({ error: 'Connection not found' });
+      return toConnectionStatus(updated);
     }
   );
 
@@ -424,7 +419,8 @@ export async function forgeRoutes(fastify: FastifyInstance): Promise<void> {
         const run = result.runs.find((r) => r.id === runId) ?? null;
         return await buildFixPromptForRun(connection, repo, target.branch, run, result.source, runId);
       } catch (err) {
-        return reply.code(400).send({ error: (err as Error).message });
+        if (err instanceof ForgeHttpError) throw new UpstreamError(err.message, { expose: true, cause: err });
+        throw gitHttpError(err);
       }
     }
   );

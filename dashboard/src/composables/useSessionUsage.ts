@@ -110,5 +110,3 @@ export function useSessionUsage(options: UseSessionUsageOptions) {
     resetUsage
   };
 }
-
-export type UseSessionUsage = ReturnType<typeof useSessionUsage>;

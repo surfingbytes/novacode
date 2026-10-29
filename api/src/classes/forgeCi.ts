@@ -6,7 +6,7 @@ import type { CiRun, CiRunStatus, CiStatusResponse } from '@novacode/shared';
  * `CiRun`, summarize them for the UI, and build the "fix failed build" prompt.
  */
 
-export const CI_QUEUED_DISPLAY_LIMIT = 3;
+const CI_QUEUED_DISPLAY_LIMIT = 3;
 const LOG_TAIL_LINES = 150;
 const LOG_TAIL_MAX_CHARS = 12_000;
 
@@ -70,7 +70,7 @@ export function normalizeCiStatus(status: unknown, conclusion: unknown): CiRunSt
 }
 
 /** GitLab pipeline/job statuses. `manual` waits on a human, so it is neither queued nor done. */
-export function normalizeGitlabStatus(status: unknown): CiRunStatus {
+function normalizeGitlabStatus(status: unknown): CiRunStatus {
   switch (typeof status === 'string' ? status.toLowerCase() : '') {
     case 'success':
       return 'success';
@@ -96,7 +96,7 @@ export function normalizeGitlabStatus(status: unknown): CiRunStatus {
   }
 }
 
-export function absoluteUrl(url: string | null, baseUrl: string): string | null {
+function absoluteUrl(url: string | null, baseUrl: string): string | null {
   if (!url) return null;
   if (/^https?:\/\//i.test(url)) return url;
   return url.startsWith('/') ? `${baseUrl}${url}` : null;

@@ -2,12 +2,13 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 
 // classes
-import { config, readMcpClients, type McpClientServerConfig } from './config';
+import { readMcpClients, type McpClientServerConfig } from './config';
+import { childEnv } from './childEnv';
 
 const STDIO_PROBE_MS = 2000;
 const HTTP_TIMEOUT_MS = 10_000;
 
-export type McpCheckKind = 'stdio' | 'http';
+type McpCheckKind = 'stdio' | 'http';
 
 export interface McpCheckResult {
   ok: boolean;
@@ -18,18 +19,13 @@ export interface McpCheckResult {
   detail?: string;
 }
 
-function mergeStdioEnv(configDir: string, extra?: Record<string, string>): Record<string, string> {
-  const base = config.agentEnv();
-  return { ...base, ...(extra ?? {}) };
-}
-
 function checkStdio(configDir: string, cfg: McpClientServerConfig): Promise<McpCheckResult> {
   const cmd = cfg.command?.trim();
   if (!cmd) {
     return Promise.resolve({ ok: false, kind: 'stdio', error: 'Missing command' });
   }
   const args = cfg.args ?? [];
-  const env = mergeStdioEnv(configDir, cfg.env);
+  const env = childEnv(cfg.env);
 
   return new Promise((resolve) => {
     let settled = false;
@@ -64,6 +60,10 @@ function checkStdio(configDir: string, cfg: McpClientServerConfig): Promise<McpC
     }
 
     child.on('error', (err) => {
+      done({ ok: false, kind: 'stdio', error: err.message });
+    });
+    // stdin is kept open as the liveness probe; an EPIPE from a dying server must not throw.
+    child.stdin?.on('error', (err) => {
       done({ ok: false, kind: 'stdio', error: err.message });
     });
 

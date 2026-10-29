@@ -37,5 +37,3 @@ export function useChatInputBreakpoint() {
     bChatInputMdUp
   };
 }
-
-export type UseChatInputBreakpoint = ReturnType<typeof useChatInputBreakpoint>;

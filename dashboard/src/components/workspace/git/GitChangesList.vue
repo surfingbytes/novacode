@@ -13,7 +13,7 @@ import {
 } from 'lucide-vue-next';
 import { computed } from 'vue';
 
-import type { GitCommit, GitFile, GitRepoStatus } from '@/classes/api';
+import type { GitCommit, GitFile, GitRepoStatus } from '@/@types/index';
 import {
   gitFileKey as fileKey,
   gitFormatCommitDate as formatCommitDate,
@@ -511,11 +511,11 @@ function onRepoCommitMessageInput(event: Event): void {
             <div class="flex items-stretch gap-2">
               <textarea
                 :value="commitMessagesByRepo[selectedGitRepo] ?? ''"
-                @input="onRepoCommitMessageInput"
                 rows="2"
                 class="min-w-0 flex-1 bg-card border border-fg/[0.08] focus:border-primary/50 focus:ring-2 focus:ring-primary/10 rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all resize-none"
                 placeholder="Commit message..."
                 :disabled="committingRepo !== null || bGeneratingCommitMessage"
+                @input="onRepoCommitMessageInput"
               />
               <button
                 class="flex-shrink-0 w-10 rounded-lg transition-all flex items-center justify-center"

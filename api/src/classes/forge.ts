@@ -5,7 +5,8 @@ import { join } from 'node:path';
 
 // classes
 import { buildFixBuildPrompt, isActiveCiRun } from './forgeCi';
-import { forgeClient, ForgeHttpError, providerLabel } from './forgeClients';
+import { forgeClient, providerLabel } from './forgeClients';
+import { BadRequestError } from './httpErrors';
 import { logger } from './logger';
 
 // types
@@ -33,8 +34,6 @@ const ERROR_CACHE_TTL_MS = 30_000;
 /** Public hosts never served by a self-hosted forge connection. */
 const PUBLIC_GIT_HOSTS = new Set(['github.com', 'gitlab.com', 'bitbucket.org', 'codeberg.org']);
 const FORGE_PROVIDERS: ReadonlySet<string> = new Set(['gitea', 'forgejo', 'github', 'gitlab']);
-
-export { ForgeHttpError };
 
 export interface ForgeConnection {
   id: string;
@@ -64,7 +63,7 @@ export function normalizeForgeUrl(raw: string): string {
   let url = raw.trim().replace(/\/+$/, '');
   url = url.replace(/\/api\/v[134]$/i, '');
   if (!/^https?:\/\//i.test(url)) {
-    throw new Error('URL must start with http:// or https://');
+    throw new BadRequestError('URL must start with http:// or https://');
   }
   return url;
 }
@@ -94,7 +93,7 @@ export function normalizeRemoteHosts(raw: string[] | undefined): string[] {
   return [...hosts];
 }
 
-export function defaultConnectionName(provider: ForgeProvider, url: string): string {
+function defaultConnectionName(provider: ForgeProvider, url: string): string {
   const host = urlHost(url);
   const label = providerLabel(provider);
   return PUBLIC_GIT_HOSTS.has(host) ? label : `${label} (${host || url})`;
@@ -214,7 +213,7 @@ export function createForgeConnection(
 ): ForgeConnection {
   const url = normalizeForgeUrl(input.url);
   const token = input.token?.trim();
-  if (!token) throw new Error('Access token is required');
+  if (!token) throw new BadRequestError('Access token is required');
   const provider = test.provider ?? input.provider;
   const stored: StoredConnection = {
     id: randomUUID().slice(0, 8),
@@ -321,7 +320,7 @@ export function parseGitRemote(remote: string): { host: string; path: string } |
  * Repo path as the provider addresses it. GitLab keeps nested groups (`group/sub/project`);
  * the others use `owner/name` — the last two segments, so sub-path installs still work.
  */
-export function repoPathForProvider(provider: ForgeProvider, path: string, connectionUrl?: string): string | null {
+function repoPathForProvider(provider: ForgeProvider, path: string, connectionUrl?: string): string | null {
   let segments = path.split('/').filter(Boolean);
   if (provider === 'gitlab') {
     // Drop an install sub-path (`https://host/gitlab/group/project` → `group/project`).
@@ -412,7 +411,7 @@ export function normalizeForgeRepoInput(
     const repo = repoPathForProvider(provider ?? 'github', parsed.path);
     if (repo && REPO_PATH_RE.test(repo)) return repo;
   }
-  throw new Error('Forge repository must look like owner/name');
+  throw new BadRequestError('Forge repository must look like owner/name');
 }
 
 // -------------------------------------------------- Cached runs --------------------------------------------------
@@ -425,7 +424,7 @@ interface CacheEntry {
 
 const runsCache = new Map<string, CacheEntry>();
 
-export function clearForgeCaches(): void {
+function clearForgeCaches(): void {
   runsCache.clear();
 }
 

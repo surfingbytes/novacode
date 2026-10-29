@@ -16,7 +16,7 @@ export const OPENCODE_QUICK_VALUE_PREFIX = 'ocquick:';
 export const OPENCODE_CURRENT_VALUE_PREFIX = 'occurrent:';
 
 /** Quick-menu entries. `label` is what the UI shows; `modelNames` match API `option.model`. */
-export const BASIC_CURSOR_MODEL_PRESETS = [
+const BASIC_CURSOR_MODEL_PRESETS = [
   { label: 'Auto', thinking: 'Auto', modelNames: ['Auto'] },
   { label: 'Composer 2.5', thinking: 'Fast', modelNames: ['Composer 2.5'] },
   { label: 'Opus 5.5', thinking: 'High', modelNames: ['Claude Opus 5 5'] },
@@ -33,7 +33,7 @@ export type ModelSelectOption = { value: string; label: string };
  * OpenCode quick-menu presets for built-in providers. `modelIds` are matched against
  * API `option.id` in preference order — the first id present in the catalog wins.
  */
-export const BASIC_OPENCODE_MODEL_PRESETS = [
+const BASIC_OPENCODE_MODEL_PRESETS = [
   { label: 'GPT 6.1', modelIds: ['openai/gpt-6.1-sol', 'openai/gpt-6-sol', 'openai/gpt-6'] }
 ] as const;
 
@@ -186,7 +186,7 @@ function prettifyModelId(id: string): string {
     .join(' ');
 }
 
-export function parseConfiguredModelId(id: string): { baseId: string; config: Record<string, string> } | null {
+function parseConfiguredModelId(id: string): { baseId: string; config: Record<string, string> } | null {
   const match = id.match(/^([^\[]+)\[([^\]]+)\]$/);
   if (!match) return null;
 
@@ -583,7 +583,7 @@ const LEGACY_THINKING_INFIX_RE =
   /-thinking-(none|minimal|low|medium|high|xhigh|max|extra-high)$/i;
 
 function optionBaseId(option: AgentModelOption): string {
-  return parseConfiguredModelId(option.id)?.baseId ?? option.id.split('[')[0]!.trim();
+  return parseConfiguredModelId(option.id)?.baseId ?? option.id.split('[')[0].trim();
 }
 
 /**
@@ -628,12 +628,12 @@ export function resolveSavedModelOption(
   let thinkingHint: string | undefined;
   const thinkingInfix = rest.match(LEGACY_THINKING_INFIX_RE);
   if (thinkingInfix) {
-    thinkingHint = titleModelToken(thinkingInfix[1]!);
+    thinkingHint = titleModelToken(thinkingInfix[1]);
     rest = rest.slice(0, -thinkingInfix[0].length);
   } else {
     const thinkingSuffix = rest.match(LEGACY_THINKING_SUFFIX_RE);
     if (thinkingSuffix) {
-      thinkingHint = titleModelToken(thinkingSuffix[1]!);
+      thinkingHint = titleModelToken(thinkingSuffix[1]);
       rest = rest.slice(0, -thinkingSuffix[0].length);
     }
   }

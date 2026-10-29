@@ -1,20 +1,19 @@
 <script setup lang="ts">
 // node_modules
-import { computed, ref, onMounted } from 'vue';
+import { computed, ref, onMounted, defineAsyncComponent } from 'vue';
 
 // components
 import ApiKeyModal from '@/components/ApiKeyModal.vue';
-import AppTerminal from '@/components/AppTerminal.vue';
 import BaseModal from '@/components/BaseModal.vue';
 import ConfirmModal from '@/components/ConfirmModal.vue';
 import ModalHeader from '@/components/ModalHeader.vue';
 
 // classes
-import { agentAuthApi, apiErrorMessage, isGloballyToasted, settingsApi, type CursorAuthStatus } from '@/classes/api';
+import { agentAuthApi, apiErrorMessage, settingsApi } from '@/classes/api';
+import { notifyApiError } from '@/lib/notifyApiError';
 import { formatUsageBar, formatUsdFromCents } from '@/utils/cursorUsageDisplay';
 
 // stores
-import { useToastStore } from '@/stores/toasts';
 
 // types
 import type {
@@ -23,17 +22,40 @@ import type {
   OpenCodeProviderAdapter
 } from '@/@types/index';
 
+// composables
+import { useAgentAuth } from '@/composables/useAgentAuth';
+
+// -------------------------------------------------- Components --------------------------------------------------
+const AppTerminal = defineAsyncComponent(() => import('@/components/AppTerminal.vue'));
+
 // -------------------------------------------------- Stores --------------------------------------------------
-const toastStore = useToastStore();
 
 // -------------------------------------------------- Refs --------------------------------------------------
-const bCursorAuthenticated = ref<boolean>(false);
-const cursorAuthStatus = ref<CursorAuthStatus>('error');
-const cursorAuthMessage = ref<string>('');
-const bClaudeAuthenticated = ref<boolean>(false);
-const bOpenCodeAuthenticated = ref<boolean>(false);
-const bCodexAuthenticated = ref<boolean>(false);
-const bOpenCodeAvailable = ref<boolean>(false);
+const {
+  status: agentStatus,
+  cursorAuthStatus,
+  cursorAuthMessage,
+  refreshAll,
+  refresh: refreshAgent,
+  isBusy,
+  startCursorLogin,
+  startClaudeLogin,
+  submitAuthCode,
+  onAuthTokenFound,
+  logoutCursor: logoutCursorAuth,
+  logoutClaude,
+  saveApiKey,
+  clearApiKey,
+  authSessionId,
+  authCode,
+  authUrl,
+  authTerminalRef,
+  bClaudeAuthSuccess,
+  claudeAuthError,
+  openAuthUrl,
+  dismissAuthTerminal,
+  onAuthSessionEnded
+} = useAgentAuth({ onFlowEnded: () => void loadCursorUsage() });
 const openCodeProviders = ref<OpenCodeProvider[]>([]);
 const bLoadingOpenCodeProviders = ref<boolean>(false);
 const bSavingOpenCodeProvider = ref<boolean>(false);
@@ -58,34 +80,16 @@ const openCodeProviderForm = ref<{
   models: '',
   apiKey: ''
 });
-const bStartingCursorLogin = ref<boolean>(false);
-const bStartingClaudeLogin = ref<boolean>(false);
-const bLoggingOutCursor = ref<boolean>(false);
-const bLoggingOutClaude = ref<boolean>(false);
-const bLoggingOutOpenCode = ref<boolean>(false);
-const bLoggingOutCodex = ref<boolean>(false);
 const bShowOpenCodeApiKeyModal = ref<boolean>(false);
 const bShowCodexApiKeyModal = ref<boolean>(false);
-const bSavingOpenCodeApiKey = ref<boolean>(false);
-const bSavingCodexApiKey = ref<boolean>(false);
 const openCodeApiKeyError = ref<string>('');
 const codexApiKeyError = ref<string>('');
 const bOpenCodeAuthSuccess = ref<boolean>(false);
 const bCodexAuthSuccess = ref<boolean>(false);
-const authSessionId = ref<string | null>(null);
-const authCode = ref<string>('');
-const authUrl = ref<string | null>(null);
-const bClaudeAuthSuccess = ref<boolean>(false);
-const claudeAuthError = ref<string>('');
-const authTerminalRef = ref<InstanceType<typeof AppTerminal> | null>(null);
 
 // Mistral Vibe API key
-const bVibeConfigured = ref<boolean>(false);
-const bLoadingVibeStatus = ref<boolean>(false);
 const bShowVibeApiKeyModal = ref<boolean>(false);
-const bSavingVibeApiKey = ref<boolean>(false);
 const vibeApiKeyError = ref<string>('');
-const bDeletingVibeApiKey = ref<boolean>(false);
 
 // Cursor account usage (from agent login → usage-summary)
 const cursorUsage = ref<CursorUsageSummaryResponse | null>(null);
@@ -137,46 +141,6 @@ const cursorCycleEndLabel = computed(() => {
 });
 
 // -------------------------------------------------- Methods --------------------------------------------------
-const refreshAuthStatus = async (): Promise<void> => {
-  try {
-    const cursorResponse = await agentAuthApi.cursorStatus();
-    bCursorAuthenticated.value = cursorResponse.data.authenticated;
-    cursorAuthStatus.value = cursorResponse.data.status;
-    cursorAuthMessage.value = cursorResponse.data.message ?? '';
-  } catch {
-    bCursorAuthenticated.value = false;
-    cursorAuthStatus.value = 'error';
-    cursorAuthMessage.value = 'Could not verify Cursor CLI authentication.';
-  }
-
-  try {
-    const claudeResponse = await agentAuthApi.claudeStatus();
-    bClaudeAuthenticated.value = claudeResponse.data.authenticated;
-  } catch {
-    // Best-effort status probe; the card just keeps its previous state.
-  }
-
-  try {
-    const openCodeResponse = await agentAuthApi.openCodeStatus();
-    bOpenCodeAuthenticated.value = openCodeResponse.data.authenticated;
-  } catch {
-    // Best-effort status probe; the card just keeps its previous state.
-  }
-  try {
-    const codexResponse = await agentAuthApi.codexStatus();
-    bCodexAuthenticated.value = codexResponse.data.authenticated;
-  } catch {
-    // Best-effort status probe; the card just keeps its previous state.
-  }
-
-  try {
-    const capsResponse = await settingsApi.getAgentCapabilities();
-    bOpenCodeAvailable.value = capsResponse.data.openCodeAvailable;
-  } catch {
-    // Optional capability probe; OpenCode stays hidden when unknown.
-  }
-};
-
 const loadOpenCodeProviders = async (): Promise<void> => {
   bLoadingOpenCodeProviders.value = true;
   try {
@@ -189,58 +153,10 @@ const loadOpenCodeProviders = async (): Promise<void> => {
   }
 };
 
-const startCursorLogin = async (): Promise<void> => {
-  bStartingCursorLogin.value = true;
-  try {
-    authUrl.value = null;
-    authCode.value = '';
-    const response = await agentAuthApi.cursorLogin();
-    authSessionId.value = response.data.sessionId;
-  } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Cursor login failed');
-  } finally {
-    bStartingCursorLogin.value = false;
-  }
-};
-
-const startClaudeLogin = async (): Promise<void> => {
-  bStartingClaudeLogin.value = true;
-  try {
-    authUrl.value = null;
-    authCode.value = '';
-    const response = await agentAuthApi.claudeLogin();
-    authSessionId.value = response.data.sessionId;
-  } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Claude login failed');
-  } finally {
-    bStartingClaudeLogin.value = false;
-  }
-};
-
 const logoutCursor = async (): Promise<void> => {
-  bLoggingOutCursor.value = true;
-  try {
-    await agentAuthApi.cursorLogout();
-    await refreshAuthStatus();
-    cursorUsage.value = null;
-    void loadCursorUsage();
-  } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Cursor logout failed');
-  } finally {
-    bLoggingOutCursor.value = false;
-  }
-};
-
-const logoutClaude = async (): Promise<void> => {
-  bLoggingOutClaude.value = true;
-  try {
-    await agentAuthApi.claudeLogout();
-    await refreshAuthStatus();
-  } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Claude logout failed');
-  } finally {
-    bLoggingOutClaude.value = false;
-  }
+  await logoutCursorAuth();
+  cursorUsage.value = null;
+  void loadCursorUsage();
 };
 
 const openOpenCodeApiKeyModal = (): void => {
@@ -251,44 +167,28 @@ const openOpenCodeApiKeyModal = (): void => {
 const closeOpenCodeApiKeyModal = (): void => {
   bShowOpenCodeApiKeyModal.value = false;
   openCodeApiKeyError.value = '';
-  refreshAuthStatus();
-  loadOpenCodeProviders();
+  void refreshAgent('opencode');
+  void loadOpenCodeProviders();
 };
 
 const saveOpenCodeApiKey = async (apiKey: string): Promise<void> => {
-  const key = apiKey.trim();
   openCodeApiKeyError.value = '';
-  if (!key) {
+  if (!apiKey.trim()) {
     openCodeApiKeyError.value = 'Enter your OpenCode API key.';
     return;
   }
-  bSavingOpenCodeApiKey.value = true;
-  try {
-    const response = await agentAuthApi.openCodeLogin(key);
-    if (response.data?.ok) {
-      bOpenCodeAuthSuccess.value = true;
-      closeOpenCodeApiKeyModal();
-      setTimeout(() => { bOpenCodeAuthSuccess.value = false; }, 3000);
-    } else {
-      openCodeApiKeyError.value = 'Authentication failed. Check your API key and try again.';
-    }
-  } catch {
-    openCodeApiKeyError.value = 'Failed to authenticate. Try again.';
-  } finally {
-    bSavingOpenCodeApiKey.value = false;
+  const error = await saveApiKey('opencode', apiKey);
+  if (error) {
+    openCodeApiKeyError.value = error;
+    return;
   }
+  bOpenCodeAuthSuccess.value = true;
+  closeOpenCodeApiKeyModal();
+  setTimeout(() => { bOpenCodeAuthSuccess.value = false; }, 3000);
 };
 
 const logoutOpenCode = async (): Promise<void> => {
-  bLoggingOutOpenCode.value = true;
-  try {
-    await agentAuthApi.openCodeLogout();
-    await refreshAuthStatus();
-  } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('OpenCode logout failed');
-  } finally {
-    bLoggingOutOpenCode.value = false;
-  }
+  await clearApiKey('opencode');
 };
 
 const openAddOpenCodeProvider = (): void => {
@@ -415,7 +315,7 @@ const saveOpenCodeProvider = async (): Promise<void> => {
     openCodeProviders.value = next.sort((a, b) => a.name.localeCompare(b.name));
     bOpenCodeProviderSuccess.value = true;
     closeOpenCodeProviderModal();
-    await refreshAuthStatus();
+    await refreshAgent('opencode');
     setTimeout(() => { bOpenCodeProviderSuccess.value = false; }, 3000);
   } catch (err) {
     openCodeProviderError.value = apiErrorMessage(err, 'Failed to save provider.');
@@ -436,9 +336,9 @@ const deleteOpenCodeProvider = async (): Promise<void> => {
     await settingsApi.deleteOpenCodeProvider(providerId);
     openCodeProviders.value = openCodeProviders.value.filter((provider) => provider.id !== providerId);
     pendingDelete.value = null;
-    await refreshAuthStatus();
+    await refreshAgent('opencode');
   } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Delete provider failed');
+    notifyApiError(err, 'Delete provider failed');
   } finally {
     bSavingOpenCodeProvider.value = false;
   }
@@ -452,107 +352,27 @@ const openCodexApiKeyModal = (): void => {
 const closeCodexApiKeyModal = (): void => {
   bShowCodexApiKeyModal.value = false;
   codexApiKeyError.value = '';
-  refreshAuthStatus();
+  void refreshAgent('codex');
 };
 
 const saveCodexApiKey = async (apiKey: string): Promise<void> => {
-  const key = apiKey.trim();
   codexApiKeyError.value = '';
-  if (!key) {
+  if (!apiKey.trim()) {
     codexApiKeyError.value = 'Enter your Codex API key.';
     return;
   }
-  bSavingCodexApiKey.value = true;
-  try {
-    const response = await agentAuthApi.codexLogin(key);
-    if (response.data?.ok) {
-      bCodexAuthSuccess.value = true;
-      closeCodexApiKeyModal();
-      setTimeout(() => { bCodexAuthSuccess.value = false; }, 3000);
-    } else {
-      codexApiKeyError.value = 'Authentication failed. Check your API key and try again.';
-    }
-  } catch {
-    codexApiKeyError.value = 'Failed to authenticate. Try again.';
-  } finally {
-    bSavingCodexApiKey.value = false;
+  const error = await saveApiKey('codex', apiKey);
+  if (error) {
+    codexApiKeyError.value = error;
+    return;
   }
+  bCodexAuthSuccess.value = true;
+  closeCodexApiKeyModal();
+  setTimeout(() => { bCodexAuthSuccess.value = false; }, 3000);
 };
 
 const logoutCodex = async (): Promise<void> => {
-  bLoggingOutCodex.value = true;
-  try {
-    await agentAuthApi.codexLogout();
-    await refreshAuthStatus();
-  } catch (err) {
-    if (!isGloballyToasted(err)) toastStore.error('Codex logout failed');
-  } finally {
-    bLoggingOutCodex.value = false;
-  }
-};
-
-const submitAuthCode = async (): Promise<void> => {
-  const code = authCode.value.trim();
-  if (!code) {
-    return;
-  }
-  authTerminalRef.value?.sendInput(code);
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  authTerminalRef.value?.sendInput('\r');
-  authCode.value = '';
-};
-
-const onAuthTokenFound = async (token: string): Promise<void> => {
-  const trimmedToken = token.trim();
-  if (!trimmedToken) {
-    return;
-  }
-  try {
-    claudeAuthError.value = '';
-    const response = await agentAuthApi.claudeSaveToken(trimmedToken);
-    if (response.data?.ok) {
-      bClaudeAuthSuccess.value = true;
-      dismissAuthTerminal();
-      setTimeout(() => {
-        bClaudeAuthSuccess.value = false;
-      }, 3000);
-    } else {
-      claudeAuthError.value = 'Failed to save Claude token.';
-    }
-    await refreshAuthStatus();
-  } catch {
-    claudeAuthError.value = 'Failed to save Claude token.';
-  }
-};
-
-const openAuthUrl = (url: string): void => {
-  authUrl.value = url;
-  window.open(url, '_blank', 'noopener,noreferrer');
-};
-
-const dismissAuthTerminal = (): void => {
-  authSessionId.value = null;
-  authUrl.value = null;
-  authCode.value = '';
-  refreshAuthStatus();
-  void loadCursorUsage();
-};
-
-const onAuthSessionEnded = (): void => {
-  refreshAuthStatus();
-  void loadCursorUsage();
-};
-
-const loadVibeApiKeyStatus = async (): Promise<void> => {
-  bLoadingVibeStatus.value = true;
-  try {
-    const response = await settingsApi.getVibeApiKeyStatus();
-    bVibeConfigured.value = response.data.configured;
-  } catch {
-    bVibeConfigured.value = false;
-  } finally {
-    bLoadingVibeStatus.value = false;
-  }
+  await clearApiKey('codex');
 };
 
 const loadCursorUsage = async (): Promise<void> => {
@@ -572,46 +392,36 @@ const openVibeApiKeyModal = (): void => {
 const closeVibeApiKeyModal = (): void => {
   bShowVibeApiKeyModal.value = false;
   vibeApiKeyError.value = '';
-  loadVibeApiKeyStatus();
+  void refreshAgent('vibe');
 };
 
 const saveVibeApiKey = async (apiKey: string): Promise<void> => {
-  const key = apiKey.trim();
   vibeApiKeyError.value = '';
-  if (!key) {
+  if (!apiKey.trim()) {
     vibeApiKeyError.value = 'Enter your Mistral API key.';
     return;
   }
-  bSavingVibeApiKey.value = true;
-  try {
-    await settingsApi.setVibeApiKey(key);
-    closeVibeApiKeyModal();
-  } catch {
-    vibeApiKeyError.value = 'Failed to save API key.';
-  } finally {
-    bSavingVibeApiKey.value = false;
+  const error = await saveApiKey('vibe', apiKey);
+  if (error) {
+    vibeApiKeyError.value = error;
+    return;
   }
+  closeVibeApiKeyModal();
 };
 
 const deleteVibeApiKey = async (): Promise<void> => {
   vibeApiKeyError.value = '';
-  bDeletingVibeApiKey.value = true;
-  try {
-    await settingsApi.clearVibeApiKey();
-    bVibeConfigured.value = false;
-    closeVibeApiKeyModal();
-  } catch (err) {
-    vibeApiKeyError.value = 'Failed to remove API key.';
-    if (!isGloballyToasted(err)) toastStore.error('Remove Vibe API key failed');
-  } finally {
-    bDeletingVibeApiKey.value = false;
+  const error = await clearApiKey('vibe');
+  if (error) {
+    vibeApiKeyError.value = error;
+    return;
   }
+  closeVibeApiKeyModal();
 };
 
 onMounted((): void => {
-  refreshAuthStatus();
-  loadVibeApiKeyStatus();
-  loadOpenCodeProviders();
+  void refreshAll();
+  void loadOpenCodeProviders();
   void loadCursorUsage();
 });
 </script>
@@ -630,14 +440,14 @@ onMounted((): void => {
               <span class="nc-chip" :class="cursorAuthChipClass">{{ cursorAuthChipText }}</span>
             </div>
             <div class="settings-auth-card__actions">
-              <button v-if="cursorAuthStatus === 'unauthenticated'" class="settings-btn-primary" :disabled="bStartingCursorLogin" @click="startCursorLogin">
-                <span v-if="bStartingCursorLogin" class="settings-spinner" />Login to Cursor
+              <button v-if="cursorAuthStatus === 'unauthenticated'" class="settings-btn-primary" :disabled="isBusy('cursor', 'login')" @click="startCursorLogin">
+                <span v-if="isBusy('cursor', 'login')" class="settings-spinner" />Login to Cursor
               </button>
-              <button v-else-if="cursorAuthStatus === 'timeout' || cursorAuthStatus === 'error'" class="settings-btn" @click="refreshAuthStatus">
+              <button v-else-if="cursorAuthStatus === 'timeout' || cursorAuthStatus === 'error'" class="settings-btn" @click="refreshAgent('cursor')">
                 Check again
               </button>
-              <button v-else class="settings-btn" :disabled="bLoggingOutCursor" @click="logoutCursor">
-                <span v-if="bLoggingOutCursor" class="settings-spinner" />Logout
+              <button v-else class="settings-btn" :disabled="isBusy('cursor', 'logout')" @click="logoutCursor">
+                <span v-if="isBusy('cursor', 'logout')" class="settings-spinner" />Logout
               </button>
               <a href="https://cursor.com/dashboard?tab=spending" target="_blank" rel="noopener noreferrer" class="settings-auth-link">View account &amp; usage →</a>
             </div>
@@ -661,14 +471,14 @@ onMounted((): void => {
                 <div class="settings-auth-card__name">Claude Code</div>
                 <div class="settings-auth-card__desc">Uses <code class="settings-mono-chip">claude setup-token</code> — sign in with your Claude account and paste the issued token.</div>
               </div>
-              <span class="nc-chip" :class="bClaudeAuthenticated ? 'success' : ''">{{ bClaudeAuthenticated ? 'Configured' : 'Not configured' }}</span>
+              <span class="nc-chip" :class="agentStatus.claude.authenticated ? 'success' : ''">{{ agentStatus.claude.authenticated ? 'Configured' : 'Not configured' }}</span>
             </div>
             <div class="settings-auth-card__actions">
-              <button v-if="!bClaudeAuthenticated" class="settings-btn-primary" :disabled="bStartingClaudeLogin" @click="startClaudeLogin">
-                <span v-if="bStartingClaudeLogin" class="settings-spinner" />Login to Claude
+              <button v-if="!agentStatus.claude.authenticated" class="settings-btn-primary" :disabled="isBusy('claude', 'login')" @click="startClaudeLogin">
+                <span v-if="isBusy('claude', 'login')" class="settings-spinner" />Login to Claude
               </button>
-              <button v-else class="settings-btn" :disabled="bLoggingOutClaude" @click="logoutClaude">
-                <span v-if="bLoggingOutClaude" class="settings-spinner" />Logout
+              <button v-else class="settings-btn" :disabled="isBusy('claude', 'logout')" @click="logoutClaude">
+                <span v-if="isBusy('claude', 'logout')" class="settings-spinner" />Logout
               </button>
               <a href="https://claude.ai" target="_blank" rel="noopener noreferrer" class="settings-auth-link">Manage account &amp; usage →</a>
             </div>
@@ -681,10 +491,10 @@ onMounted((): void => {
                 <div class="settings-auth-card__name">Mistral Vibe</div>
                 <div class="settings-auth-card__desc">API key for the Vibe CLI. Stored in <code class="settings-mono-chip">~/.vibe/.env</code>.</div>
               </div>
-              <span class="nc-chip" :class="bVibeConfigured ? 'success' : ''">{{ bLoadingVibeStatus ? '…' : bVibeConfigured ? 'Configured' : 'Not configured' }}</span>
+              <span class="nc-chip" :class="agentStatus.vibe.authenticated ? 'success' : ''">{{ agentStatus.vibe.loading ? '…' : agentStatus.vibe.authenticated ? 'Configured' : 'Not configured' }}</span>
             </div>
             <div class="settings-auth-card__actions">
-              <button class="settings-btn-accent" :disabled="bLoadingVibeStatus" @click="openVibeApiKeyModal">{{ bVibeConfigured ? 'Update API key' : 'Set API key' }}</button>
+              <button class="settings-btn-accent" :disabled="agentStatus.vibe.loading" @click="openVibeApiKeyModal">{{ agentStatus.vibe.authenticated ? 'Update API key' : 'Set API key' }}</button>
             </div>
           </div>
           <div class="settings-auth-card">
@@ -696,15 +506,15 @@ onMounted((): void => {
                   proxies, or other OpenAI-compatible endpoints.
                 </div>
               </div>
-              <span class="nc-chip" :class="bOpenCodeAuthenticated ? 'success' : ''">{{ openCodeProviderCountLabel }}</span>
+              <span class="nc-chip" :class="agentStatus.opencode.authenticated ? 'success' : ''">{{ openCodeProviderCountLabel }}</span>
             </div>
             <div class="settings-auth-card__actions">
               <button class="settings-btn-accent" @click="openAddOpenAIProvider">Add OpenAI</button>
               <button class="settings-btn-accent" @click="openAddKimiProvider">Add Moonshot/Kimi</button>
               <button class="settings-btn" @click="openAddOpenCodeProvider">Add custom provider</button>
               <button class="settings-btn" @click="openOpenCodeApiKeyModal">Legacy OpenCode key</button>
-              <button v-if="bOpenCodeAuthenticated" class="settings-btn" :disabled="bLoggingOutOpenCode" @click="logoutOpenCode">
-                <span v-if="bLoggingOutOpenCode" class="settings-spinner" />Clear legacy key
+              <button v-if="agentStatus.opencode.authenticated" class="settings-btn" :disabled="isBusy('opencode', 'clear')" @click="logoutOpenCode">
+                <span v-if="isBusy('opencode', 'clear')" class="settings-spinner" />Clear legacy key
               </button>
             </div>
             <p v-if="bOpenCodeAuthSuccess" class="settings-auth-card__success">Legacy OpenCode API key saved.</p>
@@ -759,12 +569,12 @@ onMounted((): void => {
                 <div class="settings-auth-card__name">OpenAI Codex ACP</div>
                 <div class="settings-auth-card__desc">API key for Codex ACP. Stored in <code class="settings-mono-chip">~/.codex/auth.json</code>.</div>
               </div>
-              <span class="nc-chip" :class="bCodexAuthenticated ? 'success' : ''">{{ bCodexAuthenticated ? 'Configured' : 'Not configured' }}</span>
+              <span class="nc-chip" :class="agentStatus.codex.authenticated ? 'success' : ''">{{ agentStatus.codex.authenticated ? 'Configured' : 'Not configured' }}</span>
             </div>
             <div class="settings-auth-card__actions">
-              <button class="settings-btn-accent" @click="openCodexApiKeyModal">{{ bCodexAuthenticated ? 'Update API key' : 'Set API key' }}</button>
-              <button v-if="bCodexAuthenticated" class="settings-btn" :disabled="bLoggingOutCodex" @click="logoutCodex">
-                <span v-if="bLoggingOutCodex" class="settings-spinner" />Logout
+              <button class="settings-btn-accent" @click="openCodexApiKeyModal">{{ agentStatus.codex.authenticated ? 'Update API key' : 'Set API key' }}</button>
+              <button v-if="agentStatus.codex.authenticated" class="settings-btn" :disabled="isBusy('codex', 'clear')" @click="logoutCodex">
+                <span v-if="isBusy('codex', 'clear')" class="settings-spinner" />Logout
               </button>
             </div>
             <p v-if="bCodexAuthSuccess" class="settings-auth-card__success">Codex API key saved.</p>
@@ -796,8 +606,8 @@ onMounted((): void => {
       eyebrow="// codex api key"
       description="Enter your OpenAI API key for Codex ACP authentication."
       placeholder="Your OpenAI API key"
-      :b-configured="bCodexAuthenticated"
-      :b-saving="bSavingCodexApiKey"
+      :b-configured="agentStatus.codex.authenticated"
+      :b-saving="isBusy('codex', 'save')"
       :error-message="codexApiKeyError"
       @update:model-value="(v: boolean) => { if (!v) closeCodexApiKeyModal(); }"
       @save="saveCodexApiKey"
@@ -809,9 +619,9 @@ onMounted((): void => {
       provider-name="Mistral Vibe"
       eyebrow="// mistral vibe api key"
       placeholder="Your Mistral API key"
-      :b-configured="bVibeConfigured"
-      :b-saving="bSavingVibeApiKey"
-      :b-deleting="bDeletingVibeApiKey"
+      :b-configured="agentStatus.vibe.authenticated"
+      :b-saving="isBusy('vibe', 'save')"
+      :b-deleting="isBusy('vibe', 'clear')"
       :error-message="vibeApiKeyError"
       @update:model-value="(v: boolean) => { if (!v) closeVibeApiKeyModal(); }"
       @save="saveVibeApiKey"
@@ -947,8 +757,8 @@ onMounted((): void => {
       provider-name="OpenCode"
       eyebrow="// opencode api key"
       placeholder="Your OpenCode API key"
-      :b-configured="bOpenCodeAuthenticated"
-      :b-saving="bSavingOpenCodeApiKey"
+      :b-configured="agentStatus.opencode.authenticated"
+      :b-saving="isBusy('opencode', 'save')"
       :error-message="openCodeApiKeyError"
       @update:model-value="(v: boolean) => { if (!v) closeOpenCodeApiKeyModal(); }"
       @save="saveOpenCodeApiKey"

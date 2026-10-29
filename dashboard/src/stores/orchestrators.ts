@@ -173,6 +173,12 @@ export const useOrchestratorsStore = defineStore('orchestrators', () => {
     }
   }
 
+  /** Logout: forget every workspace's orchestrators. */
+  function reset(): void {
+    orchestratorsByWorkspace.value = {};
+    fetchedWorkspaces.clear();
+  }
+
   // -------------------------------------------------- Export --------------------------------------------------
   return {
     // data
@@ -189,6 +195,7 @@ export const useOrchestratorsStore = defineStore('orchestrators', () => {
     markRead,
     removeOrchestrator,
     ensureFetched,
-    fetchOne
+    fetchOne,
+    reset
   };
 });

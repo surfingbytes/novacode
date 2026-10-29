@@ -6,51 +6,11 @@ import { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 // classes
 import { db } from '../classes/database';
 import { jwtPreHandler } from '../classes/auth';
-import {
-  ensureSessionSpec,
-  isChatNewerThanSpec,
-  readSessionSpec,
-  sessionSpecPath,
-  specHasContent
-} from '../classes/sessionSpec';
-import { broadcastSessionSpecStatus } from './ws';
-
-// types
-import type { SessionSpecStatus } from '../@types/index';
+import { ensureSessionSpec, readSessionSpec } from '../classes/sessionSpec';
+import { buildSessionSpecStatus } from '../classes/sessionSpecStatus';
+import { broadcastSessionSpecStatus } from '../classes/wsBroadcast';
 
 const SpecParamsSchema = Type.Object({ workspaceId: Type.String(), sessionId: Type.String() });
-
-interface SpecSession {
-  id: string;
-  name: string;
-  workspaceId: string;
-  agentType: string;
-  modelSelection: string;
-  updatedAt: string;
-}
-
-async function buildSessionSpecStatus(session: SpecSession): Promise<SessionSpecStatus> {
-  const [spec, orchestrator] = await Promise.all([
-    readSessionSpec(session.workspaceId, session.id).catch(() => null),
-    db.getLatestOrchestratorBySourceSession(session.id)
-  ]);
-  return {
-    sessionId: session.id,
-    exists: !!spec,
-    hasContent: spec ? specHasContent(spec.content) : false,
-    path: sessionSpecPath(session.workspaceId, session.id),
-    updatedAt: spec?.updatedAt ?? null,
-    orchestratorId: orchestrator?.id ?? null,
-    bChatNewerThanSpec: spec ? isChatNewerThanSpec(session.updatedAt, spec.updatedAt) : false
-  };
-}
-
-/** Push the spec status of a session to its workspace (after the nova MCP wrote the spec). */
-export async function publishSpecStatus(sessionId: string): Promise<void> {
-  const session = await db.getSession(sessionId);
-  if (!session) return;
-  broadcastSessionSpecStatus(session.workspaceId, await buildSessionSpecStatus(session));
-}
 
 export async function sessionSpecRoutes(fastify: FastifyInstance): Promise<void> {
   const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
@@ -66,7 +26,7 @@ export async function sessionSpecRoutes(fastify: FastifyInstance): Promise<void>
     async (request, reply) => {
       const { workspaceId, sessionId } = request.params;
       const session = await loadSession(workspaceId, sessionId);
-      if (!session) return reply.status(404).send({ error: 'Session not found' });
+      if (!session) return reply.code(404).send({ error: 'Session not found' });
       const [status, spec] = await Promise.all([
         buildSessionSpecStatus(session),
         readSessionSpec(workspaceId, sessionId).catch(() => null)
@@ -82,11 +42,11 @@ export async function sessionSpecRoutes(fastify: FastifyInstance): Promise<void>
     async (request, reply) => {
       const { workspaceId, sessionId } = request.params;
       const session = await loadSession(workspaceId, sessionId);
-      if (!session) return reply.status(404).send({ error: 'Session not found' });
+      if (!session) return reply.code(404).send({ error: 'Session not found' });
       const spec = await ensureSessionSpec(workspaceId, sessionId, session.name);
       const status = await buildSessionSpecStatus(session);
       broadcastSessionSpecStatus(workspaceId, status);
-      return reply.status(201).send({ status, content: spec.content });
+      return reply.code(201).send({ status, content: spec.content });
     }
   );
 }

@@ -10,7 +10,6 @@ import { useRouter } from 'vue-router';
 
 // stores
 import { useWorkspacesStore } from '@/stores/workspaces';
-import { useToastStore } from '@/stores/toasts';
 
 // composables
 import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
@@ -18,6 +17,7 @@ import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
 // classes
 import { apiErrorMessage, sessionsApi } from '@/classes/api';
 import { createPlanningSession, type NewOrchestratorOptions } from '@/lib/createPlanningSession';
+import { notifyApiError } from '@/lib/notifyApiError';
 
 // types
 import type { AgentType, ApprovalPolicy, Workspace } from '@/@types/index';
@@ -36,7 +36,6 @@ export interface CreateSessionPayload {
 export function useCreateSession() {
   const router = useRouter();
   const workspacesStore = useWorkspacesStore();
-  const toastStore = useToastStore();
   const { ensureLoaded: ensureAgentCapabilitiesLoaded } = useAgentCapabilities();
 
   // -------------------------------------------------- Refs --------------------------------------------------
@@ -95,7 +94,7 @@ export function useCreateSession() {
       });
     } catch (error) {
       createError.value = apiErrorMessage(error, 'Failed to create session');
-      toastStore.error(createError.value);
+      notifyApiError(error, 'Failed to create session');
     } finally {
       bCreating.value = false;
     }

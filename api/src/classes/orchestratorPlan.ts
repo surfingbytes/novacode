@@ -11,7 +11,7 @@ import type { SubTask } from '../@types/index';
 
 export const VERIFY_STEP_NAME = 'Verify against spec';
 
-export const VERIFY_STEP_PROMPT = `Check the whole implementation against the spec above and the handoff notes from the earlier steps.
+const VERIFY_STEP_PROMPT = `Check the whole implementation against the spec above and the handoff notes from the earlier steps.
 For every requirement and acceptance criterion: confirm it is implemented correctly; fix anything missing, wrong or inconsistent.
 Run the project's existing tests, typecheck and lint if available, and fix failures caused by this work.
 Finish with a short list: verified OK / fixed / still open (with the reason).`;

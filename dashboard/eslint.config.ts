@@ -16,7 +16,37 @@ export default defineConfigWithVueTs(
 
   globalIgnores(['**/dist/**', '**/dist-ssr/**', '**/coverage/**']),
 
-  pluginVue.configs['flat/essential'],
-  vueTsConfigs.recommended,
+  pluginVue.configs['flat/recommended'],
+  vueTsConfigs.recommendedTypeChecked,
+
+  {
+    name: 'app/type-aware',
+    files: ['**/*.{ts,mts,tsx,vue}'],
+    languageOptions: {
+      // projectService itself is enabled by defineConfigWithVueTs; pin the root so lint works from any cwd.
+      parserOptions: { tsconfigRootDir: import.meta.dirname }
+    },
+    rules: {
+      '@typescript-eslint/no-floating-promises': ['error', { ignoreVoid: true }],
+      '@typescript-eslint/no-misused-promises': [
+        'error',
+        { checksVoidReturn: { attributes: false } }
+      ],
+      // Attribute line breaks are layout, which Prettier owns; skip-formatting does not cover this rule.
+      'vue/first-attribute-linebreak': 'off'
+    }
+  },
+
+  {
+    name: 'app/tests',
+    files: ['**/*.test.ts'],
+    rules: {
+      // `expect(obj.method)` / `vi.mocked(obj.method)` pass methods around without calling them.
+      '@typescript-eslint/unbound-method': 'off',
+      // async mock implementations stand in for async APIs even when they await nothing.
+      '@typescript-eslint/require-await': 'off'
+    }
+  },
+
   skipFormatting
 );
