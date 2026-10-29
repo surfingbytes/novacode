@@ -295,6 +295,10 @@ onUnmounted(() => {
           role="menu"
           @click.stop
         >
+          <template v-if="$slots['mobile-menu-leading']">
+            <slot name="mobile-menu-leading" :close="closeMobileMenu" />
+            <div class="my-1 border-t border-border" role="separator" />
+          </template>
           <template v-if="showNewSession">
             <button
               type="button"

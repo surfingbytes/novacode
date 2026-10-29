@@ -7,7 +7,7 @@
  */
 // node_modules
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { ChevronDown, Copy, ExternalLink, FileText, RefreshCw, Workflow } from 'lucide-vue-next';
+import { ChevronDown, Copy, ExternalLink, FileText, ListOrdered, RefreshCw } from 'lucide-vue-next';
 
 // components
 import BaseModal from '@/components/BaseModal.vue';
@@ -133,6 +133,8 @@ function handleKeydown(e: KeyboardEvent): void {
   }
 }
 
+defineExpose({ openSpec });
+
 // -------------------------------------------------- Watchers --------------------------------------------------
 
 watch(
@@ -158,7 +160,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="menuRef" class="relative shrink-0">
+  <!-- Below lg the actions live in the header's overflow menu; the spec modal stays reachable via openSpec() -->
+  <div ref="menuRef" class="relative shrink-0 hidden lg:block">
     <div class="inline-flex items-stretch h-9 rounded-lg border border-fg/10 overflow-hidden">
       <button
         type="button"
@@ -167,7 +170,7 @@ onBeforeUnmount(() => {
         :aria-label="mainLabel"
         @click="onMainClick"
       >
-        <Workflow :size="16" :stroke-width="1.6" aria-hidden="true" />
+        <ListOrdered :size="16" :stroke-width="1.6" aria-hidden="true" />
         <span class="hidden xl:inline whitespace-nowrap">{{ mainLabel }}</span>
         <span
           v-if="bStale"

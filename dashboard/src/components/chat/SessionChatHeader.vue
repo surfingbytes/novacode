@@ -4,6 +4,7 @@
  * the CI / cost / rules subtitle trailing. Extracted from SessionChat.vue.
  */
 // node_modules
+import { ref } from 'vue';
 import { CircleCheck, CircleSlash, CircleX, Clock, LoaderCircle } from 'lucide-vue-next';
 import type { RouteLocationRaw } from 'vue-router';
 
@@ -11,6 +12,7 @@ import type { RouteLocationRaw } from 'vue-router';
 import EntityDetailHeader from '@/components/ui/EntityDetailHeader.vue';
 import FavoriteButton from '@/components/ui/FavoriteButton.vue';
 import SessionOrchestratorButton from '@/components/chat/SessionOrchestratorButton.vue';
+import SessionOrchestratorMenuItems from '@/components/chat/SessionOrchestratorMenuItems.vue';
 
 // types
 import type { Session } from '@/@types/index';
@@ -58,6 +60,11 @@ const emit = defineEmits<{
   /** CI badge clicked — show the Git tab. */
   (e: 'open-git'): void;
 }>();
+
+// -------------------------------------------------- Refs --------------------------------------------------
+
+/** The button hides below lg but stays mounted — it owns the spec modal the mobile menu opens. */
+const orchestratorButtonRef = ref<InstanceType<typeof SessionOrchestratorButton> | null>(null);
 </script>
 
 <template>
@@ -85,6 +92,7 @@ const emit = defineEmits<{
     </template>
     <template v-if="session && !session.archived" #actions-leading>
       <SessionOrchestratorButton
+        ref="orchestratorButtonRef"
         :workspace-id="workspaceId"
         :session-id="session.id"
         :orchestrator-id="plannedOrchestratorId"
@@ -92,6 +100,17 @@ const emit = defineEmits<{
         @plan="emit('plan')"
         @open-plan="emit('open-plan')"
         @open-page="emit('open-page')"
+      />
+    </template>
+    <template v-if="session && !session.archived" #mobile-menu-leading="{ close }">
+      <SessionOrchestratorMenuItems
+        :session-id="session.id"
+        :orchestrator-id="plannedOrchestratorId"
+        :b-has-steps="bPlanHasSteps"
+        @plan="close(); emit('plan')"
+        @open-plan="close(); emit('open-plan')"
+        @open-page="close(); emit('open-page')"
+        @open-spec="close(); orchestratorButtonRef?.openSpec()"
       />
     </template>
     <template #subtitle-trailing>
