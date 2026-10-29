@@ -1,6 +1,9 @@
 // node_modules
 import { spawn } from 'node:child_process';
-import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 // classes
 import { childEnv, childProcessFailure, claudeTokenSessionMeta, execCli, onChildProcessError } from './childEnv';
@@ -74,6 +77,21 @@ describe('spawn error guards', () => {
 });
 
 describe('execCli', () => {
+  // execCli runs in config.configDir, which only exists in the container (not on CI).
+  let savedConfigDir: string;
+  let tmp: string;
+
+  beforeEach(() => {
+    savedConfigDir = config.configDir;
+    tmp = mkdtempSync(join(tmpdir(), 'child-env-test-'));
+    config.configDir = tmp;
+  });
+
+  afterEach(() => {
+    config.configDir = savedConfigDir;
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
   it('returns stdout with status 0 and runs with childEnv', async () => {
     process.env['JWT_SECRET'] = FAKE_SECRET;
     const result = await execCli(
