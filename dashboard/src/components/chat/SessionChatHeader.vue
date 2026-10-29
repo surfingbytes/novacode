@@ -64,7 +64,7 @@ const emit = defineEmits<{
 // -------------------------------------------------- Refs --------------------------------------------------
 
 /** The button hides below lg but stays mounted — it owns the spec modal the mobile menu opens. */
-const orchestratorButtonRef = ref<InstanceType<typeof SessionOrchestratorButton> | null>(null);
+const orchestratorButtonRef = ref<InstanceType<typeof SessionOrchestratorButton>>();
 </script>
 
 <template>
