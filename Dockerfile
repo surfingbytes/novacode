@@ -108,9 +108,13 @@ ARG CODEX_VERSION=0.159.2
 ARG CODEX_ACP_VERSION=2.0.1
 RUN npm install -g "@openai/codex@${CODEX_VERSION}" "@agentclientprotocol/codex-acp@${CODEX_ACP_VERSION}"
 
-# Install Playwright core so agents can connect to a Playwright server
+# Install Playwright core plus Chromium's system libraries so agents can launch
+# a local headless browser. Browsers are not baked in: each project's Playwright
+# version downloads its matching build into ~/.cache/ms-playwright.
 ARG PLAYWRIGHT_CORE_VERSION=1.63.0
-RUN npm install -g "playwright-core@${PLAYWRIGHT_CORE_VERSION}"
+RUN npm install -g "playwright-core@${PLAYWRIGHT_CORE_VERSION}" \
+    && playwright-core install-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
 
 # App runs as the host UID via gosu; agent CLIs live under /root.
 RUN chmod a+x /root \

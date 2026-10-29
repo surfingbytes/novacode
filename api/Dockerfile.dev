@@ -19,8 +19,10 @@ RUN curl -fsSL https://opencode.ai/install | bash
 # Install Codex + Codex ACP adapter
 RUN npm install -g @openai/codex @agentclientprotocol/codex-acp
 
-# Install Playwright core so agents can connect to a Playwright server
-RUN npm install -g playwright-core
+# Install Playwright core plus Chromium's system libraries (same as production image)
+RUN npm install -g playwright-core \
+    && playwright-core install-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
 
 # App runs as the host UID via gosu; agent CLIs live under /root.
 RUN chmod a+x /root \

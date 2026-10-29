@@ -336,6 +336,13 @@ npx playwright install chromium   # once
 npm run test:e2e
 ```
 
+The Nova Code image ships Chromium's system libraries; elsewhere run `npx playwright install-deps chromium` once. To use a remote browser (browserless) instead:
+
+```bash
+PW_TEST_CONNECT_WS_ENDPOINT='ws://playwright-chrome:3000/chromium/playwright?timeout=600000' \
+E2E_HOST=<this machine's IP> npm run test:e2e
+```
+
 `e2e/global-setup.ts` starts a throwaway stack and removes it afterwards: a `postgres:17` Docker container, the API (ts-node-dev) and the dashboard (Vite), with config, home and workspace root in a temp dir. Your shell's `DATABASE_URL` and `/config` are not used. Options:
 
 | Variable | Default | Purpose |
