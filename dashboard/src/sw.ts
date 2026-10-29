@@ -10,6 +10,8 @@ import { CacheFirst } from 'workbox-strategies';
 declare let self: ServiceWorkerGlobalScope;
 type SwNotificationAction = { action: string; title: string; icon?: string };
 
+// Activate new builds immediately instead of waiting for every tab to close
+void self.skipWaiting();
 clientsClaim();
 cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST);
@@ -26,6 +28,11 @@ registerRoute(
     cacheName: 'nova-assets',
     plugins: [
       new CacheableResponsePlugin({ statuses: [200] }),
+      // Never store an HTML fallback page under a chunk URL
+      {
+        cacheWillUpdate: ({ response }) =>
+          Promise.resolve((response.headers.get('content-type') ?? '').includes('text/html') ? null : response)
+      },
       new ExpirationPlugin({ maxEntries: 200, maxAgeSeconds: ONE_YEAR_SECONDS })
     ]
   })

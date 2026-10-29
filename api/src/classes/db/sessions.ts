@@ -283,6 +283,10 @@ async function listSessionMessages(sessionId: string): Promise<ChatMessage[]> {
   return rows.map(sessionMessageRowToChat);
 }
 
+async function countSessionMessages(sessionId: string): Promise<number> {
+  return prisma.sessionMessage.count({ where: { sessionId } });
+}
+
 async function listSessionMessagesPage(
   sessionId: string,
   offset: number,
@@ -578,6 +582,7 @@ export const sessionDb = {
   setSessionAcpId,
   setSessionUnread,
   listSessionMessages,
+  countSessionMessages,
   listSessionMessagesPage,
   appendSessionPlanUpdate,
   persistSessionMessages,

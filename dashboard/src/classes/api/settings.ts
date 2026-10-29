@@ -54,6 +54,8 @@ export const settingsApi = {
   get: (): ReturnType<typeof http.get<AppSettings>> => http.get<AppSettings>('/settings'),
   update: (payload: Partial<AppSettings>): ReturnType<typeof http.put<AppSettings>> =>
     http.put<AppSettings>('/settings', payload),
+  getSshPrivateKey: (): ReturnType<typeof http.get<{ sshPrivateKey: string }>> =>
+    http.get<{ sshPrivateKey: string }>('/settings/ssh-private-key'),
 
   getCursorModels: (): ReturnType<
     typeof http.get<{ models: CursorModelOption[]; fromCache: boolean }>

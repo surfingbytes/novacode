@@ -6,6 +6,7 @@ const { dbMock, runClaudeAcp, cancelClaudeAcp } = vi.hoisted(() => ({
     getSession: vi.fn(),
     getWorkspace: vi.fn(),
     listSessionMessages: vi.fn(),
+    countSessionMessages: vi.fn(),
     persistSessionMessages: vi.fn(),
     getFirstUser: vi.fn(),
     updateSession: vi.fn(),
@@ -78,6 +79,7 @@ beforeEach(() => {
   });
   dbMock.getWorkspace.mockResolvedValue({ id: 'w1', name: 'WS', path: '/ws' });
   dbMock.listSessionMessages.mockResolvedValue([]);
+  dbMock.countSessionMessages.mockResolvedValue(0);
   dbMock.persistSessionMessages.mockResolvedValue(null);
   dbMock.getFirstUser.mockResolvedValue(null);
 });
@@ -152,6 +154,7 @@ describe('dispatchPrompt fresh-session context', () => {
     dbMock.listSessionMessages.mockResolvedValue([
       { role: 'user', content: 'first', createdAt: '2026-01-01T00:00:00.000Z' }
     ]);
+    dbMock.countSessionMessages.mockResolvedValue(1);
     runClaudeAcp.mockResolvedValue({ acpSessionId: 'acp-2', stopReason: 'end_turn' });
 
     await dispatchPrompt({ sessionId: 's1', text: 'continue', subscriber: makeSubscriber() });

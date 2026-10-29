@@ -81,11 +81,21 @@ export async function dispatchPrompt(
     return { error: 'Workspace not found', requeue: true };
   }
 
-  let currentMessages: ChatMessage[] = [];
+  // Never fall back to an empty history: saving from position 0 would delete
+  // every stored message of the session.
+  let currentMessages: ChatMessage[];
+  let userPosition: number;
   try {
     currentMessages = await db.listSessionMessages(sessionId);
-  } catch {
-    currentMessages = [];
+    userPosition = await db.countSessionMessages(sessionId);
+  } catch (err) {
+    logger.error({ err, sessionId }, 'Failed to load chat history');
+    return { error: 'Failed to load chat history', requeue: true };
+  }
+  // Saves slice `currentMessages` from `userPosition`, so both must agree.
+  if (userPosition !== currentMessages.length) {
+    logger.error({ sessionId, userPosition, loaded: currentMessages.length }, 'Chat history changed while loading');
+    return { error: 'Failed to load chat history', requeue: true };
   }
 
   const userMessage: ChatMessage = {
@@ -94,9 +104,8 @@ export async function dispatchPrompt(
     imagePaths: imagePaths.length > 0 ? imagePaths : undefined,
     createdAt: new Date().toISOString(),
   };
-  currentMessages.push(userMessage);
   // Earlier rows are already in the DB — saves only rewrite this turn's rows.
-  const userPosition = currentMessages.length - 1;
+  currentMessages.push(userMessage);
 
   const previewAfterUser = computeLastListPreview(currentMessages);
   try {

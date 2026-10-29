@@ -97,6 +97,44 @@ const EXT_TO_CONTENT_TYPE: Record<string, string> = {
   '.zip': 'application/zip',
 };
 
+/** Content types safe to render inline on the app origin. */
+const INLINE_CONTENT_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'video/mp4',
+  'application/pdf',
+  'text/plain',
+  'text/markdown',
+  'text/csv',
+  'application/json',
+]);
+
+/** Script sources are shown as text so they can never execute from the app origin. */
+const SCRIPT_EXTENSIONS = new Set(['.js', '.mjs', '.jsx', '.ts', '.tsx']);
+
+/**
+ * Response headers for serving an uploaded attachment. Anything outside the inline
+ * allowlist is forced to download inside a sandbox so it cannot run as HTML or script.
+ */
+export function attachmentHeadersFor(safeName: string): { contentType: string; headers: Record<string, string> } {
+  const ext = extname(safeName).toLowerCase();
+  const headers: Record<string, string> = { 'X-Content-Type-Options': 'nosniff' };
+  if (SCRIPT_EXTENSIONS.has(ext)) {
+    return { contentType: 'text/plain', headers };
+  }
+  const contentType = EXT_TO_CONTENT_TYPE[ext] ?? 'application/octet-stream';
+  if (INLINE_CONTENT_TYPES.has(contentType)) {
+    return { contentType, headers };
+  }
+  // Header values must stay printable ASCII; drop quotes and backslashes that would break the quoting.
+  const quotedName = safeName.replace(/[^\x20-\x7e]|["\\]/g, '_');
+  headers['Content-Disposition'] = `attachment; filename="${quotedName}"`;
+  headers['Content-Security-Policy'] = 'sandbox';
+  return { contentType, headers };
+}
+
 /** Prefer the real filename extension; mime map is only a fallback when none is present. */
 function resolveExtension(mimeType: string, filename?: string): string {
   const fromName = filename ? extname(filename).toLowerCase() : '';
@@ -231,9 +269,9 @@ export async function imageRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(404).send({ error: 'Image not found' });
       }
 
-      const contentType = EXT_TO_CONTENT_TYPE[extname(safeName).toLowerCase()] ?? 'application/octet-stream';
+      const { contentType, headers } = attachmentHeadersFor(safeName);
       const data = await readFile(filePath);
-      return reply.header('Content-Type', contentType).send(data);
+      return reply.headers(headers).header('Content-Type', contentType).send(data);
     }
   );
 }

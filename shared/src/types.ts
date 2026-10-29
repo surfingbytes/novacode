@@ -612,8 +612,8 @@ export interface AppSettings {
   utilityModelSelection: string;
   /** ed25519 public key — add to your Git host for SSH git access */
   sshPublicKey: string;
-  /** Same keypair’s private key — secret; stored on server config volume */
-  sshPrivateKey: string;
+  /** Whether the same keypair’s private key exists — fetch it via GET /api/settings/ssh-private-key */
+  hasSshPrivateKey: boolean;
   /** Absolute workspace browse root inside the container (env WORKSPACE_BROWSE_ROOT). */
   workspaceBrowseRoot: string;
 }

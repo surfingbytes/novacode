@@ -23,5 +23,8 @@
   "devDependencies": {
     "@playwright/test": "^1.64.1",
     "knip": "^6.43.0"
+  },
+  "overrides": {
+    "dompurify": "^3.4.17"
   }
 }

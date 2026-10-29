@@ -1,6 +1,9 @@
 // node_modules
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const mocks = vi.hoisted(() => ({
   pingDatabase: vi.fn()
@@ -53,7 +56,7 @@ describe('buildApp', () => {
 
     const res = await app.inject({ url: '/api/health' });
 
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode).toBe(503);
     expect(res.json()).toMatchObject({ status: 'degraded', dbOk: false });
   });
 
@@ -116,6 +119,45 @@ describe('buildApp', () => {
 
   it('answers unknown /api paths with 404 JSON', async () => {
     const res = await app.inject({ url: '/api/nope' });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: 'Not found' });
+  });
+});
+
+describe('buildApp with a dashboard dist', () => {
+  let spaApp: FastifyInstance;
+  let distDir: string;
+
+  beforeAll(async () => {
+    distDir = mkdtempSync(join(tmpdir(), 'nova-dist-'));
+    writeFileSync(join(distDir, 'index.html'), '<!doctype html><title>spa</title>');
+    spaApp = await buildApp({ logger: false, dashboardDist: distDir });
+    await spaApp.ready();
+  });
+
+  afterAll(async () => {
+    await spaApp.close();
+    rmSync(distDir, { recursive: true, force: true });
+  });
+
+  it('answers a missing asset with 404 JSON instead of index.html', async () => {
+    const res = await spaApp.inject({ url: '/assets/missing-abc123.js?v=1' });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: 'Not found' });
+  });
+
+  it('falls back to index.html for client routes', async () => {
+    const res = await spaApp.inject({ url: '/some/client/route?tab=1' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('text/html');
+    expect(res.body).toContain('<title>spa</title>');
+  });
+
+  it('keeps JSON 404 for unknown /api paths', async () => {
+    const res = await spaApp.inject({ url: '/api/nope' });
 
     expect(res.statusCode).toBe(404);
     expect(res.json()).toEqual({ error: 'Not found' });

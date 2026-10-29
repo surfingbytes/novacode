@@ -8,7 +8,7 @@ import {
   checkCredentials,
   signToken,
   extractRequestToken,
-  verifyToken,
+  authenticateToken,
   createAuthUser,
   changePassword,
   changeUsername,
@@ -129,7 +129,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       const { username, password } = request.body;
       const user = await createAuthUser(username, password);
       clearVibeApiKey(config.configDir);
-      const token = await signToken(user.username, user.id);
+      const token = await signToken(user.username, user.id, user.tokenVersion);
       attachSessionCookie(request, reply, token);
       return { token };
     }
@@ -164,7 +164,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       if (!user) {
         return reply.code(401).send({ error: 'Invalid credentials' });
       }
-      const token = await signToken(user.username, user.id);
+      const token = await signToken(user.username, user.id, user.tokenVersion);
       attachSessionCookie(request, reply, token);
       return { token };
     }
@@ -284,7 +284,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.redirect(`${appOrigin}/setup`);
       }
 
-      const token = await signToken(user.username, user.id);
+      const token = await signToken(user.username, user.id, user.tokenVersion);
       setCookies(reply, [sessionCookieHeader(token, { secure }), clearPending]);
       return reply.redirect(
         oidcLoginPageUrl(appOrigin, { from: 'oidc', redirect: pending.redirect })
@@ -308,14 +308,14 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       if (!token) {
         return reply.code(401).send({ error: 'No token' });
       }
-      try {
-        const payload = await verifyToken(token);
-        const refreshed = await signToken(payload.username, payload.id);
-        attachSessionCookie(request, reply, refreshed);
-        return { valid: true, username: payload.username };
-      } catch {
+      const authUser = await authenticateToken(token);
+      const user = authUser ? await db.getUserById(authUser.id) : null;
+      if (!user) {
         return reply.code(401).send({ error: 'Invalid token' });
       }
+      const refreshed = await signToken(user.username, user.id, user.tokenVersion);
+      attachSessionCookie(request, reply, refreshed);
+      return { valid: true, username: user.username };
     }
   );
 
@@ -338,10 +338,13 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request, reply) => {
       const { currentPassword, newPassword } = request.body;
-      const ok = await changePassword(request.jwtUser!.id, currentPassword, newPassword);
-      if (!ok) {
+      const user = await changePassword(request.jwtUser!.id, currentPassword, newPassword);
+      if (!user) {
         return reply.code(400).send({ error: 'Current password is incorrect' });
       }
+      // Old tokens are now invalid; keep this browser signed in with a fresh one.
+      const token = await signToken(user.username, user.id, user.tokenVersion);
+      attachSessionCookie(request, reply, token);
       return { ok: true };
     }
   );
@@ -370,7 +373,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
           error: 'Password is incorrect or username is already taken'
         });
       }
-      const token = await signToken(user.username, user.id);
+      const token = await signToken(user.username, user.id, user.tokenVersion);
       attachSessionCookie(request, reply, token);
       return { token };
     }

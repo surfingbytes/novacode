@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
     createUser: vi.fn(),
     getUserById: vi.fn(),
     getUserByUsername: vi.fn(),
+    updateUser: vi.fn(),
     getUserByApiToken: vi.fn(),
     listApiTokens: vi.fn(),
     clearVibeApiKey: vi.fn()
@@ -23,6 +24,7 @@ vi.mock('../classes/database', async (importOriginal) => ({
     createUser: (...args: unknown[]) => mocks.createUser(...args),
     getUserById: (...args: unknown[]) => mocks.getUserById(...args),
     getUserByUsername: (...args: unknown[]) => mocks.getUserByUsername(...args),
+    updateUser: (...args: unknown[]) => mocks.updateUser(...args),
     getUserByApiToken: (...args: unknown[]) => mocks.getUserByApiToken(...args),
     listApiTokens: (...args: unknown[]) => mocks.listApiTokens(...args)
   }
@@ -35,12 +37,12 @@ vi.mock('../classes/config', async (importOriginal) => ({
 }));
 
 import { authRoutes } from './auth';
-import { registerAuth } from '../classes/auth';
+import { registerAuth, signToken } from '../classes/auth';
 import { registerErrorHandler } from '../classes/errorHandler';
 import { SESSION_COOKIE_NAME } from '../classes/sessionCookie';
 import { createNovaMcpToken } from '../classes/novaMcp';
 
-type StoredUser = { id: string; username: string; passwordHash: string };
+type StoredUser = { id: string; username: string; passwordHash: string; tokenVersion: number };
 
 let app: FastifyInstance;
 let users: StoredUser[];
@@ -81,12 +83,16 @@ beforeEach(() => {
   users = [];
   mocks.hasAnyUser.mockImplementation(async () => users.length > 0);
   mocks.createUser.mockImplementation(async (username: string, passwordHash: string) => {
-    const user = { id: `u${users.length + 1}`, username, passwordHash };
+    const user = { id: `u${users.length + 1}`, username, passwordHash, tokenVersion: 0 };
     users.push(user);
     return user;
   });
   mocks.getUserById.mockImplementation(async (id: string) => users.find((u) => u.id === id) ?? null);
   mocks.getUserByUsername.mockImplementation(async (name: string) => users.find((u) => u.username === name) ?? null);
+  mocks.updateUser.mockImplementation(async (id: string, patch: Partial<StoredUser>) => {
+    const user = users.find((u) => u.id === id);
+    return user ? Object.assign(user, patch) : undefined;
+  });
   mocks.getUserByApiToken.mockResolvedValue(null);
   mocks.listApiTokens.mockResolvedValue([]);
 });
@@ -287,6 +293,17 @@ describe('protected routes (jwtPreHandler)', () => {
 
     expect(res.statusCode).toBe(401);
   });
+
+  it('answers 401 when the JWT token version is older than the user', async () => {
+    await setupUser();
+    const token = await signToken('admin', 'u1', 0);
+    users[0]!.tokenVersion = 1;
+
+    const res = await app.inject({ url, headers: { authorization: `Bearer ${token}` } });
+
+    expect(res.statusCode).toBe(401);
+    expect(mocks.listApiTokens).not.toHaveBeenCalled();
+  });
 });
 
 describe('POST /api/auth/validate', () => {
@@ -304,5 +321,40 @@ describe('POST /api/auth/validate', () => {
     const res = await app.inject({ method: 'POST', url: '/api/auth/validate' });
 
     expect(res.statusCode).toBe(401);
+  });
+
+  it('answers 401 when the user no longer exists', async () => {
+    const token = await setupUser();
+    users = [];
+
+    const res = await app.inject({ method: 'POST', url: '/api/auth/validate', headers: { authorization: `Bearer ${token}` } });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.headers['set-cookie']).toBeUndefined();
+  });
+});
+
+describe('PUT /api/auth/change-password', () => {
+  it('sets a fresh session cookie and rejects the old token', async () => {
+    const oldToken = await setupUser('admin', 'correct horse');
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/auth/change-password',
+      headers: { authorization: `Bearer ${oldToken}` },
+      payload: { currentPassword: 'correct horse', newPassword: 'battery staple' }
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(users[0]!.tokenVersion).toBe(1);
+    const newToken = sessionCookieFrom(res.headers['set-cookie']);
+    expect(newToken).not.toBe('');
+    expect(newToken).not.toBe(oldToken);
+
+    const url = '/api/auth/api-tokens';
+    const fresh = await app.inject({ url, headers: { cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(newToken)}` } });
+    expect(fresh.statusCode).toBe(200);
+    const stale = await app.inject({ url, headers: { authorization: `Bearer ${oldToken}` } });
+    expect(stale.statusCode).toBe(401);
   });
 });

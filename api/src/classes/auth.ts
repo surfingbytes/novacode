@@ -22,6 +22,8 @@ import type { UserModel } from '../generated/client/models';
 interface JwtPayload {
   username: string;
   id: string;
+  /** User token version at signing; tokens without it count as version 0. */
+  v?: number;
   iat: number;
   exp: number;
 }
@@ -35,9 +37,9 @@ async function getJwtSecret(): Promise<string> {
   return config.jwtSecret;
 }
 
-export async function signToken(username: string, id: string): Promise<string> {
+export async function signToken(username: string, id: string, tokenVersion: number): Promise<string> {
   const secret = await getJwtSecret();
-  return jwt.sign({ username, id }, secret, { expiresIn: JWT_EXPIRES_IN });
+  return jwt.sign({ username, id, v: tokenVersion }, secret, { expiresIn: JWT_EXPIRES_IN });
 }
 
 function cookieHeaderFromRequest(request: FastifyRequest): string | undefined {
@@ -64,7 +66,7 @@ export function clearSessionCookie(request: FastifyRequest, reply: FastifyReply)
   );
 }
 
-export async function verifyToken(token: string): Promise<JwtPayload> {
+async function verifyToken(token: string): Promise<JwtPayload> {
   const secret = await getJwtSecret();
   return jwt.verify(token, secret) as JwtPayload;
 }
@@ -86,6 +88,10 @@ export async function authenticateToken(
       user = await db.getUserByUsername(payload.username);
     }
     if (!user) {
+      return null;
+    }
+    // Password changes bump the version, so older JWTs stop working.
+    if ((payload.v ?? 0) !== user.tokenVersion) {
       return null;
     }
     return { id: user.id, username: user.username };
@@ -168,14 +174,15 @@ export async function changePassword(
   userId: string,
   currentPassword: string,
   newPassword: string
-): Promise<boolean> {
+): Promise<UserModel | null> {
   const user = await db.getUserById(userId);
   if (!user || !verifyPassword(currentPassword, user.passwordHash)) {
-    return false;
+    return null;
   }
   const passwordHash = hashPassword(newPassword);
-  const updated = await db.updateUser(userId, { passwordHash });
-  return !!updated;
+  // Bumping the version invalidates every JWT signed before this change.
+  const updated = await db.updateUser(userId, { passwordHash, tokenVersion: user.tokenVersion + 1 });
+  return updated ?? null;
 }
 
 export async function changeUsername(

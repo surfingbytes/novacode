@@ -25,7 +25,11 @@ const gitBaseline = ref<{ name: string; email: string }>({ name: '', email: '' }
 const bSavingGit = ref<boolean>(false);
 const bGitSaved = ref<boolean>(false);
 const sshPublicKey = ref<string>('');
+// Fetched only on reveal/copy; empty until then.
 const sshPrivateKey = ref<string>('');
+const bHasSshPrivateKey = ref<boolean>(false);
+const bPrivateKeyRevealed = ref<boolean>(false);
+const bLoadingPrivateKey = ref<boolean>(false);
 const bCopiedSshPublic = ref<boolean>(false);
 const bCopiedSshPrivate = ref<boolean>(false);
 
@@ -50,7 +54,7 @@ const loadSettings = async (): Promise<void> => {
     gitForm.value.email = response.data.gitUserEmail ?? '';
     gitBaseline.value = { ...gitForm.value };
     sshPublicKey.value = response.data.sshPublicKey ?? '';
-    sshPrivateKey.value = response.data.sshPrivateKey ?? '';
+    bHasSshPrivateKey.value = response.data.hasSshPrivateKey;
   } catch {
     // ignore
   }
@@ -84,8 +88,36 @@ const copySshPublic = async (): Promise<void> => {
   }, 2000);
 };
 
+/** Fetches the private key once; later calls reuse it. Returns false when it could not be loaded. */
+const ensureSshPrivateKey = async (): Promise<boolean> => {
+  if (sshPrivateKey.value) {
+    return true;
+  }
+  bLoadingPrivateKey.value = true;
+  try {
+    const response = await settingsApi.getSshPrivateKey();
+    sshPrivateKey.value = response.data.sshPrivateKey;
+    return true;
+  } catch (err) {
+    notifyApiError(err, 'Failed to load the private key');
+    return false;
+  } finally {
+    bLoadingPrivateKey.value = false;
+  }
+};
+
+const togglePrivateKeyRevealed = async (): Promise<void> => {
+  if (bPrivateKeyRevealed.value) {
+    bPrivateKeyRevealed.value = false;
+    return;
+  }
+  if (await ensureSshPrivateKey()) {
+    bPrivateKeyRevealed.value = true;
+  }
+};
+
 const copySshPrivate = async (): Promise<void> => {
-  if (!sshPrivateKey.value) {
+  if (!(await ensureSshPrivateKey())) {
     return;
   }
   if (!(await copyToClipboard(sshPrivateKey.value, 'private key'))) {
@@ -111,7 +143,9 @@ const saveGitSettings = async (): Promise<void> => {
       gitUserEmail: saved.email || null
     });
     sshPublicKey.value = response.data.sshPublicKey ?? '';
-    sshPrivateKey.value = response.data.sshPrivateKey ?? '';
+    bHasSshPrivateKey.value = response.data.hasSshPrivateKey;
+    sshPrivateKey.value = '';
+    bPrivateKeyRevealed.value = false;
     // Keep edits typed while the request was in flight.
     if (gitForm.value.name === submitted.name && gitForm.value.email === submitted.email) {
       gitForm.value = { ...saved };
@@ -226,18 +260,30 @@ defineExpose({ hasUnsavedChanges });
             <div class="bg-fg/[0.02] border border-fg/[0.07] rounded-xl p-5">
               <div class="flex items-center justify-between gap-2 mb-2">
                 <label class="text-sm font-medium text-text-primary">Private key</label>
-                <button
-                  type="button"
-                  class="text-xs font-medium px-3 py-1.5 rounded-lg border border-fg/[0.12] bg-fg/[0.05] hover:bg-fg/[0.09] text-text-primary transition-colors disabled:opacity-40"
-                  :disabled="!sshPrivateKey"
-                  @click="copySshPrivate"
-                >
-                  {{ bCopiedSshPrivate ? 'Copied' : 'Copy' }}
-                </button>
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    class="text-xs font-medium px-3 py-1.5 rounded-lg border border-fg/[0.12] bg-fg/[0.05] hover:bg-fg/[0.09] text-text-primary transition-colors disabled:opacity-40"
+                    :disabled="!bHasSshPrivateKey || bLoadingPrivateKey"
+                    :aria-pressed="bPrivateKeyRevealed"
+                    @click="togglePrivateKeyRevealed"
+                  >
+                    {{ bPrivateKeyRevealed ? 'Hide' : 'Reveal' }}
+                  </button>
+                  <button
+                    type="button"
+                    class="text-xs font-medium px-3 py-1.5 rounded-lg border border-fg/[0.12] bg-fg/[0.05] hover:bg-fg/[0.09] text-text-primary transition-colors disabled:opacity-40"
+                    :disabled="!bHasSshPrivateKey || bLoadingPrivateKey"
+                    aria-label="Copy private key"
+                    @click="copySshPrivate"
+                  >
+                    {{ bCopiedSshPrivate ? 'Copied' : 'Copy' }}
+                  </button>
+                </div>
               </div>
               <pre
                 class="text-xs font-mono text-text-muted whitespace-pre-wrap break-all bg-fg/[0.05] border border-fg/[0.08] rounded-lg px-3 py-2.5 min-h-[2.5rem] max-h-48 overflow-y-auto"
-                >{{ sshPrivateKey || '—' }}</pre
+                >{{ bPrivateKeyRevealed ? sshPrivateKey : bHasSshPrivateKey ? '••••••••' : '—' }}</pre
               >
               <p class="text-xs text-warning mt-2">
                 Anyone with this key can push as you to any host that trusts the public key. Do not

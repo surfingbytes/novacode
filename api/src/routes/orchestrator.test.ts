@@ -116,7 +116,7 @@ beforeAll(async () => {
   await app.register(orchestratorRoutes);
   await app.register(novaMcpRoutes);
   await app.ready();
-  authorization = `Bearer ${await signToken('admin', 'u1')}`;
+  authorization = `Bearer ${await signToken('admin', 'u1', 0)}`;
 });
 
 afterAll(async () => {
@@ -126,7 +126,7 @@ afterAll(async () => {
 beforeEach(() => {
   vi.resetAllMocks();
   orchestrators = new Map();
-  mocks.getUserById.mockImplementation(async (id: string) => (id === 'u1' ? { id: 'u1', username: 'admin' } : null));
+  mocks.getUserById.mockImplementation(async (id: string) => (id === 'u1' ? { id: 'u1', username: 'admin', tokenVersion: 0 } : null));
   mocks.getUserByUsername.mockResolvedValue(null);
   mocks.getWorkspace.mockImplementation(async (id: string) =>
     id === 'w1' ? { id: 'w1', path: '/tmp/w1', defaultAgentType: 'codex' } : null

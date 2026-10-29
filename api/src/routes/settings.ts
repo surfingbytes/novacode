@@ -38,6 +38,7 @@ import {
   saveOpenCodeProvider
 } from '../classes/openCodeProviders';
 import { readSshKeyMaterial } from '../classes/sshKey';
+import { SSH_PRIVATE_KEY_RATE_LIMIT } from '../classes/rateLimits';
 import { checkCursorAuth, isAgentAuthenticated } from '../classes/agentAuthStatus';
 
 // types
@@ -73,7 +74,7 @@ type AppSettings = {
   utilityAgentType: string | null;
   utilityModelSelection: string;
   sshPublicKey: string;
-  sshPrivateKey: string;
+  hasSshPrivateKey: boolean;
   workspaceBrowseRoot: string;
 };
 
@@ -89,8 +90,8 @@ const AppSettingsSchema = Type.Object({
   utilityModelSelection: Type.String(),
   /** SSH public key (e.g. register on GitHub/GitLab) — persisted under config volume `.ssh/` */
   sshPublicKey: Type.String(),
-  /** Private key for the same pair — treat as a secret */
-  sshPrivateKey: Type.String(),
+  /** Whether the private key of the same pair exists — fetched via GET /api/settings/ssh-private-key */
+  hasSshPrivateKey: Type.Boolean(),
   /** Absolute browse root for workspaces (WORKSPACE_BROWSE_ROOT) */
   workspaceBrowseRoot: Type.String()
 });
@@ -113,7 +114,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       utilityAgentType: user?.utilityAgentType && isAgentType(user.utilityAgentType) ? user.utilityAgentType : null,
       utilityModelSelection: user?.utilityModelSelection ?? '',
       sshPublicKey: ssh.sshPublicKey,
-      sshPrivateKey: ssh.sshPrivateKey,
+      hasSshPrivateKey: ssh.sshPrivateKey !== '',
       workspaceBrowseRoot: config.workspaceBrowseRoot
     };
   };
@@ -206,6 +207,29 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       return appSettingsFromUser(user);
+    }
+  );
+
+  // GET /api/settings/ssh-private-key - private key, fetched only on explicit reveal/copy
+  fastifyInstance.get(
+    '/api/settings/ssh-private-key',
+    {
+      preHandler: jwtPreHandler,
+      config: { rateLimit: SSH_PRIVATE_KEY_RATE_LIMIT },
+      schema: {
+        response: {
+          200: Type.Object({ sshPrivateKey: Type.String() }),
+          404: Type.Object({ error: Type.String() })
+        }
+      }
+    },
+    async (_request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      const { sshPrivateKey } = readSshKeyMaterial(config.configDir);
+      if (!sshPrivateKey) {
+        return reply.code(404).send({ error: 'No SSH key' });
+      }
+      return { sshPrivateKey };
     }
   );
 

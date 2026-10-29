@@ -93,6 +93,7 @@ export async function updateUser(
     claudeToken?: string | null;
     utilityAgentType?: string | null;
     utilityModelSelection?: string;
+    tokenVersion?: number;
   }
 ): Promise<UserModel | undefined> {
   const existingUser = await prisma.user.findUnique({ where: { id } });

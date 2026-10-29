@@ -49,12 +49,21 @@ const startTime = Date.now();
 export interface BuildAppOptions {
   /** `false` disables logging; an object is pino options; omitted uses the shared pino logger. */
   logger?: boolean | object;
+  /** Dashboard build to serve; defaults to `dashboard-dist` at the repo root. */
+  dashboardDist?: string;
 }
 
 // --------------------------------------------- Methods ---------------------------------------------
 
 function isApiPath(url: string): boolean {
   return url === '/api' || url.startsWith('/api/') || url.startsWith('/api?');
+}
+
+/** True when the last path segment (query string ignored) looks like a file, e.g. `/assets/a.js`. */
+function hasFileExtension(url: string): boolean {
+  const pathname = url.split('?')[0] ?? '';
+  const lastSegment = pathname.slice(pathname.lastIndexOf('/') + 1);
+  return /\.[A-Za-z0-9]+$/.test(lastSegment);
 }
 
 /**
@@ -134,15 +143,17 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   await registerTaggedRoutes(fastify, 'search', searchRoutes);
 
   // health check (no auth, for monitoring/Docker HEALTHCHECK)
+  const healthBody = Type.Object({
+    status: Type.Union([Type.Literal('ok'), Type.Literal('degraded')]),
+    uptime: Type.Integer(),
+    dbOk: Type.Boolean()
+  });
   const healthSchema = {
     tags: ['health'],
     security: [],
     response: {
-      200: Type.Object({
-        status: Type.Union([Type.Literal('ok'), Type.Literal('degraded')]),
-        uptime: Type.Integer(),
-        dbOk: Type.Boolean()
-      })
+      200: healthBody,
+      503: healthBody
     }
   };
   fastify.get('/api/health', { schema: healthSchema }, async (_request, reply) => {
@@ -154,7 +165,8 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
       // db not ok
     }
     const status = dbOk ? 'ok' : 'degraded';
-    return reply.send({
+    // 503 makes Docker HEALTHCHECK (curl -fsS) fail while the database is unreachable
+    return reply.code(dbOk ? 200 : 503).send({
       status,
       uptime: Math.floor((Date.now() - startTime) / 1000),
       dbOk
@@ -162,7 +174,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   });
 
   // serve dashboard SPA in production
-  const dashboardDist = join(__dirname, '..', '..', 'dashboard-dist');
+  const dashboardDist = opts.dashboardDist ?? join(__dirname, '..', '..', 'dashboard-dist');
   const bServeDashboard = existsSync(dashboardDist);
   if (bServeDashboard) {
     fastify.log.info('Dashboard dist found — serving dashboard');
@@ -174,9 +186,11 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
     fastify.log.warn('Dashboard dist not found — serving API only');
   }
 
-  // unknown /api/* paths answer JSON; everything else falls back to the SPA
+  // unknown /api/* paths and missing files answer JSON; client routes fall back to the SPA
   fastify.setNotFoundHandler(async (request, reply) => {
-    if (bServeDashboard && !isApiPath(request.url)) return reply.sendFile('index.html');
+    if (bServeDashboard && !isApiPath(request.url) && !hasFileExtension(request.url)) {
+      return reply.sendFile('index.html');
+    }
     return reply.code(404).send({ error: 'Not found' });
   });
 

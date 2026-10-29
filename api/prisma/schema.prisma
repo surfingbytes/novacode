@@ -23,6 +23,7 @@ model User {
   claudeAutoContinue  Boolean            @default(false) @map("claude_auto_continue")
   utilityAgentType    String?            @map("utility_agent_type")
   utilityModelSelection String           @default("") @map("utility_model_selection")
+  tokenVersion        Int                @default(0) @map("token_version")
   pushSubscriptions   PushSubscription[]
   apiTokens           ApiToken[]
 
