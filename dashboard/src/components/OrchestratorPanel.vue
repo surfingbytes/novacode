@@ -636,105 +636,101 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <!-- Workers: agent + model for the step sessions -->
+      <!-- Run settings: who runs the step sessions and the final "Verify against spec" step -->
       <div class="rounded-xl border border-fg/15 overflow-hidden">
         <div class="px-3 py-2 border-b border-fg/10 bg-fg/[0.04]">
-          <span class="text-sm font-medium text-text-primary">Workers</span>
-          <p class="text-xs text-text-muted mt-0.5">Agent and model of the step sessions.</p>
+          <span class="text-sm font-medium text-text-primary">Run settings</span>
+          <p class="text-xs text-text-muted mt-0.5">Agent and model of the step sessions and of the final verify step.</p>
         </div>
-        <div class="px-3 py-3 flex flex-col gap-3">
-          <div class="flex flex-wrap items-center gap-3">
-            <label class="text-xs text-text-muted w-28 shrink-0" for="orch-worker-agent">Agent</label>
-            <select
-              id="orch-worker-agent"
-              class="text-sm px-2 py-1.5 rounded-lg border border-fg/10 bg-fg/[0.04] text-text-primary"
-              :value="workerAgentType"
-              :disabled="!canEdit || bSavingSettings"
-              @change="onWorkerAgentChange"
-            >
-              <option v-for="agent in AGENT_TYPES" :key="agent" :value="agent">{{ agentTypeLabel(agent) }}</option>
-            </select>
-          </div>
-          <div class="flex flex-wrap items-center gap-3">
-            <span class="text-xs text-text-muted w-28 shrink-0">Same model as planning chat</span>
-            <UiToggle
-              :model-value="bWorkersUsePlannerModel"
-              :disabled="!canEdit || bSavingSettings"
-              aria-label="Workers use the planning chat's model"
-              @update:model-value="onSamePlannerModelToggle"
-            />
-          </div>
-          <div v-if="!bWorkersUsePlannerModel" class="flex flex-wrap items-center gap-3">
-            <span class="text-xs text-text-muted w-28 shrink-0">Model</span>
-            <div class="min-w-[14rem]">
-              <AgentModelPicker
-                :model-value="orchestrator?.workerModel ?? 'auto'"
-                :agent-type="workerAgentType"
-                :model-options="workerModelOptions"
-                :disabled="!canEdit || bSavingSettings || bLoadingWorkerModels"
-                variant="modal"
-                @update:model-value="saveRunSettings({ workerModel: $event })"
-              />
-            </div>
-          </div>
-          <div class="flex flex-wrap items-center gap-3">
-            <label class="text-xs text-text-muted w-28 shrink-0" for="orch-max-parallel">Parallel at once</label>
-            <select
-              id="orch-max-parallel"
-              class="text-sm px-2 py-1.5 rounded-lg border border-fg/10 bg-fg/[0.04] text-text-primary"
-              :value="maxParallel"
-              :disabled="!canEdit || bSavingSettings"
-              @change="saveRunSettings({ maxParallel: Number(($event.target as HTMLSelectElement).value) })"
-            >
-              <option v-for="count in MAX_PARALLEL_CHOICES" :key="count" :value="count">{{ count }}</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <!-- Verification: agent + model for the final "Verify against spec" step -->
-      <div class="rounded-xl border border-fg/15 overflow-hidden">
-        <div class="px-3 py-2 border-b border-fg/10 bg-fg/[0.04]">
-          <span class="text-sm font-medium text-text-primary">Verification</span>
-          <p class="text-xs text-text-muted mt-0.5">Agent and model of the final verify step.</p>
-        </div>
-        <div class="px-3 py-3 flex flex-col gap-3">
-          <div class="flex flex-wrap items-center gap-3">
-            <span class="text-xs text-text-muted w-28 shrink-0">Same as planning chat</span>
-            <UiToggle
-              :model-value="bVerifyUsesPlanner"
-              :disabled="!canEdit || bSavingSettings"
-              aria-label="Verification uses the planning chat's agent and model"
-              @update:model-value="onVerifySamePlannerToggle"
-            />
-          </div>
-          <template v-if="!bVerifyUsesPlanner">
-            <div class="flex flex-wrap items-center gap-3">
-              <label class="text-xs text-text-muted w-28 shrink-0" for="orch-verify-agent">Agent</label>
+        <div class="divide-y divide-fg/10">
+          <div class="px-3 py-2.5 flex flex-wrap items-center gap-x-6 gap-y-2">
+            <span class="text-xs font-medium text-text-primary w-20 shrink-0">Workers</span>
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-text-muted shrink-0" for="orch-worker-agent">Agent</label>
               <select
-                id="orch-verify-agent"
-                class="text-sm px-2 py-1.5 rounded-lg border border-fg/10 bg-fg/[0.04] text-text-primary"
-                :value="verifyAgentType"
+                id="orch-worker-agent"
+                class="w-auto h-auto text-sm px-2 py-1.5 rounded-lg border border-fg/10 bg-fg/[0.04] text-text-primary"
+                :value="workerAgentType"
                 :disabled="!canEdit || bSavingSettings"
-                @change="onVerifyAgentChange"
+                @change="onWorkerAgentChange"
               >
                 <option v-for="agent in AGENT_TYPES" :key="agent" :value="agent">{{ agentTypeLabel(agent) }}</option>
               </select>
             </div>
-            <div class="flex flex-wrap items-center gap-3">
-              <span class="text-xs text-text-muted w-28 shrink-0">Model</span>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-text-muted shrink-0">Same model as planning chat</span>
+              <UiToggle
+                :model-value="bWorkersUsePlannerModel"
+                :disabled="!canEdit || bSavingSettings"
+                aria-label="Workers use the planning chat's model"
+                @update:model-value="onSamePlannerModelToggle"
+              />
+            </div>
+            <div v-if="!bWorkersUsePlannerModel" class="flex items-center gap-2">
+              <span class="text-xs text-text-muted shrink-0">Model</span>
               <div class="min-w-[14rem]">
                 <AgentModelPicker
-                  :model-value="orchestrator?.verifyModel ?? 'auto'"
-                  :agent-type="verifyAgentType"
-                  :model-options="verifyModelOptions"
-                  :disabled="!canEdit || bSavingSettings || bLoadingVerifyModels"
+                  :model-value="orchestrator?.workerModel ?? 'auto'"
+                  :agent-type="workerAgentType"
+                  :model-options="workerModelOptions"
+                  :disabled="!canEdit || bSavingSettings || bLoadingWorkerModels"
                   variant="modal"
-                  @update:model-value="saveRunSettings({ verifyModel: $event })"
+                  @update:model-value="saveRunSettings({ workerModel: $event })"
                 />
               </div>
             </div>
-          </template>
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-text-muted shrink-0" for="orch-max-parallel">Parallel at once</label>
+              <select
+                id="orch-max-parallel"
+                class="w-auto h-auto text-sm px-2 py-1.5 rounded-lg border border-fg/10 bg-fg/[0.04] text-text-primary"
+                :value="maxParallel"
+                :disabled="!canEdit || bSavingSettings"
+                @change="saveRunSettings({ maxParallel: Number(($event.target as HTMLSelectElement).value) })"
+              >
+                <option v-for="count in MAX_PARALLEL_CHOICES" :key="count" :value="count">{{ count }}</option>
+              </select>
+            </div>
+          </div>
+          <div class="px-3 py-2.5 flex flex-wrap items-center gap-x-6 gap-y-2">
+            <span class="text-xs font-medium text-text-primary w-20 shrink-0">Verification</span>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-text-muted shrink-0">Same as planning chat</span>
+              <UiToggle
+                :model-value="bVerifyUsesPlanner"
+                :disabled="!canEdit || bSavingSettings"
+                aria-label="Verification uses the planning chat's agent and model"
+                @update:model-value="onVerifySamePlannerToggle"
+              />
+            </div>
+            <template v-if="!bVerifyUsesPlanner">
+              <div class="flex items-center gap-2">
+                <label class="text-xs text-text-muted shrink-0" for="orch-verify-agent">Agent</label>
+                <select
+                  id="orch-verify-agent"
+                  class="w-auto h-auto text-sm px-2 py-1.5 rounded-lg border border-fg/10 bg-fg/[0.04] text-text-primary"
+                  :value="verifyAgentType"
+                  :disabled="!canEdit || bSavingSettings"
+                  @change="onVerifyAgentChange"
+                >
+                  <option v-for="agent in AGENT_TYPES" :key="agent" :value="agent">{{ agentTypeLabel(agent) }}</option>
+                </select>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-text-muted shrink-0">Model</span>
+                <div class="min-w-[14rem]">
+                  <AgentModelPicker
+                    :model-value="orchestrator?.verifyModel ?? 'auto'"
+                    :agent-type="verifyAgentType"
+                    :model-options="verifyModelOptions"
+                    :disabled="!canEdit || bSavingSettings || bLoadingVerifyModels"
+                    variant="modal"
+                    @update:model-value="saveRunSettings({ verifyModel: $event })"
+                  />
+                </div>
+              </div>
+            </template>
+          </div>
         </div>
       </div>
 
