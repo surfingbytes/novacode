@@ -67,7 +67,7 @@ const NOVA_MCP_TOOLS: NovaMcpTool[] = [
   {
     name: 'orchestrator_save_plan',
     description:
-      "Create or replace this chat's orchestrator plan. Each step runs in a fresh agent session (in parallel runs each in its own git worktree, merged afterwards); a final 'Verify against spec' step is added automatically. Write the spec with spec_write first. The user starts the run — never start it or implement the steps yourself.",
+      "Create or replace this chat's orchestrator plan. Each step runs in a fresh agent session (in parallel runs each in its own git worktree); a 'Merge into workspace' step and a final 'Verify against spec' step are added automatically. Write the spec with spec_write first. The user starts the run — never start it or implement the steps yourself.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -152,7 +152,7 @@ async function callNovaTool(sessionId: string, name: string, args: Record<string
             dependsOn: task.dependsOn ?? [],
             status: task.runResult ?? 'not run',
             ...(task.runNote ? { note: task.runNote } : {}),
-            ...(task.kind === 'verify' ? { automatic: true } : {})
+            ...(task.kind ? { automatic: true } : {})
           })),
           handoffLog: payload?.handoffLog ?? ''
         },

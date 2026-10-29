@@ -37,8 +37,16 @@ export interface SubTask {
   runNote?: string | null;
   /** Question the step's agent asked the user; the step waits for a reply in its session. */
   waitingQuestion?: string | null;
-  /** 'verify' marks the auto-added final "check against spec" step. */
-  kind?: 'verify';
+  /**
+   * Auto-added steps: 'merge' applies the parallel steps' combined result to the
+   * workspace, 'verify' is the final "check against spec" step.
+   */
+  kind?: 'verify' | 'merge';
+  /**
+   * Merge step: the integration branch of the last parallel run and the commit it
+   * started from, kept while the merge hasn't succeeded so the step can be run again.
+   */
+  mergeRef?: { base: string; branch: string } | null;
 }
 
 export type OrchestratorRunMode = 'sequential' | 'parallel';

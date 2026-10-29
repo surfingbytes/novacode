@@ -17,6 +17,7 @@ import {
   parseSubtasksPayloadString,
   serializeSubtasksPayload
 } from '../classes/orchestratorPayload';
+import { ensureMergeStep, MERGE_STEP_NAME } from '../classes/orchestratorPlan';
 import { deleteSessionImages } from '../classes/sessionImages';
 import { broadcastWorkspaceSessionsRefresh } from '../classes/wsBroadcast';
 import { broadcastOrchestratorUpsert, updateOrchestratorAndBroadcast } from '../classes/orchestratorEvents';
@@ -399,11 +400,13 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         });
       }
       const subtasks = payload.subtasks;
-      const clearResult = (index: number) => {
+      // A merge step run alone keeps its branch to merge.
+      const clearResult = (index: number, bKeepMergeRef = false) => {
         delete subtasks[index].runResult;
         delete subtasks[index].sessionId;
         delete subtasks[index].runNote;
         delete subtasks[index].waitingQuestion;
+        if (!bKeepMergeRef) delete subtasks[index].mergeRef;
       };
 
       let onlyIndex = typeof body.onlyIndex === 'number' ? body.onlyIndex : undefined;
@@ -429,13 +432,22 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         return reply.code(409).send({ error: blocked });
       }
 
+      if (mode === 'parallel' && onlyIndex === undefined) {
+        // Plans saved before merge steps existed get theirs now, so it shows from the start.
+        ensureMergeStep(subtasks);
+      }
       if (onlyIndex !== undefined) {
-        clearResult(onlyIndex);
+        clearResult(onlyIndex, true);
       } else if (mode === 'parallel' && !body.fresh) {
-        // Keep finished steps (their work is already in the workspace); verification re-runs with the rest.
+        // Keep finished steps (their work is already in the workspace); merge and verification re-run with the rest.
+        if (subtasks.some((task) => task.kind === 'merge' && task.runResult === 'failed' && task.mergeRef)) {
+          return reply.code(409).send({
+            error: `The last run's result is not merged into the workspace yet. Run the "${MERGE_STEP_NAME}" step first, or use "Run all again in parallel" to start over.`
+          });
+        }
         subtasks.forEach((task, index) => task.runResult !== 'done' && clearResult(index));
-        if (subtasks.some((task) => task.kind !== 'verify' && !task.runResult)) {
-          subtasks.forEach((task, index) => task.kind === 'verify' && clearResult(index));
+        if (subtasks.some((task) => !task.kind && !task.runResult)) {
+          subtasks.forEach((task, index) => task.kind && clearResult(index));
         }
         if (subtasks.every((task) => task.runResult === 'done')) {
           return reply.code(400).send({ error: 'Every step is done. Use "Run all again in parallel" to start over.' });

@@ -858,13 +858,14 @@ onBeforeUnmount(() => {
                 </span>
                 <template v-if="!isRunning">
                   <button
+                    v-if="task.kind !== 'merge' || task.mergeRef"
                     type="button"
                     class="p-1.5 rounded text-text-muted hover:text-text-primary hover:bg-fg/10 transition-colors text-xs"
-                    title="Run only this step (in the workspace)"
+                    :title="task.kind === 'merge' ? 'Merge the last parallel run\'s result into the workspace again' : 'Run only this step (in the workspace)'"
                     :disabled="bStartingRun"
                     @click="startRun('sequential', { onlyIndex: i })"
                   >
-                    Run step
+                    {{ task.kind === 'merge' ? 'Merge again' : 'Run step' }}
                   </button>
                   <button
                     v-if="i > 0"
@@ -877,7 +878,7 @@ onBeforeUnmount(() => {
                     Run from here
                   </button>
                 </template>
-                <template v-if="canEdit && task.kind !== 'verify'">
+                <template v-if="canEdit && !task.kind">
                   <button
                     type="button"
                     class="p-1.5 rounded text-text-muted hover:text-text-primary hover:bg-fg/10 transition-colors"

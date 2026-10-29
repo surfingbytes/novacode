@@ -23,10 +23,13 @@ import {
   abortMerge,
   addWorktree,
   applyCommitRangeToWorkingTree,
+  branchExists,
+  changedFiles,
   commitAll,
   concludeMerge,
   createSnapshotCommit,
   deleteBranch,
+  filesWithConflictMarkers,
   headCommit,
   linkIgnoredEntries,
   mergeBranch,
@@ -35,6 +38,7 @@ import {
   unmergedFiles,
   worktreesRootDir
 } from './gitWorktrees';
+import { ensureMergeStep } from './orchestratorPlan';
 import { updateOrchestratorAndBroadcast } from './orchestratorEvents';
 
 // types
@@ -197,6 +201,8 @@ interface RunSettings {
 
 interface StepContext {
   workspaceId: string;
+  /** Absolute path of the workspace. */
+  workspacePath: string;
   orchestratorId: string;
   planName: string;
   payload: OrchestratorSubtasksPayload;
@@ -229,38 +235,40 @@ async function readLiveSpec(workspaceId: string, plannerSessionId: string | null
   return spec && specHasContent(spec.content) ? spec.content : null;
 }
 
-/** Create the step's session and run its prompt to completion. */
-async function runStep(ctx: StepContext, index: number, worktreeCwd: string | null): Promise<void> {
+interface StepTurnOptions {
+  agentType: AgentType;
+  model: string | undefined;
+  name: string;
+  tags: string[] | null;
+  prompt: string;
+  worktreeCwd: string | null;
+}
+
+type StepTurnResult = { error: string; messages?: undefined } | { error?: undefined; messages: ChatMessage[] };
+
+/**
+ * Create the step's session and run `prompt` in it until its turn ends, waiting
+ * out questions the agent asks the user; the session becomes the step's session.
+ */
+async function runStepTurn(ctx: StepContext, index: number, opts: StepTurnOptions): Promise<StepTurnResult> {
   const task = ctx.payload.subtasks[index];
-  task.runResult = 'running';
-  task.runNote = null;
-  task.waitingQuestion = null;
-  const bVerify = task.kind === 'verify';
-  const settings = await ctx.settings();
-  const agentType = bVerify ? settings.verifyAgentType : settings.workerAgentType;
-  const model = bVerify ? settings.verifyModel : settings.workerModel;
   const created = await createSessionWithAgent({
     workspaceId: ctx.workspaceId,
-    agentType,
-    ...(model ? { modelSelection: model } : {}),
+    agentType: opts.agentType,
+    ...(opts.model ? { modelSelection: opts.model } : {}),
     ...(ctx.approvalPolicy ? { approvalPolicy: ctx.approvalPolicy as ApprovalPolicy } : {}),
     orchestratorId: ctx.orchestratorId,
-    name: task.name,
-    tags: task.category && String(task.category).trim() ? normalizeTagStringList([task.category]) : null
+    name: opts.name,
+    tags: opts.tags
   });
   if (created.error || !created.session) {
-    task.runResult = 'failed';
-    task.runNote = created.error ?? 'Could not create the step session';
-    await ctx.persist();
-    return;
+    return { error: created.error ?? 'Could not create the step session' };
   }
   const session = created.session;
   task.sessionId = session.id;
-  if (worktreeCwd) await db.setSessionWorktreePath(session.id, worktreeCwd);
+  if (opts.worktreeCwd) await db.setSessionWorktreePath(session.id, opts.worktreeCwd);
   await ctx.persist();
 
-  const spec = bVerify ? await readLiveSpec(ctx.workspaceId, ctx.plannerSessionId) : null;
-  const stepPrompt = buildStepPrompt(task, ctx.payload, spec, index);
   runningStepSessions.add(session.id);
   let cancelReason: string | null = null;
   const cancelled = new Promise<{ error: string }>((resolve) => {
@@ -274,7 +282,7 @@ async function runStep(ctx: StepContext, index: number, worktreeCwd: string | nu
     result = await Promise.race([
       dispatchPromptAndWait({
         sessionId: session.id,
-        text: isNovaMcpEnabled() ? `${stepPrompt}\n\n---\n\n${STEP_NEEDS_INPUT_PROMPT}` : stepPrompt,
+        text: isNovaMcpEnabled() ? `${opts.prompt}\n\n---\n\n${STEP_NEEDS_INPUT_PROMPT}` : opts.prompt,
         model: session.modelSelection,
         mode: session.sessionMode,
         timeoutMs: STEP_TIMEOUT_MS
@@ -311,6 +319,31 @@ async function runStep(ctx: StepContext, index: number, worktreeCwd: string | nu
     stepQuestions.delete(session.id);
     stepCancels.delete(session.id);
   }
+  return result.error ? { error: result.error } : { messages: result.messages ?? [] };
+}
+
+/** Create the step's session and run its prompt to completion. */
+async function runStep(ctx: StepContext, index: number, worktreeCwd: string | null): Promise<void> {
+  const task = ctx.payload.subtasks[index];
+  if (task.kind === 'merge') {
+    // Only "Merge again" (the step run alone) merges the kept branch; one-by-one runs work in the workspace.
+    await runMergeStep(ctx, index, ctx.run.options.onlyIndex === index ? (task.mergeRef ?? null) : null);
+    return;
+  }
+  task.runResult = 'running';
+  task.runNote = null;
+  task.waitingQuestion = null;
+  const bVerify = task.kind === 'verify';
+  const settings = await ctx.settings();
+  const spec = bVerify ? await readLiveSpec(ctx.workspaceId, ctx.plannerSessionId) : null;
+  const result = await runStepTurn(ctx, index, {
+    agentType: bVerify ? settings.verifyAgentType : settings.workerAgentType,
+    model: bVerify ? settings.verifyModel : settings.workerModel,
+    name: task.name,
+    tags: task.category && String(task.category).trim() ? normalizeTagStringList([task.category]) : null,
+    prompt: buildStepPrompt(task, ctx.payload, spec, index),
+    worktreeCwd
+  });
   if (result.error) {
     task.runResult = 'failed';
     task.runNote = result.error;
@@ -319,6 +352,104 @@ async function runStep(ctx: StepContext, index: number, worktreeCwd: string | nu
     ctx.payload.handoffLog = appendHandoff(ctx.payload.handoffLog, index + 1, task.name, summarizeStepHandoff(result.messages));
   }
   await ctx.persist();
+}
+
+const MAX_LISTED_FILES = 60;
+
+const MERGE_INTO_WORKSPACE_PROMPT = (ref: { base: string; branch: string }, error: string, files: string[]) => {
+  const listed = files.slice(0, MAX_LISTED_FILES).map((file) => `- ${file}`);
+  if (files.length > MAX_LISTED_FILES) listed.push(`- … and ${files.length - MAX_LISTED_FILES} more`);
+  return `You are merging the result of a Nova orchestrator run into this workspace (the repository you work in).
+The branch \`${ref.branch}\` holds the combined work of the run's parallel steps on top of commit ${ref.base.slice(0, 12)}, a snapshot of the workspace when the run started. Applying its changes to the working tree failed:
+${error}
+
+The failed three-way apply may have applied some files already and left conflict markers in others. Make the working tree contain all changes of the branch:
+- see the branch's version of a file with \`git show ${ref.branch}:<path>\` and its changes with \`git diff ${ref.base} ${ref.branch} -- <path>\`;
+- resolve every conflict so the result keeps the intent of BOTH sides (the workspace's uncommitted edits and the branch; use the handoff notes above), remove all conflict markers, and stage the resolved files with \`git add\` so no unmerged entries remain;
+- do not commit, do not reset or check out anything that would drop the workspace's uncommitted changes, and do not delete the branch.
+
+Files the branch changes:
+${listed.join('\n')}`;
+};
+
+/**
+ * Merge step: apply the integration branch of the parallel run (`ref`) to the
+ * workspace as uncommitted changes; when the patch doesn't apply cleanly an agent
+ * resolves the conflicts in the workspace (unless `bAllowAgent` is off, after a
+ * stop). The branch is deleted once the merge is done and kept otherwise, so the
+ * step can be run again. Without a branch (one-by-one runs) there is nothing to merge.
+ */
+async function runMergeStep(
+  ctx: StepContext,
+  index: number,
+  ref: { base: string; branch: string } | null,
+  bAllowAgent = true
+): Promise<void> {
+  const task = ctx.payload.subtasks[index];
+  task.runResult = 'running';
+  task.runNote = null;
+  task.waitingQuestion = null;
+  await ctx.persist();
+  const finish = async (runResult: 'done' | 'failed', note: string | null): Promise<void> => {
+    task.runResult = runResult;
+    task.runNote = note;
+    await ctx.persist();
+  };
+
+  const nothingToMerge = async (): Promise<void> => {
+    task.mergeRef = null;
+    await finish('done', 'Nothing to merge: the steps worked in the workspace.');
+  };
+  if (!ref) {
+    await nothingToMerge();
+    return;
+  }
+  const repo = await resolveRepo(ctx.workspacePath);
+  if ('error' in repo) {
+    await finish('failed', repo.error);
+    return;
+  }
+  if (!(await branchExists(repo.root, ref.branch))) {
+    await nothingToMerge();
+    return;
+  }
+  task.mergeRef = ref;
+  const kept = `The merged result is kept on branch ${ref.branch}; run this step again to retry.`;
+  const applied = await applyCommitRangeToWorkingTree(repo.root, ref.base, ref.branch);
+  if (applied.ok) {
+    await deleteBranch(repo.root, ref.branch);
+    task.mergeRef = null;
+    await finish('done', applied.bChanged ? null : 'Nothing to merge: the steps made no changes.');
+    return;
+  }
+  if (!bAllowAgent) {
+    await finish('failed', `Could not apply the merged result to the workspace:\n${applied.error}\n${kept}`);
+    return;
+  }
+
+  const files = await changedFiles(repo.root, ref.base, ref.branch);
+  const { workerAgentType, workerModel } = await ctx.settings();
+  const result = await runStepTurn(ctx, index, {
+    agentType: workerAgentType,
+    model: workerModel,
+    name: task.name,
+    tags: normalizeTagStringList(['merge']),
+    prompt: buildStepPrompt({ name: task.name, prompt: MERGE_INTO_WORKSPACE_PROMPT(ref, applied.error, files) }, ctx.payload),
+    worktreeCwd: null
+  });
+  if (result.error) {
+    await finish('failed', `${result.error}\n${kept}`);
+    return;
+  }
+  const remaining = [...new Set([...(await unmergedFiles(repo.root)), ...(await filesWithConflictMarkers(repo.root, files))])];
+  if (remaining.length > 0) {
+    await finish('failed', `Conflicts remain in ${remaining.join(', ')}. ${kept}`);
+    return;
+  }
+  await deleteBranch(repo.root, ref.branch);
+  task.mergeRef = null;
+  ctx.payload.handoffLog = appendHandoff(ctx.payload.handoffLog, index + 1, task.name, summarizeStepHandoff(result.messages));
+  await finish('done', "The changes did not apply cleanly; the step's agent resolved the conflicts.");
 }
 
 /** Mark not-yet-run steps whose dependency failed or was skipped. */
@@ -367,15 +498,19 @@ Resolve every conflict so the result keeps the intent of BOTH sides (use the spe
 /**
  * Parallel run: each step in its own worktree from the integration branch's
  * current head (so dependents see their dependencies' work), merged back as it
- * finishes; afterwards the combined diff is applied to the workspace and the
- * verify step runs there.
+ * finishes; afterwards the merge step applies the combined diff to the workspace
+ * and the verify step runs there.
  */
 async function runParallel(ctx: StepContext, repo: RepoInfo): Promise<void> {
   const subtasks = ctx.payload.subtasks;
   const runRoot = join(worktreesRootDir(), ctx.orchestratorId);
   const integrationDir = join(runRoot, 'integration');
   const integrationBranch = stepBranch(ctx.orchestratorId, 'integration');
+  // Plans saved before merge steps existed get theirs now.
+  if (ensureMergeStep(subtasks)) await ctx.persist();
+  const mergeIndex = subtasks.findIndex((task) => task.kind === 'merge');
   const verifyIndexes = new Set(subtasks.flatMap((task, index) => (task.kind === 'verify' ? [index] : [])));
+  const autoIndexes = new Set([mergeIndex, ...verifyIndexes]);
 
   const base = await createSnapshotCommit(repo.root, ctx.gitEnv);
   await addWorktree(repo.root, integrationDir, integrationBranch, base);
@@ -455,7 +590,7 @@ async function runParallel(ctx: StepContext, repo: RepoInfo): Promise<void> {
     const bStopped = await ctx.isStopped();
     if (!bStopped) {
       const { maxParallel } = await ctx.settings();
-      const ready = findRunnableSteps(subtasks).filter((index) => !running.has(index) && !verifyIndexes.has(index));
+      const ready = findRunnableSteps(subtasks).filter((index) => !running.has(index) && !autoIndexes.has(index));
       for (const index of ready.slice(0, Math.max(0, maxParallel - running.size))) {
         const promise = runWorktreeStep(index)
           .catch(async (err) => {
@@ -480,22 +615,15 @@ async function runParallel(ctx: StepContext, repo: RepoInfo): Promise<void> {
     await Promise.race([...running.values(), woken]);
   }
 
-  // Apply whatever was merged, even after a stop, so finished work isn't stranded.
-  const head = await headCommit(integrationDir);
-  const applied = await applyCommitRangeToWorkingTree(repo.root, base, head);
+  // Merge whatever was integrated, even after a stop, so finished work isn't stranded
+  // (after a stop no agent is started for conflicts; the step can be run again).
   await removeWorktree(repo.root, integrationDir);
-  if (!applied.ok) {
-    const note = `Could not apply the merged result to the workspace (${applied.error}). It is kept on branch ${integrationBranch} — merge it manually.`;
-    for (const index of verifyIndexes) {
-      if (!subtasks[index].runResult) {
-        subtasks[index].runResult = 'skipped';
-        subtasks[index].runNote = note;
-      }
-    }
-    await ctx.persist();
-    return;
+  if (subtasks[mergeIndex].runResult) {
+    // Kept from the earlier run (no step ran again): nothing new was integrated.
+    await deleteBranch(repo.root, integrationBranch);
+  } else {
+    await runMergeStep(ctx, mergeIndex, { base, branch: integrationBranch }, !(await ctx.isStopped()));
   }
-  await deleteBranch(repo.root, integrationBranch);
 
   for (const index of verifyIndexes) {
     if (await ctx.isStopped()) return;
@@ -544,7 +672,6 @@ export async function runOrchestrator(
 async function runOrchestratorSteps(workspaceId: string, orchestratorId: string, run: ActiveRun): Promise<void> {
   const { payload, options } = run;
   const subtasks = payload.subtasks;
-  const total = subtasks.length;
   const orchestrator = await db.getOrchestrator(orchestratorId);
   const workspace = await db.getWorkspace(workspaceId);
   if (!orchestrator || !workspace) return;
@@ -568,8 +695,10 @@ async function runOrchestratorSteps(workspaceId: string, orchestratorId: string,
   };
 
   let persistChain: Promise<unknown> = Promise.resolve();
+  const workspacePath = resolveWorkspaceAbsolutePath(workspace.path);
   const ctx: StepContext = {
     workspaceId,
+    workspacePath,
     orchestratorId,
     planName: orchestrator.name || 'task plan',
     payload,
@@ -585,7 +714,7 @@ async function runOrchestratorSteps(workspaceId: string, orchestratorId: string,
       persistChain = persistChain.then(() =>
         updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
           runCurrentStep: finishedCount(subtasks),
-          runTotalSteps: total,
+          runTotalSteps: subtasks.length,
           subtasksJson: serializeSubtasksPayload(payload)
         })
       );
@@ -598,7 +727,7 @@ async function runOrchestratorSteps(workspaceId: string, orchestratorId: string,
     if (options.onlyIndex !== undefined) {
       await runStep(ctx, options.onlyIndex, null);
     } else if (options.mode === 'parallel') {
-      const repo = await resolveRepo(resolveWorkspaceAbsolutePath(workspace.path));
+      const repo = await resolveRepo(workspacePath);
       if ('error' in repo) throw new Error(repo.error);
       await runParallel(ctx, repo);
     } else {
@@ -606,10 +735,12 @@ async function runOrchestratorSteps(workspaceId: string, orchestratorId: string,
     }
     run.bResumable = false;
     await persistChain;
+    const total = subtasks.length;
 
     if (await ctx.isStopped()) {
       await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
         runCurrentStep: finishedCount(subtasks),
+        runTotalSteps: total,
         subtasksJson: serializeSubtasksPayload(payload)
       });
       return;
@@ -648,7 +779,7 @@ async function runOrchestratorSteps(workspaceId: string, orchestratorId: string,
       runStatus: 'failed',
       unread: true,
       runCurrentStep: finishedCount(subtasks),
-      runTotalSteps: total,
+      runTotalSteps: subtasks.length,
       subtasksJson: serializeSubtasksPayload(payload)
     });
     void sendPushToAll({

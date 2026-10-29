@@ -215,9 +215,26 @@ export async function abortMerge(dir: string): Promise<void> {
   await git(dir, ['merge', '--abort']);
 }
 
+const MAX_ERROR_LINES = 12;
+
+/** Keep the lines of a `git apply` failure that say what went wrong (no per-file progress chatter). */
+export function condenseApplyError(output: string): string {
+  const lines = output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !/^Applied patch to .* cleanly\.$/.test(line) && line !== 'Falling back to direct application...');
+  const relevant = lines.filter((line) => /^error:|conflict/i.test(line));
+  const kept = relevant.length > 0 ? relevant : lines;
+  const unique = [...new Set(kept)];
+  return unique.length > MAX_ERROR_LINES
+    ? `${unique.slice(0, MAX_ERROR_LINES).join('\n')}\n… and ${unique.length - MAX_ERROR_LINES} more`
+    : unique.join('\n');
+}
+
 /**
  * Apply the changes between two commits to the user's working tree as
- * uncommitted edits (three-way when the plain patch doesn't fit).
+ * uncommitted edits (three-way when the plain patch doesn't fit). On failure the
+ * three-way attempt may have applied some files and left conflict markers in others.
  */
 export async function applyCommitRangeToWorkingTree(
   repoRoot: string,
@@ -234,7 +251,28 @@ export async function applyCommitRangeToWorkingTree(
     timeoutMs: MERGE_TIMEOUT_MS
   });
   if (threeWay.code === 0) return { ok: true, bChanged: true };
-  return { ok: false, error: (threeWay.stderr || plain.stderr).trim() || 'git apply failed' };
+  return { ok: false, error: condenseApplyError(threeWay.stderr || plain.stderr) || 'git apply failed' };
+}
+
+export async function branchExists(repoRoot: string, branch: string): Promise<boolean> {
+  const result = await git(repoRoot, ['rev-parse', '-q', '--verify', `refs/heads/${branch}`]);
+  return result.code === 0;
+}
+
+/** Files changed between two commits (paths relative to the repo root). */
+export async function changedFiles(repoRoot: string, from: string, to: string): Promise<string[]> {
+  const result = await git(repoRoot, ['diff', '--name-only', from, to]);
+  return result.code === 0 ? result.stdout.split('\n').map((line) => line.trim()).filter(Boolean) : [];
+}
+
+/** Those of `files` (relative to `dir`) that still hold conflict markers. */
+export async function filesWithConflictMarkers(dir: string, files: string[]): Promise<string[]> {
+  const out: string[] = [];
+  for (const file of files) {
+    const content = await readFile(join(dir, file), 'utf8').catch(() => '');
+    if (CONFLICT_MARKER_RE.test(content)) out.push(file);
+  }
+  return out;
 }
 
 export async function removeWorktree(repoRoot: string, dir: string): Promise<void> {

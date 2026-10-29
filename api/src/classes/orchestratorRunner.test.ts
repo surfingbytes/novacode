@@ -65,6 +65,37 @@ describe('cancelOrchestratorStep', () => {
   });
 });
 
+describe('merge step', () => {
+  it('is done with nothing to merge in a one-by-one run, without a session', async () => {
+    mocks.db.getOrchestrator.mockResolvedValue({ id: 'o1', name: 'Plan', agentType: 'claude', runStatus: 'running', sourceSessionId: null });
+    mocks.db.getWorkspace.mockResolvedValue({ id: 'w1', path: '/ws' });
+    let sessionCount = 0;
+    mocks.createSessionWithAgent.mockImplementation(async () => ({
+      session: { id: `step-s${++sessionCount}`, modelSelection: 'auto', sessionMode: 'default' }
+    }));
+    mocks.dispatchPromptAndWait.mockResolvedValue({ messages: [] });
+    mocks.updateOrchestratorAndBroadcast.mockResolvedValue(undefined);
+    const payload: OrchestratorSubtasksPayload = {
+      sharedContext: '',
+      handoffLog: '',
+      subtasks: [
+        { name: 'Step 1', prompt: 'do it' },
+        { name: 'Merge into workspace', prompt: 'merge', kind: 'merge', mergeRef: { base: 'abc', branch: 'nova/o1/integration' } },
+        { name: 'Verify against spec', prompt: 'check', kind: 'verify', dependsOn: [0, 1] }
+      ]
+    };
+
+    await runOrchestrator('w1', 'o1', payload, { mode: 'sequential' });
+
+    expect(payload.subtasks[0]).toMatchObject({ runResult: 'done', sessionId: 'step-s1' });
+    expect(payload.subtasks[1]).toMatchObject({ runResult: 'done', runNote: 'Nothing to merge: the steps worked in the workspace.', mergeRef: null });
+    expect(payload.subtasks[1].sessionId).toBeUndefined();
+    expect(payload.subtasks[2]).toMatchObject({ runResult: 'done', sessionId: 'step-s2' });
+    expect(mocks.createSessionWithAgent).toHaveBeenCalledTimes(2);
+    expect(mocks.updateOrchestratorAndBroadcast).toHaveBeenLastCalledWith('w1', 'o1', expect.objectContaining({ runStatus: 'completed', runTotalSteps: 3 }));
+  });
+});
+
 describe('cancelAllOrchestratorRuns', () => {
   it('returns at once when nothing runs', async () => {
     mocks.db.failStaleRunningOrchestrators.mockResolvedValue(0);

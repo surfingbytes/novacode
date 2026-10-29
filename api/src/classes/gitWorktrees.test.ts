@@ -7,8 +7,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   addWorktree,
   applyCommitRangeToWorkingTree,
+  branchExists,
+  changedFiles,
   commitAll,
   concludeMerge,
+  condenseApplyError,
+  filesWithConflictMarkers,
   createSnapshotCommit,
   git,
   headCommit,
@@ -88,8 +92,14 @@ describe('gitWorktrees', () => {
     expect(await mergeBranch(integration, 'nova/test/step-1', 'merge 1', ENV)).toEqual({ ok: true });
     expect(await mergeBranch(integration, 'nova/test/step-2', 'merge 2', ENV)).toEqual({ ok: true });
 
-    const applied = await applyCommitRangeToWorkingTree(repo, base, await headCommit(integration));
+    expect(await branchExists(repo, 'nova/test/integration')).toBe(true);
+    expect(await branchExists(repo, 'nova/test/nope')).toBe(false);
+    expect((await changedFiles(repo, base, 'nova/test/integration')).sort()).toEqual(['b.txt', 'c.txt']);
+
+    // A branch name works as the range end, like a commit.
+    const applied = await applyCommitRangeToWorkingTree(repo, base, 'nova/test/integration');
     expect(applied).toEqual({ ok: true, bChanged: true });
+    expect(await filesWithConflictMarkers(repo, ['b.txt', 'c.txt'])).toEqual([]);
     expect(await readFile(join(repo, 'b.txt'), 'utf8')).toBe('from step 1\n');
     expect(await readFile(join(repo, 'c.txt'), 'utf8')).toBe('from step 2\n');
     // The user's own uncommitted work is still there, still uncommitted.
@@ -119,5 +129,47 @@ describe('gitWorktrees', () => {
     expect(await concludeMerge(integration, ENV)).toBe(true);
     expect(existsSync(join(integration, '.git'))).toBe(true);
     expect(await sh(integration, ['show', 'HEAD:a.txt'])).toContain('TWO by 1 and 2');
+  });
+
+  it('reports a short error when the merged result conflicts with the workspace', async () => {
+    const base = await headCommit(repo);
+    const step1 = join(root, 'wt', 'step-1');
+    await addWorktree(repo, step1, 'nova/test/step-1', base);
+    await writeFile(join(step1, 'a.txt'), 'one\nTWO by step\nthree\n');
+    await commitAll(step1, 'step 1', ENV);
+    // The user changed the same line meanwhile.
+    await writeFile(join(repo, 'a.txt'), 'one\nTWO by user\nthree\n');
+
+    const applied = await applyCommitRangeToWorkingTree(repo, base, 'nova/test/step-1');
+    expect(applied.ok).toBe(false);
+    const error = !applied.ok ? applied.error : '';
+    expect(error).toContain('a.txt');
+    expect(error).not.toContain('Falling back');
+    expect(error.split('\n').length).toBeLessThanOrEqual(13);
+    const conflicted = await filesWithConflictMarkers(repo, ['a.txt']);
+    // Either the three-way apply left markers, or nothing was applied; both are recoverable by the merge agent.
+    expect(conflicted.length === 0 || conflicted[0] === 'a.txt').toBe(true);
+  });
+});
+
+describe('condenseApplyError', () => {
+  it('keeps the error lines and drops the per-file chatter', () => {
+    const output = [
+      "Applied patch to 'a.ts' cleanly.",
+      'Falling back to direct application...',
+      'error: patch failed: b.ts:10',
+      'error: b.ts: patch does not apply',
+      'Falling back to direct application...',
+      "Applied patch to 'c.ts' cleanly.",
+      'error: patch failed: b.ts:10'
+    ].join('\n');
+    expect(condenseApplyError(output)).toBe('error: patch failed: b.ts:10\nerror: b.ts: patch does not apply');
+  });
+
+  it('caps the number of lines', () => {
+    const output = Array.from({ length: 20 }, (_, i) => `error: patch failed: f${i}.ts:1`).join('\n');
+    const lines = condenseApplyError(output).split('\n');
+    expect(lines).toHaveLength(13);
+    expect(lines[12]).toBe('… and 8 more');
   });
 });
