@@ -647,7 +647,7 @@ describe('runAcpSubprocessPrompt', () => {
 
 describe('isAcpTaskToolCall', () => {
   it('detects Task tools by title when rawInput is empty', async () => {
-    const { isAcpTaskToolCall } = await import('./acpSubprocessRunner');
+    const { isAcpTaskToolCall } = await import('./acpSubprocessRunner.js');
     expect(
       isAcpTaskToolCall({
         title: 'Task: Explore auth',

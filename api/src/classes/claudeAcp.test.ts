@@ -146,7 +146,7 @@ beforeEach(async () => {
   process.env['ACP_PROMPT_IDLE_TIMEOUT_MS'] = '0';
   FakeClaudeAgent.instances = [];
   FakeClaudeAgent.nextSessionNumber = 0;
-  claudeAcp = await import('./claudeAcp');
+  claudeAcp = await import('./claudeAcp.js');
   claudeAcp.setClaudeAcpAgentCtorForTests(FakeClaudeAgent);
 });
 

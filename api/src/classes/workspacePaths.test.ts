@@ -19,7 +19,7 @@ describe('workspacePaths', () => {
   it('resolves relative paths under the configured browse root', async () => {
     process.env['WORKSPACE_BROWSE_ROOT'] = '/opt';
     const { resolveWorkspaceAbsolutePath, normalizeWorkspaceRelativePath, isPathUnderBrowseRoot } =
-      await import('./workspacePaths');
+      await import('./workspacePaths.js');
 
     expect(normalizeWorkspaceRelativePath('')).toBe('.');
     expect(normalizeWorkspaceRelativePath('/')).toBe('.');
@@ -33,8 +33,8 @@ describe('workspacePaths', () => {
 
   it('defaults browse root when WORKSPACE_BROWSE_ROOT is unset', async () => {
     delete process.env['WORKSPACE_BROWSE_ROOT'];
-    const { DEFAULT_WORKSPACE_BROWSE_ROOT } = await import('./config');
-    const { resolveWorkspaceAbsolutePath } = await import('./workspacePaths');
+    const { DEFAULT_WORKSPACE_BROWSE_ROOT } = await import('./config.js');
+    const { resolveWorkspaceAbsolutePath } = await import('./workspacePaths.js');
     expect(resolveWorkspaceAbsolutePath('opt/src/foo')).toBe(
       `${DEFAULT_WORKSPACE_BROWSE_ROOT}/opt/src/foo`
     );

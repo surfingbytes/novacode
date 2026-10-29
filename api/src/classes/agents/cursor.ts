@@ -41,8 +41,8 @@ class CursorAdapter extends AcpSubprocessAdapter {
   override async probeOptions(): Promise<AgentOptionsProbeResult> {
     // Dynamic: agentModes/agentConfigOptions resolve adapters through the registry.
     const [{ getAgentModes }, { getAgentConfigOptions }] = await Promise.all([
-      import('../agentModes'),
-      import('../agentConfigOptions'),
+      import('../agentModes.js'),
+      import('../agentConfigOptions.js'),
     ]);
     const [modes, configOptions, parameterized] = await Promise.all([
       getAgentModes('cursor-agent'),

@@ -3,10 +3,9 @@
     "files": true
   },
   "compilerOptions": {
-    "module": "commonjs",
+    "module": "nodenext",
     "target": "ESNext",
-    "moduleResolution": "node",
-    "ignoreDeprecations": "6.0",
+    "moduleResolution": "nodenext",
     "skipLibCheck": true,
     "sourceMap": true,
     "outDir": "build",
