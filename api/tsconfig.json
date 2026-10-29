@@ -2,19 +2,19 @@
   "ts-node": {
     "files": true
   },
+  // Type-checks src (tests included) and the root config files. Builds use tsconfig.build.json.
   "compilerOptions": {
     "module": "nodenext",
-    "target": "ESNext",
+    "target": "ES2025",
     "moduleResolution": "nodenext",
+    "lib": ["ES2025"],
+    "types": ["node"],
     "skipLibCheck": true,
     "sourceMap": true,
     "outDir": "build",
-    "esModuleInterop": true,
     "resolveJsonModule": true,
     "noImplicitAny": true,
     "strict": true
   },
-  "exclude": [
-    "node_modules",
-  ]
+  "include": ["src", "*.ts"]
 }

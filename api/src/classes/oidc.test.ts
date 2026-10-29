@@ -149,7 +149,7 @@ describe('OIDC authorization', () => {
   });
 
   it('uses the discovery authorization endpoint and PKCE', async () => {
-    const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchFn = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       expect(url).toBe(
         'https://auth.example.com/application/o/novacode/.well-known/openid-configuration'
@@ -194,7 +194,7 @@ describe('OIDC authorization', () => {
       { algorithm: 'RS256', keyid: 'kid-1' }
     );
 
-    const fetchFn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchFn = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith('openid-configuration')) {
         return jsonResponse({
@@ -249,7 +249,7 @@ describe('OIDC authorization', () => {
       { algorithm: 'RS256', keyid: 'kid-1' }
     );
 
-    const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchFn = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.endsWith('openid-configuration')) {
         return jsonResponse({

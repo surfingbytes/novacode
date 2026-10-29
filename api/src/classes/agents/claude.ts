@@ -38,13 +38,10 @@ const claudeClientProxy = {
   extNotification: async (_method: string, _params: Record<string, unknown>): Promise<void> => {},
 } satisfies Partial<ClaudeAcpClient>;
 
-// Keep this as a true dynamic import: the Claude ACP package is ESM-only.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const esmImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
 
 async function probeClaudeOptions(claudeToken?: string | null): Promise<AgentOptionsProbeResult | null> {
   try {
-    const { ClaudeAcpAgent } = await esmImport('@agentclientprotocol/claude-agent-acp');
+    const { ClaudeAcpAgent } = await import('@agentclientprotocol/claude-agent-acp');
     const agent = new ClaudeAcpAgent(claudeClientProxy as unknown as ClaudeAcpClient);
     await agent.initialize({
       protocolVersion: PROTOCOL_VERSION,

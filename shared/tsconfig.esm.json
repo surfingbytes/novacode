@@ -1,18 +1,9 @@
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "module": "ESNext",
-    "target": "ES2024",
     "moduleResolution": "Bundler",
-    "lib": ["ES2024"],
     "outDir": "dist/esm",
-    "rootDir": "src",
-    "declaration": false,
-    "sourceMap": false,
-    "strict": true,
-    "noImplicitAny": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true
-  },
-  "include": ["src/**/*"],
-  "exclude": ["src/**/*.test.ts"]
+    "declaration": false
+  }
 }

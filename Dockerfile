@@ -156,4 +156,4 @@ ENV NODE_ENV=production
 ENV HOME=/config
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["node", "build/src/index.js"]
+CMD ["node", "build/index.js"]

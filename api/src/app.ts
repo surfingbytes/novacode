@@ -176,7 +176,7 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   });
 
   // serve dashboard SPA in production
-  const dashboardDist = opts.dashboardDist ?? join(__dirname, '..', '..', 'dashboard-dist');
+  const dashboardDist = opts.dashboardDist ?? join(__dirname, '..', 'dashboard-dist');
   const bServeDashboard = existsSync(dashboardDist);
   if (bServeDashboard) {
     fastify.log.info('Dashboard dist found — serving dashboard');

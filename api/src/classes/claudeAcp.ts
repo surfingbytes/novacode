@@ -1,7 +1,6 @@
 // node_modules
-// @agentclientprotocol/claude-agent-acp is ESM-only. TypeScript (module: commonjs) compiles
-// import() → require(), which fails for ESM packages. We use a new Function('m','return import(m)')
-// wrapper so the import stays as a true ESM dynamic import at runtime. Types are import-type only.
+// @agentclientprotocol/claude-agent-acp is ESM-only, so it is loaded with a dynamic import() at
+// runtime (module: nodenext keeps import() as-is in the CommonJS output). Types are import-type only.
 import type { ClaudeAcpAgent } from '@agentclientprotocol/claude-agent-acp';
 import { PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 import type {
@@ -357,11 +356,6 @@ const acpClientProxy = {
 
 // --------------------------------------------- Claude-specific agent ---------------------------------------------
 
-// new Function wrapper prevents TypeScript (module: commonjs) from compiling import() → require().
-// At runtime this stays as a true ESM dynamic import, which can load ESM-only packages.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const esmImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
-
 /** `ClaudeAcpAgent` constructor: client, optional logger, optional options (`foreground` reporter). */
 type ClaudeAcpAgentCtorType = new (
   client: ClaudeAcpClient,
@@ -373,8 +367,8 @@ let ClaudeAcpAgentCtor: ClaudeAcpAgentCtorType | null = null;
 
 async function loadClaudeAcpAgentCtor(): Promise<ClaudeAcpAgentCtorType> {
   if (!ClaudeAcpAgentCtor) {
-    const mod = await esmImport('@agentclientprotocol/claude-agent-acp');
-    ClaudeAcpAgentCtor = mod.ClaudeAcpAgent;
+    const mod = await import('@agentclientprotocol/claude-agent-acp');
+    ClaudeAcpAgentCtor = mod.ClaudeAcpAgent as ClaudeAcpAgentCtorType;
   }
   return ClaudeAcpAgentCtor!;
 }

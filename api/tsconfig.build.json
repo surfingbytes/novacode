@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  // Emits only the app: build/index.js, no tests or root config files.
+  "compilerOptions": {
+    "rootDir": "src"
+  },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
+}
