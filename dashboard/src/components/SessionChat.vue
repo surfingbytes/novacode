@@ -482,6 +482,15 @@ const { bLoading, error, fetchSession } = useSessionLoader({
 });
 
 // -------------------------------------------------- Watchers --------------------------------------------------
+// Re-selecting this chat in the sidebar drops `?tab=`; fall back to the chat tab.
+watch(
+  () => route.query.tab,
+  (queryTab) => {
+    const tab = tabFromQuery(queryTab) ?? 'chat';
+    if (tab !== activeTab.value) activeTab.value = tab;
+  }
+);
+
 watch(activeTab, (tab) => {
   syncSessionQuery();
   if (tab === 'chat') {

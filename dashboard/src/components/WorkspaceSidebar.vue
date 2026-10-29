@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // node_modules
 import { computed, onMounted, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { MoreHorizontal } from 'lucide-vue-next';
 
 // components
@@ -60,6 +60,7 @@ const emit = defineEmits<{
 // -------------------------------------------------- Store --------------------------------------------------
 
 const router = useRouter();
+const route = useRoute();
 const workspacesStore = useWorkspacesStore();
 const orchestratorsStore = useOrchestratorsStore();
 
@@ -239,7 +240,11 @@ function open(item: SidebarItem): void {
     emit('close-mobile');
   }
   if (item.kind === 'session') {
-    if (props.activeKind === 'session' && props.activeId === item.session.id) {
+    if (
+      props.activeKind === 'session' &&
+      props.activeId === item.session.id &&
+      !route.query.tab
+    ) {
       return;
     }
     void router.push({
