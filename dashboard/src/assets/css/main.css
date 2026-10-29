@@ -867,3 +867,27 @@ hr {
 .btn-primary-solid:disabled {
   opacity: 0.4;
 }
+
+/* ────── Reduced motion ──────
+   Animations and transitions finish instantly (end state kept, so enter/leave transitions and
+   their events still run). Looping indicators (spinners, pulses, glows, the running-step border
+   and progress-ring blink) are switched off so they rest in their static base state. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+
+  .animate-spin,
+  .animate-pulse,
+  .orch-active-border,
+  .orchestrator-ring__pulse {
+    animation: none !important;
+  }
+}

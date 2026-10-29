@@ -4,7 +4,9 @@
   "workspaces": {
     ".": {
       "entry": [],
-      "project": []
+      "project": [],
+      // e2e/global-setup.ts runs the API workspace's prisma for migrations.
+      "ignoreBinaries": ["prisma"]
     },
     "api": {
       "entry": ["src/index.ts", "scripts/*.mjs"],

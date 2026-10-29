@@ -2,6 +2,7 @@
 // components
 import SessionCard from '@/components/workspace/SessionCard.vue';
 import OrchestratorCard from '@/components/workspace/OrchestratorCard.vue';
+import VirtualGrid from '@/components/ui/VirtualGrid.vue';
 
 // types
 import type { Orchestrator, Session } from '@/@types/index';
@@ -22,15 +23,22 @@ const emit = defineEmits<{
   archiveOrchestrator: [orchestrator: Orchestrator];
   delete: [item: CombinedItem];
 }>();
+
+// -------------------------------------------------- Methods --------------------------------------------------
+function combinedItemKey(item: CombinedItem): string {
+  return item.kind === 'session' ? item.session.id : item.orchestrator.id;
+}
 </script>
 
 <template>
   <div class="grid-view">
-    <TransitionGroup name="list-stagger" tag="div" class="grid-view-items">
-      <template
-        v-for="(item, index) in items"
-        :key="item.kind === 'session' ? item.session.id : item.orchestrator.id"
-      >
+    <VirtualGrid
+      :items="items"
+      :item-key="combinedItemKey"
+      :estimate-row-size="112"
+      grid-class="grid-view-items"
+    >
+      <template #default="{ item, index }">
         <SessionCard
           v-if="item.kind === 'session'"
           :session="item.session"
@@ -53,6 +61,6 @@ const emit = defineEmits<{
           @delete="emit('delete', item)"
         />
       </template>
-    </TransitionGroup>
+    </VirtualGrid>
   </div>
 </template>

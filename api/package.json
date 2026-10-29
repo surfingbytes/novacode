@@ -20,6 +20,8 @@
     "@fastify/helmet": "^13.1.0",
     "@fastify/rate-limit": "^11.2.0",
     "@fastify/static": "^10.1.0",
+    "@fastify/swagger": "^9.9.2",
+    "@fastify/swagger-ui": "^6.1.2",
     "@fastify/type-provider-typebox": "^6.1.0",
     "@fastify/websocket": "^11.3.0",
     "@novacode/shared": "file:../shared",

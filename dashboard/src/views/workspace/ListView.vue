@@ -452,14 +452,14 @@ onMounted((): void => {
                 </button>
                 <!-- Secondary actions (hover-only) -->
                 <div class="ws-card__actions">
-                  <button class="ws-icon-btn" title="Edit" @click.prevent.stop="openEditWorkspace(workspace)">
+                  <button class="ws-icon-btn" title="Edit" aria-label="Edit" @click.prevent.stop="openEditWorkspace(workspace)">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6 M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
                   </button>
-                  <button class="ws-icon-btn ws-icon-btn--warn" title="Archive" :disabled="archivingId === workspace.id" @click.prevent.stop="handleArchiveWorkspace(workspace, true)">
+                  <button class="ws-icon-btn ws-icon-btn--warn" title="Archive" aria-label="Archive" :disabled="archivingId === workspace.id" @click.prevent.stop="handleArchiveWorkspace(workspace, true)">
                     <div v-if="archivingId === workspace.id" class="ws-btn-spinner" />
                     <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18 M5 7v12a2 2 0 002 2h10a2 2 0 002-2V7 M10 11h4"/></svg>
                   </button>
-                  <button class="ws-icon-btn ws-icon-btn--danger" title="Delete" @click.prevent.stop="openDeleteWorkspace(workspace)">
+                  <button class="ws-icon-btn ws-icon-btn--danger" title="Delete" aria-label="Delete" @click.prevent.stop="openDeleteWorkspace(workspace)">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18 M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2 M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
                   </button>
                 </div>
@@ -524,11 +524,11 @@ onMounted((): void => {
                         <div class="ws-card__path nc-mono">{{ formatWorkspacePath(workspace.path) }}</div>
                       </div>
                       <div class="ws-card__actions">
-                        <button class="ws-icon-btn" title="Unarchive" :disabled="archivingId === workspace.id" @click.prevent.stop="handleArchiveWorkspace(workspace, false)">
+                        <button class="ws-icon-btn" title="Unarchive" aria-label="Unarchive" :disabled="archivingId === workspace.id" @click.prevent.stop="handleArchiveWorkspace(workspace, false)">
                           <div v-if="archivingId === workspace.id" class="ws-btn-spinner" />
                           <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18 M5 7l2-4h10l2 4 M9 11v6 M15 11v6"/></svg>
                         </button>
-                        <button class="ws-icon-btn ws-icon-btn--danger" title="Delete" @click.prevent.stop="openDeleteWorkspace(workspace)">
+                        <button class="ws-icon-btn ws-icon-btn--danger" title="Delete" aria-label="Delete" @click.prevent.stop="openDeleteWorkspace(workspace)">
                           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18 M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2 M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
                         </button>
                       </div>

@@ -5,6 +5,7 @@ import fastifyHelmet from '@fastify/helmet';
 import fastifyRateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
+import { Type } from '@sinclair/typebox';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 
@@ -15,6 +16,7 @@ import { db } from './classes/database';
 import { logger as sharedLogger } from './classes/logger';
 import { resolveCorsOrigin } from './classes/corsOrigin';
 import { registerErrorHandler } from './classes/errorHandler';
+import { registerOpenApi, registerTaggedRoutes } from './classes/openapi';
 
 // routes
 import { authRoutes } from './routes/auth';
@@ -106,30 +108,44 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   // auth decorator
   registerAuth(fastify);
 
-  // routes
-  await fastify.register(authRoutes);
-  await fastify.register(workspaceRoutes);
-  await fastify.register(agentAuthRoutes);
-  await fastify.register(wsRoutes);
-  await fastify.register(chatRoutes);
-  await fastify.register(gitRoutes);
-  await fastify.register(fileRoutes);
-  await fastify.register(settingsRoutes);
-  await fastify.register(sessionsRoutes);
-  await fastify.register(roleTemplateRoutes);
-  await fastify.register(workspaceRuleRoutes);
-  await fastify.register(globalRuleRoutes);
-  await fastify.register(orchestratorRoutes);
-  await fastify.register(sessionSpecRoutes);
-  await fastify.register(novaMcpRoutes);
-  await fastify.register(automationRoutes);
-  await fastify.register(imageRoutes);
-  await fastify.register(pushRoutes);
-  await fastify.register(forgeRoutes);
-  await fastify.register(searchRoutes);
+  // OpenAPI collects routes via onRoute, so it must come before them
+  await registerOpenApi(fastify);
+
+  // routes (one OpenAPI tag per route file)
+  await registerTaggedRoutes(fastify, 'auth', authRoutes);
+  await registerTaggedRoutes(fastify, 'workspaces', workspaceRoutes);
+  await registerTaggedRoutes(fastify, 'agent-auth', agentAuthRoutes);
+  await registerTaggedRoutes(fastify, 'websocket', wsRoutes);
+  await registerTaggedRoutes(fastify, 'chat', chatRoutes);
+  await registerTaggedRoutes(fastify, 'git', gitRoutes);
+  await registerTaggedRoutes(fastify, 'files', fileRoutes);
+  await registerTaggedRoutes(fastify, 'settings', settingsRoutes);
+  await registerTaggedRoutes(fastify, 'sessions', sessionsRoutes);
+  await registerTaggedRoutes(fastify, 'role-templates', roleTemplateRoutes);
+  await registerTaggedRoutes(fastify, 'workspace-rules', workspaceRuleRoutes);
+  await registerTaggedRoutes(fastify, 'global-rules', globalRuleRoutes);
+  await registerTaggedRoutes(fastify, 'orchestrator', orchestratorRoutes);
+  await registerTaggedRoutes(fastify, 'session-spec', sessionSpecRoutes);
+  await registerTaggedRoutes(fastify, 'nova-mcp', novaMcpRoutes);
+  await registerTaggedRoutes(fastify, 'automations', automationRoutes);
+  await registerTaggedRoutes(fastify, 'images', imageRoutes);
+  await registerTaggedRoutes(fastify, 'push', pushRoutes);
+  await registerTaggedRoutes(fastify, 'forge', forgeRoutes);
+  await registerTaggedRoutes(fastify, 'search', searchRoutes);
 
   // health check (no auth, for monitoring/Docker HEALTHCHECK)
-  fastify.get('/api/health', async (_request, reply) => {
+  const healthSchema = {
+    tags: ['health'],
+    security: [],
+    response: {
+      200: Type.Object({
+        status: Type.Union([Type.Literal('ok'), Type.Literal('degraded')]),
+        uptime: Type.Integer(),
+        dbOk: Type.Boolean()
+      })
+    }
+  };
+  fastify.get('/api/health', { schema: healthSchema }, async (_request, reply) => {
     let dbOk = false;
     try {
       await db.pingDatabase();

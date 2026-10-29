@@ -90,7 +90,7 @@ function runTime(run: CiRun): string {
         <Clock :size="13" :stroke-width="1.8" class="select-none flex-shrink-0 text-text-muted" aria-hidden="true" />
         <span class="flex-shrink-0 text-text-primary">Queued {{ ciRunLabel(run) }}</span>
         <span class="min-w-0 truncate text-text-muted">{{ run.title }}</span>
-        <a v-if="run.url" :href="run.url" target="_blank" rel="noopener noreferrer" class="ml-auto flex-shrink-0 text-text-muted hover:text-text-primary" title="Open run">
+        <a v-if="run.url" :href="run.url" target="_blank" rel="noopener noreferrer" class="ml-auto flex-shrink-0 text-text-muted hover:text-text-primary" title="Open run" aria-label="Open run">
           <ExternalLink :size="12" :stroke-width="1.6" aria-hidden="true" />
         </a>
       </li>
@@ -98,7 +98,7 @@ function runTime(run: CiRun): string {
         <LoaderCircle :size="13" :stroke-width="1.8" class="select-none flex-shrink-0 text-primary animate-spin" aria-hidden="true" />
         <span class="flex-shrink-0 text-text-primary">Running {{ ciRunLabel(run) }}</span>
         <span class="min-w-0 truncate text-text-muted">{{ run.title }}</span>
-        <a v-if="run.url" :href="run.url" target="_blank" rel="noopener noreferrer" class="ml-auto flex-shrink-0 text-text-muted hover:text-text-primary" title="Open run">
+        <a v-if="run.url" :href="run.url" target="_blank" rel="noopener noreferrer" class="ml-auto flex-shrink-0 text-text-muted hover:text-text-primary" title="Open run" aria-label="Open run">
           <ExternalLink :size="12" :stroke-width="1.6" aria-hidden="true" />
         </a>
       </li>
@@ -118,6 +118,7 @@ function runTime(run: CiRun): string {
           rel="noopener noreferrer"
           class="ml-auto flex-shrink-0 text-text-muted hover:text-text-primary"
           title="Open run"
+          aria-label="Open run"
         >
           <ExternalLink :size="12" :stroke-width="1.6" aria-hidden="true" />
         </a>

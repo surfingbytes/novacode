@@ -232,7 +232,8 @@ const JsonRpcBodySchema = Type.Union([JsonRpcRequestSchema, Type.Array(JsonRpcRe
 export async function novaMcpRoutes(fastify: FastifyInstance): Promise<void> {
   const fastifyInstance = fastify.withTypeProvider<TypeBoxTypeProvider>();
 
-  fastifyInstance.post(NOVA_MCP_PATH, { schema: { body: JsonRpcBodySchema } }, async (request, reply) => {
+  // Hidden from OpenAPI: agent-only endpoint with its own per-session token.
+  fastifyInstance.post(NOVA_MCP_PATH, { schema: { hide: true, body: JsonRpcBodySchema } }, async (request, reply) => {
     const sessionId = verifyNovaMcpToken(request.headers.authorization);
     if (!sessionId) return reply.code(401).send({ error: 'Invalid Nova MCP token' });
     if (!isNovaMcpEnabled()) return reply.code(403).send({ error: 'Nova MCP is turned off in Settings' });
@@ -255,6 +256,7 @@ export async function novaMcpRoutes(fastify: FastifyInstance): Promise<void> {
     fastify.route({
       method,
       url: NOVA_MCP_PATH,
+      schema: { hide: true },
       handler: async (_request, reply) => reply.code(405).header('Allow', 'POST').send()
     });
   }

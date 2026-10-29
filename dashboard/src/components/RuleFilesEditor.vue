@@ -568,6 +568,7 @@ defineExpose({ hasUnsavedChanges });
                   type="button"
                   class="p-1.5 text-text-muted hover:text-text-primary rounded transition-colors"
                   title="Rename file"
+                  aria-label="Rename file"
                   @click.stop="startRename(file.filename)"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
@@ -576,6 +577,7 @@ defineExpose({ hasUnsavedChanges });
                   type="button"
                   class="p-1.5 text-text-muted hover:text-destructive rounded transition-colors"
                   title="Delete file"
+                  aria-label="Delete file"
                   @click.stop="fileToDelete = file.filename"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="select-none"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>

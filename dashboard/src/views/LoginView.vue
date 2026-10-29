@@ -235,7 +235,7 @@ onMounted(async (): Promise<void> => {
                 </div>
               </div>
 
-              <p v-if="error" class="message is-error">
+              <p v-if="error" class="message is-error" role="alert">
                 {{ error }}
               </p>
 
@@ -258,7 +258,7 @@ onMounted(async (): Promise<void> => {
               <span class="h-px flex-1 bg-border"></span>
             </div>
 
-            <p v-if="error && !bShowPasswordForm" class="message is-error">
+            <p v-if="error && !bShowPasswordForm" class="message is-error" role="alert">
               {{ error }}
             </p>
 

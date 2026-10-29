@@ -164,7 +164,8 @@ export const config = {
     if (override) return override;
     return existsSync('/root/.local/bin/codex-acp') ? '/root/.local/bin/codex-acp' : 'codex-acp';
   },
-  configDir: '/config',
+  /** Override with CONFIG_DIR (e.g. the e2e harness points it at a temp dir). */
+  configDir: optional('CONFIG_DIR', '/config') || '/config',
   /**
    * Body limit for the attachment-upload route, in MiB (env UPLOAD_BODY_LIMIT_MB).
    * Uploads are base64-in-JSON, so the body is ~4/3× the file size — the default

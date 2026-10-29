@@ -1,34 +1,39 @@
 <script setup lang="ts">
 // node_modules
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
-import {
-  CloudDownload,
-  GitBranch as GitBranchIcon,
-  Plus,
-  RefreshCw
-} from 'lucide-vue-next';
 
 // classes
 import { apiErrorMessage, forgeApi, gitApi } from '@/classes/api';
 
 // types
-import type { GitBranch, GitCommit, GitFile, GitRepoStatus } from '@/@types/index';
+import type { GitFile, GitRepoStatus } from '@/@types/index';
 
 // composables
 import { usePaneLayout } from '@/composables/usePaneLayout';
 import { useCiStatus } from '@/composables/useCiStatus';
 import { usePolling } from '@/composables/usePolling';
+import { useGitFileSelection } from '@/components/workspace/git/useGitFileSelection';
+import { useGitBranches } from '@/components/workspace/git/useGitBranches';
+import { useGitActionGuards } from '@/components/workspace/git/useGitActionGuards';
+import { useGitHistory } from '@/components/workspace/git/useGitHistory';
 
 // components
-import BaseModal from '@/components/BaseModal.vue';
-import ModalHeader from '@/components/ModalHeader.vue';
 import ConfirmModal from '@/components/ConfirmModal.vue';
 import ContextMenu from '@/components/ContextMenu.vue';
 import type { ContextMenuItem } from '@/components/ContextMenu.vue';
 import GitChangesList from '@/components/workspace/git/GitChangesList.vue';
 import GitDiffPane from '@/components/workspace/git/GitDiffPane.vue';
 import GitCiStatus from '@/components/workspace/git/GitCiStatus.vue';
+import GitActionsSheet from '@/components/workspace/git/GitActionsSheet.vue';
+import GitSwitchBranchModal from '@/components/workspace/git/GitSwitchBranchModal.vue';
+import GitCreateBranchModal from '@/components/workspace/git/GitCreateBranchModal.vue';
+import type { BranchOption } from '@/components/workspace/git/gitBranchOptions';
 import { gitFileKey as fileKey, gitParseFileKey as parseFileKey } from '@/components/workspace/git/gitDisplay';
+import {
+  gitErrorMessage,
+  gitFetchResultMessage as fetchResultMessage,
+  gitPullResultMessage as pullResultMessage
+} from '@/components/workspace/git/gitMessages';
 
 // -------------------------------------------------- Props --------------------------------------------------
 const props = withDefaults(
@@ -67,7 +72,6 @@ const bIsLoading = ref<boolean>(false);
 const bHasLoadedStatus = ref<boolean>(false);
 const error = ref<string | null>(null);
 
-const selectedFiles = ref<Set<string>>(new Set());
 /** When multiple Git roots exist, controls which repo’s files and actions are shown. */
 const selectedGitRepo = ref<string>('');
 
@@ -86,17 +90,11 @@ const commitResult = ref<{ type: 'success' | 'error'; text: string; repo?: strin
 const pushResult = ref<{ type: 'success' | 'error'; text: string; repo?: string } | null>(null);
 const gitActionResult = ref<{ type: 'success' | 'error'; text: string; repo?: string } | null>(null);
 
-const branches = ref<GitBranch[]>([]);
-const remoteBranches = ref<string[]>([]);
-const bBranchesLoading = ref<boolean>(false);
 const bPulling = ref<boolean>(false);
 const bFetching = ref<boolean>(false);
 const bSwitchingBranch = ref<boolean>(false);
 const bCreatingBranch = ref<boolean>(false);
 const bDiscarding = ref<boolean>(false);
-const selectedBranch = ref<string>('');
-const newBranchName = ref<string>('');
-const branchSearch = ref<string>('');
 const bShowGitActions = ref<boolean>(false);
 const bShowSwitchBranch = ref<boolean>(false);
 const bShowCreateBranch = ref<boolean>(false);
@@ -104,12 +102,24 @@ const bGitActionsMenuOpen = ref<boolean>(false);
 const gitActionsMenuX = ref<number>(0);
 const gitActionsMenuY = ref<number>(0);
 const listPane = ref<'changes' | 'history'>('changes');
-const commits = ref<GitCommit[]>([]);
-const bHistoryLoading = ref<boolean>(false);
-const selectedCommit = ref<GitCommit | null>(null);
-const commitPatch = ref<string>('');
-const bCommitPatchLoading = ref<boolean>(false);
-const commitPatchError = ref<string | null>(null);
+const {
+  commits,
+  bHistoryLoading,
+  selectedCommit,
+  commitPatch,
+  bCommitPatchLoading,
+  commitPatchError,
+  loadHistory,
+  openCommit
+} = useGitHistory({
+  getWorkspaceId: () => props.workspaceId,
+  getRepo: () => activeRepo.value?.repo ?? selectedGitRepo.value,
+  onError: (message, repo) => setGitActionResult('error', message, repo),
+  onOpenCommit: () => {
+    selectedFile.value = null;
+    emit('update:selectedFilePath', null);
+  }
+});
 
 const bFixingBuild = ref<boolean>(false);
 
@@ -127,17 +137,6 @@ const bShowList = computed((): boolean =>
 const bShowDetail = computed((): boolean =>
   detailVisible(selectedFile.value !== null || selectedCommit.value !== null)
 );
-const allSelected = computed((): boolean => {
-  const list = filesInSelectedRepo.value;
-  return (
-    list.length > 0 && list.every((f) => selectedFiles.value.has(fileKey(f)))
-  );
-});
-const someSelected = computed((): boolean => {
-  const list = filesInSelectedRepo.value;
-  const n = list.filter((f) => selectedFiles.value.has(fileKey(f))).length;
-  return n > 0 && n < list.length;
-});
 const filesInSelectedRepo = computed((): GitFile[] => {
   if (repos.value.length <= 1) return files.value;
   return files.value.filter((f) => f.repo === selectedGitRepo.value);
@@ -160,157 +159,59 @@ const {
   active: computed(() => props.active && activeRepo.value !== null),
   trigger: computed(() => activeRepo.value?.currentBranch ?? '')
 });
-const hasMixedSelection = computed((): boolean => {
-  const selectedRepos = new Set<string>();
-  for (const key of selectedFiles.value) selectedRepos.add(parseFileKey(key).repo);
-  return selectedRepos.size > 1;
+const {
+  selectedFiles,
+  allSelected,
+  someSelected,
+  hasMixedSelection,
+  selectedCountInRepo,
+  selectedFilesInActiveRepo,
+  toggleFile,
+  toggleAll
+} = useGitFileSelection({ filesInSelectedRepo, activeRepo });
+const {
+  branches,
+  bBranchesLoading,
+  selectedBranch,
+  newBranchName,
+  branchSearch,
+  filteredBranches,
+  loadBranches
+} = useGitBranches({
+  getWorkspaceId: () => props.workspaceId,
+  onError: (message, repo) => setGitActionResult('error', message, repo)
 });
-const selectedCountInRepo = (repo: string): number =>
-  [...selectedFiles.value].filter((key) => parseFileKey(key).repo === repo).length;
-const canCommit = computed(
-  (): boolean =>
-    !!commitMessage.value.trim() &&
-    selectedFiles.value.size > 0 &&
-    committingRepo.value === null &&
-    pushingRepo.value === null &&
-    !bPulling.value &&
-    !bFetching.value &&
-    !bSwitchingBranch.value &&
-    !bCreatingBranch.value &&
-    !bDiscarding.value &&
-    !bGeneratingCommitMessage.value &&
-    !hasMixedSelection.value
-);
-const canPushSingleRepo = computed(
-  (): boolean =>
-    pushingRepo.value === null &&
-    committingRepo.value === null &&
-    !bPulling.value &&
-    !bFetching.value &&
-    !bSwitchingBranch.value &&
-    !bCreatingBranch.value &&
-    !bDiscarding.value &&
-    !bGeneratingCommitMessage.value &&
-    repos.value.length === 1
-);
-const canCommitActiveRepo = computed((): boolean => {
-  const r = activeRepo.value;
-  if (!r || repos.value.length <= 1) return false;
-  const msg = (commitMessagesByRepo.value[r.repo] ?? '').trim();
-  return (
-    !!msg &&
-    selectedCountInRepo(r.repo) > 0 &&
-    committingRepo.value === null &&
-    pushingRepo.value === null &&
-    !bPulling.value &&
-    !bFetching.value &&
-    !bSwitchingBranch.value &&
-    !bCreatingBranch.value &&
-    !bDiscarding.value &&
-    !bGeneratingCommitMessage.value
-  );
-});
-const canPushActiveRepo = computed(
-  (): boolean =>
-    !!activeRepo.value &&
-    pushingRepo.value === null &&
-    committingRepo.value === null &&
-    !bPulling.value &&
-    !bFetching.value &&
-    !bSwitchingBranch.value &&
-    !bCreatingBranch.value &&
-    !bDiscarding.value &&
-    !bGeneratingCommitMessage.value
-);
-const selectedFilesInActiveRepo = computed((): string[] => {
-  const r = activeRepo.value;
-  if (!r) return [];
-  return [...selectedFiles.value]
-    .map((key) => parseFileKey(key))
-    .filter((entry) => entry.repo === r.repo)
-    .map((entry) => entry.file);
-});
-const gitOperationInProgress = computed(
-  (): boolean =>
-    committingRepo.value !== null ||
-    pushingRepo.value !== null ||
-    bPulling.value ||
-    bFetching.value ||
-    bSwitchingBranch.value ||
-    bCreatingBranch.value ||
-    bDiscarding.value ||
-    bGeneratingCommitMessage.value
-);
-const canPullActiveRepo = computed(
-  (): boolean => !!activeRepo.value?.upstreamBranch && !gitOperationInProgress.value
-);
-const canFetchActiveRepo = computed(
-  (): boolean => !!activeRepo.value && !gitOperationInProgress.value
-);
-const canSwitchBranch = computed(
-  (): boolean =>
-    !!activeRepo.value &&
-    !!selectedBranch.value &&
-    selectedBranch.value !== `local:${activeRepo.value.currentBranch}` &&
-    !gitOperationInProgress.value
-);
-const canCreateBranch = computed(
-  (): boolean => !!activeRepo.value && !!newBranchName.value.trim() && !gitOperationInProgress.value
-);
-const canDiscardSelected = computed(
-  (): boolean => !!activeRepo.value && selectedFilesInActiveRepo.value.length > 0 && !gitOperationInProgress.value
-);
-type BranchOption = GitBranch & {
-  key: string;
-  remote: boolean;
-  remoteName: string | null;
-};
-
-const localNameFromRemoteBranch = (remoteBranch: string): string => {
-  const slash = remoteBranch.indexOf('/');
-  return slash < 0 ? remoteBranch : remoteBranch.slice(slash + 1);
-};
-
-const branchOptions = computed((): BranchOption[] => {
-  const localNames = new Set(branches.value.map((branch) => branch.name));
-  const upstreams = new Set(
-    branches.value
-      .map((branch) => branch.upstream)
-      .filter((upstream): upstream is string => !!upstream)
-  );
-
-  const localBranches = branches.value.map((branch) => ({
-    ...branch,
-    key: `local:${branch.name}`,
-    remote: false,
-    remoteName: null
-  }));
-
-  const remoteOnlyBranches = remoteBranches.value
-    .filter((remoteBranch) => {
-      const localName = localNameFromRemoteBranch(remoteBranch);
-      return !localNames.has(localName) && !upstreams.has(remoteBranch);
-    })
-    .map((remoteBranch) => ({
-      name: localNameFromRemoteBranch(remoteBranch),
-      current: false,
-      upstream: remoteBranch,
-      key: `remote:${remoteBranch}`,
-      remote: true,
-      remoteName: remoteBranch
-    }));
-
-  return [...localBranches, ...remoteOnlyBranches];
-});
-
-const filteredBranches = computed((): BranchOption[] => {
-  const q = branchSearch.value.trim().toLowerCase();
-  if (!q) return branchOptions.value;
-  return branchOptions.value.filter(
-    (branch) =>
-      branch.name.toLowerCase().includes(q) ||
-      branch.upstream?.toLowerCase().includes(q)
-  );
+const {
+  gitOperationInProgress,
+  canCommit,
+  canPushSingleRepo,
+  canCommitActiveRepo,
+  canPushActiveRepo,
+  canPullActiveRepo,
+  canFetchActiveRepo,
+  canSwitchBranch,
+  canCreateBranch,
+  canDiscardSelected,
+  canGenerateCommitMessage
+} = useGitActionGuards({
+  committingRepo,
+  pushingRepo,
+  bPulling,
+  bFetching,
+  bSwitchingBranch,
+  bCreatingBranch,
+  bDiscarding,
+  bGeneratingCommitMessage,
+  repos,
+  activeRepo,
+  commitMessage,
+  commitMessagesByRepo,
+  selectedFiles,
+  hasMixedSelection,
+  selectedCountInRepo,
+  selectedFilesInActiveRepo,
+  selectedBranch,
+  newBranchName
 });
 const gitActionsMenuItems = computed(
   (): ContextMenuItem[] => [
@@ -337,36 +238,7 @@ const gitActionsMenuItems = computed(
   ]
 );
 
-const canGenerateCommitMessage = (targetRepo: string): boolean =>
-  selectedCountInRepo(targetRepo) > 0 &&
-  committingRepo.value === null &&
-  pushingRepo.value === null &&
-  !bPulling.value &&
-  !bFetching.value &&
-  !bSwitchingBranch.value &&
-  !bCreatingBranch.value &&
-  !bDiscarding.value &&
-  !bGeneratingCommitMessage.value &&
-  (repos.value.length === 1 || activeRepo.value?.repo === targetRepo);
-
 // -------------------------------------------------- Methods --------------------------------------------------
-const gitErrorMessage = (e: unknown, fallback: string): string => {
-  const msg = e as {
-    response?: { data?: { error?: string } };
-    message?: string;
-    code?: string;
-  };
-  const fromApi = msg?.response?.data?.error;
-  if (fromApi) return fromApi;
-  if (msg?.code === 'ECONNABORTED' || /timeout/i.test(msg?.message ?? '')) {
-    return 'Request timed out — try again';
-  }
-  if (msg?.message === 'Network Error') {
-    return 'Could not reach the server — try again';
-  }
-  return msg?.message ?? fallback;
-};
-
 const setGitActionResult = (
   type: 'success' | 'error',
   text: string,
@@ -377,23 +249,6 @@ const setGitActionResult = (
   gitActionResultTimer = setTimeout(() => {
     gitActionResult.value = null;
   }, 6000);
-};
-
-const loadBranches = async (repo: string): Promise<void> => {
-  bBranchesLoading.value = true;
-  try {
-    const response = await gitApi.branches(props.workspaceId, repo);
-    branches.value = response.data.branches;
-    remoteBranches.value = response.data.remoteBranches;
-    selectedBranch.value = `local:${response.data.currentBranch}`;
-  } catch (e: unknown) {
-    setGitActionResult('error', gitErrorMessage(e, 'Failed to load branches'), repo);
-    branches.value = [];
-    remoteBranches.value = [];
-    selectedBranch.value = '';
-  } finally {
-    bBranchesLoading.value = false;
-  }
 };
 
 let bStatusFailed = false;
@@ -485,45 +340,6 @@ const clearSelectedFile = (): void => {
   emit('update:selectedFilePath', null);
 };
 
-async function loadHistory(): Promise<void> {
-  const repo = activeRepo.value?.repo ?? selectedGitRepo.value;
-  bHistoryLoading.value = true;
-  try {
-    const response = await gitApi.log(props.workspaceId, repo, 80);
-    commits.value = response.data.commits;
-    if (
-      selectedCommit.value &&
-      !commits.value.some((commit) => commit.hash === selectedCommit.value?.hash)
-    ) {
-      selectedCommit.value = null;
-      commitPatch.value = '';
-    }
-  } catch (e: unknown) {
-    commits.value = [];
-    setGitActionResult('error', gitErrorMessage(e, 'Failed to load history'), repo);
-  } finally {
-    bHistoryLoading.value = false;
-  }
-}
-
-async function openCommit(commit: GitCommit): Promise<void> {
-  selectedFile.value = null;
-  emit('update:selectedFilePath', null);
-  selectedCommit.value = commit;
-  commitPatch.value = '';
-  commitPatchError.value = null;
-  bCommitPatchLoading.value = true;
-  try {
-    const repo = activeRepo.value?.repo ?? selectedGitRepo.value;
-    const response = await gitApi.show(props.workspaceId, commit.hash, repo);
-    commitPatch.value = response.data.patch;
-  } catch (e: unknown) {
-    commitPatchError.value = gitErrorMessage(e, 'Failed to load commit');
-  } finally {
-    bCommitPatchLoading.value = false;
-  }
-}
-
 function setListPane(pane: 'changes' | 'history'): void {
   listPane.value = pane;
   if (pane === 'history') {
@@ -535,30 +351,6 @@ function setListPane(pane: 'changes' | 'history'): void {
   selectedCommit.value = null;
   commitPatch.value = '';
 }
-
-const toggleFile = (file: GitFile): void => {
-  const key = fileKey(file);
-  if (selectedFiles.value.has(key)) {
-    selectedFiles.value.delete(key);
-  } else {
-    selectedFiles.value.add(key);
-  }
-  // Trigger reactivity
-  selectedFiles.value = new Set(selectedFiles.value);
-};
-
-const toggleAll = (): void => {
-  const list = filesInSelectedRepo.value;
-  if (list.length === 0) return;
-  const allOn = list.every((f) => selectedFiles.value.has(fileKey(f)));
-  const next = new Set(selectedFiles.value);
-  if (allOn) {
-    for (const f of list) next.delete(fileKey(f));
-  } else {
-    for (const f of list) next.add(fileKey(f));
-  }
-  selectedFiles.value = next;
-};
 
 const generateCommitMessage = async (targetRepo: string): Promise<void> => {
   if (!canGenerateCommitMessage(targetRepo)) return;
@@ -646,17 +438,6 @@ const commitChanges = async (targetRepo: string): Promise<void> => {
       commitResult.value = null;
     }, 5000);
   }
-};
-
-const pullResultMessage = (upToDate: boolean, commitCount: number): string => {
-  if (upToDate) return 'Already up to date';
-  return `Pulled ${commitCount} commit${commitCount === 1 ? '' : 's'}`;
-};
-
-const fetchResultMessage = (upToDate: boolean, behindCount: number, hasUpstream: boolean): string => {
-  if (!hasUpstream) return 'Fetched from remote';
-  if (upToDate) return 'Already up to date with remote';
-  return `Fetched from remote · ${behindCount} commit${behindCount === 1 ? '' : 's'} behind`;
 };
 
 const fetchActiveRepo = async (): Promise<void> => {
@@ -1023,91 +804,20 @@ onUnmounted((): void => {
     />
   </div>
 
-  <BaseModal
-    :model-value="bShowGitActions && !!activeRepo"
-    labelledby="git-actions-title"
-    panel-class="max-w-sm"
-    @update:model-value="bShowGitActions = false"
-  >
-    <template v-if="activeRepo">
-          <ModalHeader
-            eyebrow="// git actions"
-            title="Git actions"
-            title-id="git-actions-title"
-            @close="bShowGitActions = false"
-          />
-          <p class="px-6 pt-1 truncate font-mono text-xs text-text-muted">{{ activeRepo?.currentBranch }}</p>
-          <div class="px-3 pb-3">
-            <button
-              class="w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-text-primary hover:bg-fg/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              type="button"
-              :disabled="!canFetchActiveRepo"
-              @click="fetchActiveRepo"
-            >
-              <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-fg/[0.05] text-text-muted">
-                <div
-                  v-if="bFetching"
-                  class="w-3.5 h-3.5 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
-                ></div>
-                <RefreshCw v-else :size="16" :stroke-width="1.7" class="select-none" aria-hidden="true" />
-              </span>
-              <span class="min-w-0">
-                <span class="block font-medium">Fetch</span>
-                <span class="block text-xs text-text-muted">Update remote branch info without merging</span>
-              </span>
-            </button>
-            <button
-              class="w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-text-primary hover:bg-fg/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              type="button"
-              :disabled="!canPullActiveRepo"
-              @click="pullActiveRepo"
-            >
-              <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-fg/[0.05] text-text-muted">
-                <div
-                  v-if="bPulling"
-                  class="w-3.5 h-3.5 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
-                ></div>
-                <CloudDownload v-else :size="16" :stroke-width="1.7" class="select-none" aria-hidden="true" />
-              </span>
-              <span class="min-w-0">
-                <span class="block font-medium">Pull</span>
-                <span class="block text-xs text-text-muted">
-                  <template v-if="activeRepo?.upstreamBranch">Fast-forward from upstream</template>
-                  <template v-else>No upstream configured</template>
-                </span>
-              </span>
-            </button>
-            <button
-              class="w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-text-primary hover:bg-fg/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              type="button"
-              :disabled="gitOperationInProgress"
-              @click="openSwitchBranchDialog"
-            >
-              <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-fg/[0.05] text-text-muted">
-                <GitBranchIcon :size="16" :stroke-width="1.7" class="select-none" aria-hidden="true" />
-              </span>
-              <span>
-                <span class="block font-medium">Switch branch</span>
-                <span class="block text-xs text-text-muted">Search and checkout another local branch</span>
-              </span>
-            </button>
-            <button
-              class="w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-text-primary hover:bg-fg/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              type="button"
-              :disabled="gitOperationInProgress"
-              @click="openCreateBranchDialog"
-            >
-              <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-fg/[0.05] text-text-muted">
-                <Plus :size="16" :stroke-width="1.7" class="select-none" aria-hidden="true" />
-              </span>
-              <span>
-                <span class="block font-medium">Create branch</span>
-                <span class="block text-xs text-text-muted">Create from the current HEAD and switch to it</span>
-              </span>
-            </button>
-          </div>
-    </template>
-  </BaseModal>
+  <GitActionsSheet
+    :b-open="bShowGitActions"
+    :active-repo="activeRepo"
+    :b-fetching="bFetching"
+    :b-pulling="bPulling"
+    :can-fetch-active-repo="canFetchActiveRepo"
+    :can-pull-active-repo="canPullActiveRepo"
+    :git-operation-in-progress="gitOperationInProgress"
+    @close="bShowGitActions = false"
+    @fetch="fetchActiveRepo"
+    @pull="pullActiveRepo"
+    @switch-branch="openSwitchBranchDialog"
+    @create-branch="openCreateBranchDialog"
+  />
 
   <ContextMenu
     v-model="bGitActionsMenuOpen"
@@ -1117,120 +827,29 @@ onUnmounted((): void => {
     @pick="onGitActionPick"
   />
 
-  <BaseModal
-    :model-value="bShowSwitchBranch && !!activeRepo"
-    labelledby="switch-branch-title"
-    panel-class="max-w-md"
-    @update:model-value="bShowSwitchBranch = false"
-  >
-    <template v-if="activeRepo">
-          <ModalHeader
-            eyebrow="// switch branch"
-            title="Switch branch"
-            title-id="switch-branch-title"
-            @close="bShowSwitchBranch = false"
-          />
-          <p class="px-6 pt-1 text-xs text-text-muted">Current: <span class="font-mono">{{ activeRepo?.currentBranch }}</span></p>
-          <div class="px-5 pb-3">
-            <input
-              v-model="branchSearch"
-              class="w-full rounded-lg border border-fg/[0.12] bg-fg/[0.04] px-3 py-3 text-sm text-text-primary placeholder:text-text-muted focus:border-primary/50 focus:outline-none"
-              placeholder="Search branches..."
-              autocomplete="off"
-              autofocus
-              @keydown.escape="bShowSwitchBranch = false"
-            />
-          </div>
-          <div class="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
-            <div v-if="bBranchesLoading" class="px-3 py-4 text-sm text-text-muted">
-              Loading branches...
-            </div>
-            <div v-else-if="!filteredBranches.length" class="px-3 py-4 text-sm text-text-muted">
-              No branches found.
-            </div>
-            <button
-              v-for="branch in filteredBranches"
-              :key="branch.key"
-              class="w-full flex items-center justify-between gap-3 rounded-xl px-3 py-3 text-left hover:bg-fg/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              type="button"
-              :disabled="branch.current || gitOperationInProgress"
-              @click="switchBranch(branch)"
-            >
-              <span class="min-w-0">
-                <span class="block truncate font-mono text-sm text-text-primary">{{ branch.name }}</span>
-                <span v-if="branch.upstream" class="block truncate text-xs text-text-muted">{{ branch.upstream }}</span>
-              </span>
-              <span
-                v-if="branch.current"
-                class="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-primary"
-              >
-                Current
-              </span>
-              <div
-                v-else-if="bSwitchingBranch && selectedBranch === branch.key"
-                class="w-4 h-4 border border-text-muted/30 border-t-text-muted rounded-full animate-spin"
-              ></div>
-              <span
-                v-else-if="branch.remote"
-                class="rounded-full bg-fg/[0.08] px-2 py-0.5 text-[10px] uppercase tracking-wide text-text-muted"
-              >
-                Remote
-              </span>
-            </button>
-          </div>
-    </template>
-  </BaseModal>
+  <GitSwitchBranchModal
+    v-model:branch-search="branchSearch"
+    :b-open="bShowSwitchBranch"
+    :active-repo="activeRepo"
+    :b-branches-loading="bBranchesLoading"
+    :filtered-branches="filteredBranches"
+    :b-switching-branch="bSwitchingBranch"
+    :selected-branch="selectedBranch"
+    :git-operation-in-progress="gitOperationInProgress"
+    @close="bShowSwitchBranch = false"
+    @switch="switchBranch"
+  />
 
-  <BaseModal
-    :model-value="bShowCreateBranch && !!activeRepo"
-    labelledby="create-branch-title"
-    panel-class="max-w-sm"
-    @update:model-value="bShowCreateBranch = false"
-  >
-    <template v-if="activeRepo">
-    <form class="contents"
-          @submit.prevent="createBranch"
-        >
-          <ModalHeader
-            eyebrow="// create branch"
-            title="Create branch"
-            title-id="create-branch-title"
-            @close="bShowCreateBranch = false"
-          />
-          <p class="px-6 pt-1 text-xs text-text-muted">From <span class="font-mono">{{ activeRepo?.currentBranch }}</span></p>
-          <div class="px-5 pb-5">
-            <label class="text-xs font-medium text-text-muted">Branch name</label>
-            <input
-              v-model="newBranchName"
-              class="mt-1.5 w-full rounded-lg border border-fg/[0.12] bg-fg/[0.04] px-3 py-3 text-sm text-text-primary placeholder:text-text-muted focus:border-primary/50 focus:outline-none"
-              placeholder="feature/my-branch"
-              autocomplete="off"
-              autofocus
-              :disabled="gitOperationInProgress"
-              @keydown.escape="bShowCreateBranch = false"
-            />
-          </div>
-          <div class="flex justify-end gap-2 border-t border-fg/[0.08] px-5 py-4">
-            <button
-              class="rounded-lg px-3 py-2 text-sm text-text-muted hover:text-text-primary transition-colors"
-              type="button"
-              :disabled="gitOperationInProgress"
-              @click="bShowCreateBranch = false"
-            >
-              Cancel
-            </button>
-            <button
-              class="rounded-lg bg-primary px-4 py-2 text-sm text-on-accent transition-colors hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed"
-              type="submit"
-              :disabled="!canCreateBranch"
-            >
-              <span v-if="!bCreatingBranch">Create and switch</span>
-              <span v-else>Creating...</span>
-            </button>
-          </div>
-        </form>
-    </template>
-  </BaseModal>
+  <GitCreateBranchModal
+    v-model:new-branch-name="newBranchName"
+    :b-open="bShowCreateBranch"
+    :active-repo="activeRepo"
+    :b-creating-branch="bCreatingBranch"
+    :can-create-branch="canCreateBranch"
+    :git-operation-in-progress="gitOperationInProgress"
+    @close="bShowCreateBranch = false"
+    @create="createBranch"
+  />
 
   <ConfirmModal
     v-model="bShowDiscardConfirm"

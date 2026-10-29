@@ -92,6 +92,28 @@ describe('buildApp', () => {
     expect(res.json()).toEqual({ error: expect.stringContaining('n') });
   });
 
+  it('keeps the OpenAPI spec and docs behind auth', async () => {
+    expect((await app.inject({ url: '/api/openapi.json' })).statusCode).toBe(401);
+    expect((await app.inject({ url: '/api/docs' })).statusCode).toBe(401);
+  });
+
+  it('generates an OpenAPI spec listing the key routes', () => {
+    const spec = app.swagger() as {
+      paths: Record<string, Record<string, { tags?: string[]; security?: unknown[] }>>;
+      components: { securitySchemes: Record<string, { type: string; in?: string; scheme?: string }> };
+    };
+
+    expect(spec.paths['/api/workspaces']?.['get']?.tags).toEqual(['workspaces']);
+    expect(spec.paths['/api/workspaces/{workspaceId}/sessions/{sessionId}/usage']?.['get']?.tags).toEqual(['sessions']);
+    expect(spec.paths['/api/role-templates']?.['post']?.tags).toEqual(['role-templates']);
+    expect(spec.paths['/api/auth/api-tokens']?.['post']?.tags).toEqual(['auth']);
+    expect(spec.paths['/api/auth/login']?.['post']?.security).toEqual([]);
+    expect(spec.paths['/api/health']?.['get']?.security).toEqual([]);
+    expect(spec.paths['/api/mcp/nova']).toBeUndefined();
+    expect(spec.components.securitySchemes['sessionCookie']).toMatchObject({ type: 'apiKey', in: 'cookie' });
+    expect(spec.components.securitySchemes['apiKey']).toMatchObject({ type: 'http', scheme: 'bearer' });
+  });
+
   it('answers unknown /api paths with 404 JSON', async () => {
     const res = await app.inject({ url: '/api/nope' });
 

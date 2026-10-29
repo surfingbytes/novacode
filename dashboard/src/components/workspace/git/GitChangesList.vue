@@ -151,6 +151,7 @@ function onRepoCommitMessageInput(event: Event): void {
                 class="h-8 px-2.5 rounded-lg border border-fg/10 text-text-muted hover:text-text-primary hover:bg-fg/[0.04] transition-colors"
                 type="button"
                 title="Git actions"
+                aria-label="Git actions"
                 @click="openGitActions"
               >
                 <MoreHorizontal :size="16" :stroke-width="1.8" class="select-none" aria-hidden="true" />
@@ -200,6 +201,7 @@ function onRepoCommitMessageInput(event: Event): void {
               class="text-text-muted hover:text-text-primary transition-colors px-1"
               :class="{ 'animate-spin': listPane === 'changes' ? bIsLoading : bHistoryLoading }"
               title="Refresh"
+              aria-label="Refresh"
               @click="listPane === 'history' ? loadHistory() : refresh()"
             >
               <RefreshCw :size="14" :stroke-width="1.6" class="select-none" aria-hidden="true" />
@@ -220,6 +222,8 @@ function onRepoCommitMessageInput(event: Event): void {
           <button
             v-if="filesInSelectedRepo.length"
             class="flex items-center justify-center w-4 h-4 rounded border transition-colors flex-shrink-0"
+            role="checkbox"
+            :aria-checked="allSelected ? 'true' : someSelected ? 'mixed' : 'false'"
             :class="
               allSelected
                 ? 'bg-primary border-primary'
@@ -228,6 +232,7 @@ function onRepoCommitMessageInput(event: Event): void {
                   : 'border-fg/20 hover:border-fg/40'
             "
             title="Select all / none"
+            aria-label="Select all / none"
             @click.stop="toggleAll"
           >
             <Check v-if="allSelected" :size="10" :stroke-width="1.6" class="select-none text-white" aria-hidden="true" />
@@ -340,6 +345,9 @@ function onRepoCommitMessageInput(event: Event): void {
                 ? 'bg-primary border-primary'
                 : 'border-fg/20 hover:border-fg/40'
             "
+            role="checkbox"
+            :aria-checked="selectedFiles.has(fileKey(f))"
+            :aria-label="`Select ${f.file}`"
             @click.stop="toggleFile(f)"
           >
             <Check v-if="selectedFiles.has(fileKey(f))" :size="10" :stroke-width="1.6" class="select-none text-white" aria-hidden="true" />
@@ -370,6 +378,7 @@ function onRepoCommitMessageInput(event: Event): void {
           <button
             class="flex-shrink-0 text-text-muted hover:text-destructive transition-colors p-1 disabled:opacity-40 disabled:cursor-not-allowed"
             title="Discard changes"
+            aria-label="Discard changes"
             :disabled="bDiscarding"
             @click.stop="discardFiles([f.file], f.repo)"
           >

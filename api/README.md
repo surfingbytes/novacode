@@ -6,6 +6,13 @@ WebSocket clients authenticate the same way (cookie, or the `bearer.<token>` sub
 
 Optional **OIDC** (`OIDC_ISSUER` + client id/secret) adds SSO next to password login. Restrict who can open the app in the identity provider (Authentik application assignment, Authelia access rules, and so on) — Nova Code still maps a successful login to the single local owner account.
 
+## OpenAPI
+
+- `GET /api/openapi.json` — OpenAPI 3.1 spec generated from the route schemas (one tag per route file)
+- `/api/docs` — Swagger UI
+
+Both need a session cookie or API key, like the rest of the API (only the UI's static vendor files under `/api/docs/static` are public). Routes that work without auth set `security: []` in their schema. WebSocket routes and the agent-only `/api/mcp/nova` endpoint are not listed.
+
 ## Role templates
 
 Reusable Markdown snippets for new workspace or global rule files.

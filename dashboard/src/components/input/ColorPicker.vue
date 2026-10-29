@@ -42,6 +42,7 @@ onMounted(() => {
       "
       :style="{ backgroundColor: c }"
       :title="c"
+      :aria-label="`Color ${c}`"
       @click="
         color = c;
         bUseCustomColor = false;
@@ -50,6 +51,7 @@ onMounted(() => {
     <button
       type="button"
       class="w-7 h-7 rounded-full border-2 transition-all focus:outline-none focus:ring-2 bg-border"
+      aria-label="Custom color"
       :class="
         bUseCustomColor
           ? 'border-surface scale-110 ring-2 ring-primary'
@@ -67,12 +69,14 @@ onMounted(() => {
           type="text"
           maxlength="7"
           placeholder="#6366f1"
+          aria-label="Custom color hex code"
           class="border border-border rounded-lg p-1 text-sm shrink-0 grow-0 w-20!"
           @input="handleCustomColorInput"
         />
         <button
           class="shrink-0 w-9 h-9 border border-border rounded-full flex items-center justify-center"
           :style="{ backgroundColor: customColor }"
+          aria-label="Custom color preview"
         ></button>
       </div>
     </template>

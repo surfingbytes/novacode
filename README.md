@@ -324,6 +324,26 @@ docker compose -f dev.docker-compose.yaml up --build
 cd api && npx prisma migrate dev --name your_migration_name
 ```
 
+### End-to-end smoke test
+
+A Playwright smoke test (`e2e/`) runs first-run setup, creates a workspace and a session, and checks the session shows in the sidebar. It sends no prompts, so no agent CLI or credentials are needed. It is not part of `npm test`.
+
+```bash
+npx playwright install chromium   # once
+npm run test:e2e
+```
+
+`e2e/global-setup.ts` starts a throwaway stack and removes it afterwards: a `postgres:17` Docker container, the API (ts-node-dev) and the dashboard (Vite), with config, home and workspace root in a temp dir. Your shell's `DATABASE_URL` and `/config` are not used. Options:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `E2E_DATABASE_URL` | — | Use this empty, throwaway database instead of starting a container |
+| `E2E_API_PORT` / `E2E_DASHBOARD_PORT` | `21100` / `21101` | Ports for the API and dashboard |
+| `E2E_HOST` | `127.0.0.1` | Address the stack listens on and the browser uses; set to this machine's IP with a remote browser |
+| `PW_TEST_CONNECT_WS_ENDPOINT` | — | Playwright's own option to use a remote browser, e.g. `ws://playwright-chrome:3000/chromium/playwright` (browserless) |
+
+Report and traces go to `e2e/.report` and `e2e/.results`, server logs to `e2e/.logs`.
+
 ---
 
 ## Project structure

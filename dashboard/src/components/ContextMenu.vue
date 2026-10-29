@@ -35,6 +35,8 @@ const menuRef = ref<HTMLElement | null>(null);
 
 let bGlobalListenersBound = false;
 let pointerRaf: number | null = null;
+/** Element focused before the menu opened; focus returns there when the menu is dismissed with Escape. */
+let returnFocus: HTMLElement | null = null;
 
 // -------------------------------------------------- Methods --------------------------------------------------
 
@@ -62,9 +64,42 @@ function clampMenu(): void {
   pos.value = { x: nx, y: ny };
 }
 
+function getMenuItems(): HTMLButtonElement[] {
+  return Array.from(menuRef.value?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? []);
+}
+
+function focusItem(index: number): void {
+  const items = getMenuItems();
+  if (items.length === 0) {
+    return;
+  }
+  items[(index + items.length) % items.length]?.focus({ preventScroll: true });
+}
+
 function onKey(e: KeyboardEvent): void {
   if (e.key === 'Escape') {
     bOpen.value = false;
+    returnFocus?.focus();
+    return;
+  }
+  if (e.key === 'Tab') {
+    bOpen.value = false;
+    return;
+  }
+  const items = getMenuItems();
+  const current = items.indexOf(document.activeElement as HTMLButtonElement);
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    focusItem(current + 1);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    focusItem(current < 0 ? -1 : current - 1);
+  } else if (e.key === 'Home') {
+    e.preventDefault();
+    focusItem(0);
+  } else if (e.key === 'End') {
+    e.preventDefault();
+    focusItem(-1);
   }
 }
 
@@ -112,8 +147,12 @@ watch(
   () => bOpen.value,
   (isOpen) => {
     if (isOpen) {
+      returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       pos.value = { x: props.x, y: props.y };
-      void nextTick(() => clampMenu());
+      void nextTick(() => {
+        clampMenu();
+        focusItem(0);
+      });
       bindGlobal();
     } else {
       unbindGlobal();

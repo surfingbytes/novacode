@@ -78,6 +78,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     '/api/auth/needs-setup',
     {
       schema: {
+        security: [],
         response: { 200: Type.Object({ needsSetup: Type.Boolean() }) }
       }
     },
@@ -92,6 +93,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     '/api/auth/login-options',
     {
       schema: {
+        security: [],
         response: { 200: LoginOptionsSchema }
       }
     },
@@ -109,6 +111,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         rateLimit: { max: 5, timeWindow: '1 minute' }
       },
       schema: {
+        security: [],
         body: Type.Object({
           username: Type.String({ minLength: 1, maxLength: 128 }),
           password: Type.String({ minLength: 8 })
@@ -140,6 +143,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         rateLimit: { max: 10, timeWindow: '1 minute' }
       },
       schema: {
+        security: [],
         body: Type.Object({
           username: Type.String({ minLength: 1 }),
           password: Type.String({ minLength: 1 })
@@ -171,6 +175,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     '/api/auth/logout',
     {
       schema: {
+        security: [],
         response: {
           204: Type.Null()
         }
@@ -190,6 +195,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         rateLimit: { max: 10, timeWindow: '1 minute' }
       },
       schema: {
+        security: [],
         querystring: Type.Object({
           redirect: Type.Optional(Type.String())
         })
@@ -233,6 +239,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         rateLimit: { max: 10, timeWindow: '1 minute' }
       },
       schema: {
+        security: [],
         querystring: Type.Object(
           {
             code: Type.Optional(Type.String()),

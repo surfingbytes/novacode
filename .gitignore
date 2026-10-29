@@ -20,3 +20,7 @@ local.docker-compose.yml
 # Affinity / Dropbox lock artifacts (dashboard public assets)
 **/logo.af~lock~
 **/logo.af~lock~:com.dropbox.ignored
+# Playwright e2e output
+e2e/.report/
+e2e/.results/
+e2e/.logs/

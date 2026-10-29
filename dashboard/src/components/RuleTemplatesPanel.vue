@@ -334,12 +334,14 @@ onMounted(() => {
             <div class="buttons">
               <button
                 class="button is-icon is-transparent"
+                aria-label="Edit template"
                 @click.prevent.stop="startEdit(template)"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
               </button>
               <button
                 class="button is-icon is-transparent is-delete"
+                aria-label="Delete template"
                 @click.prevent.stop="confirmDelete(template)"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
@@ -362,11 +364,12 @@ onMounted(() => {
             <p class="text-xs text-text-muted">Updated {{ formatDate(template.updatedAt) }}</p>
           </div>
           <div class="cell buttons">
-            <button class="button is-icon" @click.prevent.stop="startEdit(template)">
+            <button class="button is-icon" aria-label="Edit template" @click.prevent.stop="startEdit(template)">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H5a2 2 0 00-2 2v13a2 2 0 002 2h13a2 2 0 002-2v-6"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg>
             </button>
             <button
               class="button is-icon hover:bg-destructive/10! hover:border-destructive!"
+              aria-label="Delete template"
               @click.prevent.stop="confirmDelete(template)"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="text-destructive"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>

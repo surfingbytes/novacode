@@ -2,6 +2,7 @@
 // components
 import SessionCard from '@/components/workspace/SessionCard.vue';
 import OrchestratorCard from '@/components/workspace/OrchestratorCard.vue';
+import VirtualList from '@/components/ui/VirtualList.vue';
 
 // types
 import type { Orchestrator, Session } from '@/@types/index';
@@ -35,16 +36,22 @@ const emit = defineEmits<{
   orchestratorPointerUp: [];
   orchestratorPointerMove: [e: PointerEvent];
 }>();
+
+// -------------------------------------------------- Methods --------------------------------------------------
+function combinedItemKey(item: CombinedItem): string {
+  return item.kind === 'session' ? item.session.id : item.orchestrator.id;
+}
 </script>
 
 <template>
-  <TransitionGroup name="list-stagger" tag="div" class="list-view-items">
-    <div
-      v-for="(item, index) in items"
-      :key="item.kind === 'session' ? item.session.id : item.orchestrator.id"
-      :style="{ '--stagger-index': index }"
-      class="flex flex-col"
-    >
+  <VirtualList
+    :items="items"
+    :item-key="combinedItemKey"
+    :estimate-size="56"
+    class="list-view-items"
+    item-class="flex flex-col"
+  >
+    <template #default="{ item }">
       <SessionCard
         v-if="item.kind === 'session'"
         :session="item.session"
@@ -91,6 +98,6 @@ const emit = defineEmits<{
           @contextmenu.prevent.stop="emit('sessionContextMenu', $event, child)"
         />
       </template>
-    </div>
-  </TransitionGroup>
+    </template>
+  </VirtualList>
 </template>

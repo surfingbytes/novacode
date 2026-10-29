@@ -10,6 +10,7 @@ import ConfirmModal from '@/components/ConfirmModal.vue';
 import ContextMenu from '@/components/ContextMenu.vue';
 import OrchestratorProgressRing from '@/components/OrchestratorProgressRing.vue';
 import StatusBadge from '@/components/ui/StatusBadge.vue';
+import VirtualList from '@/components/ui/VirtualList.vue';
 import SessionEditModal from '@/components/SessionEditModal.vue';
 
 import PromptModal from '@/components/PromptModal.vue';
@@ -184,6 +185,10 @@ const workspaceNameById = computed(() => {
 });
 
 // -------------------------------------------------- Methods --------------------------------------------------
+
+function sidebarItemKey(item: SidebarItem): string {
+  return item.kind === 'session' ? item.session.id : item.orchestrator.id;
+}
 
 function itemBusy(item: SidebarItem): boolean {
   return item.kind === 'session' ? !!item.session.busy : item.nestedSessions.some((s) => s.busy);
@@ -367,6 +372,7 @@ watch(
         type="button"
         class="inline-flex items-center justify-center w-9 h-9 rounded-lg text-text-muted hover:text-text-primary transition-colors"
         title="Back to sessions"
+        aria-label="Back to sessions"
         @click="emit('back')"
       >
         <svg
@@ -394,6 +400,7 @@ watch(
         type="button"
         class="ml-auto inline-flex items-center justify-center w-9 h-9 rounded-lg border border-fg/[0.10] bg-fg/[0.03] text-text-muted hover:text-text-primary hover:bg-fg/[0.06] transition-colors"
         title="New session"
+        aria-label="New session"
         @click="emit('new-session')"
       >
         <svg
@@ -460,12 +467,17 @@ watch(
       </div>
 
       <!-- Items -->
-      <ul v-else class="space-y-1">
-        <li
-          v-for="item in items"
-          :key="item.kind === 'session' ? item.session.id : item.orchestrator.id"
-          class="space-y-0.5"
-        >
+      <VirtualList
+        v-else
+        :items="items"
+        :item-key="sidebarItemKey"
+        :estimate-size="64"
+        tag="ul"
+        data-testid="workspace-sidebar-sessions"
+        item-tag="li"
+        item-class="space-y-0.5 not-last:pb-1"
+      >
+        <template #default="{ item }">
           <template v-if="item.kind === 'session'">
             <div
               class="sidebar-row w-full flex items-center rounded-lg transition-colors border"
@@ -735,8 +747,8 @@ watch(
               </ul>
             </div>
           </template>
-        </li>
-      </ul>
+        </template>
+      </VirtualList>
     </div>
   </aside>
 

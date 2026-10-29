@@ -210,6 +210,7 @@ startCountdown();
                 type="button"
                 role="switch"
                 :aria-checked="bAutoContinueEnabled"
+                aria-label="Auto-continue when limit resets"
                 :disabled="bSaving"
                 class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-50 disabled:cursor-not-allowed"
                 :class="bAutoContinueEnabled ? 'bg-primary' : 'bg-fg/[0.1]'"

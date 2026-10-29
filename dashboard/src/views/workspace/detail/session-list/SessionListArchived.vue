@@ -2,6 +2,8 @@
 // components
 import SessionCard from '@/components/workspace/SessionCard.vue';
 import OrchestratorCard from '@/components/workspace/OrchestratorCard.vue';
+import VirtualGrid from '@/components/ui/VirtualGrid.vue';
+import VirtualList from '@/components/ui/VirtualList.vue';
 
 // types
 import type { Orchestrator, Session } from '@/@types/index';
@@ -34,6 +36,11 @@ const emit = defineEmits<{
   toggleSelect: [id: string];
   toggleSelectOrchestrator: [id: string];
 }>();
+
+// -------------------------------------------------- Methods --------------------------------------------------
+function sessionKey(session: Session): string {
+  return 'arch-' + session.id;
+}
 </script>
 
 <template>
@@ -67,20 +74,25 @@ const emit = defineEmits<{
     <Transition name="fade">
       <div v-if="bShowArchived" class="mt-4">
         <div v-if="viewMode === 'grid'" class="grid-view">
-          <TransitionGroup name="list-stagger" tag="div" class="grid-view-items">
-            <SessionCard
-              v-for="(session, index) in sessions"
-              :key="'arch-' + session.id"
-              :session="session"
-              :workspace-id="workspaceId"
-              b-grid
-              b-archived
-              :style="{ '--stagger-index': index }"
-              @contextmenu.prevent.stop="emit('sessionContextMenu', $event, session)"
-              @archive="emit('archive', session)"
-              @delete="emit('delete', { kind: 'session', session })"
-            />
-          </TransitionGroup>
+          <VirtualGrid
+            :items="sessions"
+            :item-key="sessionKey"
+            :estimate-row-size="112"
+            grid-class="grid-view-items"
+          >
+            <template #default="{ item: session, index }">
+              <SessionCard
+                :session="session"
+                :workspace-id="workspaceId"
+                b-grid
+                b-archived
+                :style="{ '--stagger-index': index }"
+                @contextmenu.prevent.stop="emit('sessionContextMenu', $event, session)"
+                @archive="emit('archive', session)"
+                @delete="emit('delete', { kind: 'session', session })"
+              />
+            </template>
+          </VirtualGrid>
 
           <template v-if="orchestrators.length > 0">
             <p
@@ -113,22 +125,27 @@ const emit = defineEmits<{
         </div>
 
         <div v-else :ref="setListViewEl" class="list-view">
-          <TransitionGroup name="list-stagger" tag="div" class="list-view-items">
-            <SessionCard
-              v-for="(session, index) in sessions"
-              :key="'arch-' + session.id"
-              :session="session"
-              :workspace-id="workspaceId"
-              :b-selected="selectedIds.has(session.id)"
-              :b-selection-active="bSelectionActive"
-              b-archived
-              :style="{ '--stagger-index': index }"
-              @contextmenu.prevent.stop="emit('sessionContextMenu', $event, session)"
-              @archive="emit('archive', session)"
-              @delete="emit('delete', { kind: 'session', session })"
-              @toggle-select="emit('toggleSelect', session.id)"
-            />
-          </TransitionGroup>
+          <VirtualList
+            :items="sessions"
+            :item-key="sessionKey"
+            :estimate-size="56"
+            class="list-view-items"
+            item-class="flex flex-col not-last:border-b border-border"
+          >
+            <template #default="{ item: session }">
+              <SessionCard
+                :session="session"
+                :workspace-id="workspaceId"
+                :b-selected="selectedIds.has(session.id)"
+                :b-selection-active="bSelectionActive"
+                b-archived
+                @contextmenu.prevent.stop="emit('sessionContextMenu', $event, session)"
+                @archive="emit('archive', session)"
+                @delete="emit('delete', { kind: 'session', session })"
+                @toggle-select="emit('toggleSelect', session.id)"
+              />
+            </template>
+          </VirtualList>
 
           <template v-if="orchestrators.length > 0">
             <p

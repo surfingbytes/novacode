@@ -17,9 +17,11 @@
     "test": "npm run test --workspaces",
     "lint": "npm run lint -w novacode-api && npm run lint -w novacode-dashboard",
     "lint:check": "npm run lint:check -w novacode-api && npm run lint:check -w novacode-dashboard",
-    "knip": "knip"
+    "knip": "knip",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "knip": "^6.43.0"
   }
 }

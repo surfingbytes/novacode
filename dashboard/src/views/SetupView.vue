@@ -371,7 +371,7 @@ onMounted((): void => {
                 </div>
               </div>
 
-              <p v-if="profileError" class="message is-error">{{ profileError }}</p>
+              <p v-if="profileError" class="message is-error" role="alert">{{ profileError }}</p>
             </div>
 
             <!-- Theme Selection -->
@@ -824,6 +824,7 @@ onMounted((): void => {
                         ? 'Notifications blocked in browser settings'
                         : ''
                     "
+                    aria-label="Enable real-time alerts"
                     role="switch"
                     :aria-checked="bNotifications"
                     @click="toggleNotifications"
