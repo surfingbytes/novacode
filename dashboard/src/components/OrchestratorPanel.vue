@@ -142,6 +142,12 @@ const ringDashOffset = computed(() => {
   return RING_CIRCUMFERENCE * (1 - ratio);
 });
 
+const finishedArcLength = computed(() => RING_CIRCUMFERENCE - ringDashOffset.value);
+const runningArcLength = computed(() => {
+  const progress = runProgress.value;
+  return progress && progress.total > 0 ? (RING_CIRCUMFERENCE * progress.running) / progress.total : 0;
+});
+
 // Short label beside the ring; the full sentence goes to the title
 const runSummary = computed(() => {
   const progress = runProgress.value;
@@ -1062,7 +1068,7 @@ onBeforeUnmount(() => {
           width="20"
           height="20"
           class="shrink-0 -rotate-90"
-          :class="[RUN_STATUS_RING_CLASS[runProgress.status], runProgress.status === 'running' && 'animate-pulse']"
+          :class="RUN_STATUS_RING_CLASS[runProgress.status]"
           aria-hidden="true"
         >
           <circle cx="10" cy="10" :r="RING_RADIUS" fill="none" stroke="currentColor" stroke-opacity="0.2" stroke-width="2.5" />
@@ -1077,6 +1083,19 @@ onBeforeUnmount(() => {
             :stroke-dasharray="RING_CIRCUMFERENCE"
             :stroke-dashoffset="ringDashOffset"
             class="transition-[stroke-dashoffset] duration-500"
+          />
+          <!-- Running steps' share blinks, like the sidebar ring -->
+          <circle
+            v-if="runProgress.status === 'running' && runningArcLength > 0"
+            cx="10"
+            cy="10"
+            :r="RING_RADIUS"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            :stroke-dasharray="`${runningArcLength} ${RING_CIRCUMFERENCE}`"
+            :stroke-dashoffset="-finishedArcLength"
+            class="animate-pulse"
           />
         </svg>
         <span class="truncate">{{ runSummary.short }}</span>
