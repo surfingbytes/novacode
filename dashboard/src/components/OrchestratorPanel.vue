@@ -95,7 +95,10 @@ const plannerSession = computed(() => {
 });
 const bHasPlanner = computed(() => !!props.orchestrator?.sourceSessionId);
 const workerAgentType = computed<AgentType>(() => (props.orchestrator?.agentType ?? 'cursor-agent'));
-const bWorkersUsePlannerModel = computed(() => !props.orchestrator?.workerModel);
+// Workers always store an agent, so "same as planning chat" means: no model override and the planner's agent.
+const bWorkersUsePlanner = computed(
+  () => !props.orchestrator?.workerModel && (!plannerSession.value || plannerSession.value.agentType === workerAgentType.value)
+);
 const maxParallel = computed(() => props.orchestrator?.maxParallel ?? 3);
 const bVerifyUsesPlanner = computed(() => !props.orchestrator?.verifyAgentType);
 const verifyAgentType = computed<AgentType>(
@@ -192,7 +195,7 @@ watch(
 );
 
 watch(
-  [workerAgentType, bWorkersUsePlannerModel],
+  [workerAgentType, bWorkersUsePlanner],
   async ([agent, bSame]) => {
     if (bSame) return;
     bLoadingWorkerModels.value = true;
@@ -396,8 +399,11 @@ function onWorkerAgentChange(event: Event): void {
   void saveRunSettings({ agentType: agent, workerModel: null });
 }
 
-function onSamePlannerModelToggle(bSame: boolean): void {
-  void saveRunSettings({ workerModel: bSame ? null : 'auto' });
+function onWorkersSamePlannerToggle(bSame: boolean): void {
+  const plannerAgent = plannerSession.value?.agentType;
+  void saveRunSettings(
+    bSame ? { ...(plannerAgent ? { agentType: plannerAgent } : {}), workerModel: null } : { workerModel: 'auto' }
+  );
 }
 
 function onVerifyAgentChange(event: Event): void {
@@ -646,39 +652,41 @@ onBeforeUnmount(() => {
           <div class="px-3 py-2.5 flex flex-wrap items-center gap-x-6 gap-y-2">
             <span class="text-xs font-medium text-text-primary w-20 shrink-0">Workers</span>
             <div class="flex items-center gap-2">
-              <label class="text-xs text-text-muted shrink-0" for="orch-worker-agent">Agent</label>
-              <select
-                id="orch-worker-agent"
-                class="w-auto h-auto text-sm px-2 py-1.5 rounded-lg border border-fg/10 bg-fg/[0.04] text-text-primary"
-                :value="workerAgentType"
-                :disabled="!canEdit || bSavingSettings"
-                @change="onWorkerAgentChange"
-              >
-                <option v-for="agent in AGENT_TYPES" :key="agent" :value="agent">{{ agentTypeLabel(agent) }}</option>
-              </select>
-            </div>
-            <div class="flex items-center gap-2">
-              <span class="text-xs text-text-muted shrink-0">Same model as planning chat</span>
+              <span class="text-xs text-text-muted shrink-0">Same as planning chat</span>
               <UiToggle
-                :model-value="bWorkersUsePlannerModel"
+                :model-value="bWorkersUsePlanner"
                 :disabled="!canEdit || bSavingSettings"
-                aria-label="Workers use the planning chat's model"
-                @update:model-value="onSamePlannerModelToggle"
+                aria-label="Workers use the planning chat's agent and model"
+                @update:model-value="onWorkersSamePlannerToggle"
               />
             </div>
-            <div v-if="!bWorkersUsePlannerModel" class="flex items-center gap-2">
-              <span class="text-xs text-text-muted shrink-0">Model</span>
-              <div class="min-w-[14rem]">
-                <AgentModelPicker
-                  :model-value="orchestrator?.workerModel ?? 'auto'"
-                  :agent-type="workerAgentType"
-                  :model-options="workerModelOptions"
-                  :disabled="!canEdit || bSavingSettings || bLoadingWorkerModels"
-                  variant="modal"
-                  @update:model-value="saveRunSettings({ workerModel: $event })"
-                />
+            <template v-if="!bWorkersUsePlanner">
+              <div class="flex items-center gap-2">
+                <label class="text-xs text-text-muted shrink-0" for="orch-worker-agent">Agent</label>
+                <select
+                  id="orch-worker-agent"
+                  class="w-auto h-auto text-sm px-2 py-1.5 rounded-lg border border-fg/10 bg-fg/[0.04] text-text-primary"
+                  :value="workerAgentType"
+                  :disabled="!canEdit || bSavingSettings"
+                  @change="onWorkerAgentChange"
+                >
+                  <option v-for="agent in AGENT_TYPES" :key="agent" :value="agent">{{ agentTypeLabel(agent) }}</option>
+                </select>
               </div>
-            </div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-text-muted shrink-0">Model</span>
+                <div class="min-w-[14rem]">
+                  <AgentModelPicker
+                    :model-value="orchestrator?.workerModel ?? 'auto'"
+                    :agent-type="workerAgentType"
+                    :model-options="workerModelOptions"
+                    :disabled="!canEdit || bSavingSettings || bLoadingWorkerModels"
+                    variant="modal"
+                    @update:model-value="saveRunSettings({ workerModel: $event })"
+                  />
+                </div>
+              </div>
+            </template>
             <div class="flex items-center gap-2">
               <label class="text-xs text-text-muted shrink-0" for="orch-max-parallel">Parallel at once</label>
               <select
