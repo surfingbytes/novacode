@@ -560,11 +560,12 @@ async function runClaudeAcpTurn(
   }
 
   // No-output watchdog (same setting as subprocess agents). Paused while a permission
-  // prompt waits on the user. Disposing the agent tears down the CLI, which makes the
-  // pending prompt() settle.
+  // prompt waits on the user and while a held turn waits on silent background work.
+  // Disposing the agent tears down the CLI, which makes the pending prompt() settle.
   let bPromptIdleTimedOut = false;
   let promptIdleTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingPermissions = 0;
+  let bWatchdogPaused = false;
   const clearPromptIdleTimer = (): void => {
     if (promptIdleTimer !== null) {
       clearTimeout(promptIdleTimer);
@@ -574,12 +575,17 @@ async function runClaudeAcpTurn(
   const armPromptIdleTimer = (): void => {
     clearPromptIdleTimer();
     const timeoutMs = resolvePromptIdleTimeoutMs(config.configDir);
-    if (timeoutMs <= 0 || pendingPermissions > 0) return;
+    if (timeoutMs <= 0 || pendingPermissions > 0 || bWatchdogPaused) return;
     promptIdleTimer = setTimeout(() => {
       bPromptIdleTimedOut = true;
       logger.warn({ novaSessionId, timeoutMs }, 'Claude prompt idle timeout');
       void disposeAgent(novaSessionId, 'prompt idle timeout');
     }, timeoutMs);
+  };
+  const setWatchdogPaused = (paused: boolean): void => {
+    bWatchdogPaused = paused;
+    if (paused) clearPromptIdleTimer();
+    else armPromptIdleTimer();
   };
   const handleEvent: AcpEventHandler = (line) => {
     armPromptIdleTimer();
@@ -632,8 +638,7 @@ async function runClaudeAcpTurn(
     let stopReason: string | undefined = resp.stopReason;
     if (stopReason !== 'cancelled') {
       const followup = await holdForFollowupWork(resolvedSessionId, work, {
-        clearPromptIdleTimer,
-        armPromptIdleTimer,
+        setWatchdogPaused,
         timedOut: () => bPromptIdleTimedOut,
         novaSessionId,
       });
@@ -663,8 +668,7 @@ async function holdForFollowupWork(
   acpSessionId: string,
   work: SessionWork,
   hooks: {
-    clearPromptIdleTimer: () => void;
-    armPromptIdleTimer: () => void;
+    setWatchdogPaused: (paused: boolean) => void;
     timedOut: () => boolean;
     novaSessionId: string;
   }
@@ -672,10 +676,12 @@ async function holdForFollowupWork(
   let bHadFollowup = false;
   let bLogged = false;
   // The idle watchdog expects output; background tasks produce none until they
-  // end, so it only runs while a follow-up cycle streams. Armed on the transition
-  // only: re-arming on every re-check would keep it from ever firing.
+  // end, so it only runs while a follow-up cycle streams. Paused, not just cleared:
+  // stray events during the wait (usage, task counts) would otherwise re-arm it.
+  // Resumed on the transition only: re-arming on every re-check would keep it from
+  // ever firing.
   let bWatchdogArmed = false;
-  hooks.clearPromptIdleTimer();
+  hooks.setWatchdogPaused(true);
   for (;;) {
     if (work.released || hooks.timedOut()) return bHadFollowup;
     const bBusy = hasFollowupWork(work);
@@ -690,8 +696,7 @@ async function holdForFollowupWork(
     if (bStreaming) bHadFollowup = true;
     if (bStreaming !== bWatchdogArmed) {
       bWatchdogArmed = bStreaming;
-      if (bStreaming) hooks.armPromptIdleTimer();
-      else hooks.clearPromptIdleTimer();
+      hooks.setWatchdogPaused(!bStreaming);
     }
     // A turn that never had background work cannot get a follow-up: end at once.
     if (!bBusy && work.seenTaskIds.size === 0 && work.followupPendingSince === null && !bHadFollowup) {

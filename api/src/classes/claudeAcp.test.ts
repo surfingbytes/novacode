@@ -414,4 +414,26 @@ describe('embedded Claude follow-up work', () => {
     expect(agent.disposed).toBe(true);
     await expect(result).resolves.toMatchObject({ error: expect.stringContaining('no output') });
   });
+
+  it('keeps the idle watchdog paused when stray events arrive during a background wait', async () => {
+    process.env['ACP_PROMPT_IDLE_TIMEOUT_MS'] = '300000';
+    const { result, agent } = await startTurn('nova-1');
+    await agent.backgroundTasks('acp-1', ['render']);
+    agent.finishPrompt();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    // Events after the result (usage, task counts) must not re-arm the watchdog.
+    await agent.client.sessionUpdate({
+      sessionId: 'acp-1',
+      update: { sessionUpdate: 'usage_update', used: 1, size: 2 }
+    });
+    await agent.backgroundTasks('acp-1', ['render', 'waiter']);
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(agent.disposed).toBe(false);
+    expect(await isSettled(result)).toBe(false);
+
+    claudeAcp.cancelClaudeAcp('acp-1');
+    await flush();
+    await expect(result).resolves.toMatchObject({ stopReason: 'end_turn' });
+  });
 });
