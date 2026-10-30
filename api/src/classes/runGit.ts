@@ -63,6 +63,23 @@ export function ensureSafeGitArg(value: string, label = 'git argument'): string 
   return value;
 }
 
+/**
+ * Parses `git status --porcelain -z` output. Paths come back verbatim (no C-style quoting of
+ * spaces/non-ASCII); renames/copies report the new path and skip the trailing original-path field.
+ */
+export function parsePorcelainZ(stdout: string): Array<{ status: string; file: string }> {
+  const fields = stdout.split('\0');
+  const entries: Array<{ status: string; file: string }> = [];
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i];
+    if (field.length < 4) continue;
+    const xy = field.slice(0, 2);
+    entries.push({ status: xy.trim(), file: field.slice(3) });
+    if (xy.includes('R') || xy.includes('C')) i++;
+  }
+  return entries;
+}
+
 /** Git's own explanation of a failure (stderr, else stdout — `nothing to commit` is on stdout). */
 function gitErrorMessage(err: unknown): string {
   const gitErr = err as { stderr?: string; stdout?: string };

@@ -3,7 +3,7 @@ import { readdir } from 'node:fs/promises';
 
 // classes
 import { db, normalizeTagStringList } from './database';
-import { runGit } from './runGit';
+import { parsePorcelainZ, runGit } from './runGit';
 import { createSessionWithAgent } from './sessionService';
 import { dispatchPromptAndWait } from './chatEngine';
 import { sendPushToAll } from './push';
@@ -60,16 +60,9 @@ async function getGitStatus(
 
   const readPorcelain = async (cwd: string, prefix: string): Promise<void> => {
     try {
-      const { stdout } = await runGit(['status', '--porcelain', '-u'], { cwd });
-      for (const line of stdout.split('\n')) {
-        if (!line.trim()) {
-          continue;
-        }
-        const statusCode = line.slice(0, 2).trim();
-        const file = line.slice(3).trim();
-        if (file) {
-          files.push({ status: statusCode, file: prefix ? `${prefix}/${file}` : file });
-        }
+      const { stdout } = await runGit(['status', '--porcelain', '-z', '-u'], { cwd });
+      for (const { status, file } of parsePorcelainZ(stdout)) {
+        files.push({ status, file: prefix ? `${prefix}/${file}` : file });
       }
     } catch {
       // not a git repo or git unavailable

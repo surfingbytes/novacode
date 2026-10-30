@@ -5,7 +5,7 @@ import path from 'node:path';
 // classes
 import { db } from './database';
 import { resolveWorkspaceAbsolutePath } from './workspacePaths';
-import { ensureSafeGitArg, GitCommandError, runGit } from './runGit';
+import { ensureSafeGitArg, GitCommandError, parsePorcelainZ, runGit } from './runGit';
 import { BadRequestError, NotFoundError } from './httpErrors';
 
 // types
@@ -225,19 +225,12 @@ export async function getBranchMeta(cwd: string): Promise<{
 
 export async function getRepoStatus(baseCwd: string, repo: string): Promise<GitRepoStatus> {
   const cwd = repoCwd(baseCwd, repo);
-  const { stdout } = await runGit(['status', '--porcelain', '-u'], { cwd });
-  const files = stdout
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => {
-      const repoFile = line.slice(3).trim();
-      const workspaceFile = repo ? `${repo}/${repoFile}` : repoFile;
-      return {
-        status: line.slice(0, 2).trim(),
-        file: workspaceFile,
-        repo
-      };
-    });
+  const { stdout } = await runGit(['status', '--porcelain', '-z', '-u'], { cwd });
+  const files = parsePorcelainZ(stdout).map(({ status, file }) => ({
+    status,
+    file: repo ? `${repo}/${file}` : file,
+    repo
+  }));
 
   const branchMeta = await getBranchMeta(cwd);
 

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { BadRequestError, ConflictError, UpstreamError } from './httpErrors';
-import { ensureSafeGitArg, GitCommandError, gitHttpError, runGit } from './runGit';
+import { ensureSafeGitArg, GitCommandError, gitHttpError, parsePorcelainZ, runGit } from './runGit';
 
 let root: string;
 
@@ -170,5 +170,23 @@ describe('gitHttpError', () => {
 
   it('throws BadRequestError for option-like arguments', () => {
     expect(() => ensureSafeGitArg('-x')).toThrow(BadRequestError);
+  });
+});
+
+describe('parsePorcelainZ', () => {
+  it('returns unquoted paths with spaces/non-ASCII and the new path of renames', async () => {
+    const env = { GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@e.x', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@e.x' };
+    await writeFile(join(root, 'old.txt'), 'x');
+    await runGit(['add', '.'], { cwd: root });
+    await runGit(['commit', '-qm', 'init'], { cwd: root, env });
+    await runGit(['mv', 'old.txt', 'new name.txt'], { cwd: root });
+    await mkdir(join(root, 'dir with space'));
+    await writeFile(join(root, 'dir with space', 'čaj.md'), 'x');
+
+    const { stdout } = await runGit(['status', '--porcelain', '-z', '-u'], { cwd: root });
+    expect(parsePorcelainZ(stdout)).toEqual([
+      { status: 'R', file: 'new name.txt' },
+      { status: '??', file: 'dir with space/čaj.md' }
+    ]);
   });
 });
