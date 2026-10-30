@@ -51,6 +51,9 @@ export function useChatScroll(options: UseChatScrollOptions) {
   let ignoreScrollUntil = 0;
   let contentResizeObserver: ResizeObserver | null = null;
   let bRestoringHistoryScroll = false;
+  /** True while the mouse button is held inside the list (scrollbar drag). */
+  let bPointerScrolling = false;
+  let touchStartY: number | null = null;
 
   // -------------------------------------------------- Scroll management --------------------------------------------------
 
@@ -124,7 +127,8 @@ export function useChatScroll(options: UseChatScrollOptions) {
   }
 
   function onMessagesScroll(): void {
-    if (shouldIgnoreScrollEvent()) {
+    // While the pointer is held on the scrollbar, every scroll event is the user's.
+    if (!bPointerScrolling && shouldIgnoreScrollEvent()) {
       return;
     }
     bPinnedToBottom.value = isScrolledToBottom();
@@ -133,6 +137,85 @@ export function useChatScroll(options: UseChatScrollOptions) {
     if (messagesEl.value && messagesEl.value.scrollTop < 100) {
       options.onLoadOlder();
     }
+  }
+
+  // -------------------------------------------------- User-intent unpin --------------------------------------------------
+  // While a response streams, the content resizes many times per second and each
+  // follow-scroll opens a 150ms ignore window. Those windows overlap, so the scroll
+  // events caused by the user scrolling up were dropped and the next resize snapped
+  // them back down. Input events are unambiguous user intent, so unpin on them
+  // directly instead of inferring it from scroll position.
+
+  function unpinFromUser(): void {
+    bIgnoreScrollEvents = false;
+    ignoreScrollUntil = 0;
+    bPinnedToBottom.value = false;
+    bShowScrollToBottom.value = true;
+  }
+
+  function onWheel(event: WheelEvent): void {
+    if (event.deltaY < 0) {
+      unpinFromUser();
+    }
+  }
+
+  function onTouchStart(event: TouchEvent): void {
+    touchStartY = event.touches[0]?.clientY ?? null;
+  }
+
+  function onTouchMove(event: TouchEvent): void {
+    const y = event.touches[0]?.clientY;
+    if (touchStartY === null || y === undefined) return;
+    // Finger moving down drags the content down = scrolling up.
+    if (y - touchStartY > 8) {
+      unpinFromUser();
+      touchStartY = null;
+    }
+  }
+
+  function onTouchEnd(): void {
+    touchStartY = null;
+  }
+
+  function onKeyDown(event: KeyboardEvent): void {
+    if (event.key === 'ArrowUp' || event.key === 'PageUp' || event.key === 'Home') {
+      unpinFromUser();
+    }
+  }
+
+  function onPointerDown(event: PointerEvent): void {
+    if (event.pointerType !== 'mouse' || event.button !== 0) return;
+    bPointerScrolling = true;
+  }
+
+  function onPointerUp(): void {
+    bPointerScrolling = false;
+  }
+
+  function attachUserIntentListeners(el: HTMLElement): void {
+    el.addEventListener('wheel', onWheel, { passive: true });
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: true });
+    el.addEventListener('touchend', onTouchEnd, { passive: true });
+    el.addEventListener('touchcancel', onTouchEnd, { passive: true });
+    el.addEventListener('keydown', onKeyDown);
+    el.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+  }
+
+  function detachUserIntentListeners(el: HTMLElement | null): void {
+    if (el) {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchEnd);
+      el.removeEventListener('keydown', onKeyDown);
+      el.removeEventListener('pointerdown', onPointerDown);
+    }
+    window.removeEventListener('pointerup', onPointerUp);
+    window.removeEventListener('pointercancel', onPointerUp);
   }
 
   /** Keep scroll position stable when older messages are prepended. */
@@ -202,6 +285,9 @@ export function useChatScroll(options: UseChatScrollOptions) {
   // -------------------------------------------------- Lifecycle --------------------------------------------------
 
   onMounted(() => {
+    if (messagesEl.value) {
+      attachUserIntentListeners(messagesEl.value);
+    }
     if (typeof ResizeObserver !== 'undefined' && messagesContentEl.value) {
       contentResizeObserver = new ResizeObserver(() => {
         followPinnedToBottom();
@@ -211,6 +297,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
   });
 
   onUnmounted(() => {
+    detachUserIntentListeners(messagesEl.value);
     contentResizeObserver?.disconnect();
     contentResizeObserver = null;
   });
