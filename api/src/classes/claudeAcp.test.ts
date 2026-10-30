@@ -187,6 +187,22 @@ describe('embedded Claude agent idle sweep', () => {
     expect(second.disposed).toBe(false);
   });
 
+  it('does not dispose an idle agent while its CLI runs background tasks', async () => {
+    const agent = await runIdleTurn('nova-1');
+    // A follow-up that outlived its turn started a background waiter.
+    await agent.backgroundTasks('acp-1', ['waiter']);
+
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(agent.disposed).toBe(false);
+
+    // The idle timeout runs from when the work ended.
+    await agent.backgroundTasks('acp-1', []);
+    await vi.advanceTimersByTimeAsync(14 * 60_000);
+    expect(agent.disposed).toBe(false);
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
+    expect(agent.disposed).toBe(true);
+  });
+
   it('keeps agents alive when the idle timeout is disabled', async () => {
     process.env['CLAUDE_AGENT_IDLE_TIMEOUT_MS'] = '0';
     const agent = await runIdleTurn('nova-1');
@@ -413,6 +429,42 @@ describe('embedded Claude follow-up work', () => {
     await vi.advanceTimersByTimeAsync(300_000);
     expect(agent.disposed).toBe(true);
     await expect(result).resolves.toMatchObject({ error: expect.stringContaining('no output') });
+  });
+
+  it('keeps the turn open from a live task_notification frame until its follow-up cycle starts', async () => {
+    const events: string[] = [];
+    const { result, agent } = await startTurn('nova-1', (line) => events.push(line));
+    await agent.backgroundTasks('acp-1', ['render']);
+    agent.finishPrompt();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+    // Live order: the notification frame, then the task leaves the level signal.
+    await agent.sdkMessage('acp-1', { type: 'system', subtype: 'task_notification', task_id: 'render', status: 'completed' });
+    await agent.backgroundTasks('acp-1', []);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await isSettled(result)).toBe(false);
+
+    const cycle = agent.foreground('acp-1');
+    cycle.running();
+    await agent.client.sessionUpdate({
+      sessionId: 'acp-1',
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Render done.' } }
+    });
+    cycle.ended({ stopReason: 'end_turn' });
+    await agent.sdkMessage('acp-1', { type: 'result' });
+    await vi.advanceTimersByTimeAsync(FOLLOWUP_GRACE_MS + 1);
+    await expect(result).resolves.toMatchObject({ stopReason: 'end_turn' });
+    expect(events.some((line) => line.includes('Render done.'))).toBe(true);
+  });
+
+  it('ignores a task_notification frame for a task the level never reported', async () => {
+    const { result, agent } = await startTurn('nova-1');
+    await agent.backgroundTasks('acp-1', ['build']);
+    await agent.backgroundTasks('acp-1', []);
+    agent.finishPrompt();
+    await agent.sdkMessage('acp-1', { type: 'system', subtype: 'task_notification', task_id: 'ambient', status: 'completed' });
+    await vi.advanceTimersByTimeAsync(FOLLOWUP_GRACE_MS + 1);
+    await expect(result).resolves.toMatchObject({ stopReason: 'end_turn' });
   });
 
   it('keeps the idle watchdog paused when stray events arrive during a background wait', async () => {

@@ -45,7 +45,9 @@ const activePermissionHandlers = new Map<string, AcpPermissionHandler>();
 // adapter reports that work through its `foreground` constructor option and, with
 // `emitRawSDKMessages`, the SDK's background task level signal. A turn stays open
 // until that work drains so the follow-up lands in the same assistant message
-// instead of being dropped.
+// instead of being dropped. Live, a finished task is announced by the SDK's
+// `system/task_notification` frame; the `user` record with a task-notification
+// origin is what the transcript keeps, so both mark a follow-up as queued.
 
 /** How long a turn waits, after the last sign of follow-up work, before ending. */
 const FOLLOWUP_GRACE_MS = 2_000;
@@ -57,6 +59,7 @@ const CLAUDE_SESSION_META = {
   claudeCode: {
     emitRawSDKMessages: [
       { type: 'system', subtype: 'background_tasks_changed' },
+      { type: 'system', subtype: 'task_notification' },
       { type: 'user', origin: 'task-notification' },
       { type: 'result' },
     ],
@@ -96,6 +99,12 @@ function getSessionWork(acpSessionId: string): SessionWork {
     workByAcpSession.set(acpSessionId, work);
   }
   return work;
+}
+
+/** Follow-up work counts as use: the idle timeout runs from when it was last seen. */
+function touchAcpSession(acpSessionId: string): void {
+  const novaSessionId = novaByAcpSession.get(acpSessionId);
+  if (novaSessionId && agentsByNovaSession.has(novaSessionId)) lastUsedByNovaSession.set(novaSessionId, Date.now());
 }
 
 function wakeSessionWork(work: SessionWork): void {
@@ -141,6 +150,7 @@ function makeForegroundEvents(acpSessionId: string): {
     work.foreground = foreground;
     if (foreground) work.followupPendingSince = null;
     if (stopReason) work.lastStopReason = stopReason;
+    touchAcpSession(acpSessionId);
     wakeSessionWork(work);
   };
   return {
@@ -154,6 +164,7 @@ function makeForegroundEvents(acpSessionId: string): {
 /** Raw SDK messages (`_claude/sdkMessage`) that describe follow-up work. */
 function trackRawSdkMessage(acpSessionId: string, message: Record<string, unknown>): void {
   const work = getSessionWork(acpSessionId);
+  touchAcpSession(acpSessionId);
   if (message.type === 'system' && message.subtype === 'background_tasks_changed') {
     const tasks = Array.isArray(message.tasks) ? (message.tasks as Array<Record<string, unknown>>) : [];
     work.liveTaskIds = new Set(
@@ -164,6 +175,16 @@ function trackRawSdkMessage(acpSessionId: string, message: Record<string, unknow
     for (const id of work.liveTaskIds) work.seenTaskIds.add(id);
     emitBackgroundTaskCounts(acpSessionId, work);
     wakeSessionWork(work);
+    return;
+  }
+  // The frame comes before the task leaves the level signal, so the turn never
+  // looks quiet between the task ending and its follow-up cycle starting. Only
+  // tasks the level reported count: ambient ones start no follow-up.
+  if (message.type === 'system' && message.subtype === 'task_notification') {
+    if (typeof message.task_id === 'string' && work.seenTaskIds.has(message.task_id) && !work.foreground) {
+      work.followupPendingSince = Date.now();
+      wakeSessionWork(work);
+    }
     return;
   }
   if (message.type === 'user') {
@@ -189,7 +210,9 @@ const initializedNovaSessions = new Set<string>();
 
 // Each cached agent keeps a live `claude` CLI (plus one connection / child process per
 // configured MCP server) after its turn ends. Idle agents are disposed by a periodic
-// sweep and an LRU cap; the next turn resumes the conversation from disk.
+// sweep and an LRU cap; the next turn resumes the conversation from disk. An agent
+// whose CLI still runs background tasks or a self-started cycle is not idle:
+// disposing it would kill that work.
 const MAX_LIVE_CLAUDE_AGENTS = 10;
 const IDLE_SWEEP_INTERVAL_MS = 60_000;
 const lastUsedByNovaSession = new Map<string, number>();
@@ -235,9 +258,18 @@ function isTurnInFlight(novaSessionId: string): boolean {
   return (inFlightTurnsByNovaSession.get(novaSessionId) ?? 0) > 0;
 }
 
+function hasLiveWork(novaSessionId: string): boolean {
+  for (const [acpId, novaId] of novaByAcpSession.entries()) {
+    if (novaId !== novaSessionId) continue;
+    const work = workByAcpSession.get(acpId);
+    if (work && hasFollowupWork(work)) return true;
+  }
+  return false;
+}
+
 function idleAgentsOldestFirst(): Array<[string, number]> {
   return [...agentsByNovaSession.keys()]
-    .filter((id) => !isTurnInFlight(id))
+    .filter((id) => !isTurnInFlight(id) && !hasLiveWork(id))
     .map((id): [string, number] => [id, lastUsedByNovaSession.get(id) ?? 0])
     .sort((a, b) => a[1] - b[1]);
 }
