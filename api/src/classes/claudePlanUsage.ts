@@ -33,7 +33,7 @@ function normalizeWindow(value: unknown): ClaudePlanUsageWindow | null {
 }
 
 /** Windows from a `_claude/rateLimit` payload, or null when it carries none. */
-export function normalizeClaudeRateLimit(value: unknown): Record<string, ClaudePlanUsageWindow> | null {
+function normalizeClaudeRateLimit(value: unknown): Record<string, ClaudePlanUsageWindow> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   const windows: Record<string, ClaudePlanUsageWindow> = {};
