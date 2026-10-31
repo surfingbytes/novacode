@@ -16,8 +16,8 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div class="flex flex-wrap justify-between sm:justify-end gap-y-2 mb-3">
-    <div class="button-select-small mr-2 mt-0">
+  <div class="flex items-center gap-2 max-sm:w-full max-sm:justify-between">
+    <div class="button-select-small mt-0">
       <button
         class="button is-icon"
         :class="{ 'is-active': viewMode === 'list' }"
@@ -69,8 +69,13 @@ const emit = defineEmits<{
         </svg>
       </button>
     </div>
-    <div class="flex flex-wrap items-center gap-2 shrink-0">
-      <button type="button" class="button" @click="emit('newOrchestrator')">
+    <div class="flex items-center gap-2 shrink-0">
+      <button
+        type="button"
+        class="button"
+        aria-label="New orchestrator"
+        @click="emit('newOrchestrator')"
+      >
         <svg
           viewBox="0 0 24 24"
           fill="none"
@@ -85,7 +90,7 @@ const emit = defineEmits<{
           <path d="M21 3H15v4h6V3zM9 3H3v4h6V3zM15 17H9v4h6v-4z" />
           <path d="M12 7v4M6 7v6h12V7" />
         </svg>
-        New orchestrator
+        <span class="max-sm:hidden">New orchestrator</span>
       </button>
       <button type="button" class="button is-primary" @click="emit('newSession')">
         <svg

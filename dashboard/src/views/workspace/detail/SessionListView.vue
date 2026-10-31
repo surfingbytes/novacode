@@ -654,14 +654,16 @@ watch(
     :tags="sessionTags"
     :agent-types="agentTypesPresent"
     :counts="statusCounts"
-  />
-
-  <SessionListToolbar
-    :view-mode="viewMode"
-    @update:view-mode="viewMode = $event"
-    @new-session="openNewSessionModal"
-    @new-orchestrator="openNewSessionModal('orchestrator')"
-  />
+  >
+    <template #actions>
+      <SessionListToolbar
+        :view-mode="viewMode"
+        @update:view-mode="viewMode = $event"
+        @new-session="openNewSessionModal"
+        @new-orchestrator="openNewSessionModal('orchestrator')"
+      />
+    </template>
+  </SessionListFilters>
 
   <ListPageSkeleton
     v-if="sessionsLoading || !bOrchestratorsInitialFetched"
