@@ -52,6 +52,18 @@ const applyAutoload = (autoload?: McpAutoloadStatus): void => {
   }
 };
 
+const getSkippedError = (name: string): string | undefined =>
+  mcpAutoload.value?.skipped.find((skipped) => skipped.name === name)?.error;
+
+/** Latest Test connectivity result for the row, falling back to the autoload probe error. */
+const getStatusMessage = (name: string): string | undefined => {
+  const result = mcpConnectivityResults.value?.[name];
+  if (result) {
+    return result.ok ? result.detail : result.error;
+  }
+  return getSkippedError(name);
+};
+
 // -------------------------------------------------- Methods --------------------------------------------------
 const loadMcpClients = async (): Promise<void> => {
   bLoadingMcpClients.value = true;
@@ -326,44 +338,17 @@ onMounted((): void => {
             >
               Checking MCP servers in the background…
             </p>
-            <div
+            <p
               v-else-if="mcpAutoload && mcpAutoload.skipped.length > 0"
-              class="mb-4 rounded-lg border border-destructive/25 bg-destructive/8 px-3 py-2.5 text-sm text-destructive"
+              class="mb-4 rounded-lg border border-destructive/25 bg-destructive/8 px-3 py-2 text-xs text-destructive"
             >
-              <p class="font-medium mb-1">Some MCP servers are not reachable and were ignored.</p>
-              <ul class="space-y-0.5 text-xs">
-                <li v-for="skipped in mcpAutoload.skipped" :key="skipped.name">
-                  <span class="font-medium">{{ skipped.name }}</span>
-                  <span class="text-destructive/80"> — {{ skipped.error }}</span>
-                </li>
-              </ul>
-              <p class="text-xs text-text-muted mt-2">
-                Agents will start without them. Use Test connectivity after the server is running.
-              </p>
-            </div>
+              {{ mcpAutoload.skipped.length }} unreachable
+              {{ mcpAutoload.skipped.length === 1 ? 'server was' : 'servers were' }} ignored — agents
+              start without them. Use Test connectivity after the server is running.
+            </p>
             <p v-if="mcpConnectivityError" class="text-xs text-destructive mb-3">
               {{ mcpConnectivityError }}
             </p>
-            <div
-              v-if="mcpConnectivityResults && Object.keys(mcpConnectivityResults).length > 0"
-              class="mb-4 rounded-lg border border-fg/[0.08] bg-fg/[0.03] divide-y divide-fg/[0.06]"
-            >
-              <div
-                v-for="(connectivityResult, name) in mcpConnectivityResults"
-                :key="name"
-                class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 px-3 py-2.5 text-sm"
-              >
-                <span class="font-medium text-text-primary">{{ name }}</span>
-                <span
-                  class="text-xs font-medium shrink-0"
-                  :class="connectivityResult.ok ? 'text-success' : 'text-destructive'"
-                >
-                  {{ connectivityResult.ok ? `${connectivityResult.kind === 'http' ? 'HTTP' : 'stdio'} OK` : 'Failed' }}
-                  <span v-if="connectivityResult.detail" class="text-text-muted font-normal"> — {{ connectivityResult.detail }}</span>
-                  <span v-if="connectivityResult.error" class="text-destructive"> — {{ connectivityResult.error }}</span>
-                </span>
-              </div>
-            </div>
             <!-- Built-in: Nova's own MCP server -->
             <div
               class="flex items-center justify-between gap-4 py-3 border-b border-fg/[0.06]"
@@ -429,10 +414,16 @@ onMounted((): void => {
                       disabled
                     </span>
                     <span
-                      v-else-if="mcpAutoload?.skipped.some((skipped) => skipped.name === name)"
+                      v-else-if="mcpConnectivityResults?.[name]?.ok"
+                      class="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded border bg-success/10 text-success border-success/20"
+                    >
+                      OK
+                    </span>
+                    <span
+                      v-else-if="mcpConnectivityResults?.[name] || getSkippedError(name as string)"
                       class="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded border bg-destructive/10 text-destructive border-destructive/20"
                     >
-                      ignored
+                      {{ mcpConnectivityResults?.[name] ? 'Failed' : 'ignored' }}
                     </span>
                   </div>
                   <p class="text-xs text-text-muted font-mono mt-0.5 truncate">
@@ -441,6 +432,13 @@ onMounted((): void => {
                         ? `${server.command} ${(server.args ?? []).join(' ')}`
                         : server.url
                     }}
+                  </p>
+                  <p
+                    v-if="isMcpEnabled(server) && getStatusMessage(name as string)"
+                    class="text-xs mt-0.5 break-words"
+                    :class="mcpConnectivityResults?.[name]?.ok ? 'text-text-muted' : 'text-destructive'"
+                  >
+                    {{ getStatusMessage(name as string) }}
                   </p>
                 </div>
                 <div class="flex items-center gap-2 flex-shrink-0">
