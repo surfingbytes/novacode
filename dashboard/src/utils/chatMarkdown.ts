@@ -127,14 +127,24 @@ export function renderMd(src: string | undefined): string {
   return sanitizeHtml(marked.parse(normalizeMarkdownForRendering(src), { async: false }));
 }
 
+const MARKDOWN_RENDER_CACHE_LIMIT = 500;
 const markdownRenderCache = new Map<string, string>();
 
 export function renderMdCached(src: string | undefined): string {
   if (!src) return '';
   const cached = markdownRenderCache.get(src);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    // Re-insert so Map order stays least-recently-used first
+    markdownRenderCache.delete(src);
+    markdownRenderCache.set(src, cached);
+    return cached;
+  }
   const rendered = renderMd(src);
-  if (markdownRenderCache.size > 500) markdownRenderCache.clear();
+  if (markdownRenderCache.size >= MARKDOWN_RENDER_CACHE_LIMIT) {
+    // Evict one entry, never the whole cache: a full clear re-renders the entire history at once
+    const oldest = markdownRenderCache.keys().next().value;
+    if (oldest !== undefined) markdownRenderCache.delete(oldest);
+  }
   markdownRenderCache.set(src, rendered);
   return rendered;
 }

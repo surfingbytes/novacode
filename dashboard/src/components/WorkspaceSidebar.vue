@@ -475,7 +475,7 @@ watch(
         tag="ul"
         data-testid="workspace-sidebar-sessions"
         item-tag="li"
-        item-class="space-y-0.5 not-last:pb-1"
+        item-class="space-y-0.5 pb-1"
       >
         <template #default="{ item }">
           <template v-if="item.kind === 'session'">

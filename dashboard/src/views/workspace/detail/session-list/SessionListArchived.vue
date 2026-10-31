@@ -129,8 +129,8 @@ function sessionKey(session: Session): string {
             :items="sessions"
             :item-key="sessionKey"
             :estimate-size="56"
-            class="list-view-items"
-            item-class="flex flex-col not-last:border-b border-border"
+            class="list-view-items -mb-px"
+            item-class="flex flex-col border-b border-border"
           >
             <template #default="{ item: session }">
               <SessionCard

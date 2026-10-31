@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
 // node_modules
-import { describe, it, expect } from 'vitest';
-import { h } from 'vue';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { h, nextTick } from 'vue';
 import { mount } from '@vue/test-utils';
 
 // components
@@ -43,5 +43,32 @@ describe('VirtualList', () => {
     expect(style).toContain('padding-top: 0px');
     // Unrendered items keep the estimated height so the scrollbar stays correct
     expect(style).toContain(`padding-bottom: ${(500 - rows.length) * 50}px`);
+  });
+
+  describe('position-dependent item heights', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('settles instead of looping when the last rendered item is shorter', async () => {
+      // `not-last:pb-1` style: every item is 70px except the last rendered one (66px)
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        const bItem = this.hasAttribute('data-vl-key');
+        const height = bItem ? (this.parentElement?.lastElementChild === this ? 66 : 70) : 0;
+        return { height, width: 100, top: 0, bottom: height, left: 0, right: 100, x: 0, y: 0, toJSON: () => ({}) };
+      });
+      // The window edge lands in the 4px band where the range flips back and forth
+      vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(106);
+      const items = Array.from({ length: 200 }, (_, i) => ({ id: `s${i}`, name: `Session ${i}` }));
+      const wrapper = mount(VirtualList<{ id: string; name: string }>, {
+        props: { items, itemKey: (item: { id: string }) => item.id, estimateSize: 64 } as never,
+        slots: { default: ({ item }: { item: { name: string } }) => h('span', item.name) },
+        attachTo: document.body
+      });
+      for (let i = 0; i < 5; i += 1) await nextTick();
+
+      expect(wrapper.findAll('[data-vl-key]').length).toBeGreaterThan(0);
+      wrapper.unmount();
+    });
   });
 });

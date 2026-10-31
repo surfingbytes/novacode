@@ -10,6 +10,7 @@ import { computed, type Ref } from 'vue';
 import {
   parseHistoryEventsCached,
   prepareDisplayItem,
+  prepareLiveDisplayItem,
   renderMdCached,
   type DisplayItem
 } from '@/utils/chatDisplayItems';
@@ -55,7 +56,7 @@ export function useChatDisplayItems(options: UseChatDisplayItemsOptions) {
   );
 
   const streamingDisplayItems = computed(() => {
-    const items = options.streamingItems.value.map(prepareDisplayItem);
+    const items = options.streamingItems.value.map(prepareLiveDisplayItem);
     let planIndex = 0;
     for (const item of items) {
       if (item.kind !== 'plan') continue;

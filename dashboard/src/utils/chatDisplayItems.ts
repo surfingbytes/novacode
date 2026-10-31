@@ -12,7 +12,7 @@ import type { TodoDisplayItem } from '@novacode/shared';
 import type { DisplayItem, PlanEntry, ToolDiff } from './chatDisplayTypes';
 
 // utils
-import { renderMdCached } from './chatMarkdown';
+import { renderMd, renderMdCached } from './chatMarkdown';
 import { isPlanEntryCompleted, markdownFromPlanEntries } from './planDocuments';
 import {
   appendAssistantTextChunk,
@@ -701,8 +701,23 @@ export function parseHistoryEventsCached(events: string[]): DisplayItem[] {
 // ---------------------------------- prepareDisplayItem ----------------------------------
 
 export function prepareDisplayItem(item: DisplayItem): DisplayItem {
+  return prepareDisplayItemWith(item, renderMdCached);
+}
+
+/**
+ * Live variant: streamed text grows with every chunk, so caching each partial
+ * render would flood the markdown cache and evict the whole history's HTML.
+ */
+export function prepareLiveDisplayItem(item: DisplayItem): DisplayItem {
+  return prepareDisplayItemWith(item, renderMd);
+}
+
+function prepareDisplayItemWith(
+  item: DisplayItem,
+  render: (src: string | undefined) => string
+): DisplayItem {
   if (item.kind === 'text') {
-    return { ...item, renderedHtml: renderMdCached(item.text) };
+    return { ...item, renderedHtml: render(item.text) };
   }
   if (item.kind === 'todos') {
     return {
@@ -716,7 +731,7 @@ export function prepareDisplayItem(item: DisplayItem): DisplayItem {
     return {
       ...item,
       planCompletedCount: entries.filter((entry) => isPlanEntryCompleted(entry.status)).length,
-      planRenderedHtml: renderMdCached(item.planMarkdown ?? markdownFromPlanEntries(entries))
+      planRenderedHtml: render(item.planMarkdown ?? markdownFromPlanEntries(entries))
     };
   }
   return item;

@@ -208,6 +208,14 @@ describe('sessionCache', () => {
     expect(cached?.messages.at(-1)?.createdAt).toBe(messages.at(-1)?.createdAt);
   });
 
+  it('skips snapshots over the size cap without trying to store them', () => {
+    const big = 'x'.repeat(30_000);
+    const messages = makeMessages(50).map((m) => ({ ...m, content: big }));
+    writeSessionCache('ws-1', 'session-1', { session: null, messages, bHasMore: false });
+
+    expect(readSessionCache('ws-1', 'session-1')?.messages).toHaveLength(10);
+  });
+
   it('drops a stale snapshot when even the latest message does not fit', () => {
     writeSessionCache('ws-1', 'session-1', {
       session: null,

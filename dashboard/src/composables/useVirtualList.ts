@@ -37,6 +37,14 @@ export interface UseVirtualListOptions<T> {
 /** Attribute set on each rendered item wrapper so it can be measured. */
 const VIRTUAL_KEY_ATTR = 'data-vl-key';
 
+/**
+ * Height updates allowed between two scroll/resize/list changes. An item whose
+ * height depends on its position (e.g. `:last-child` styles) can flip the
+ * range back and forth forever; production Vue has no recursion guard, so the
+ * tab would freeze.
+ */
+const MAX_MEASURE_PASSES = 10;
+
 function isScrollable(el: HTMLElement): boolean {
   const overflowY = getComputedStyle(el).overflowY;
   return overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay';
@@ -70,6 +78,7 @@ export function useVirtualList<T>(
   const scrollParent = shallowRef<HTMLElement | null>(null);
   let resizeObserver: ResizeObserver | null = null;
   let frame: number | null = null;
+  let measurePasses = 0;
 
   const bVirtual = computed(() => options.items().length >= options.threshold());
 
@@ -128,13 +137,19 @@ export function useVirtualList<T>(
     });
   }
 
+  /** User scroll or window resize: the window moves, so items may be measured again. */
+  function onViewportChange(): void {
+    measurePasses = 0;
+    scheduleViewportUpdate();
+  }
+
   /** Caches heights of rendered items; bumps the version when any height changed. */
   function measure(): void {
     const el = containerRef.value;
-    if (!el || !bVirtual.value) {
+    if (!el || !bVirtual.value || measurePasses >= MAX_MEASURE_PASSES) {
       return;
     }
-    let bChanged = false;
+    const changed: [string, number][] = [];
     for (const child of Array.from(el.children)) {
       const key = child.getAttribute(VIRTUAL_KEY_ATTR);
       if (key === null) {
@@ -143,11 +158,14 @@ export function useVirtualList<T>(
       const height = child.getBoundingClientRect().height;
       // Hidden or not laid out (e.g. collapsed sidebar, jsdom): keep the estimate
       if (height > 0 && sizes.get(key) !== height) {
-        sizes.set(key, height);
-        bChanged = true;
+        changed.push([key, height]);
       }
     }
-    if (bChanged) {
+    if (changed.length > 0) {
+      measurePasses++;
+      for (const [key, height] of changed) {
+        sizes.set(key, height);
+      }
       sizesVersion.value++;
     }
   }
@@ -169,8 +187,8 @@ export function useVirtualList<T>(
   }
 
   function detach(): void {
-    scrollParent.value?.removeEventListener('scroll', scheduleViewportUpdate);
-    window.removeEventListener('scroll', scheduleViewportUpdate);
+    scrollParent.value?.removeEventListener('scroll', onViewportChange);
+    window.removeEventListener('scroll', onViewportChange);
     scrollParent.value = null;
   }
 
@@ -181,7 +199,7 @@ export function useVirtualList<T>(
       return;
     }
     scrollParent.value = findScrollParent(el);
-    (scrollParent.value ?? window).addEventListener('scroll', scheduleViewportUpdate, {
+    (scrollParent.value ?? window).addEventListener('scroll', onViewportChange, {
       passive: true
     });
     updateViewport();
@@ -199,7 +217,7 @@ export function useVirtualList<T>(
         scheduleViewportUpdate();
       });
     }
-    window.addEventListener('resize', scheduleViewportUpdate);
+    window.addEventListener('resize', onViewportChange);
     attach();
     afterRender();
   });
@@ -211,9 +229,14 @@ export function useVirtualList<T>(
   // Items reordered/added: the list may have moved relative to the viewport
   watch(() => options.items().length, scheduleViewportUpdate);
 
+  // New or changed items need fresh measurements
+  watch(options.items, () => {
+    measurePasses = 0;
+  });
+
   onBeforeUnmount(() => {
     detach();
-    window.removeEventListener('resize', scheduleViewportUpdate);
+    window.removeEventListener('resize', onViewportChange);
     resizeObserver?.disconnect();
     resizeObserver = null;
     if (frame !== null) {

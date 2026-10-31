@@ -20,6 +20,13 @@ const KEY_PREFIX = 'nova:sessionCache:';
 /** Message counts tried in order until the snapshot fits the storage quota. */
 const CACHED_MESSAGE_LIMITS = [50, 10, 3, 1];
 const MAX_CACHED_SESSIONS = 5;
+/**
+ * Snapshots longer than this are not even tried: a write near the ~5 MB origin
+ * quota blocks the main thread and only fails after the whole string is copied.
+ */
+const MAX_SNAPSHOT_CHARS = 1_000_000;
+/** `cachedAt` sits right after `version` at the start of every payload. */
+const CACHED_AT_PREFIX = /^\{"version":\d+,"cachedAt":"([^"]+)"/;
 
 export interface SessionCacheSnapshot {
   session: Session | null;
@@ -40,16 +47,9 @@ function listCacheEntries(): { key: string; cachedAt: number }[] {
   const entries: { key: string; cachedAt: number }[] = [];
   for (const key of safeLocalStorageKeys()) {
     if (!key.startsWith(KEY_PREFIX)) continue;
-    const raw = safeGetItem(key);
-    let cachedAt = 0;
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as { cachedAt?: string };
-        cachedAt = Date.parse(parsed.cachedAt ?? '') || 0;
-      } catch {
-        cachedAt = 0;
-      }
-    }
+    // Read only the payload prefix: parsing every multi-MB snapshot on each write froze the tab
+    const match = safeGetItem(key)?.slice(0, 120).match(CACHED_AT_PREFIX);
+    const cachedAt = match ? Date.parse(match[1]) || 0 : 0;
     entries.push({ key, cachedAt });
   }
   return entries.sort((a, b) => b.cachedAt - a.cachedAt);
@@ -134,6 +134,9 @@ export function writeSessionCache(
   for (const limit of CACHED_MESSAGE_LIMITS) {
     const payload = { ...base, messages: base.messages.slice(-limit) };
     const serialized = JSON.stringify(payload);
+    if (serialized.length > MAX_SNAPSHOT_CHARS) {
+      continue;
+    }
     if (safeSetItem(key, serialized)) {
       evictExcessSessionCaches(key);
       return;
