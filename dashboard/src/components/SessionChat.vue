@@ -403,9 +403,9 @@ const {
   usageTurns,
   sessionCostLabel,
   sessionCostTitle,
-  pooledRemainingLabel,
+  accountUsageLabel,
+  accountUsageTitle,
   fetchUsageTurns,
-  loadPooledRemaining,
   resetUsage
 } =
   useSessionUsage({
@@ -646,7 +646,6 @@ onMounted(async () => {
   // Fetch and socket run in parallel — the WS history frame must not wait on
   // the REST round-trip (a hung fetch would otherwise block chat + sending).
   void fetchSession();
-  void loadPooledRemaining();
   chatSocket.connect();
   if (initialCache?.messages.length) {
     void nextTick(() => chatListRef.value?.forceInitialScrollToBottom());
@@ -679,7 +678,8 @@ onUnmounted(() => {
       :header-ci-title="headerCiTitle"
       :session-cost-label="sessionCostLabel"
       :session-cost-title="sessionCostTitle"
-      :pooled-remaining-label="pooledRemainingLabel"
+      :account-usage-label="accountUsageLabel"
+      :account-usage-title="accountUsageTitle"
       :rules-subtitle-label="rulesSubtitleLabel"
       :rules-subtitle-title="rulesSubtitleTitle"
       :rules-subtitle-to="rulesSubtitleTo"

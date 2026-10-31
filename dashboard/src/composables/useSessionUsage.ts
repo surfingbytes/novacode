@@ -1,5 +1,6 @@
 /**
- * Session usage — per-turn usage, the header cost label and the pooled account remaining.
+ * Session usage — per-turn usage, the header cost label and the account usage left
+ * (Claude subscription windows / Cursor remaining credit).
  * Extracted from SessionChat.vue.
  */
 
@@ -10,9 +11,10 @@ import { computed, ref, watch, type Ref } from 'vue';
 import { agentAuthApi, sessionsApi } from '@/classes/api';
 import { formatSessionCostLabel, resolveSessionCostAmount } from '@/utils/sessionUsageDisplay';
 import { formatRemainingLabel } from '@/utils/cursorUsageDisplay';
+import { formatClaudePlanUsageLabel, formatClaudePlanUsageTitle } from '@/utils/claudePlanUsageDisplay';
 
 // types
-import type { Session, SessionUsageSummary, SessionUsageTurn } from '@/@types/index';
+import type { ClaudePlanUsage, Session, SessionUsageSummary, SessionUsageTurn } from '@/@types/index';
 import type { StreamUsage } from '@/utils/chatDisplayItems';
 
 // -------------------------------------------------- Types --------------------------------------------------
@@ -33,6 +35,7 @@ export function useSessionUsage(options: UseSessionUsageOptions) {
   const usageTurns = ref<SessionUsageTurn[]>([]);
   const usageSummary = ref<SessionUsageSummary | null>(null);
   const pooledRemainingCents = ref<number | null>(null);
+  const claudePlanUsage = ref<ClaudePlanUsage | null>(null);
 
   // -------------------------------------------------- Computed --------------------------------------------------
   const sessionCostAmount = computed(() =>
@@ -56,11 +59,22 @@ export function useSessionUsage(options: UseSessionUsageOptions) {
       ? null
       : formatSessionCostLabel(sessionCostAmount.value, sessionCostCurrency.value, 4)
   );
-  /** Account remaining — used when ACP does not report per-session cost (typical for Cursor). */
-  const pooledRemainingLabel = computed(() => {
-    if (sessionCostLabel.value != null) return null;
-    if (pooledRemainingCents.value == null) return null;
-    return formatRemainingLabel(pooledRemainingCents.value);
+  const agentType = computed(() => session.value?.agentType ?? null);
+  /** Subscription usage left — shown before the session cost, which is only API-equivalent there. */
+  const accountUsageLabel = computed(() => {
+    if (agentType.value === 'claude') {
+      return claudePlanUsage.value ? formatClaudePlanUsageLabel(claudePlanUsage.value) : null;
+    }
+    if (agentType.value === 'cursor-agent' && pooledRemainingCents.value != null) {
+      return formatRemainingLabel(pooledRemainingCents.value);
+    }
+    return null;
+  });
+  const accountUsageTitle = computed(() => {
+    if (agentType.value === 'claude' && claudePlanUsage.value) {
+      return formatClaudePlanUsageTitle(claudePlanUsage.value);
+    }
+    return accountUsageLabel.value;
   });
 
   // -------------------------------------------------- Methods --------------------------------------------------
@@ -75,6 +89,18 @@ export function useSessionUsage(options: UseSessionUsageOptions) {
       }
     } catch {
       // Usage is optional; agents that never emit usage_update leave this empty.
+    }
+  }
+
+  async function loadClaudePlanUsage(): Promise<void> {
+    try {
+      const { data } = await agentAuthApi.claudeUsage();
+      // A live stream update may have landed while the request was in flight.
+      if (data.usage && (!claudePlanUsage.value || data.usage.updatedAt > claudePlanUsage.value.updatedAt)) {
+        claudePlanUsage.value = data.usage;
+      }
+    } catch {
+      // Optional: the header just shows the session cost.
     }
   }
 
@@ -96,6 +122,22 @@ export function useSessionUsage(options: UseSessionUsageOptions) {
 
   // -------------------------------------------------- Watchers --------------------------------------------------
   watch(
+    agentType,
+    (type) => {
+      if (type === 'claude') void loadClaudePlanUsage();
+      else if (type === 'cursor-agent') void loadPooledRemaining();
+    },
+    { immediate: true }
+  );
+
+  watch(
+    () => streamingUsage.value?.planWindows,
+    (windows) => {
+      if (windows) claudePlanUsage.value = { windows, updatedAt: new Date().toISOString() };
+    }
+  );
+
+  watch(
     () => session.value?.lastUsage,
     (usage) => {
       if (usage && !bIsStreaming.value && streamingUsage.value == null) {
@@ -111,10 +153,10 @@ export function useSessionUsage(options: UseSessionUsageOptions) {
     usageSummary,
     sessionCostLabel,
     sessionCostTitle,
-    pooledRemainingLabel,
+    accountUsageLabel,
+    accountUsageTitle,
     // methods
     fetchUsageTurns,
-    loadPooledRemaining,
     resetUsage
   };
 }

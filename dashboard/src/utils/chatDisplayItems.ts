@@ -8,11 +8,12 @@
  */
 
 // types
-import type { TodoDisplayItem } from '@novacode/shared';
+import type { ClaudePlanUsageWindow, TodoDisplayItem } from '@novacode/shared';
 import type { DisplayItem, PlanEntry, ToolDiff } from './chatDisplayTypes';
 
 // utils
 import { renderMd, renderMdCached } from './chatMarkdown';
+import { parseClaudeRateLimitMeta } from './claudePlanUsageDisplay';
 import { isPlanEntryCompleted, markdownFromPlanEntries } from './planDocuments';
 import {
   appendAssistantTextChunk,
@@ -59,6 +60,8 @@ export interface StreamUsage {
   used: number;
   size: number;
   cost?: { amount: number; currency: string };
+  /** Claude subscription windows from `_meta["_claude/rateLimit"]`, when reported. */
+  planWindows?: Record<string, ClaudePlanUsageWindow>;
 }
 
 function textFromAcpToolContent(content: unknown): string {
@@ -452,10 +455,13 @@ export function createChatStreamParser(hooks: ChatStreamParserHooks = {}) {
         typeof used === 'number' &&
         typeof size === 'number'
       ) {
+        const meta = update._meta as Record<string, unknown> | undefined;
+        const planWindows = parseClaudeRateLimitMeta(meta?.['_claude/rateLimit']);
         hooks.usage.value = {
           used,
           size,
-          cost: update.cost as { amount: number; currency: string } | undefined
+          cost: update.cost as { amount: number; currency: string } | undefined,
+          ...(planWindows ? { planWindows } : {})
         };
       }
       return;

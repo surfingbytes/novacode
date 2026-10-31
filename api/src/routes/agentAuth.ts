@@ -25,6 +25,7 @@ import {
   clearCursorUsageSummaryCache,
   getCursorUsageSummary
 } from '../classes/cursorUsageSummary';
+import { getClaudePlanUsage } from '../classes/claudePlanUsage';
 import { logger } from '../classes/logger';
 
 const cursorUsageBucketSchema = Type.Object({
@@ -46,6 +47,23 @@ const cursorUsageSummaryResponseSchema = Type.Object({
   teamOnDemand: Type.Optional(cursorUsageBucketSchema),
   error: Type.Optional(Type.String()),
   fetchedAt: Type.Optional(Type.Number())
+});
+
+const claudePlanUsageResponseSchema = Type.Object({
+  available: Type.Boolean(),
+  usage: Type.Optional(
+    Type.Object({
+      windows: Type.Record(
+        Type.String(),
+        Type.Object({
+          utilization: Type.Number(),
+          resetsAt: Type.Union([Type.Number(), Type.Null()]),
+          status: Type.Optional(Type.String())
+        })
+      ),
+      updatedAt: Type.String()
+    })
+  )
 });
 
 export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
@@ -125,6 +143,20 @@ export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
       schema: { response: { 200: cursorUsageSummaryResponseSchema } }
     },
     async () => getCursorUsageSummary(config.configDir)
+  );
+
+  // ─── Claude subscription usage (last `_claude/rateLimit` seen on a Claude turn) ───
+
+  fastifyInstance.get(
+    '/api/agent-auth/claude/usage',
+    {
+      preHandler: jwtPreHandler,
+      schema: { response: { 200: claudePlanUsageResponseSchema } }
+    },
+    async () => {
+      const usage = getClaudePlanUsage();
+      return usage ? { available: true, usage } : { available: false };
+    }
   );
 
   fastifyInstance.get(

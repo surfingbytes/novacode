@@ -34,7 +34,9 @@ defineProps<{
   headerCiTitle: string;
   sessionCostLabel: string | null;
   sessionCostTitle: string | null;
-  pooledRemainingLabel: string | null;
+  /** Subscription usage left (Claude windows / Cursor credit) — shown before the cost. */
+  accountUsageLabel: string | null;
+  accountUsageTitle: string | null;
   rulesSubtitleLabel: string | null;
   rulesSubtitleTitle: string;
   rulesSubtitleTo: RouteLocationRaw;
@@ -131,13 +133,17 @@ const orchestratorButtonRef = ref<InstanceType<typeof SessionOrchestratorButton>
           <span>CI</span>
         </button>
       </template>
+      <template v-if="accountUsageLabel">
+        <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>
+        <span class="shrink-0 tabular-nums" :title="accountUsageTitle ?? accountUsageLabel">{{ accountUsageLabel }}</span>
+      </template>
       <template v-if="sessionCostLabel">
         <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>
-        <span class="shrink-0 tabular-nums" :title="sessionCostTitle ?? sessionCostLabel">{{ sessionCostLabel }}</span>
-      </template>
-      <template v-else-if="pooledRemainingLabel">
-        <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>
-        <span class="shrink-0 tabular-nums" :title="pooledRemainingLabel">{{ pooledRemainingLabel }}</span>
+        <span
+          class="shrink-0 tabular-nums"
+          :class="{ 'text-text-muted/60': accountUsageLabel }"
+          :title="`Session cost: ${sessionCostTitle ?? sessionCostLabel}`"
+        >{{ sessionCostLabel }}</span>
       </template>
       <RouterLink
         v-if="rulesSubtitleLabel"

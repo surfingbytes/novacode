@@ -2,7 +2,7 @@ import { http } from './http';
 
 // types
 import type { CursorAuthStatus } from './settings';
-import type { CursorUsageSummaryResponse } from '@/@types/index';
+import type { ClaudePlanUsageResponse, CursorUsageSummaryResponse } from '@/@types/index';
 
 // ---------------------------------- Agent Auth (Cursor, Claude & OpenCode) ----------------------------------
 export const agentAuthApi = {
@@ -18,6 +18,9 @@ export const agentAuthApi = {
 
   cursorUsage: (): ReturnType<typeof http.get<CursorUsageSummaryResponse>> =>
     http.get<CursorUsageSummaryResponse>('/agent-auth/cursor/usage'),
+
+  claudeUsage: (): ReturnType<typeof http.get<ClaudePlanUsageResponse>> =>
+    http.get<ClaudePlanUsageResponse>('/agent-auth/claude/usage'),
 
   claudeStatus: (): ReturnType<typeof http.get<{ authenticated: boolean }>> =>
     http.get<{ authenticated: boolean }>('/agent-auth/claude/status'),

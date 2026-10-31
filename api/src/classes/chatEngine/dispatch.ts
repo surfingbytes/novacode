@@ -24,6 +24,7 @@ import { buildHandoffContextPrefix, extractHandoffLinksFromConfig } from '../ses
 import { claimClaudePlanForSession, claudePlanFileIdsFromEventLines, tagClaudePlanFileForSession } from '../planDocumentSources';
 import { logger, truncateLogText } from '../logger';
 import { parseUsageUpdateLine } from '../sessionUsage';
+import { parseClaudePlanUsageLine, recordClaudePlanUsage } from '../claudePlanUsage';
 import { buildSpecPromptNote, readSessionSpec, workspaceSpecDir } from '../sessionSpec';
 import { activeRuns, emitBusy, runCompletions } from './state';
 import { cancelPendingApprovals, requestAcpPermissionForSession } from './approvals';
@@ -212,6 +213,10 @@ export async function dispatchPrompt(
     if (backgroundTasks) {
       run.backgroundTasks = backgroundTasks.total > 0 ? backgroundTasks : null;
       emitBusy(sessionId, session.workspaceId, true, run.backgroundTasks);
+    }
+    if (agentType === 'claude') {
+      const planUsage = parseClaudePlanUsageLine(line);
+      if (planUsage) recordClaudePlanUsage(planUsage);
     }
     if (agentType === 'claude' && run.acpSessionId) {
       for (const planFileId of claudePlanFileIdsFromEventLines([line])) {

@@ -422,6 +422,31 @@ export interface CursorUsageSummaryResponse {
   fetchedAt?: number;
 }
 
+/** One Claude subscription rate-limit window (e.g. 5-hour, weekly). */
+export interface ClaudePlanUsageWindow {
+  /** Fraction of the window used, 0–1. */
+  utilization: number;
+  /** Unix seconds when the window resets. */
+  resetsAt: number | null;
+  status?: string;
+}
+
+/**
+ * Latest Claude subscription usage, taken from the `_claude/rateLimit` metadata on
+ * Claude `usage_update` events. Window keys follow Claude's names: `five_hour`,
+ * `seven_day`, `seven_day_opus`, ...
+ */
+export interface ClaudePlanUsage {
+  windows: Record<string, ClaudePlanUsageWindow>;
+  /** ISO time the usage was last reported. */
+  updatedAt: string;
+}
+
+export interface ClaudePlanUsageResponse {
+  available: boolean;
+  usage?: ClaudePlanUsage;
+}
+
 /**
  * Git hosting provider for CI status. `gitea` and `forgejo` share one API; when adding a
  * connection either value means "Gitea-compatible" and the server detects which it is.
