@@ -157,9 +157,11 @@ const agentInitial = computed(() => {
 const agentDisplayName = computed(() => agentTypeShortLabel(props.agentType ?? '') || 'agent');
 
 const visibleStreamingDisplayItems = computed(() =>
-  props.hideToolCalls
-    ? props.streamingDisplayItems.filter((item) => !isToolCallDisplayItem(item))
-    : props.streamingDisplayItems
+  props.streamingDisplayItems.filter(
+    (item) =>
+      !(props.hideToolCalls && isToolCallDisplayItem(item)) &&
+      !(props.hideThinkingOutput && item.kind === 'thinking')
+  )
 );
 
 const userInitial = computed(() => {
@@ -278,6 +280,7 @@ defineExpose({
           :agent-initial="agentInitial"
           :agent-display-name="agentDisplayName"
           :hide-tool-calls="hideToolCalls"
+          :hide-thinking-output="hideThinkingOutput"
           :expanded-tool-output-ids="expandedToolOutputIds"
           :b-find-match="findMatchKeys[findMatchIndex] === entry.key"
           :b-copied="copiedMessageKey === entry.key"
@@ -301,6 +304,7 @@ defineExpose({
             :items="streamingDisplayItems"
             :b-live="true"
             :hide-tool-calls="hideToolCalls"
+            :hide-thinking="hideThinkingOutput"
             :expanded-tool-output-ids="expandedToolOutputIds"
             @toggle-tool-output="(callId) => emit('toggleToolOutput', callId)"
             @open-plan="(planId) => emit('openPlan', planId)"

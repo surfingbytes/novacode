@@ -21,8 +21,8 @@ export interface ToolDiff {
 }
 
 export interface DisplayItem {
-  kind: 'text' | 'tool' | 'todos' | 'plan' | 'notice';
-  // text
+  kind: 'text' | 'tool' | 'todos' | 'plan' | 'notice' | 'thinking';
+  // text (also the thought text of a thinking item)
   text?: string;
   renderedHtml?: string;
   // tool

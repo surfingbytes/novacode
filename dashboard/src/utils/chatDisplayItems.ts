@@ -236,6 +236,21 @@ function shouldKeepAssistantTextChunk(assistantText: string, items: DisplayItem[
   return Boolean(assistantText.trim() || items[items.length - 1]?.kind === 'text');
 }
 
+/** Shared by every parser instance so thinking toggle ids never collide across messages. */
+let thinkingSeq = 0;
+
+/** Appends to the trailing thinking item, or starts a new segment (after text/tool items). */
+function appendThinkingChunk(text: string, items: DisplayItem[]): void {
+  const last = items[items.length - 1];
+  if (last?.kind === 'thinking') {
+    last.text = mergeStreamingTextChunks(last.text ?? '', text);
+    return;
+  }
+  if (!text.trim()) return;
+  thinkingSeq += 1;
+  items.push({ kind: 'thinking', callId: `thinking-${thinkingSeq}`, text });
+}
+
 // ---------------------------------- Parser hooks ----------------------------------
 
 export type AgentThoughtChunkContent = {
@@ -322,9 +337,16 @@ export function createChatStreamParser(hooks: ChatStreamParserHooks = {}) {
 
     if (sessionUpdate === 'agent_thought_chunk') {
       const content = update.content as AgentThoughtChunkContent | undefined;
-      if (opts?.liveThinking && !hooks.isThinkingHidden?.() && content?.text) {
-        mergeAgentThoughtChunk(content.text, content);
+      if (!content?.text) return;
+      // Progress status lines only drive the live box; real thoughts become expandable items.
+      const meta = content.annotations?._meta;
+      if (meta?.heartbeat === true || typeof meta?.elapsedSeconds === 'number') {
+        if (opts?.liveThinking && !hooks.isThinkingHidden?.()) {
+          mergeAgentThoughtChunk(content.text, content);
+        }
+        return;
       }
+      appendThinkingChunk(content.text, items);
       return;
     }
 
@@ -550,16 +572,10 @@ export function createChatStreamParser(hooks: ChatStreamParserHooks = {}) {
       }
     }
 
-    // Ephemeral thinking stream (Cursor stream-json) — never persisted as display items.
+    // Thinking stream (Cursor stream-json) — grouped into expandable thinking items.
     if (event.type === 'thinking') {
-      if (
-        opts?.liveThinking &&
-        !hooks.isThinkingHidden?.() &&
-        event.subtype === 'delta' &&
-        typeof event.text === 'string' &&
-        hooks.thinkingText
-      ) {
-        hooks.thinkingText.value = mergeStreamingTextChunks(hooks.thinkingText.value, event.text);
+      if (event.subtype === 'delta' && typeof event.text === 'string') {
+        appendThinkingChunk(event.text, items);
       }
       return;
     }

@@ -32,13 +32,30 @@ const props = withDefaults(
     bLive?: boolean;
     expandedToolOutputIds: Set<string>;
     hideToolCalls?: boolean;
+    hideThinking?: boolean;
   }>(),
-  { bLive: false, hideToolCalls: false }
+  { bLive: false, hideToolCalls: false, hideThinking: false }
 );
 
 const visibleItems = computed(() =>
-  props.hideToolCalls ? props.items.filter((item) => !isToolCallDisplayItem(item)) : props.items
+  props.hideToolCalls || props.hideThinking
+    ? props.items.filter(
+        (item) =>
+          !(props.hideToolCalls && isToolCallDisplayItem(item)) &&
+          !(props.hideThinking && item.kind === 'thinking')
+      )
+    : props.items
 );
+
+/** Past thinking stays collapsed until toggled; the segment still streaming is shown open. */
+function thinkingOpen(item: DisplayItem, index: number): boolean {
+  if (props.bLive && index === visibleItems.value.length - 1) return true;
+  return Boolean(item.callId && props.expandedToolOutputIds.has(item.callId));
+}
+
+function thinkingPreview(text: string | undefined): string {
+  return (text ?? '').replace(/\s+/g, ' ').trim();
+}
 
 /** Tool images whose file is gone (or outside the workspaces) — show a note instead. */
 const failedToolImagePaths = ref(new Set<string>());
@@ -162,6 +179,32 @@ const emit = defineEmits<{
           <line x1="12" y1="17" x2="12.01" y2="17" />
         </svg>
         <span class="leading-snug">{{ item.text }}</span>
+      </div>
+    </div>
+
+    <!-- Thinking segment (collapsed like a tool card, expandable) -->
+    <div v-else-if="item.kind === 'thinking'" class="flex justify-start">
+      <div class="flex flex-col gap-0.5 max-w-full md:max-w-[85%] min-w-0">
+        <button
+          type="button"
+          class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-text-muted text-xs chat-card text-left hover:text-text-primary transition-colors"
+          :aria-expanded="thinkingOpen(item, j)"
+          @click="item.callId && emit('toggleToolOutput', item.callId)"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none shrink-0" aria-hidden="true"><path d="M9 12a3 3 0 006 0 3 3 0 00-6 0"/><path d="M12 2a7 7 0 00-7 7c0 2.38 1.19 4.47 3 5.74V17a2 2 0 002 2h4a2 2 0 002-2v-2.26A7 7 0 0012 2z"/><path d="M9 17v1a3 3 0 006 0v-1"/></svg>
+          <span class="font-medium text-text-primary shrink-0">Thinking</span>
+          <span v-if="!thinkingOpen(item, j)" class="truncate">{{ thinkingPreview(item.text) }}</span>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0 ml-auto" aria-hidden="true">
+            <polyline v-if="thinkingOpen(item, j)" points="18 15 12 9 6 15" />
+            <polyline v-else points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+        <div
+          v-if="thinkingOpen(item, j)"
+          class="flex max-h-60 flex-col-reverse overflow-y-auto overflow-x-hidden rounded bg-fg/[0.04] px-2 py-1 [overflow-anchor:none]"
+        >
+          <pre class="w-full min-w-0 whitespace-pre-wrap break-words font-sans text-xs leading-snug text-text-muted">{{ item.text }}</pre>
+        </div>
       </div>
     </div>
 

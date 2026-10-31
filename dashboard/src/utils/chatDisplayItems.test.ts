@@ -626,29 +626,52 @@ describe('ACP native events', () => {
     expect(usage.value).toEqual({ used: 100, size: 1000, cost: undefined });
   });
 
-  it('appends agent_thought_chunk to thinking text unless hidden', () => {
+  it('groups agent_thought_chunk into thinking items split by tool calls', () => {
     const thinkingText = { value: '' };
     const parser = createChatStreamParser({ thinkingText, isThinkingHidden: () => false });
-    parser.processEventLine(
+    const thought = (text: string) =>
       JSON.stringify({
         sessionId: 's1',
-        update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'hmm' } }
-      }),
-      [],
+        update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text } }
+      });
+    const items = parser.parseEventsToItems(
+      [
+        thought('first '),
+        thought('idea'),
+        JSON.stringify({
+          sessionId: 's1',
+          update: { sessionUpdate: 'tool_call', toolCallId: 't1', kind: 'read', title: 'Read a.ts' }
+        }),
+        thought('second')
+      ],
       { liveThinking: true }
     );
-    expect(thinkingText.value).toBe('hmm');
+    expect(items.map((item) => item.kind)).toEqual(['thinking', 'tool', 'thinking']);
+    expect(items[0].text).toBe('first idea');
+    expect(items[2].text).toBe('second');
+    expect(items[0].callId).not.toBe(items[2].callId);
+    expect(thinkingText.value).toBe('');
+  });
+
+  it('keeps heartbeat thought chunks in the live thinking text unless hidden', () => {
+    const thinkingText = { value: '' };
+    const heartbeat = (text: string) =>
+      JSON.stringify({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'agent_thought_chunk',
+          content: { type: 'text', text, annotations: { _meta: { heartbeat: true } } }
+        }
+      });
+    const items: DisplayItem[] = [];
+    const parser = createChatStreamParser({ thinkingText, isThinkingHidden: () => false });
+    parser.processEventLine(heartbeat('Pondering... (3s)'), items, { liveThinking: true });
+    expect(thinkingText.value).toBe('Pondering... (3s)');
+    expect(items).toEqual([]);
 
     const hiddenParser = createChatStreamParser({ thinkingText, isThinkingHidden: () => true });
-    hiddenParser.processEventLine(
-      JSON.stringify({
-        sessionId: 's1',
-        update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'more' } }
-      }),
-      [],
-      { liveThinking: true }
-    );
-    expect(thinkingText.value).toBe('hmm');
+    hiddenParser.processEventLine(heartbeat('Musing...'), items, { liveThinking: true });
+    expect(thinkingText.value).toBe('Pondering... (3s)');
   });
 });
 

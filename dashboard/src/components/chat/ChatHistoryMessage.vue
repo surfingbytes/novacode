@@ -36,6 +36,7 @@ const props = withDefaults(
     agentInitial: string;
     agentDisplayName: string;
     hideToolCalls: boolean;
+    hideThinkingOutput?: boolean;
     expandedToolOutputIds: Set<string>;
     bFindMatch: boolean;
     bCopied: boolean;
@@ -144,6 +145,7 @@ function onChatMarkdownClick(e: MouseEvent): void {
       <ChatDisplayItems
         :items="entry.items"
         :hide-tool-calls="hideToolCalls"
+        :hide-thinking="hideThinkingOutput"
         :expanded-tool-output-ids="expandedToolOutputIds"
         @toggle-tool-output="(callId) => emit('toggleToolOutput', callId)"
         @open-plan="(planId) => emit('openPlan', planId)"
