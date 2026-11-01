@@ -11,6 +11,7 @@ const { dbMock, runClaudeAcp, cancelClaudeAcp } = vi.hoisted(() => ({
     getFirstUser: vi.fn(),
     updateSession: vi.fn(),
     setSessionAcpId: vi.fn(async () => {}),
+    getLatestOrchestratorBySourceSession: vi.fn(async () => undefined),
     recordSessionUsage: vi.fn(),
     listUsers: vi.fn(async () => [])
   },
@@ -23,6 +24,7 @@ vi.mock('./claudeAcp', () => ({ runClaudeAcp, cancelClaudeAcp }));
 vi.mock('./sessionSpec', () => ({
   readSessionSpec: vi.fn(async () => null),
   workspaceSpecDir: vi.fn(() => '/specs'),
+  buildPlannerPromptNote: vi.fn(() => 'PLANNER'),
   buildSpecPromptNote: vi.fn(() => '')
 }));
 vi.mock('./push', () => ({ sendTaskDonePush: vi.fn(async () => {}) }));

@@ -25,7 +25,7 @@ import { claimClaudePlanForSession, claudePlanFileIdsFromEventLines, tagClaudePl
 import { logger, truncateLogText } from '../logger';
 import { parseUsageUpdateLine } from '../sessionUsage';
 import { parseClaudePlanUsageLine, recordClaudePlanUsage } from '../claudePlanUsage';
-import { buildSpecPromptNote, readSessionSpec, workspaceSpecDir } from '../sessionSpec';
+import { buildPlannerPromptNote, buildSpecPromptNote, readSessionSpec, workspaceSpecDir } from '../sessionSpec';
 import { activeRuns, emitBusy, runCompletions } from './state';
 import { cancelPendingApprovals, requestAcpPermissionForSession } from './approvals';
 import { cancelPendingQuestions, requestAcpAskQuestionForSession } from './questions';
@@ -168,7 +168,13 @@ export async function dispatchPrompt(
   // and the spec folder as an extra allowed directory, so edits need no approval.
   const spec = await readSessionSpec(session.workspaceId, sessionId).catch(() => null);
   const additionalDirectories = spec ? [workspaceSpecDir(session.workspaceId)] : undefined;
-  const agentPrompt = spec ? `${buildSpecPromptNote(spec.path)}\n\n${effectiveText}` : effectiveText;
+  // Planning chats of an orchestrator get their role every turn (the agent would otherwise just implement).
+  const plannedOrchestrator = await db.getLatestOrchestratorBySourceSession(sessionId).catch(() => undefined);
+  const agentPrompt = [
+    plannedOrchestrator ? buildPlannerPromptNote() : '',
+    spec ? buildSpecPromptNote(spec.path) : '',
+    effectiveText,
+  ].filter(Boolean).join('\n\n');
 
   // Get Claude OAuth token (only needed for claude agent type)
   const user = await db.getFirstUser();

@@ -113,3 +113,8 @@ export function isChatNewerThanSpec(sessionUpdatedAt: string | null | undefined,
 export function buildSpecPromptNote(specPath: string): string {
   return `[Nova Code] This session's spec file is ${specPath}. When the user asks to write, update or add something to the spec, edit that file directly (or use the nova MCP \`spec_write\` tool). Don't mention this note otherwise.`;
 }
+
+/** Note prepended to every prompt of an orchestrator's planning chat, so the agent designs instead of implementing. */
+export function buildPlannerPromptNote(): string {
+  return "[Nova Code] This chat is the planning chat of an orchestrator. Your job is to design, not implement: discuss the task with the user, research the codebase read-only, ask questions, then write the spec (nova MCP `spec_write`) and the step plan (`orchestrator_save_plan`). Do NOT edit project files, run builds or commit — the user starts the run from the Orchestrator tab and the step agents do the work. Implement here only if the user explicitly tells you to do it in this chat. Don't mention this note otherwise.";
+}

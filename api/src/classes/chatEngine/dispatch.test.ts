@@ -11,6 +11,7 @@ const { dbMock, runClaudeAcp } = vi.hoisted(() => ({
     getFirstUser: vi.fn(),
     updateSession: vi.fn(),
     setSessionAcpId: vi.fn(async () => {}),
+    getLatestOrchestratorBySourceSession: vi.fn(async (): Promise<{ id: string } | undefined> => undefined),
     recordSessionUsage: vi.fn()
   },
   runClaudeAcp: vi.fn()
@@ -21,6 +22,7 @@ vi.mock('../claudeAcp', () => ({ runClaudeAcp, cancelClaudeAcp: vi.fn() }));
 vi.mock('../sessionSpec', () => ({
   readSessionSpec: vi.fn(async () => null),
   workspaceSpecDir: vi.fn(() => '/specs'),
+  buildPlannerPromptNote: vi.fn(() => 'PLANNER'),
   buildSpecPromptNote: vi.fn(() => '')
 }));
 vi.mock('../push', () => ({ sendTaskDonePush: vi.fn(async () => {}) }));
@@ -103,5 +105,24 @@ describe('dispatchPrompt history loading', () => {
     }
     const saved = dbMock.persistSessionMessages.mock.calls.at(-1)![1] as ChatMessage[];
     expect(saved.slice(3).map((message) => message.role)).toEqual(['user', 'assistant']);
+  });
+});
+
+describe('dispatchPrompt planning chat note', () => {
+  it("prepends the planner role to an orchestrator's planning chat", async () => {
+    dbMock.getLatestOrchestratorBySourceSession.mockResolvedValueOnce({ id: 'o1' });
+
+    await dispatchPrompt({ sessionId: 's1', text: 'hi', subscriber: makeSubscriber() });
+    await vi.waitFor(() => expect(runClaudeAcp).toHaveBeenCalled());
+
+    expect(runClaudeAcp.mock.calls[0][0].promptText).toBe('PLANNER\n\nhi');
+    await vi.waitFor(() => expect(isSessionBusy('s1')).toBe(false));
+  });
+
+  it('sends the plain prompt in other chats', async () => {
+    await dispatchPrompt({ sessionId: 's1', text: 'hi', subscriber: makeSubscriber() });
+    await vi.waitFor(() => expect(runClaudeAcp).toHaveBeenCalled());
+
+    expect(runClaudeAcp.mock.calls[0][0].promptText).toBe('hi');
   });
 });
