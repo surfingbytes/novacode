@@ -555,8 +555,9 @@ export async function gitRoutes(fastify: FastifyInstance): Promise<void> {
         }
 
         const { stdout, stderr } = await runGit(pushArgs, { cwd: context.cwd, timeoutMs: GIT_NETWORK_TIMEOUT_MS });
-        markCiWatchPushed(request.params.workspaceId, context.repo);
-        return { output: (stdout + '\n' + stderr).trim() };
+        const output = (stdout + '\n' + stderr).trim();
+        if (!/Everything up-to-date/i.test(output)) markCiWatchPushed(request.params.workspaceId, context.repo);
+        return { output };
       } catch (err) {
         throw gitHttpError(err);
       }

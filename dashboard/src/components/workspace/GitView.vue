@@ -616,16 +616,19 @@ const pushChanges = async (targetRepo: string): Promise<void> => {
   pushingRepo.value = targetRepo;
   pushResult.value = null;
   try {
-    await gitApi.push(props.workspaceId, targetRepo);
+    const { data } = await gitApi.push(props.workspaceId, targetRepo);
+    const bUpToDate = /Everything up-to-date/i.test(data.output);
     pushResult.value = {
       type: 'success',
-      text: 'Pushed successfully',
+      text: bUpToDate ? 'Nothing to push — already up to date' : 'Pushed successfully',
       repo: repos.value.length > 1 ? targetRepo : undefined
     };
     await refresh();
-    // Give the forge a moment to register the push-triggered run.
-    if (ciAfterPushTimer) clearTimeout(ciAfterPushTimer);
-    ciAfterPushTimer = setTimeout(() => void refreshCiStatus(), 4000);
+    if (!bUpToDate) {
+      // Give the forge a moment to register the push-triggered run.
+      if (ciAfterPushTimer) clearTimeout(ciAfterPushTimer);
+      ciAfterPushTimer = setTimeout(() => void refreshCiStatus(), 4000);
+    }
   } catch (e: unknown) {
     const caughtError = e as { response?: { data?: { error?: string } }; message?: string };
     pushResult.value = {
