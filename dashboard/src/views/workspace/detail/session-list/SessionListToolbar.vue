@@ -11,7 +11,6 @@ defineProps<{
 const emit = defineEmits<{
   'update:viewMode': [mode: SessionListViewMode];
   newSession: [];
-  newOrchestrator: [];
 }>();
 </script>
 
@@ -70,28 +69,6 @@ const emit = defineEmits<{
       </button>
     </div>
     <div class="flex items-center gap-2 shrink-0">
-      <button
-        type="button"
-        class="button"
-        aria-label="New orchestrator"
-        @click="emit('newOrchestrator')"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.6"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          width="16"
-          height="16"
-          aria-hidden="true"
-        >
-          <path d="M21 3H15v4h6V3zM9 3H3v4h6V3zM15 17H9v4h6v-4z" />
-          <path d="M12 7v4M6 7v6h12V7" />
-        </svg>
-        <span class="max-sm:hidden">New orchestrator</span>
-      </button>
       <button type="button" class="button is-primary" @click="emit('newSession')">
         <svg
           viewBox="0 0 24 24"

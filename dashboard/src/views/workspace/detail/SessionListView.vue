@@ -42,7 +42,7 @@ import {
 
 // composables
 import { useAgentCapabilities } from '@/composables/useAgentCapabilities';
-import { useCreateSession, type NewSessionMode } from '@/composables/useCreateSession';
+import { useCreateSession } from '@/composables/useCreateSession';
 
 // types
 import type { ContextMenuItem } from '@/components/ContextMenu.vue';
@@ -625,8 +625,8 @@ function openNewSessionFromShortcut(): void {
   openNewSessionModal();
 }
 
-function openNewSessionModal(mode: NewSessionMode = 'session'): void {
-  openNewSession(props.workspace, mode);
+function openNewSessionModal(): void {
+  openNewSession(props.workspace);
 }
 
 watch(
@@ -660,7 +660,6 @@ watch(
         :view-mode="viewMode"
         @update:view-mode="viewMode = $event"
         @new-session="openNewSessionModal"
-        @new-orchestrator="openNewSessionModal('orchestrator')"
       />
     </template>
   </SessionListFilters>
