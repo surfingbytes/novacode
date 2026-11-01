@@ -138,7 +138,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="h-16 px-4 md:px-6 flex items-center border-b border-fg/10 shrink-0 gap-3 min-w-0">
+  <div class="h-16 px-4 md:px-6 flex items-center border-b border-fg/10 shrink-0 gap-1 lg:gap-3 min-w-0">
     <!-- Name + tags -->
     <div class="flex-1 min-w-0 flex flex-col gap-0.5">
       <div class="flex items-center min-w-0">
@@ -162,19 +162,20 @@ onUnmounted(() => {
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M11 9l3 3-3 3"/></svg>
         </button>
-        <div class="flex flex-col min-w-0">
+        <div class="flex-1 flex flex-col min-w-0">
           <div class="flex items-center gap-1 min-w-0">
             <h1 class="text-base font-semibold text-text-primary truncate">
               {{ bLoading ? '…' : title }}
             </h1>
             <slot name="title-trailing" />
           </div>
-          <!-- workspace name + optional trailing meta (cost, rules, …) -->
+          <!-- workspace name + optional trailing meta (cost, rules, …).
+               Phones drop the workspace name, so the first "·" separator of the trailing meta hides too. -->
           <div
             v-if="subtitle || subtitleItems.length > 0 || $slots['subtitle-trailing']"
-            class="flex items-center gap-1 min-w-0 text-xs text-text-muted"
+            class="flex items-center gap-1 min-w-0 text-xs text-text-muted max-md:[&>span[aria-hidden]:first-of-type]:hidden"
           >
-            <div v-if="subtitleItems.length > 0" ref="subtitleMenuRef" class="relative min-w-0">
+            <div v-if="subtitleItems.length > 0" ref="subtitleMenuRef" class="relative min-w-0 hidden md:block">
               <button
                 type="button"
                 class="flex items-center gap-1 max-w-full hover:text-text-primary truncate"
@@ -205,7 +206,7 @@ onUnmounted(() => {
                 </button>
               </div>
             </div>
-            <p v-else-if="subtitle" class="truncate min-w-0">
+            <p v-else-if="subtitle" class="truncate min-w-0 hidden md:block">
               {{ subtitle }}
             </p>
             <slot name="subtitle-trailing" />
@@ -227,8 +228,9 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Entity-specific actions shown before the standard ones (all widths) -->
-    <div v-if="!bLoading && $slots['actions-leading']" class="flex items-center shrink-0">
+    <!-- Entity-specific actions shown before the standard ones; below lg they live in the overflow
+         menu, so the wrapper hides too and its empty gap doesn't squeeze the title -->
+    <div v-if="!bLoading && $slots['actions-leading']" class="hidden lg:flex items-center shrink-0">
       <slot name="actions-leading" />
     </div>
 
@@ -276,7 +278,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Mobile: overflow menu (New session? / Edit / Archive / Delete) -->
-    <div v-if="!bLoading" ref="mobileMenuRef" class="relative lg:hidden shrink-0">
+    <div v-if="!bLoading" ref="mobileMenuRef" class="relative lg:hidden shrink-0 -mr-2">
       <button
         type="button"
         class="inline-flex items-center justify-center w-9 h-9 rounded-lg text-text-muted hover:text-text-primary hover:bg-fg/[0.06] transition-colors"
