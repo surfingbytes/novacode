@@ -38,6 +38,7 @@ import type {
 import { defaultAskQuestionResponse, parseAskQuestionParams } from './acpAskQuestion';
 import type { AcpAskQuestionHandler, AcpAskQuestionResponse } from './acpAskQuestion';
 import { nodeReadableToWeb, nodeWritableToWeb } from './acpStreams';
+import { StreamingToolInputTracker, effectivePromptIdleTimeoutMs } from './streamingToolInput';
 import { extractAgentErrorDetail, type AgentErrorDetail } from './agentError';
 import {
   emitCursorPlanRequest,
@@ -329,6 +330,7 @@ export async function runAcpSubprocessPrompt(
   let bPromptInFlight = false;
   let bPromptIdleTimedOut = false;
   let promptIdleTimer: ReturnType<typeof setTimeout> | null = null;
+  const streamingInput = new StreamingToolInputTracker();
   const backgroundTaskIds = new Set<string>();
   /** All Task toolCallIds seen this turn (for total count in the UI). */
   const backgroundTaskIdsSeen = new Set<string>();
@@ -506,7 +508,7 @@ export async function runAcpSubprocessPrompt(
   };
 
   const armPromptIdleTimer = (): void => {
-    const timeoutMs = promptIdleTimeoutMs();
+    const timeoutMs = effectivePromptIdleTimeoutMs(promptIdleTimeoutMs(), streamingInput.bStreaming);
     if (!bPromptInFlight || timeoutMs <= 0) return;
     clearPromptIdleTimer();
     promptIdleTimer = setTimeout(() => {
@@ -521,6 +523,7 @@ export async function runAcpSubprocessPrompt(
 
   const handleEvent: AcpEventHandler = (line) => {
     trackBackgroundTaskEvent(line);
+    streamingInput.observe(line);
     onEvent(line);
     armPromptIdleTimer();
   };

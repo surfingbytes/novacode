@@ -271,6 +271,28 @@ describe('embedded Claude prompt idle timeout', () => {
     await expect(result).resolves.toMatchObject({ stopReason: 'end_turn' });
   });
 
+  it('stretches the timeout while a tool call still streams its input', async () => {
+    process.env['ACP_PROMPT_IDLE_TIMEOUT_MS'] = '300000';
+    const { result, agent } = await startTurn('nova-1');
+
+    await agent.client.sessionUpdate({
+      sessionId: 'acp-1',
+      update: { sessionUpdate: 'tool_call', toolCallId: 't1', name: 'mcp__nova__orchestrator_save_plan', status: 'pending', rawInput: {} }
+    });
+    // The adapter refines a pending call only when a top-level field completes;
+    // a long last field is silent for far longer than the configured timeout.
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    expect(agent.disposed).toBe(false);
+
+    await agent.client.sessionUpdate({
+      sessionId: 'acp-1',
+      update: { sessionUpdate: 'tool_call_update', toolCallId: 't1', status: 'completed' }
+    });
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(agent.disposed).toBe(true);
+    await expect(result).resolves.toMatchObject({ error: expect.stringContaining('no output') });
+  });
+
   it('pauses the timeout while a permission prompt is open', async () => {
     process.env['ACP_PROMPT_IDLE_TIMEOUT_MS'] = '300000';
     let answerPermission: (() => void) | null = null;

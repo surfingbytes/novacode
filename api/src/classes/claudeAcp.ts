@@ -24,6 +24,7 @@ import { config, resolveClaudeAgentIdleTimeoutMs, resolvePromptIdleTimeoutMs } f
 import { getConfiguredAcpMcpServers } from './mcpServersForAcp';
 import { novaMcpServerIfSession } from './novaMcp';
 import { buildPromptContent, sessionResetNoticeEventLine } from './acpSubprocessRunner';
+import { StreamingToolInputTracker, effectivePromptIdleTimeoutMs } from './streamingToolInput';
 import type { AcpPermissionHandler, AcpPromptAttachment, SessionConfigSyncHandler } from './acpSubprocessRunner';
 
 /** Client callbacks the embedded ClaudeAcpAgent invokes (SDK 2.0 removed AgentSideConnection). */
@@ -598,6 +599,7 @@ async function runClaudeAcpTurn(
   let promptIdleTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingPermissions = 0;
   let bWatchdogPaused = false;
+  const streamingInput = new StreamingToolInputTracker();
   const clearPromptIdleTimer = (): void => {
     if (promptIdleTimer !== null) {
       clearTimeout(promptIdleTimer);
@@ -606,7 +608,7 @@ async function runClaudeAcpTurn(
   };
   const armPromptIdleTimer = (): void => {
     clearPromptIdleTimer();
-    const timeoutMs = resolvePromptIdleTimeoutMs(config.configDir);
+    const timeoutMs = effectivePromptIdleTimeoutMs(resolvePromptIdleTimeoutMs(config.configDir), streamingInput.bStreaming);
     if (timeoutMs <= 0 || pendingPermissions > 0 || bWatchdogPaused) return;
     promptIdleTimer = setTimeout(() => {
       bPromptIdleTimedOut = true;
@@ -620,6 +622,7 @@ async function runClaudeAcpTurn(
     else armPromptIdleTimer();
   };
   const handleEvent: AcpEventHandler = (line) => {
+    streamingInput.observe(line);
     armPromptIdleTimer();
     onEvent(line);
   };
