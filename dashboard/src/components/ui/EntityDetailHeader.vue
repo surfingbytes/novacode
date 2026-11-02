@@ -162,7 +162,7 @@ onUnmounted(() => {
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M11 9l3 3-3 3"/></svg>
         </button>
-        <div class="flex-1 flex flex-col min-w-0">
+        <div class="@container flex-1 flex flex-col min-w-0">
           <div class="flex items-center gap-1 min-w-0">
             <h1 class="text-base font-semibold text-text-primary truncate">
               {{ bLoading ? '…' : title }}
@@ -170,12 +170,12 @@ onUnmounted(() => {
             <slot name="title-trailing" />
           </div>
           <!-- workspace name + optional trailing meta (cost, rules, …).
-               Phones drop the workspace name, so the first "·" separator of the trailing meta hides too. -->
+               Narrow headers (below @sm, i.e. phones) drop the workspace name, so the first "·" separator of the trailing meta hides too. -->
           <div
             v-if="subtitle || subtitleItems.length > 0 || $slots['subtitle-trailing']"
-            class="flex items-center gap-1 min-w-0 text-xs text-text-muted max-md:[&>span[aria-hidden]:first-of-type]:hidden"
+            class="flex items-center gap-1 min-w-0 text-xs text-text-muted @max-sm:[&>span[aria-hidden]:first-of-type]:hidden"
           >
-            <div v-if="subtitleItems.length > 0" ref="subtitleMenuRef" class="relative min-w-0 hidden md:block">
+            <div v-if="subtitleItems.length > 0" ref="subtitleMenuRef" class="relative min-w-0 hidden @sm:block">
               <button
                 type="button"
                 class="flex items-center gap-1 max-w-full hover:text-text-primary truncate"
@@ -206,7 +206,7 @@ onUnmounted(() => {
                 </button>
               </div>
             </div>
-            <p v-else-if="subtitle" class="truncate min-w-0 hidden md:block">
+            <p v-else-if="subtitle" class="truncate min-w-0 hidden @sm:block">
               {{ subtitle }}
             </p>
             <slot name="subtitle-trailing" />

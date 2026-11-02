@@ -135,10 +135,10 @@ const orchestratorButtonRef = ref<InstanceType<typeof SessionOrchestratorButton>
       </template>
       <template v-if="accountUsageLabel">
         <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>
-        <!-- Phones drop the trailing " left" to save width -->
+        <!-- Narrow headers (phones) drop the trailing " left" to save width -->
         <span class="shrink-0 tabular-nums" :title="accountUsageTitle ?? accountUsageLabel">{{
           accountUsageLabel.replace(/ left$/, '')
-        }}<span v-if="accountUsageLabel.endsWith(' left')" class="hidden md:inline"> left</span></span>
+        }}<span v-if="accountUsageLabel.endsWith(' left')" class="hidden @sm:inline"> left</span></span>
       </template>
       <template v-if="sessionCostLabel">
         <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>
@@ -151,7 +151,7 @@ const orchestratorButtonRef = ref<InstanceType<typeof SessionOrchestratorButton>
       <RouterLink
         v-if="rulesSubtitleLabel"
         :to="rulesSubtitleTo"
-        class="hidden md:inline-flex items-center gap-1 min-w-0 hover:text-text-primary"
+        class="hidden @sm:inline-flex items-center gap-1 min-w-0 hover:text-text-primary"
         :title="rulesSubtitleTitle"
       >
         <span class="text-text-muted/40 shrink-0" aria-hidden="true">·</span>
