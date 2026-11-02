@@ -6,6 +6,10 @@ import { ExpirationPlugin } from 'workbox-expiration';
 import { cleanupOutdatedCaches, createHandlerBoundToURL, precacheAndRoute } from 'workbox-precaching';
 import { NavigationRoute, registerRoute } from 'workbox-routing';
 import { CacheFirst } from 'workbox-strategies';
+// Inlined as data URLs: Android fetches notification images when the push arrives, and a
+// failed fetch (phone off the LAN/VPN) swaps the badge for its generic bell
+import NOTIFICATION_BADGE from '../public/notification-badge.png?inline';
+import NOTIFICATION_ICON from '../public/android-chrome-192x192.png?inline';
 
 declare let self: ServiceWorkerGlobalScope;
 type SwNotificationAction = { action: string; title: string; icon?: string };
@@ -71,8 +75,8 @@ self.addEventListener('push', (event) => {
   const options = {
     body: payload.body || '',
     tag: payload.tag,
-    icon: payload.icon || '/favicon.ico',
-    badge: payload.badge || '/notification-badge.png',
+    icon: payload.icon || NOTIFICATION_ICON,
+    badge: payload.badge || NOTIFICATION_BADGE,
     data: { url: payload.url || '/' },
     actions: payload.actions ?? [{ action: 'reply', title: 'Reply' }],
     requireInteraction: true

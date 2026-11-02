@@ -120,8 +120,8 @@ export async function sendPushToAll(payload: PushPayload, kind: PushKind = 'task
     body: payload.body,
     tag: payload.tag,
     url: payload.url ?? '/',
-    icon: '/favicon.ico',
-    badge: payload.badge ?? '/notification-badge.png',
+    // icon and badge default to images inlined in the service worker
+    badge: payload.badge,
     ...(payload.actions && { actions: payload.actions })
   });
 
