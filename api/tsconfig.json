@@ -1,7 +1,4 @@
 {
-  "ts-node": {
-    "files": true
-  },
   // Type-checks src (tests included) and the root config files. Builds use tsconfig.build.json.
   "compilerOptions": {
     "module": "nodenext",

@@ -9,6 +9,7 @@ import { db } from '../classes/database';
 import { AGENT_ROUTE_RATE_LIMIT, WS_ROUTE_RATE_LIMIT } from '../classes/rateLimits';
 import { acceptWebSocket } from '../classes/wsAccept';
 import { startContinueInNewChat } from '../classes/sessionHandoff';
+import { buildHistoryFrame } from '../classes/chatHistoryFrame';
 import { maybeNameUntitledSession } from '../classes/sessionTitle';
 import {
   getActiveRun,
@@ -68,6 +69,10 @@ const ContinueInNewChatBodySchema = Type.Object({
 });
 
 const ChatSocketParamsSchema = Type.Object({ id: Type.String() });
+const ChatSocketQuerySchema = Type.Object({
+  /** Fingerprint of the history page the reconnecting client already shows. */
+  historyHash: Type.Optional(Type.String({ maxLength: 128 }))
+});
 
 // ---------------------------------- Routes ----------------------------------
 export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
@@ -103,7 +108,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
     {
       websocket: true,
       config: { rateLimit: WS_ROUTE_RATE_LIMIT },
-      schema: { params: ChatSocketParamsSchema }
+      schema: { params: ChatSocketParamsSchema, querystring: ChatSocketQuerySchema }
     },
     async (socket: WebSocket, request) => {
     if (!(await acceptWebSocket(socket, request))) {
@@ -111,6 +116,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
     }
 
     const { id } = request.params as Static<typeof ChatSocketParamsSchema>;
+    const { historyHash: knownHistoryHash } = request.query as Static<typeof ChatSocketQuerySchema>;
     // Attached before any await so a socket closing mid-load is always unregistered.
     socket.on('close', () => {
       unregisterChatSocket(id, socket);
@@ -140,12 +146,10 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
         }
         if (!existingRun) {
           registerChatSocket(id, socket);
-          send(socket, {
-            type: 'history',
-            messages: pageResult.messages,
-            hasMore: pageResult.hasMore,
-            queue
-          });
+          send(
+            socket,
+            buildHistoryFrame({ messages: pageResult.messages, hasMore: pageResult.hasMore, queue, knownHistoryHash })
+          );
         }
       }
     }
@@ -161,7 +165,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
       const pendingApprovals = [...existingRun.pendingApprovals.values()].map((pending) => pending.approval);
       const pendingQuestions = [...existingRun.pendingQuestions.values()].map((pending) => pending.question);
       const { messages: page, hasMore } = paginateMessages(existingRun.messages, 0);
-      send(socket, { type: 'history', messages: page, hasMore, streaming: true, queue });
+      send(socket, buildHistoryFrame({ messages: page, hasMore, queue, streaming: true, knownHistoryHash }));
       for (const line of bufferedSnapshot) {
         send(socket, { type: 'stream', data: line });
       }

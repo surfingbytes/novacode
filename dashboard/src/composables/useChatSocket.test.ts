@@ -392,6 +392,85 @@ describe('useChatSocket', () => {
     expect(chat.messages.value.map((m) => m.content)).toEqual(['old', 'new']);
   });
 
+  it('passes the history fingerprint on reconnect and keeps its messages on an unchanged frame', () => {
+    const { chat, ws } = connectOpen();
+    cleanup = chat.disconnect;
+    ws.serverMessage(frame({ type: 'history', messages: [userMsg('new')], hasMore: true, historyHash: 'h1' }));
+    ws.serverMessage(frame({ type: 'history-page', messages: [userMsg('older')], hasMore: false }));
+
+    ws.serverClose(1006);
+    vi.advanceTimersByTime(1000);
+    const next = FakeWebSocket.instances[1];
+    expect(next.url).toMatch(/\/ws\/chat\/s1\?historyHash=h1$/);
+
+    next.serverOpen();
+    next.serverMessage(frame({ type: 'history', unchanged: true, historyHash: 'h1', hasMore: true, queue: [] }));
+
+    expect(chat.messages.value.map((m) => m.content)).toEqual(['older', 'new']);
+    // The older page we already loaded was the last one
+    expect(chat.bHasMore.value).toBe(false);
+  });
+
+  it('drops the fingerprint once a turn changes the messages', () => {
+    const { chat, ws } = connectOpen();
+    cleanup = chat.disconnect;
+    ws.serverMessage(frame({ type: 'history', messages: [userMsg('hi')], historyHash: 'h1' }));
+    ws.serverMessage(frame({ type: 'prompt-started', prompt: { text: 'go', createdAt: '2026-01-01T00:00:01.000Z' } }));
+
+    ws.serverClose(1006);
+    vi.advanceTimersByTime(1000);
+
+    expect(FakeWebSocket.instances[1].url).toMatch(/\/ws\/chat\/s1$/);
+  });
+
+  it('keeps local messages when an unchanged frame no longer matches them', () => {
+    const { chat, ws } = connectOpen();
+    cleanup = chat.disconnect;
+    ws.serverMessage(frame({ type: 'history', messages: [userMsg('hi')], historyHash: 'h1' }));
+    ws.serverMessage(frame({ type: 'prompt-started', prompt: { text: 'go', createdAt: '2026-01-01T00:00:01.000Z' } }));
+
+    ws.serverMessage(frame({ type: 'history', unchanged: true, historyHash: 'h1' }));
+
+    expect(chat.messages.value.map((m) => m.content)).toEqual(['hi', 'go']);
+  });
+
+  it('keeps a prompt sent while disconnected and sends it after the next history frame', () => {
+    localStorage.clear();
+    const { chat, ws } = connectOpen();
+    cleanup = chat.disconnect;
+    ws.serverClose(1006);
+
+    chat.sendOrQueuePrompt({ text: 'offline', model: 'auto', mode: 'agent', imagePaths: [] });
+    expect(chat.offlinePrompts.value.map((prompt) => prompt.text)).toEqual(['offline']);
+    expect(ws.sent).toHaveLength(0);
+
+    vi.advanceTimersByTime(1000);
+    const next = FakeWebSocket.instances[1];
+    next.serverOpen();
+    next.serverMessage(frame({ type: 'history', messages: [userMsg('hi')] }));
+
+    expect(chat.offlinePrompts.value).toEqual([]);
+    expect(next.sent.map((raw) => JSON.parse(raw) as { type: string; text?: string })).toEqual([
+      expect.objectContaining({ type: 'prompt', text: 'offline' })
+    ]);
+    expect(chat.messages.value.map((m) => m.content)).toEqual(['hi', 'offline']);
+  });
+
+  it('restores prompts left waiting by an earlier page load', () => {
+    localStorage.clear();
+    const first = connectOpen();
+    first.ws.serverClose(1006);
+    first.chat.sendOrQueuePrompt({ text: 'survives', model: 'auto', mode: 'agent', imagePaths: [] });
+    first.chat.disconnect();
+
+    const { chat } = connectOpen();
+    cleanup = chat.disconnect;
+
+    expect(chat.offlinePrompts.value.map((prompt) => prompt.text)).toEqual(['survives']);
+    chat.deleteOfflinePrompt(chat.offlinePrompts.value[0].id);
+    expect(localStorage.getItem('nova:offlinePrompts:s1')).toBeNull();
+  });
+
   it('does not reconnect while the chat tab is inactive', () => {
     let bActive = true;
     const { chat, ws } = connectOpen({ shouldBeConnected: () => bActive });

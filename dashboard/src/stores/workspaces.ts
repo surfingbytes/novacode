@@ -1,10 +1,11 @@
 // node_modules
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 // classes
 import { orchestratorApi, sessionsApi, workspaceApi, buildSessionsWsUrl, isApiUnreachableError } from '@/classes/api';
 import { createManagedSocket, type ManagedSocket } from '@/lib/wsClient';
+import { readListCache, writeListCache } from '@/lib/listCache';
 
 // stores
 import { useNotificationsStore } from '@/stores/notifications';
@@ -28,6 +29,8 @@ import type {
 } from '@/@types/index';
 
 const LIST_RETRY_DELAYS_MS = [1000, 3000];
+/** Busy/unread updates can arrive several times a second; batch the list cache writes. */
+const LIST_CACHE_WRITE_DELAY_MS = 1000;
 
 /** A live session event recorded while a list fetch is in flight, re-applied on its result. */
 type SessionListEvent =
@@ -82,13 +85,15 @@ async function withUnreachableRetry<T>(request: () => Promise<T>): Promise<T> {
 
 export const useWorkspacesStore = defineStore('workspaces', () => {
   // -------------------------------------------------- Refs --------------------------------------------------
-  const workspaces = ref<Workspace[]>([]);
+  // Seeded from the last known lists so a cold start renders before the network answers;
+  // the `*Initialized` flags stay false until a real fetch, so awaiting callers get fresh data.
+  const workspaces = ref<Workspace[]>(readListCache<Workspace>('workspaces') ?? []);
   const bIsLoading = ref<boolean>(false);
   const bWorkspacesLoadFailed = ref<boolean>(false);
 
   // Sessions (global + active workspace derived views)
   const activeWorkspaceId = ref<string | null>(null);
-  const allSessions = ref<Session[]>([]);
+  const allSessions = ref<Session[]>(readListCache<Session>('sessions') ?? []);
   const bSessionsLoading = ref<boolean>(false);
   const bSessionsLoadFailed = ref<boolean>(false);
 
@@ -97,6 +102,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
   let workspacesInitialized = false;
   let workspacesInitPromise: Promise<void> | null = null;
   let sessionsInitPromise: Promise<void> | null = null;
+  const listCacheTimers = new Map<'workspaces' | 'sessions', ReturnType<typeof setTimeout>>();
   /** One journal per in-flight `fetchAllSessions`; `null` = a snapshot superseded that fetch. */
   const pendingListJournals = new Set<{ events: SessionListEvent[] | null }>();
 
@@ -105,6 +111,21 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
       journal.events?.push(event);
     }
   }
+
+  function scheduleListCacheWrite(name: 'workspaces' | 'sessions', read: () => unknown[]): void {
+    if (listCacheTimers.has(name)) return;
+    listCacheTimers.set(
+      name,
+      setTimeout(() => {
+        listCacheTimers.delete(name);
+        writeListCache(name, read());
+      }, LIST_CACHE_WRITE_DELAY_MS)
+    );
+  }
+
+  // deep: 1 also catches in-place index writes and pushes
+  watch(workspaces, () => scheduleListCacheWrite('workspaces', () => workspaces.value), { deep: 1 });
+  watch(allSessions, () => scheduleListCacheWrite('sessions', () => allSessions.value), { deep: 1 });
 
   // -------------------------------------------------- Computed --------------------------------------------------
   const activeSessions = computed<Session[]>(() => {
@@ -519,6 +540,10 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
 
   /** Logout: drop all user data and the sessions socket so the next login starts fresh and reconnects. */
   function reset(): void {
+    for (const timer of listCacheTimers.values()) {
+      clearTimeout(timer);
+    }
+    listCacheTimers.clear();
     sessionSocket?.close();
     sessionSocket = null;
     workspaces.value = [];

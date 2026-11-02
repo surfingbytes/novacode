@@ -1,9 +1,10 @@
 // node_modules
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { brotliCompressSync, gunzipSync } from 'node:zlib';
 
 const mocks = vi.hoisted(() => ({
   pingDatabase: vi.fn()
@@ -131,7 +132,11 @@ describe('buildApp with a dashboard dist', () => {
 
   beforeAll(async () => {
     distDir = mkdtempSync(join(tmpdir(), 'nova-dist-'));
-    writeFileSync(join(distDir, 'index.html'), '<!doctype html><title>spa</title>');
+    // Over the compression threshold, with no precompressed sibling
+    writeFileSync(join(distDir, 'index.html'), `<!doctype html><title>spa</title>${'<p>filler</p>'.repeat(200)}`);
+    mkdirSync(join(distDir, 'assets'));
+    writeFileSync(join(distDir, 'assets', 'index-abc123.js'), 'console.log("raw")');
+    writeFileSync(join(distDir, 'assets', 'index-abc123.js.br'), brotliCompressSync('console.log("br")'));
     spaApp = await buildApp({ logger: false, dashboardDist: distDir });
     await spaApp.ready();
   });
@@ -161,5 +166,28 @@ describe('buildApp with a dashboard dist', () => {
 
     expect(res.statusCode).toBe(404);
     expect(res.json()).toEqual({ error: 'Not found' });
+  });
+
+  it('serves the precompressed sibling of a hashed asset with an immutable cache', async () => {
+    const res = await spaApp.inject({ url: '/assets/index-abc123.js', headers: { 'accept-encoding': 'br, gzip' } });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-encoding']).toBe('br');
+    expect(res.headers['cache-control']).toBe('public, max-age=31536000, immutable');
+  });
+
+  it('serves the original asset to clients that do not accept compression', async () => {
+    const res = await spaApp.inject({ url: '/assets/index-abc123.js', headers: { 'accept-encoding': 'identity' } });
+
+    expect(res.headers['content-encoding']).toBeUndefined();
+    expect(res.body).toBe('console.log("raw")');
+  });
+
+  it('compresses index.html on the fly and makes it revalidate', async () => {
+    const res = await spaApp.inject({ url: '/some/client/route', headers: { 'accept-encoding': 'gzip' } });
+
+    expect(res.headers['content-encoding']).toBe('gzip');
+    expect(res.headers['cache-control']).toBe('no-cache');
+    expect(gunzipSync(res.rawPayload).toString()).toContain('<title>spa</title>');
   });
 });

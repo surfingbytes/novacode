@@ -14,8 +14,10 @@ export const buildWsUrl = (sessionId: string): string => {
   return `${wsBase()}/ws/session/${sessionId}`;
 };
 
-export const buildChatWsUrl = (sessionId: string): string => {
-  return `${wsBase()}/ws/chat/${sessionId}`;
+/** `historyHash`: fingerprint of the history page already shown, so an unchanged page is not resent. */
+export const buildChatWsUrl = (sessionId: string, historyHash?: string | null): string => {
+  const query = historyHash ? `?historyHash=${encodeURIComponent(historyHash)}` : '';
+  return `${wsBase()}/ws/chat/${sessionId}${query}`;
 };
 
 export const buildSessionTerminalWsUrl = (workspaceId: string, sessionId: string): string => {

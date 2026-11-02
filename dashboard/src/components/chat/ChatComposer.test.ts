@@ -133,6 +133,36 @@ describe('ChatComposer send controls', () => {
     expect(onCancel).not.toHaveBeenCalled();
   });
 
+  it('sends while disconnected so the prompt can wait for the connection', async () => {
+    const onSend = vi.fn();
+    const wrapper = mountComposer({ bWsConnected: false, promptText: '', onSend });
+    await nextTick();
+    await wrapper.get('textarea').setValue('later');
+    await nextTick();
+    await wrapper.get('button[aria-label="Send when reconnected"]').trigger('click');
+    expect(onSend).toHaveBeenCalledWith({ text: 'later', imagePaths: [] });
+  });
+
+  it('keeps Stop disabled while disconnected', async () => {
+    const wrapper = mountComposer({ bIsStreaming: true, bWsConnected: false, promptText: '' });
+    await nextTick();
+    expect(wrapper.get('button[aria-label="Stop generating"]').attributes('disabled')).toBeDefined();
+  });
+
+  it('lists prompts waiting for the connection and lets one be dropped', async () => {
+    const onDeleteOfflinePrompt = vi.fn();
+    const wrapper = mountComposer({
+      bWsConnected: false,
+      offlinePrompts: [{ id: 'p1', text: 'waiting one', model: 'auto', mode: 'agent', imagePaths: [] }],
+      onDeleteOfflinePrompt
+    });
+    await nextTick();
+    expect(wrapper.text()).toContain('Waiting for connection (1)');
+    expect(wrapper.text()).toContain('waiting one');
+    await wrapper.get('button[aria-label="Don\'t send"]').trigger('click');
+    expect(onDeleteOfflinePrompt).toHaveBeenCalledWith('p1');
+  });
+
   it('labels the approval control as Ask or Allow all', async () => {
     const wrapper = mountComposer();
     await nextTick();

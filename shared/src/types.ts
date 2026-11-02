@@ -315,6 +315,10 @@ export interface ChatWsServerMessage {
   resetTimeReadable?: string;
   /** handoff-ready: the new chat that continues this one. */
   sessionId?: string;
+  /** history: fingerprint of the page; a reconnect passes it back as `?historyHash=`. */
+  historyHash?: string;
+  /** history: the page matches the client's `historyHash`, so `messages` is left out. */
+  unchanged?: boolean;
 }
 
 // ---------------------------------- Entities ----------------------------------

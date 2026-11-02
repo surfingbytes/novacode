@@ -9,7 +9,7 @@
       "ignoreBinaries": ["prisma"]
     },
     "api": {
-      "entry": ["src/index.ts", "scripts/*.mjs"],
+      "entry": ["scripts/*.mjs"],
       "project": ["src/**/*.ts", "scripts/**/*.mjs", "prisma/**/*.prisma"],
       // Only imported by the gitignored Prisma generated client (src/generated).
       "ignoreDependencies": ["@prisma/client"]

@@ -71,6 +71,7 @@ function sessionFixture(overrides: Partial<Session> = {}): Session {
 
 describe('workspaces store bootstrap', () => {
   beforeEach(() => {
+    localStorage.clear();
     setActivePinia(createPinia());
     vi.mocked(workspaceApi.listAll).mockReset();
     vi.mocked(sessionsApi.listAll).mockReset();
@@ -280,3 +281,53 @@ describe('workspaces store bootstrap', () => {
   });
 });
 
+
+describe('workspaces store list cache', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    setActivePinia(createPinia());
+    vi.mocked(workspaceApi.listAll).mockReset();
+    vi.mocked(sessionsApi.listAll).mockReset();
+  });
+
+  it('shows the last fetched lists on the next start while the fresh fetch is pending', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(workspaceApi.listAll).mockResolvedValueOnce({ data: [workspaceFixture()] } as never);
+      vi.mocked(sessionsApi.listAll).mockResolvedValueOnce({ data: [sessionFixture()] } as never);
+      const firstStart = useWorkspacesStore();
+      await firstStart.fetchAll();
+      await firstStart.fetchAllSessions();
+      await vi.runAllTimersAsync();
+
+      setActivePinia(createPinia());
+      vi.mocked(workspaceApi.listAll).mockReturnValueOnce(new Promise(() => undefined));
+      const secondStart = useWorkspacesStore();
+      void secondStart.ensureWorkspacesInitialized();
+
+      expect(secondStart.workspaces.map((workspace) => workspace.id)).toEqual(['ws-1']);
+      expect(secondStart.allSessions.map((session) => session.id)).toEqual(['sess-1']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('replaces the cached lists with the fetched ones', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(workspaceApi.listAll).mockResolvedValueOnce({ data: [workspaceFixture()] } as never);
+      const firstStart = useWorkspacesStore();
+      await firstStart.fetchAll();
+      await vi.runAllTimersAsync();
+
+      setActivePinia(createPinia());
+      vi.mocked(workspaceApi.listAll).mockResolvedValueOnce({ data: [workspaceFixture({ id: 'ws-2' })] } as never);
+      const secondStart = useWorkspacesStore();
+      await secondStart.ensureWorkspacesInitialized();
+
+      expect(secondStart.workspaces.map((workspace) => workspace.id)).toEqual(['ws-2']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

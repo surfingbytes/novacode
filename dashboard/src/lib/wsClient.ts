@@ -17,7 +17,8 @@
 
 export interface ManagedSocketOptions {
   /** ws(s):// URL without credentials */
-  url: string;
+  /** A function is re-evaluated on every (re)connect, e.g. to pass the latest resume state. */
+  url: string | (() => string);
   onMessage: (data: string) => void;
   onOpen?: () => void;
   /** Called whenever the underlying socket (re)connects or drops */
@@ -132,7 +133,7 @@ export function createManagedSocket(options: ManagedSocketOptions): ManagedSocke
       return;
     }
     // Auth rides on the httpOnly session cookie sent with the upgrade request.
-    const thisSocket = new WebSocket(options.url);
+    const thisSocket = new WebSocket(typeof options.url === 'function' ? options.url() : options.url);
     socket = thisSocket;
 
     thisSocket.onopen = () => {

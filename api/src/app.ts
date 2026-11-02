@@ -1,12 +1,13 @@
 // node_modules
-import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyBaseLogger, type FastifyInstance, type FastifyReply } from 'fastify';
+import fastifyCompress from '@fastify/compress';
 import fastifyCors from '@fastify/cors';
 import fastifyHelmet from '@fastify/helmet';
 import fastifyRateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import { Type } from '@sinclair/typebox';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { existsSync } from 'node:fs';
 
 // classes
@@ -47,6 +48,9 @@ const BODY_LIMIT_BYTES = 25 * 1024 * 1024;
 
 const startTime = Date.now();
 
+/** Bodies below this many bytes are sent as is; compressing them saves less than it costs. */
+const COMPRESSION_THRESHOLD_BYTES = 1024;
+
 export interface BuildAppOptions {
   /** `false` disables logging; an object is pino options; omitted uses the shared pino logger. */
   logger?: boolean | object;
@@ -67,6 +71,12 @@ function hasFileExtension(url: string): boolean {
   return /\.[A-Za-z0-9]+$/.test(lastSegment);
 }
 
+/** Build output under assets/ is content-hashed and never changes; the rest (index.html, sw.js…) revalidates. */
+function setDashboardCacheHeaders(reply: FastifyReply, dashboardDist: string, filePath: string): void {
+  const bHashedAsset = relative(dashboardDist, filePath).startsWith(`assets${sep}`);
+  reply.header('Cache-Control', bHashedAsset ? 'public, max-age=31536000, immutable' : 'no-cache');
+}
+
 /**
  * Create the Fastify instance with all plugins, decorators and routes.
  * Does not listen, run migrations or write git config.
@@ -82,6 +92,9 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
   registerErrorHandler(fastify);
 
   // plugins
+  // br/gzip for API JSON; dashboard files are served from the .br/.gz siblings written at build time
+  await fastify.register(fastifyCompress, { threshold: COMPRESSION_THRESHOLD_BYTES });
+
   await fastify.register(fastifyHelmet, {
     // HSTS is off because many self-hosted installs are plain HTTP on a LAN.
     hsts: false,
@@ -102,6 +115,8 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
 
   await fastify.register(fastifyWebsocket, {
     options: {
+      // Compress larger frames (history pages, tool output); small stream deltas stay raw
+      perMessageDeflate: { threshold: COMPRESSION_THRESHOLD_BYTES },
       // Accept the bearer.<jwt> subprotocol so dashboard WS clients can
       // authenticate without putting the token in the URL.
       handleProtocols: (protocols: Set<string>): string | false => {
@@ -182,7 +197,9 @@ export async function buildApp(opts: BuildAppOptions = {}): Promise<FastifyInsta
     fastify.log.info('Dashboard dist found — serving dashboard');
     await fastify.register(fastifyStatic, {
       root: dashboardDist,
-      prefix: '/'
+      prefix: '/',
+      preCompressed: true,
+      setHeaders: (reply, filePath) => setDashboardCacheHeaders(reply, dashboardDist, filePath)
     });
   } else {
     fastify.log.warn('Dashboard dist not found — serving API only');

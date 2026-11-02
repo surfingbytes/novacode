@@ -1,7 +1,7 @@
 /**
  * Starts a throwaway stack for the e2e smoke test and returns its teardown:
  * - Postgres: a disposable `postgres:17` docker container, or E2E_DATABASE_URL (must be an empty, throwaway DB)
- * - API: ts-node-dev with CONFIG_DIR, HOME and WORKSPACE_BROWSE_ROOT in a temp dir
+ * - API: tsx with CONFIG_DIR, HOME and WORKSPACE_BROWSE_ROOT in a temp dir
  * - dashboard: Vite dev server pointed at the API via VITE_API_URL
  * Child processes get an explicit env, so the shell's DATABASE_URL, tokens and /config are never used.
  */
@@ -132,7 +132,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       stdio: 'inherit'
     });
 
-    const apiProc = startProcess('api', ['ts-node-dev', '--transpile-only', 'src/index.ts'], join(ROOT, 'api'), {
+    const apiProc = startProcess('api', ['tsx', 'src/index.ts'], join(ROOT, 'api'), {
       ...baseEnv,
       DATABASE_URL: databaseUrl,
       PORT: String(E2E_API_PORT),
@@ -140,8 +140,6 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       CONFIG_DIR: configDir,
       WORKSPACE_BROWSE_ROOT: browseRoot,
       STARTUP_READY_FILE: join(tempDir, 'ready'),
-      // TypeScript 6 rejects ts-node's implicit rootDir (TS5011) when only src/ is compiled
-      TS_NODE_COMPILER_OPTIONS: JSON.stringify({ rootDir: '.' }),
       LOG_LEVEL: 'warn'
     });
     api = apiProc.child;

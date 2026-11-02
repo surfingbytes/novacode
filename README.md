@@ -343,7 +343,7 @@ PW_TEST_CONNECT_WS_ENDPOINT='ws://playwright-chrome:3000/chromium/playwright?tim
 E2E_HOST=<this machine's IP> npm run test:e2e
 ```
 
-`e2e/global-setup.ts` starts a throwaway stack and removes it afterwards: a `postgres:17` Docker container, the API (ts-node-dev) and the dashboard (Vite), with config, home and workspace root in a temp dir. Your shell's `DATABASE_URL` and `/config` are not used. Options:
+`e2e/global-setup.ts` starts a throwaway stack and removes it afterwards: a `postgres:17` Docker container, the API (tsx) and the dashboard (Vite), with config, home and workspace root in a temp dir. Your shell's `DATABASE_URL` and `/config` are not used. Options:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|

@@ -258,7 +258,8 @@ const {
   bLoadingMore,
   bHistoryLoaded,
   bWsConnected,
-  bWsReconnecting
+  bWsReconnecting,
+  offlinePrompts
 } = chatSocket;
 
 // -------------------------------------------------- Session snapshot cache --------------------------------------------------
@@ -390,7 +391,7 @@ const {
 
 function onComposerSend(payload: { text: string; imagePaths: string[] }): void {
   clearSessionPrompt(props.workspaceId, props.sessionId);
-  chatSocket.sendPrompt({
+  chatSocket.sendOrQueuePrompt({
     text: payload.text,
     model: modelSelection.value,
     mode: displaySessionMode.value,
@@ -807,6 +808,7 @@ onUnmounted(() => {
           :b-is-streaming="bIsStreaming"
           :b-ws-connected="bWsConnected"
           :queued-prompts="queuedPrompts"
+          :offline-prompts="offlinePrompts"
           :mode-options="modeOptions"
           :display-session-mode="displaySessionMode"
           :selected-mode-label="selectedModeOption.label"
@@ -839,6 +841,7 @@ onUnmounted(() => {
           @cancel="chatSocket.cancelPrompt"
           @push-queue="chatSocket.pushQueuedPrompt"
           @delete-queue="chatSocket.deleteQueuedPrompt"
+          @delete-offline-prompt="chatSocket.deleteOfflinePrompt"
           @edit-queue="chatSocket.editQueuedPrompt"
           @select-mode="onSessionModeChange"
           @config-change="onAgentConfigChange"

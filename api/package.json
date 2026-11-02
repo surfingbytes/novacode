@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Nova Code backend – Fastify + node-pty",
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "dev": "tsx watch src/index.ts",
     "build": "prisma generate && tsc -p tsconfig.build.json",
     "start": "node build/index.js",
     "generate": "prisma generate",
@@ -16,6 +16,7 @@
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "^0.99.1",
     "@agentclientprotocol/sdk": "^2.1.0",
+    "@fastify/compress": "^9.3.0",
     "@fastify/cors": "^11.3.0",
     "@fastify/helmet": "^13.1.0",
     "@fastify/rate-limit": "^11.2.0",
@@ -47,7 +48,7 @@
     "@types/ws": "^8.18.1",
     "eslint": "^10.13.0",
     "jiti": "^2.7.0",
-    "ts-node-dev": "^2.0.0",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.1",
     "vitest": "^5.0.5",

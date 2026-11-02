@@ -12,6 +12,7 @@ import { ref, toRaw } from 'vue';
 import { buildChatWsUrl, type AgentErrorCode } from '@/classes/api';
 import { createManagedSocket, type ManagedSocket } from '@/lib/wsClient';
 import { notifyTaskDone } from '@/lib/notifications';
+import { readOfflinePrompts, writeOfflinePrompts, type OfflinePrompt } from '@/lib/offlinePrompts';
 
 // utils
 import {
@@ -92,6 +93,8 @@ export function useChatSocket(ctx: UseChatSocketContext) {
   const bHistoryLoaded = ref((ctx.initialMessages?.length ?? 0) > 0);
   const bWsConnected = ref(false);
   const bWsReconnecting = ref(false);
+  /** Prompts sent while disconnected; sent in order once the next `history` frame lands. */
+  const offlinePrompts = ref<OfflinePrompt[]>([]);
 
   // Raw lines kept for DB persistence when the run ends.
   const streamingRawLines: string[] = [];
@@ -100,6 +103,12 @@ export function useChatSocket(ctx: UseChatSocketContext) {
   /** Optimistic user turns not yet confirmed by `prompt-started` (raw objects). */
   const unconfirmedUserMessages = new WeakSet<ChatMessage>();
   let loadMoreTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Fingerprint of the last `history` page while the newest messages are still
+   * exactly that page; cleared by any local change to them. Sent on reconnect
+   * so the server can skip resending an unchanged page.
+   */
+  let knownHistoryHash: string | null = null;
 
   let socket: ManagedSocket | null = null;
   /** Bumped on disconnect/reset so late frames from a prior socket are ignored. */
@@ -143,15 +152,22 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     };
     unconfirmedUserMessages.add(message);
     messages.value.push(message);
+    knownHistoryHash = null;
   }
 
   // -------------------------------------------------- Frame handlers --------------------------------------------------
 
   function handleHistory(msg: ChatWsServerMessage): void {
-    const incoming = msg.messages ?? [];
-    // Stale empty snapshot after prompt-started / optimistic send — keep the turn.
-    const bRetainLocal = shouldRetainLocalChatHistory(incoming.length, messages.value.length);
+    // `unchanged`: the server confirmed our messages match its page (older pages we loaded stay)
+    const bUnchanged = msg.unchanged === true && knownHistoryHash !== null && msg.historyHash === knownHistoryHash;
+    const incoming = bUnchanged ? messages.value : (msg.messages ?? []);
+    // Stale empty snapshot after prompt-started / optimistic send — keep the turn. An `unchanged`
+    // we can no longer confirm (local turn since connecting) has no messages: keep ours too.
+    const bRetainLocal =
+      !bUnchanged &&
+      (msg.unchanged === true || shouldRetainLocalChatHistory(incoming.length, messages.value.length));
     bHistoryLoaded.value = true;
+    knownHistoryHash = bRetainLocal ? null : (msg.historyHash ?? null);
     if (!bRetainLocal) {
       messages.value = incoming;
       seenVibeMessageIds.clear();
@@ -169,9 +185,12 @@ export function useChatSocket(ctx: UseChatSocketContext) {
       bIsStreaming.value = true;
     }
     queuedPrompts.value = msg.queue ?? [];
-    bHasMore.value = msg.hasMore ?? false;
+    if (!bUnchanged) {
+      bHasMore.value = msg.hasMore ?? false;
+    }
     ctx.onHistoryLoaded();
     ctx.onMessagesChanged?.();
+    flushOfflinePrompts();
   }
 
   function handleHistoryPage(msg: ChatWsServerMessage): void {
@@ -218,6 +237,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
         createdAt: prompt.createdAt
       });
     }
+    knownHistoryHash = null;
     bHistoryLoaded.value = true;
     bIsStreaming.value = true;
     ctx.onContentAppended();
@@ -254,6 +274,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
       content: events.length === 0 ? '(No response from agent)' : undefined,
       createdAt: new Date().toISOString()
     });
+    knownHistoryHash = null;
     streamingItems.value = [];
     streamingRawLines.length = 0;
     streamingThinkingText.value = '';
@@ -402,8 +423,9 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     }
     const epoch = socketEpoch;
     const sessionId = ctx.sessionId();
+    offlinePrompts.value = readOfflinePrompts(sessionId);
     socket = createManagedSocket({
-      url: buildChatWsUrl(sessionId),
+      url: () => buildChatWsUrl(sessionId, knownHistoryHash),
       shouldBeConnected: ctx.shouldBeConnected,
       onMessage: (data) => {
         // Drop frames from a socket that was closed during a session switch.
@@ -484,6 +506,36 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     ctx.onContentAppended();
     ctx.onMessagesChanged?.();
     return true;
+  }
+
+  function setOfflinePrompts(prompts: OfflinePrompt[]): void {
+    offlinePrompts.value = prompts;
+    writeOfflinePrompts(ctx.sessionId(), prompts);
+  }
+
+  /** Sends now, or keeps the prompt until the connection is back (shown as waiting). */
+  function sendOrQueuePrompt(payload: { text: string; model: string; mode: string; imagePaths: string[] }): void {
+    if (sendPrompt(payload)) {
+      return;
+    }
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setOfflinePrompts([...offlinePrompts.value, { id, ...payload }]);
+  }
+
+  function deleteOfflinePrompt(id: string): void {
+    setOfflinePrompts(offlinePrompts.value.filter((prompt) => prompt.id !== id));
+  }
+
+  function flushOfflinePrompts(): void {
+    if (offlinePrompts.value.length === 0) return;
+    const remaining: OfflinePrompt[] = [];
+    for (const prompt of offlinePrompts.value) {
+      // While a turn runs the server queues the rest, keeping their order
+      if (!sendPrompt(prompt)) {
+        remaining.push(prompt);
+      }
+    }
+    setOfflinePrompts(remaining);
   }
 
   function retryLastPrompt(model: string): void {
@@ -567,6 +619,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
   /** Show a cached snapshot (session switch); the fresh history frame replaces it. */
   function hydrateHistory(cachedMessages: ChatMessage[], hasMore: boolean): void {
     messages.value = [...cachedMessages];
+    knownHistoryHash = null;
     bHasMore.value = hasMore;
     // Empty snapshot = nothing to show yet: keep the loading state until the
     // fresh history frame instead of lying with the empty state.
@@ -581,6 +634,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     bHistoryLoaded.value = false;
     bIsStreaming.value = false;
     messages.value = [];
+    knownHistoryHash = null;
     seenVibeMessageIds.clear();
     seenVibeToolCallIds.clear();
     streamingItems.value = [];
@@ -588,6 +642,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     streamingThinkingText.value = '';
     streamingUsage.value = null;
     queuedPrompts.value = [];
+    offlinePrompts.value = [];
     pendingApprovals.value = [];
     pendingQuestions.value = [];
     lastPromptRequest.value = null;
@@ -615,6 +670,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     bHistoryLoaded,
     bWsConnected,
     bWsReconnecting,
+    offlinePrompts,
     // methods
     setChatError,
     clearChatError,
@@ -622,6 +678,8 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     ensureConnected,
     disconnect,
     sendPrompt,
+    sendOrQueuePrompt,
+    deleteOfflinePrompt,
     retryLastPrompt,
     cancelPrompt,
     sendApprovalResponse,

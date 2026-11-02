@@ -27,6 +27,7 @@ import UiSelectMenu, { type SelectMenuOption } from '@/components/ui/UiSelectMen
 
 // lib
 import { isSendOnEnter } from '@/lib/sendOnEnter';
+import type { OfflinePrompt } from '@/lib/offlinePrompts';
 
 // types
 import type {
@@ -56,6 +57,8 @@ const props = withDefaults(
     bIsStreaming: boolean;
     bWsConnected: boolean;
     queuedPrompts: ChatQueueItem[];
+    /** Sent while disconnected; go out once the connection is back. */
+    offlinePrompts?: OfflinePrompt[];
     // mode
     modeOptions: AgentModeOption[];
     displaySessionMode: string;
@@ -97,6 +100,7 @@ const props = withDefaults(
     hideToolCalls: false,
     bCanContinueInNewChat: false,
     bHandoffPending: false,
+    offlinePrompts: () => [],
     promptHistory: () => []
   }
 );
@@ -109,6 +113,7 @@ const emit = defineEmits<{
   (e: 'cancel'): void;
   (e: 'pushQueue', id: string): void;
   (e: 'deleteQueue', id: string): void;
+  (e: 'deleteOfflinePrompt', id: string): void;
   (e: 'editQueue', id: string, text: string): void;
   (e: 'selectMode', id: string): void;
   (e: 'configChange', id: string, value: string): void;
@@ -193,15 +198,8 @@ const bHasDraft = computed(
 
 const bPrimaryIsStop = computed(() => props.bIsStreaming && !bHasDraft.value);
 
-const bPrimaryDisabled = computed(() => {
-  if (!props.bWsConnected) {
-    return true;
-  }
-  if (props.bIsStreaming) {
-    return false;
-  }
-  return !bHasDraft.value;
-});
+// Sending works offline too: the prompt waits for the connection (offlinePrompts)
+const bPrimaryDisabled = computed(() => (bPrimaryIsStop.value ? !props.bWsConnected : !bHasDraft.value));
 
 const bContinueInNewChatDisabled = computed(
   () =>
@@ -224,6 +222,9 @@ const primaryActionLabel = computed(() => {
   if (bPrimaryIsStop.value) {
     return 'Stop generating';
   }
+  if (!props.bWsConnected) {
+    return 'Send when reconnected';
+  }
   if (props.bIsStreaming) {
     return 'Queue message';
   }
@@ -239,7 +240,7 @@ function configMenuOptions(cfg: AgentConfigOption): SelectMenuOption[] {
 function send(): void {
   const text = promptText.value.trim();
   const imagePaths = pendingImages.value.map((img) => img.serverPath);
-  if ((!text && imagePaths.length === 0) || !props.bWsConnected) {
+  if (!text && imagePaths.length === 0) {
     return;
   }
   emit('send', { text, imagePaths });
@@ -602,6 +603,34 @@ defineExpose({
 
 <template>
   <div class="pt-2 pb-3 border-t border-fg/10 flex flex-col gap-2 shrink-0">
+    <!-- Sent while offline -->
+    <div v-if="offlinePrompts.length > 0" class="px-2">
+      <div class="rounded-md border border-fg/10 bg-fg/[0.03] p-2" role="status">
+        <div class="text-[11px] font-medium text-text-muted uppercase tracking-wide">
+          Waiting for connection ({{ offlinePrompts.length }})
+        </div>
+        <div v-for="item in offlinePrompts" :key="item.id" class="flex items-start gap-2 px-1 py-1.5">
+          <div class="flex-1 min-w-0">
+            <div class="text-xs text-text-primary break-words whitespace-pre-wrap line-clamp-2">
+              {{ item.text || '(Images only)' }}
+            </div>
+            <div v-if="item.imagePaths.length" class="text-[11px] text-text-muted mt-0.5">
+              {{ item.imagePaths.length }} attachment{{ item.imagePaths.length === 1 ? '' : 's' }}
+            </div>
+          </div>
+          <button
+            type="button"
+            title="Don't send"
+            aria-label="Don't send"
+            class="button is-transparent is-icon h-7! w-7! min-w-7! px-0!"
+            @click="emit('deleteOfflinePrompt', item.id)"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="select-none" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Prompt queue -->
     <div v-if="queuedPrompts.length > 0" class="px-2">
       <div ref="queueListRef" class="rounded-md border border-fg/10 bg-fg/[0.03] p-2">
