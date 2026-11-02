@@ -346,6 +346,36 @@ describe('embedded Claude prompt idle timeout', () => {
   });
 });
 
+describe('embedded Claude text-only runs', () => {
+  it('starts the session without tools, MCP servers, settings or memory and keeps the token', async () => {
+    const { getConfiguredAcpMcpServers } = await import('./mcpServersForAcp.js');
+    vi.mocked(getConfiguredAcpMcpServers).mockResolvedValueOnce([
+      { name: 'rea', command: 'rea', args: [], env: [] }
+    ]);
+    const result = claudeAcp.runClaudeAcp(
+      { novaSessionId: 'title-1', acpSessionId: null, cwd: '/tmp', promptText: 'hi', claudeToken: 'tok', textOnly: true },
+      () => {}
+    );
+    await flush();
+    const agent = FakeClaudeAgent.instances[FakeClaudeAgent.instances.length - 1]!;
+    await finishTurn(agent);
+    await result;
+    expect(agent.sessionParams[0]).toMatchObject({
+      mcpServers: [],
+      _meta: {
+        claudeCode: {
+          options: {
+            tools: [],
+            settingSources: [],
+            persistSession: false,
+            env: { CLAUDE_CODE_OAUTH_TOKEN: 'tok', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' }
+          }
+        }
+      }
+    });
+  });
+});
+
 describe('embedded Claude follow-up work', () => {
   it('requests the raw SDK messages that describe background work', async () => {
     const agent = await runIdleTurn('nova-1');

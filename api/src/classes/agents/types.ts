@@ -31,6 +31,8 @@ export interface AgentRunParams {
   additionalDirectories?: string[];
   /** Claude OAuth token; ignored by subprocess agents. */
   claudeToken?: string | null;
+  /** Claude: run without tools, MCP servers, settings, CLAUDE.md or memory (text replies only); ignored by subprocess agents. */
+  textOnly?: boolean;
   /** Called as soon as the ACP session id is known, before the prompt is sent. */
   onSessionId?: (id: string) => void;
   onEvent: AcpEventHandler;

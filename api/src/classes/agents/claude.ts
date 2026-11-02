@@ -78,6 +78,7 @@ export const claudeAdapter: AgentAdapter = {
           promptText: params.promptText,
           attachments: params.attachments,
           claudeToken: params.claudeToken,
+          textOnly: params.textOnly,
           model: params.model,
           mode: params.mode,
           configJson: params.configJson,
