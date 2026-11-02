@@ -60,4 +60,43 @@ describe('useChatAttachments', () => {
     expect(attachments.pendingImages.value).toEqual([]);
     expect(attachments.bUploadingImage.value).toBe(false);
   });
+
+  it('keeps send disabled until every concurrent upload settles', async () => {
+    let finishFirst: (value: unknown) => void = () => undefined;
+    let finishSecond: (value: unknown) => void = () => undefined;
+    vi.mocked(sessionsApi.uploadImage)
+      .mockReturnValueOnce(new Promise((resolve) => (finishFirst = resolve)) as never)
+      .mockReturnValueOnce(new Promise((resolve) => (finishSecond = resolve)) as never);
+    const attachments = useChatAttachments({ sessionId: () => 's1', onUploadError: vi.fn() });
+
+    attachments.onUploadFiles([
+      new File(['a'], 'a.png', { type: 'image/png' }),
+      new File(['b'], 'b.png', { type: 'image/png' })
+    ]);
+    await waitFor(() => vi.mocked(sessionsApi.uploadImage).mock.calls.length === 2);
+    finishFirst({ data: { filename: 'a.png', path: '/up/a.png' } });
+    await waitFor(() => attachments.pendingImages.value.length === 1);
+
+    expect(attachments.bUploadingImage.value).toBe(true);
+    finishSecond({ data: { filename: 'b.png', path: '/up/b.png' } });
+    await waitFor(() => attachments.pendingImages.value.length === 2);
+    expect(attachments.bUploadingImage.value).toBe(false);
+  });
+
+  it('drops an upload that finishes after switching to another session', async () => {
+    let finish: (value: unknown) => void = () => undefined;
+    vi.mocked(sessionsApi.uploadImage).mockReturnValueOnce(
+      new Promise((resolve) => (finish = resolve)) as never
+    );
+    let sessionId = 's1';
+    const attachments = useChatAttachments({ sessionId: () => sessionId, onUploadError: vi.fn() });
+
+    attachments.uploadAttachmentFile(new File(['a'], 'a.png', { type: 'image/png' }));
+    await waitFor(() => vi.mocked(sessionsApi.uploadImage).mock.calls.length === 1);
+    sessionId = 's2';
+    finish({ data: { filename: 'a.png', path: '/up/a.png' } });
+    await waitFor(() => !attachments.bUploadingImage.value);
+
+    expect(attachments.pendingImages.value).toEqual([]);
+  });
 });

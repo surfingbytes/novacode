@@ -252,12 +252,20 @@ const setGitActionResult = (
 };
 
 let bStatusFailed = false;
+/** Bumped on workspace change; responses for an older workspace are discarded. */
+let workspaceGen = 0;
+/** Bumped per openFile; older diff responses are discarded. */
+let diffSeq = 0;
+/** File keys from the last status; null until the first status of this workspace loads. */
+let knownFileKeys: Set<string> | null = null;
 
 const refresh = async (): Promise<void> => {
+  const gen = workspaceGen;
   bIsLoading.value = true;
   bStatusFailed = false;
   try {
     const response = await gitApi.status(props.workspaceId);
+    if (gen !== workspaceGen) return;
     files.value = response.data.files;
     repos.value = response.data.repos ?? [];
     error.value = null;
@@ -278,10 +286,14 @@ const refresh = async (): Promise<void> => {
       if (!currentPaths.has(key)) selectedFiles.value.delete(key);
     }
 
-    // Auto-select all new files if nothing was previously selected
-    if (selectedFiles.value.size === 0 && response.data.files.length > 0) {
-      selectedFiles.value = new Set(response.data.files.map((f) => fileKey(f)));
+    // Auto-select every file on the first load, then only files that newly appeared, so an
+    // explicit "uncheck all" survives the poll.
+    const previousKeys = knownFileKeys;
+    const newKeys = [...currentPaths].filter((key) => !previousKeys?.has(key));
+    if (newKeys.length > 0) {
+      selectedFiles.value = new Set([...selectedFiles.value, ...newKeys]);
     }
+    knownFileKeys = currentPaths;
 
     const repo = activeRepo.value?.repo ?? selectedGitRepo.value;
     if (repo !== undefined && repos.value.length > 0) await loadBranches(repo);
@@ -289,6 +301,7 @@ const refresh = async (): Promise<void> => {
       await loadHistory();
     }
   } catch (e: unknown) {
+    if (gen !== workspaceGen) return;
     bStatusFailed = true;
     const message = gitErrorMessage(e, 'Failed to get git status');
     // Keep the last-known file list visible — a failed poll (e.g. while a long
@@ -299,8 +312,10 @@ const refresh = async (): Promise<void> => {
       setGitActionResult('error', message);
     }
   } finally {
-    bHasLoadedStatus.value = true;
-    bIsLoading.value = false;
+    if (gen === workspaceGen) {
+      bHasLoadedStatus.value = true;
+      bIsLoading.value = false;
+    }
   }
 };
 
@@ -316,6 +331,9 @@ const statusPoll = usePolling(
 );
 
 const openFile = async (file: GitFile): Promise<void> => {
+  const seq = ++diffSeq;
+  // clearSelectedFile and every later openFile bump diffSeq.
+  const bIsCurrent = (): boolean => seq === diffSeq;
   selectedCommit.value = null;
   commitPatch.value = '';
   selectedFile.value = file;
@@ -325,15 +343,19 @@ const openFile = async (file: GitFile): Promise<void> => {
   bDiffLoading.value = true;
   try {
     const response = await gitApi.diff(props.workspaceId, file.file, file.status, file.repo);
+    if (!bIsCurrent()) return;
     diffContent.value = response.data.diff;
   } catch (e: unknown) {
+    if (!bIsCurrent()) return;
     diffError.value = gitErrorMessage(e, 'Failed to get diff');
   } finally {
-    bDiffLoading.value = false;
+    if (seq === diffSeq) bDiffLoading.value = false;
   }
 };
 
 const clearSelectedFile = (): void => {
+  diffSeq++;
+  bDiffLoading.value = false;
   selectedFile.value = null;
   selectedCommit.value = null;
   commitPatch.value = '';
@@ -694,6 +716,39 @@ watch(selectedGitRepo, (repo) => {
     void loadHistory();
   }
 });
+
+// The hosting views are reused across workspaces: drop everything from the previous one.
+watch(
+  () => props.workspaceId,
+  () => {
+    workspaceGen++;
+    knownFileKeys = null;
+    clearSelectedFile();
+    diffContent.value = '';
+    diffError.value = null;
+    files.value = [];
+    repos.value = [];
+    error.value = null;
+    bHasLoadedStatus.value = false;
+    bIsLoading.value = false;
+    selectedGitRepo.value = '';
+    selectedFiles.value = new Set();
+    commitMessage.value = '';
+    commitMessagesByRepo.value = {};
+    commitResult.value = null;
+    pushResult.value = null;
+    gitActionResult.value = null;
+    commits.value = [];
+    branches.value = [];
+    bShowDiscardConfirm.value = false;
+    pendingDiscard.value = null;
+    bShowSwitchBranch.value = false;
+    bShowCreateBranch.value = false;
+    bShowGitActions.value = false;
+    bGitActionsMenuOpen.value = false;
+    if (props.active) void refresh();
+  }
+);
 
 watch(
   () => props.active,

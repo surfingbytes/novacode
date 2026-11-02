@@ -379,7 +379,7 @@ export async function forgeRoutes(fastify: FastifyInstance): Promise<void> {
       });
       try {
         const result = await getCachedCiRuns(connection, repo, { branch: target.branch, sha: target.sha });
-        observeCiRuns(request.params.workspaceId, target.repoPath, result.runs);
+        observeCiRuns(request.params.workspaceId, target.repoPath, result);
         const runs = target.branch ? result.runs : result.runs.filter((run) => !run.sha || run.sha === target.sha);
         return {
           ...emptyCiStatus(true, base),

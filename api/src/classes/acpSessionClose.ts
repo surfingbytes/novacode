@@ -6,6 +6,7 @@
 import { db } from './database';
 import { disposeAllClaudeAgents } from './claudeAcp';
 import { killAllAcpSubprocesses } from './acpSubprocessRunner';
+import { clearCursorTodoState } from './cursorTodoEvents';
 import { logger } from './logger';
 import { getAgentAdapter, isAgentType } from './agents';
 
@@ -22,6 +23,7 @@ export async function closeAllAcpSessions(reason: string): Promise<void> {
 export async function closeAcpSessionForNovaSession(novaSessionId: string): Promise<void> {
   const session = await db.getSession(novaSessionId);
   if (!session) return;
+  if (session.sessionId) clearCursorTodoState(session.sessionId);
 
   const agentType = session.agentType ?? 'cursor-agent';
   // Unknown (legacy) agent types have nothing to close.

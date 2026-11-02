@@ -13,6 +13,8 @@ import { logger } from './logger';
 
 // types
 import type { AgentType, ChatMessage } from '../@types/index';
+import type { AutomationModel as Automation } from '../generated/client/models/Automation';
+import type { AutomationRunModel as AutomationRun } from '../generated/client/models/AutomationRun';
 
 // --------------------------------------------- Helpers ---------------------------------------------
 
@@ -141,32 +143,33 @@ async function runAutomation(automationId: string): Promise<void> {
   }
   runningAutomationIds.add(automationId);
 
-  const automation = await db.getAutomation(automationId);
-  if (!automation) {
-    runningAutomationIds.delete(automationId);
-    return;
-  }
-
-  const workspace = await db.getWorkspace(automation.workspaceId);
-  if (!workspace) {
-    logger.error({ workspaceId: automation.workspaceId, automationId }, 'automations: workspace not found');
-    runningAutomationIds.delete(automationId);
-    return;
-  }
-
-  const run = await db.createAutomationRun(automationId);
-
-  const nextRunAt = new Date(Date.now() + automation.intervalMinutes * 60_000).toISOString();
-  const lastRunAt = new Date().toISOString();
-  await db.updateAutomation(automationId, {
-    nextRunAt,
-    lastRunAt,
-    lastRunStatus: 'running',
-    lastRunError: null
-  });
-
+  // Everything after `add` runs inside try/finally so a DB error cannot leave the id stuck.
+  let automation: Automation | undefined;
+  let run: AutomationRun | null = null;
   let sessionId: string | null = null;
   try {
+    automation = await db.getAutomation(automationId);
+    if (!automation) {
+      return;
+    }
+
+    const workspace = await db.getWorkspace(automation.workspaceId);
+    if (!workspace) {
+      logger.error({ workspaceId: automation.workspaceId, automationId }, 'automations: workspace not found');
+      return;
+    }
+
+    run = await db.createAutomationRun(automationId);
+
+    const nextRunAt = new Date(Date.now() + automation.intervalMinutes * 60_000).toISOString();
+    const lastRunAt = new Date().toISOString();
+    await db.updateAutomation(automationId, {
+      nextRunAt,
+      lastRunAt,
+      lastRunStatus: 'running',
+      lastRunError: null
+    });
+
     const beforeFiles = await getGitStatus(workspace.path);
 
     const sessionResult = await createSessionWithAgent({
@@ -265,14 +268,19 @@ async function runAutomation(automationId: string): Promise<void> {
     await db.pruneAutomationRuns(automationId, 50);
   } catch (err) {
     const error = err instanceof Error ? err.message : 'Unknown error';
-    logger.error({ err, runId: run.id }, 'automations: run failed');
+    logger.error({ err, automationId, runId: run?.id }, 'automations: run failed');
+    if (!automation) {
+      return;
+    }
     const finishedAt = new Date().toISOString();
-    await db.updateAutomationRun(run.id, {
-      status: 'failed',
-      finishedAt,
-      error,
-      sessionId
-    });
+    if (run) {
+      await db.updateAutomationRun(run.id, {
+        status: 'failed',
+        finishedAt,
+        error,
+        sessionId
+      });
+    }
     await db.updateAutomation(automationId, { lastRunStatus: 'failed', lastRunError: error });
     broadcastAutomationRunFinished(automation.workspaceId, {
       automationId,

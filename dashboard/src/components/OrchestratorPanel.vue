@@ -266,11 +266,46 @@ function saveEditFromModal(editDraft: SubTask) {
   void saveSubtasks();
 }
 
-async function saveSubtasks(): Promise<boolean> {
-  if (!hasEdits.value || !props.orchestrator) {
-    return true;
+/** The save loop in flight; further saves queue behind it instead of overlapping. */
+let saveInFlight: Promise<boolean> | null = null;
+/** An edit landed while a save was in flight; the loop saves again with the latest steps. */
+let bResaveRequested = false;
+
+function saveSubtasks(): Promise<boolean> {
+  if (saveInFlight) {
+    bResaveRequested = true;
+    return saveInFlight;
   }
+  saveInFlight = runSubtaskSaves().finally(() => {
+    saveInFlight = null;
+  });
+  return saveInFlight;
+}
+
+// Saves sequentially until no newer edit is queued, so the latest step order always wins.
+async function runSubtaskSaves(): Promise<boolean> {
   bSavingSubtasks.value = true;
+  try {
+    let bOk = true;
+    // A skipped (superseded) response leaves props behind the server, so hasEdits can't be trusted.
+    let bForce = false;
+    do {
+      bResaveRequested = false;
+      const result = await saveSubtasksOnce(bForce);
+      bOk = result.bOk;
+      bForce = result.bSuperseded;
+    } while (bResaveRequested || bForce);
+    return bOk;
+  } finally {
+    bSavingSubtasks.value = false;
+  }
+}
+
+async function saveSubtasksOnce(bForce: boolean): Promise<{ bOk: boolean; bSuperseded: boolean }> {
+  if ((!bForce && !hasEdits.value) || !props.orchestrator) {
+    return { bOk: true, bSuperseded: false };
+  }
+  const orchestratorId = props.orchestratorId;
   try {
     const prev = parseSubtasksPayloadString(props.orchestrator.subtasksJson);
     const nextPayload = {
@@ -278,18 +313,23 @@ async function saveSubtasks(): Promise<boolean> {
       handoffLog: prev?.handoffLog ?? '',
       subtasks: editedSubtasks.value
     };
-    const { data } = await orchestratorApi.update(props.workspaceId, props.orchestratorId, {
+    const { data } = await orchestratorApi.update(props.workspaceId, orchestratorId, {
       subtasksJson: serializeSubtasksPayload(nextPayload)
     });
+    if (orchestratorId !== props.orchestratorId) {
+      return { bOk: true, bSuperseded: false };
+    }
+    // A newer edit is queued: emitting this response would reset the UI to the older steps.
+    if (bResaveRequested) {
+      return { bOk: true, bSuperseded: true };
+    }
     if (data) {
       emit('update:orchestrator', data);
     }
-    return true;
+    return { bOk: true, bSuperseded: false };
   } catch (err: unknown) {
     notifyApiError(err, 'Failed to save tasks');
-    return false;
-  } finally {
-    bSavingSubtasks.value = false;
+    return { bOk: false, bSuperseded: false };
   }
 }
 

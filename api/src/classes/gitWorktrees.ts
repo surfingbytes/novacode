@@ -281,6 +281,16 @@ export async function removeWorktree(repoRoot: string, dir: string): Promise<voi
   await git(repoRoot, ['worktree', 'prune']);
 }
 
+/** Rename `branch` to the first free `<branch>-N` (N ≥ 2) so `addWorktree` can't reset it; returns the new name. */
+export async function moveBranchAside(repoRoot: string, branch: string): Promise<string> {
+  for (let n = 2; ; n++) {
+    const candidate = `${branch}-${n}`;
+    if (await branchExists(repoRoot, candidate)) continue;
+    await gitOk(repoRoot, ['branch', '-m', branch, candidate]);
+    return candidate;
+  }
+}
+
 export async function deleteBranch(repoRoot: string, branch: string): Promise<void> {
   await git(repoRoot, ['branch', '-D', branch]);
 }

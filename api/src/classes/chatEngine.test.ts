@@ -187,7 +187,7 @@ describe('cancelAllRuns', () => {
 
     await cancelAllRuns('shutdown');
 
-    expect(cancelClaudeAcp).toHaveBeenCalledWith('acp-1');
+    expect(cancelClaudeAcp).toHaveBeenCalledWith('s1', 'acp-1');
     expect(isSessionBusy('s1')).toBe(false);
     expect(subscriber.onDone).toHaveBeenCalledTimes(1);
   });

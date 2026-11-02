@@ -22,7 +22,13 @@ const mocks = vi.hoisted(() => {
     branchExists: vi.fn(),
     deleteBranch: vi.fn(),
     applyCommitRangeToWorkingTree: vi.fn(),
-    broadcastOrchestratorUpsert: vi.fn()
+    broadcastOrchestratorUpsert: vi.fn(),
+    isOrchestratorRunActive: vi.fn(),
+    moveBranchAside: vi.fn(),
+    disposeSession: vi.fn(),
+    listOrchestratorSessionIds: vi.fn(),
+    deleteManySessions: vi.fn(),
+    deleteOrchestrator: vi.fn()
   };
 });
 
@@ -36,7 +42,10 @@ vi.mock('../classes/database', async (importOriginal) => ({
     getOrchestrator: (...args: unknown[]) => mocks.getOrchestrator(...args),
     getLatestOrchestratorBySourceSession: (...args: unknown[]) => mocks.getLatestOrchestratorBySourceSession(...args),
     createOrchestrator: (...args: unknown[]) => mocks.createOrchestrator(...args),
-    updateOrchestrator: (...args: unknown[]) => mocks.updateOrchestrator(...args)
+    updateOrchestrator: (...args: unknown[]) => mocks.updateOrchestrator(...args),
+    listOrchestratorSessionIds: (...args: unknown[]) => mocks.listOrchestratorSessionIds(...args),
+    deleteManySessions: (...args: unknown[]) => mocks.deleteManySessions(...args),
+    deleteOrchestrator: (...args: unknown[]) => mocks.deleteOrchestrator(...args)
   }
 }));
 
@@ -51,7 +60,13 @@ vi.mock('../classes/orchestratorRunner', () => ({
   claimRunResume: (...args: unknown[]) => mocks.claimRunResume(...args),
   finishRunResume: (...args: unknown[]) => mocks.finishRunResume(...args),
   runOrchestrator: (...args: unknown[]) => mocks.runOrchestrator(...args),
+  isOrchestratorRunActive: (...args: unknown[]) => mocks.isOrchestratorRunActive(...args),
+  stepBranch: (orchestratorId: string, label: string) => `nova/${orchestratorId.slice(0, 8)}/${label}`,
   markStepNeedsInput: () => false
+}));
+
+vi.mock('../classes/dispose', () => ({
+  disposeSession: (...args: unknown[]) => mocks.disposeSession(...args)
 }));
 
 // No git: the preconditions route's repo lookup and the kept-branch routes' git calls are stubbed.
@@ -60,6 +75,7 @@ vi.mock('../classes/gitWorktrees', async (importOriginal) => ({
   resolveRepo: (...args: unknown[]) => mocks.resolveRepo(...args),
   branchExists: (...args: unknown[]) => mocks.branchExists(...args),
   deleteBranch: (...args: unknown[]) => mocks.deleteBranch(...args),
+  moveBranchAside: (...args: unknown[]) => mocks.moveBranchAside(...args),
   applyCommitRangeToWorkingTree: (...args: unknown[]) => mocks.applyCommitRangeToWorkingTree(...args)
 }));
 
@@ -167,6 +183,7 @@ beforeEach(() => {
   mocks.checkRunPreconditions.mockResolvedValue(null);
   mocks.inFlightRunSteps.mockReturnValue(null);
   mocks.runOrchestrator.mockResolvedValue(undefined);
+  mocks.isOrchestratorRunActive.mockReturnValue(false);
 });
 
 describe('POST /api/workspaces/:workspaceId/orchestrators', () => {
@@ -267,7 +284,8 @@ describe('POST .../orchestrators/:orchestratorId/run', () => {
 
     expect(res.statusCode).toBe(202);
     expect(res.json()).toMatchObject({ id: 'o1', runStatus: 'running', runMode: 'sequential', runTotalSteps: 2, runCurrentStep: 1 });
-    expect(storedSubtasks()).toEqual([twoSteps[0], { name: 'B', prompt: 'do b' }]);
+    // The kept branch stays listed: the failed attempt's work is still on it.
+    expect(storedSubtasks()).toEqual([twoSteps[0], { name: 'B', prompt: 'do b', keptBranch: { base: 'c1', branch: 'nova/b' } }]);
     expect(storedHandoffLog()).toBe('### Step 1: A\n\nnotes a');
     expect(mocks.updateOrchestrator).toHaveBeenCalledWith('o1', expect.objectContaining({ runChangedFiles: null }));
     expect(mocks.checkRunPreconditions).toHaveBeenCalledWith(expect.any(String), { mode: 'sequential', startIndex: 0 });
@@ -308,6 +326,43 @@ describe('POST .../orchestrators/:orchestratorId/run', () => {
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toContain('Run the "Merge into workspace" step first');
     expect(mocks.runOrchestrator).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['plain parallel run after a server restart', { runResult: 'running' }, { mode: 'parallel' }],
+    ['plain run with the merge step never started', {}, { mode: 'parallel' }],
+    ['sequential run from a later step', {}, { mode: 'sequential', startIndex: 1 }]
+  ])('answers 409 for a %s while the integration branch is not merged', async (_, mergeState, body) => {
+    const mergeRef = { base: 'c1', branch: 'nova/o1/integration' };
+    storeOrchestrator({
+      subtasksJson: plan([
+        { name: 'A', prompt: 'a', runResult: 'done' },
+        { name: 'B', prompt: 'b', runResult: 'failed' },
+        { name: 'Merge', prompt: 'm', kind: 'merge', mergeRef, ...mergeState }
+      ])
+    });
+
+    const res = await run(body);
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toContain('Run the "Merge into workspace" step first');
+    expect(mocks.runOrchestrator).not.toHaveBeenCalled();
+    expect(storedSubtasks()[2]).toMatchObject({ mergeRef });
+  });
+
+  it('runs the merge step alone to merge a leftover integration branch', async () => {
+    const mergeRef = { base: 'c1', branch: 'nova/o1/integration' };
+    storeOrchestrator({
+      subtasksJson: plan([
+        { name: 'A', prompt: 'a', runResult: 'done' },
+        { name: 'Merge', prompt: 'm', kind: 'merge', mergeRef, runResult: 'running' }
+      ])
+    });
+
+    const res = await run({ mode: 'parallel', onlyIndex: 1 });
+
+    expect(res.statusCode).toBe(202);
+    expect(storedSubtasks()[1]).toEqual({ name: 'Merge', prompt: 'm', kind: 'merge', mergeRef });
   });
 
   it('starts a sequential run from scratch with fresh', async () => {
@@ -460,6 +515,53 @@ describe('POST .../orchestrators/:orchestratorId/run', () => {
     expect(res.statusCode).toBe(409);
     expect(res.json()).toEqual({ error: 'Workspace has uncommitted changes' });
     expect(orchestrators.get('o1')!.runStatus).toBeNull();
+  });
+
+  it('starts one run when the run is requested twice at once', async () => {
+    storeOrchestrator({ subtasksJson: plan(twoSteps) });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mocks.getWorkspace.mockImplementationOnce(async (id: string) => {
+      await gate;
+      return { id, path: '/tmp/w1', defaultAgentType: 'codex' };
+    });
+
+    const first = run();
+    await vi.waitFor(() => expect(mocks.getWorkspace).toHaveBeenCalled());
+    const second = await run();
+    release();
+
+    expect(second.statusCode).toBe(409);
+    expect(second.json()).toEqual({ error: 'Run already in progress' });
+    expect((await first).statusCode).toBe(202);
+    expect(mocks.runOrchestrator).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the run claim when the request fails', async () => {
+    storeOrchestrator({ subtasksJson: plan(twoSteps) });
+    mocks.checkRunPreconditions.mockResolvedValueOnce('Workspace has uncommitted changes');
+    expect((await run({ mode: 'parallel' })).statusCode).toBe(409);
+    mocks.checkRunPreconditions.mockRejectedValueOnce(new Error('git exploded'));
+    expect((await run({ mode: 'parallel' })).statusCode).toBe(500);
+
+    expect((await run()).statusCode).toBe(202);
+  });
+
+  it('moves a kept step branch aside so a parallel run does not reset it', async () => {
+    const keptBranch = { base: 'c1', branch: 'nova/o1/step-2' };
+    storeOrchestrator({ subtasksJson: plan([twoSteps[0]!, { ...twoSteps[1], keptBranch }]) });
+    mocks.resolveRepo.mockResolvedValue({ root: '/tmp/w1', subdir: '' });
+    mocks.branchExists.mockResolvedValue(true);
+    mocks.moveBranchAside.mockResolvedValue('nova/o1/step-2-2');
+
+    const res = await run({ mode: 'parallel' });
+
+    expect(res.statusCode).toBe(202);
+    expect(mocks.moveBranchAside).toHaveBeenCalledWith('/tmp/w1', 'nova/o1/step-2');
+    expect(storedSubtasks()[1]).toEqual({ name: 'B', prompt: 'do b', keptBranch: { base: 'c1', branch: 'nova/o1/step-2-2' } });
+    expect(mocks.runOrchestrator.mock.calls[0]![2].subtasks[1].keptBranch).toEqual({ base: 'c1', branch: 'nova/o1/step-2-2' });
   });
 
   it('answers 404 for an orchestrator of another workspace', async () => {
@@ -622,6 +724,81 @@ describe('POST .../steps/:index/branch/apply and /discard', () => {
     expect(res.statusCode).toBe(409);
     expect(res.json()).toEqual({ error: 'Parallel runs need the workspace to be a git repository.' });
     expect(storedSubtasks()[1]).toMatchObject({ keptBranch });
+  });
+});
+
+describe('DELETE .../orchestrators/:orchestratorId', () => {
+  it('stops the run and disposes every step session before deleting', async () => {
+    storeOrchestrator({ runStatus: 'running', subtasksJson: plan([{ name: 'A', prompt: 'a', runResult: 'running', sessionId: 's1' }]) });
+    mocks.listOrchestratorSessionIds.mockResolvedValue(['s1', 's2']);
+    const order: string[] = [];
+    mocks.updateOrchestrator.mockImplementation(async (id: string, patch: Record<string, unknown>) => {
+      order.push(`update:${String(patch.runStatus)}`);
+      return { ...orchestrators.get(id)!, ...patch };
+    });
+    mocks.disposeSession.mockImplementation(async (id: string) => void order.push(`dispose:${id}`));
+    mocks.deleteManySessions.mockImplementation(async () => void order.push('deleteSessions'));
+    mocks.deleteOrchestrator.mockImplementation(async () => void order.push('deleteOrchestrator'));
+
+    const res = await app.inject({ method: 'DELETE', url: '/api/workspaces/w1/orchestrators/o1', headers: { authorization } });
+
+    expect(res.statusCode).toBe(204);
+    expect(order).toEqual(['update:stopped', 'dispose:s1', 'dispose:s2', 'deleteSessions', 'deleteOrchestrator']);
+    expect(mocks.disposeSession).toHaveBeenCalledWith('s1', 'w1');
+    expect(mocks.deleteManySessions).toHaveBeenCalledWith(['s1', 's2'], 'w1');
+  });
+});
+
+describe('plan edits while a stopped run is still finishing', () => {
+  const STOPPING = 'The previous run is still stopping, try again shortly.';
+
+  it('refuses a step edit through PATCH', async () => {
+    storeOrchestrator({ runStatus: 'stopped', subtasksJson: plan([{ name: 'A', prompt: 'a' }]) });
+    mocks.isOrchestratorRunActive.mockReturnValue(true);
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/workspaces/w1/orchestrators/o1',
+      headers: { authorization },
+      payload: { subtasksJson: plan([{ name: 'X', prompt: 'x' }]) }
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: STOPPING });
+    expect(mocks.updateOrchestrator).not.toHaveBeenCalled();
+
+    // Other fields can still change.
+    const renamed = await app.inject({
+      method: 'PATCH',
+      url: '/api/workspaces/w1/orchestrators/o1',
+      headers: { authorization },
+      payload: { name: 'Renamed' }
+    });
+    expect(renamed.statusCode).toBe(200);
+  });
+
+  it('refuses orchestrator_save_plan', async () => {
+    mocks.getSession.mockResolvedValue({ id: 'planner1', workspaceId: 'w1', name: 'Planning', agentType: 'claude' });
+    mocks.getLatestOrchestratorBySourceSession.mockResolvedValue(
+      storeOrchestrator({ runStatus: 'stopped', subtasksJson: plan([{ name: 'A', prompt: 'a', runResult: 'running' }]) })
+    );
+    mocks.isOrchestratorRunActive.mockReturnValue(true);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: NOVA_MCP_PATH,
+      headers: { authorization: `Bearer ${createNovaMcpToken('planner1')}` },
+      payload: {
+        jsonrpc: '2.0',
+        id: 4,
+        method: 'tools/call',
+        params: { name: 'orchestrator_save_plan', arguments: { steps: [{ name: 'X', prompt: 'x' }] } }
+      }
+    });
+
+    expect(res.json().result).toMatchObject({ isError: true, content: [{ text: STOPPING }] });
+    expect(mocks.isOrchestratorRunActive).toHaveBeenCalledWith('o1');
+    expect(mocks.updateOrchestrator).not.toHaveBeenCalled();
   });
 });
 

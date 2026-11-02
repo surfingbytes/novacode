@@ -605,6 +605,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('novacode:new-session', openNewSessionFromShortcut);
 });
 watch(workspaceId, (id) => {
+  // Selections belong to the previous workspace; bulk actions must not act on them.
+  selectedIds.value = new Set();
+  orchestratorSelectedIds.value = new Set();
   if (!id) return;
   bOrchestratorsInitialFetched.value = false;
   void ensureData();

@@ -123,11 +123,18 @@ async function fetchWorkspaceUsage(): Promise<void> {
   if (!workspaceId.value) {
     return;
   }
+  const id = workspaceId.value;
+  // Don't keep showing the previous workspace's usage while this one loads.
+  workspaceUsage.value = null;
   try {
-    const response = await workspaceApi.usage(workspaceId.value);
-    workspaceUsage.value = response.data;
+    const response = await workspaceApi.usage(id);
+    if (id === workspaceId.value) {
+      workspaceUsage.value = response.data;
+    }
   } catch {
-    workspaceUsage.value = null;
+    if (id === workspaceId.value) {
+      workspaceUsage.value = null;
+    }
   }
 }
 

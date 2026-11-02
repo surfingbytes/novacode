@@ -122,6 +122,17 @@ describe('PUT /api/settings', () => {
     expect(res.statusCode).toBe(200);
     expect(mocks.updateUser.mock.calls[0]?.[1]).not.toHaveProperty('tourCompleted');
   });
+
+  it.each([
+    { gitUserName: 'evil\n[core]\n\tsshCommand = touch /tmp/pwned' },
+    { gitUserEmail: 'a@b.c\r' },
+    { gitUserName: 'nul\u0000byte' }
+  ])('rejects git identity with newlines or control characters (%o)', async (payload) => {
+    const res = await app.inject({ method: 'PUT', url: '/api/settings', headers: { authorization }, payload });
+
+    expect(res.statusCode).toBe(400);
+    expect(mocks.updateUser).not.toHaveBeenCalled();
+  });
 });
 
 describe('GET /api/settings/ssh-private-key', () => {

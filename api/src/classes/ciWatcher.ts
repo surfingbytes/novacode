@@ -8,6 +8,9 @@ import { sendPushToAll } from './push';
 
 // types
 import type { CiRun } from '@novacode/shared';
+import type { CiRunsResult } from './forgeCi';
+
+type CiRunSource = CiRunsResult['source'];
 
 /**
  * Server-side CI watcher: polls repos someone recently looked at (or pushed from the
@@ -42,8 +45,8 @@ interface CiWatch extends CiWatchTarget {
   lastInterestAt: number;
   fastUntil: number;
   nextPollAt: number;
-  /** Runs seen queued/running, by id. `null` = not observed yet (no notifications for history). */
-  active: Map<number, CiRun> | null;
+  /** Runs seen queued/running, by `ciRunKey`. `null` = not observed yet (no notifications for history). */
+  active: Map<string, CiRun> | null;
 }
 
 const watches = new Map<string, CiWatch>();
@@ -85,25 +88,34 @@ export function markCiWatchPushed(workspaceId: string, repoPath: string): void {
   watch.lastInterestAt = now;
 }
 
+/**
+ * Identity of a run across polls. Actions runs/pipelines keep their id; a commit status gets a
+ * new id on every update (pending → success), so it is keyed by context + commit instead.
+ */
+function ciRunKey(run: CiRun, source: CiRunSource): string {
+  return source === 'commit-status' ? `status:${run.sha ?? ''}:${run.title}` : `run:${run.id}`;
+}
+
 /** Diff the observed runs against the previous snapshot; returns runs that just finished. */
-export function diffFinishedRuns(previous: Map<number, CiRun> | null, runs: CiRun[]): CiRun[] {
+export function diffFinishedRuns(previous: Map<string, CiRun> | null, runs: CiRun[], source: CiRunSource): CiRun[] {
   if (!previous) return [];
-  const byId = new Map(runs.map((run) => [run.id, run]));
+  const byKey = new Map(runs.map((run) => [ciRunKey(run, source), run]));
   const finished: CiRun[] = [];
-  for (const id of previous.keys()) {
-    const run = byId.get(id);
+  for (const key of previous.keys()) {
+    const run = byKey.get(key);
     if (run && !isActiveCiRun(run) && run.status !== 'skipped' && run.status !== 'unknown') finished.push(run);
   }
   return finished;
 }
 
 /** Called by the status route and the poller with fresh runs for a watched target. */
-export function observeCiRuns(workspaceId: string, repoPath: string, runs: CiRun[]): void {
+export function observeCiRuns(workspaceId: string, repoPath: string, result: CiRunsResult): void {
   const watch = watches.get(watchKey(workspaceId, repoPath));
   if (!watch) return;
+  const { runs, source } = result;
   const scoped = watch.branch ? runs.filter((run) => !run.branch || run.branch === watch.branch) : runs;
-  const finished = diffFinishedRuns(watch.active, scoped);
-  watch.active = new Map(scoped.filter(isActiveCiRun).map((run) => [run.id, run]));
+  const finished = diffFinishedRuns(watch.active, scoped, source);
+  watch.active = new Map(scoped.filter(isActiveCiRun).map((run) => [ciRunKey(run, source), run]));
   for (const run of finished) {
     void notifyRunFinished(watch, run);
   }
@@ -141,7 +153,7 @@ async function pollWatch(watch: CiWatch, now: number): Promise<void> {
       { branch: watch.branch, sha: watch.sha },
       { maxAgeMs: FAST_POLL_MS / 2 }
     );
-    observeCiRuns(watch.workspaceId, watch.repoPath, result.runs);
+    observeCiRuns(watch.workspaceId, watch.repoPath, result);
   } catch (err) {
     logger.debug({ err, repo: watch.forgeRepo }, 'CI watcher poll failed');
   }

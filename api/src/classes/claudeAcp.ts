@@ -81,6 +81,8 @@ interface SessionWork {
   /** Set by cancel / dispose: a held turn ends at once. */
   released: boolean;
   waiters: Set<() => void>;
+  /** Called when the adapter reports work running (the current turn's cancel re-check). */
+  onRunning: (() => void) | null;
 }
 
 const workByAcpSession = new Map<string, SessionWork>();
@@ -96,6 +98,7 @@ function getSessionWork(acpSessionId: string): SessionWork {
       lastStopReason: undefined,
       released: false,
       waiters: new Set(),
+      onRunning: null,
     };
     workByAcpSession.set(acpSessionId, work);
   }
@@ -153,6 +156,7 @@ function makeForegroundEvents(acpSessionId: string): {
     if (stopReason) work.lastStopReason = stopReason;
     touchAcpSession(acpSessionId);
     wakeSessionWork(work);
+    if (foreground) work.onRunning?.();
   };
   return {
     running: () => setForeground(true),
@@ -218,6 +222,8 @@ const MAX_LIVE_CLAUDE_AGENTS = 10;
 const IDLE_SWEEP_INTERVAL_MS = 60_000;
 const lastUsedByNovaSession = new Map<string, number>();
 const inFlightTurnsByNovaSession = new Map<string, number>();
+/** Cancel requests of in-flight turns; keyed by Nova session so Stop works before the ACP session id is known. */
+const turnAbortByNovaSession = new Map<string, AbortController>();
 let idleSweepTimer: ReturnType<typeof setInterval> | null = null;
 
 function forgetNovaSession(novaSessionId: string): void {
@@ -505,9 +511,12 @@ export async function runClaudeAcp(
   const { novaSessionId } = params;
   // marked before any await so the idle sweep / cap never disposes a starting turn
   inFlightTurnsByNovaSession.set(novaSessionId, (inFlightTurnsByNovaSession.get(novaSessionId) ?? 0) + 1);
+  const abort = new AbortController();
+  turnAbortByNovaSession.set(novaSessionId, abort);
   try {
-    return await runClaudeAcpTurn(params, onEvent, onConfigSync, onRequestPermission);
+    return await runClaudeAcpTurn(params, abort.signal, onEvent, onConfigSync, onRequestPermission);
   } finally {
+    if (turnAbortByNovaSession.get(novaSessionId) === abort) turnAbortByNovaSession.delete(novaSessionId);
     const remaining = (inFlightTurnsByNovaSession.get(novaSessionId) ?? 1) - 1;
     if (remaining > 0) inFlightTurnsByNovaSession.set(novaSessionId, remaining);
     else inFlightTurnsByNovaSession.delete(novaSessionId);
@@ -515,8 +524,45 @@ export async function runClaudeAcp(
   }
 }
 
+type NewClaudeSession = AcpSessionResponse & { sessionId: string };
+
+/** Why session setup stopped before the prompt: Stop pressed, or setup hung past the idle timeout. */
+class TurnSetupStopped extends Error {
+  constructor(readonly reason: 'cancelled' | 'timeout') {
+    super(`Claude session setup ${reason}`);
+  }
+}
+
+/**
+ * Races each setup step (agent init, newSession / resumeSession, mode / model)
+ * against Stop and a deadline: `agent.cancel` does not abort those calls, and a
+ * hung one would otherwise leave the turn running forever.
+ */
+function makeSetupGuard(signal: AbortSignal, timeoutMs: number): {
+  step: <T>(promise: Promise<T>) => Promise<T>;
+  done: () => void;
+} {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let onAbort: (() => void) | null = null;
+  const stopped = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(new TurnSetupStopped('cancelled'));
+    if (signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+    if (timeoutMs > 0) timer = setTimeout(() => reject(new TurnSetupStopped('timeout')), timeoutMs);
+  });
+  stopped.catch(() => {});
+  return {
+    step: (promise) => Promise.race([promise, stopped]),
+    done: () => {
+      if (timer !== null) clearTimeout(timer);
+      if (onAbort) signal.removeEventListener('abort', onAbort);
+    },
+  };
+}
+
 async function runClaudeAcpTurn(
   params: RunClaudeAcpParams,
+  signal: AbortSignal,
   onEvent: AcpEventHandler,
   onConfigSync?: SessionConfigSyncHandler,
   onRequestPermission?: AcpPermissionHandler
@@ -535,62 +581,6 @@ async function runClaudeAcpTurn(
   const extraDirs = params.additionalDirectories?.length
     ? { additionalDirectories: params.additionalDirectories }
     : {};
-
-  const agent = await getAgentForNovaSession(novaSessionId);
-  // claude-agent-acp supports HTTP MCP; Nova's server is skipped for one-shot runs (no DB session).
-  const configuredMcp = await getConfiguredAcpMcpServers(config.configDir);
-  const novaMcp = await novaMcpServerIfSession(novaSessionId, true);
-  const mcpServers = novaMcp
-    ? [...configuredMcp.filter((server) => server.name !== novaMcp.name), novaMcp]
-    : configuredMcp;
-  let resolvedSessionId: string;
-  let sessionResponse: AcpSessionResponse;
-  /** True when a brand-new conversation was created (new-conversation context must be injected). */
-  let isFreshSession = false;
-
-  const sessionParams = {
-    cwd,
-    mcpServers,
-    _meta: { claudeCode: { ...CLAUDE_SESSION_META.claudeCode, ...claudeTokenSessionMeta(claudeToken).claudeCode } },
-    ...extraDirs,
-  };
-  if (!acpSessionId) {
-    const created = await agent.newSession(sessionParams);
-    sessionResponse = created;
-    resolvedSessionId = created.sessionId;
-    isFreshSession = true;
-  } else {
-    try {
-      sessionResponse = await agent.resumeSession({ sessionId: acpSessionId, ...sessionParams });
-      resolvedSessionId = acpSessionId;
-    } catch {
-      onEvent(sessionResetNoticeEventLine());
-      const created = await agent.newSession(sessionParams);
-      sessionResponse = created;
-      resolvedSessionId = created.sessionId;
-      isFreshSession = true;
-    }
-  }
-
-  rememberAcpBinding(novaSessionId, resolvedSessionId);
-
-  await applySessionMode(agent, resolvedSessionId, mode, sessionResponse);
-  await applySessionModel(agent, resolvedSessionId, model, sessionResponse);
-  await applySessionConfig(agent, resolvedSessionId, configJson, sessionResponse);
-
-  const resolvedModeId = sessionResponse.modes?.currentModeId;
-  const modelOpt = sessionResponse.configOptions?.find(
-    (o) => o.category === 'model' || o.id === 'model'
-  );
-  const resolvedModelId =
-    modelOpt?.type === 'select' &&
-    'currentValue' in modelOpt &&
-    typeof modelOpt.currentValue === 'string'
-      ? modelOpt.currentValue
-      : undefined;
-  if (resolvedModeId || resolvedModelId || model) {
-    emitClaudeConfigSync(resolvedSessionId, { modeId: resolvedModeId, modelId: model ?? resolvedModelId });
-  }
 
   // No-output watchdog (same setting as subprocess agents). Paused while a permission
   // prompt waits on the user and while a held turn waits on silent background work.
@@ -639,15 +629,89 @@ async function runClaudeAcpTurn(
       }
     : undefined;
 
-  onSessionId?.(resolvedSessionId);
-  activeHandlers.set(resolvedSessionId, handleEvent);
-  if (onConfigSync) activeConfigSyncHandlers.set(resolvedSessionId, onConfigSync);
-  if (handlePermission) activePermissionHandlers.set(resolvedSessionId, handlePermission);
+  const setupTimeoutMs = resolvePromptIdleTimeoutMs(config.configDir);
+  const setup = makeSetupGuard(signal, setupTimeoutMs);
+  let resolvedSessionId: string | null = null;
+  let work: SessionWork | null = null;
+  let onRunning: (() => void) | null = null;
+  let bSetupDone = false;
+  const sessionIdForResult = (): string => resolvedSessionId ?? acpSessionId ?? '';
   const idleTimeoutError = (): RunClaudeAcpResult => ({
-    acpSessionId: resolvedSessionId,
+    acpSessionId: sessionIdForResult(),
     error: `Agent produced no output for ${Math.round(resolvePromptIdleTimeoutMs(config.configDir) / 1000)}s and was stopped.`,
   });
   try {
+    const agent = await setup.step(getAgentForNovaSession(novaSessionId));
+    // claude-agent-acp supports HTTP MCP; Nova's server is skipped for one-shot runs (no DB session).
+    const configuredMcp = await setup.step(getConfiguredAcpMcpServers(config.configDir));
+    const novaMcp = await setup.step(novaMcpServerIfSession(novaSessionId, true));
+    const mcpServers = novaMcp
+      ? [...configuredMcp.filter((server) => server.name !== novaMcp.name), novaMcp]
+      : configuredMcp;
+    let sessionResponse: AcpSessionResponse;
+    /** True when a brand-new conversation was created (new-conversation context must be injected). */
+    let isFreshSession = false;
+
+    const sessionParams = {
+      cwd,
+      mcpServers,
+      _meta: { claudeCode: { ...CLAUDE_SESSION_META.claudeCode, ...claudeTokenSessionMeta(claudeToken).claudeCode } },
+      ...extraDirs,
+    };
+    let sessionId: string;
+    if (!acpSessionId) {
+      const created = await setup.step<NewClaudeSession>(agent.newSession(sessionParams));
+      sessionResponse = created;
+      sessionId = created.sessionId;
+      isFreshSession = true;
+    } else {
+      try {
+        sessionResponse = await setup.step<AcpSessionResponse>(agent.resumeSession({ sessionId: acpSessionId, ...sessionParams }));
+        sessionId = acpSessionId;
+      } catch (err) {
+        if (err instanceof TurnSetupStopped) throw err;
+        onEvent(sessionResetNoticeEventLine());
+        const created = await setup.step<NewClaudeSession>(agent.newSession(sessionParams));
+        sessionResponse = created;
+        sessionId = created.sessionId;
+        isFreshSession = true;
+      }
+    }
+    resolvedSessionId = sessionId;
+
+    rememberAcpBinding(novaSessionId, sessionId);
+    onSessionId?.(sessionId);
+    // Registered before mode / model are applied: the updates they trigger and the
+    // initial config sync below must reach this turn's handlers.
+    let syncedModeId: string | undefined;
+    activeHandlers.set(sessionId, handleEvent);
+    activeConfigSyncHandlers.set(sessionId, (sync) => {
+      if (sync.modeId) syncedModeId = sync.modeId;
+      onConfigSync?.(sync);
+    });
+    if (handlePermission) activePermissionHandlers.set(sessionId, handlePermission);
+
+    await setup.step(applySessionMode(agent, sessionId, mode, sessionResponse));
+    await setup.step(applySessionModel(agent, sessionId, model, sessionResponse));
+    await setup.step(applySessionConfig(agent, sessionId, configJson, sessionResponse));
+    setup.done();
+    bSetupDone = true;
+
+    // The session response predates the mode switch; a mode reported since is current.
+    const resolvedModeId = syncedModeId ?? sessionResponse.modes?.currentModeId;
+    const modelOpt = sessionResponse.configOptions?.find(
+      (o) => o.category === 'model' || o.id === 'model'
+    );
+    const resolvedModelId =
+      modelOpt?.type === 'select' &&
+      'currentValue' in modelOpt &&
+      typeof modelOpt.currentValue === 'string'
+        ? modelOpt.currentValue
+        : undefined;
+    if (resolvedModeId || resolvedModelId || model) {
+      emitClaudeConfigSync(sessionId, { modeId: resolvedModeId, modelId: model ?? resolvedModelId });
+    }
+
     let finalPromptText = promptText;
     if (isFreshSession && params.getFreshSessionPrefix) {
       try {
@@ -656,40 +720,66 @@ async function runClaudeAcpTurn(
           finalPromptText = `${freshPrefix}\n\n---\n\nUser request:\n${promptText}`;
         }
       } catch (err) {
-        logger.warn({ err, sessionId: resolvedSessionId }, 'Failed to build fresh-session prefix; prompting without it');
+        logger.warn({ err, sessionId }, 'Failed to build fresh-session prefix; prompting without it');
       }
     }
-    const work = getSessionWork(resolvedSessionId);
-    work.released = false;
-    work.lastStopReason = undefined;
-    work.followupPendingSince = null;
-    work.seenTaskIds = new Set(work.liveTaskIds);
+    // Stop pressed while the turn was starting: never send the prompt.
+    if (signal.aborted) return { acpSessionId: sessionId, stopReason: 'cancelled' };
+    const turnWork = getSessionWork(sessionId);
+    work = turnWork;
+    turnWork.released = false;
+    turnWork.lastStopReason = undefined;
+    turnWork.followupPendingSince = null;
+    turnWork.seenTaskIds = new Set(turnWork.liveTaskIds);
+    // A cancel sent before Claude Code takes the prompt in is undone when the turn
+    // activates (the adapter clears its cancelled flag then), so cancel again once
+    // the turn reports running.
+    onRunning = () => {
+      if (signal.aborted) agent.cancel({ sessionId }).catch(() => {});
+    };
+    turnWork.onRunning = onRunning;
     armPromptIdleTimer();
     const resp = await agent.prompt({
-      sessionId: resolvedSessionId,
+      sessionId,
       prompt: buildPromptContent(finalPromptText, params.attachments),
     });
     if (bPromptIdleTimedOut) return idleTimeoutError();
     let stopReason: string | undefined = resp.stopReason;
-    if (stopReason !== 'cancelled') {
-      const followup = await holdForFollowupWork(resolvedSessionId, work, {
+    if (stopReason !== 'cancelled' && !signal.aborted) {
+      const followup = await holdForFollowupWork(sessionId, turnWork, {
         setWatchdogPaused,
         timedOut: () => bPromptIdleTimedOut,
         novaSessionId,
       });
       if (bPromptIdleTimedOut) return idleTimeoutError();
-      if (followup) stopReason = work.lastStopReason ?? stopReason;
+      if (followup) stopReason = turnWork.lastStopReason ?? stopReason;
     }
-    return { acpSessionId: resolvedSessionId, stopReason };
+    return { acpSessionId: sessionId, stopReason };
   } catch (err) {
+    if (err instanceof TurnSetupStopped) {
+      if (err.reason === 'cancelled') return { acpSessionId: sessionIdForResult(), stopReason: 'cancelled' };
+      logger.warn({ novaSessionId, timeoutMs: setupTimeoutMs }, 'Claude session setup timeout');
+      // The hung call keeps the agent busy; a fresh one resumes the conversation from disk.
+      void disposeAgent(novaSessionId, 'session setup timeout');
+      return {
+        acpSessionId: sessionIdForResult(),
+        error: `Agent session did not start within ${Math.round(setupTimeoutMs / 1000)}s and was stopped.`,
+      };
+    }
+    // Other setup failures propagate as before (the caller records a crashed run).
+    if (!bSetupDone) throw err;
     if (bPromptIdleTimedOut) return idleTimeoutError();
     const errorDetail = extractAgentErrorDetail(err);
-    return { acpSessionId: resolvedSessionId, error: errorDetail.message, errorDetail };
+    return { acpSessionId: sessionIdForResult(), error: errorDetail.message, errorDetail };
   } finally {
+    setup.done();
     clearPromptIdleTimer();
-    activeHandlers.delete(resolvedSessionId);
-    activeConfigSyncHandlers.delete(resolvedSessionId);
-    activePermissionHandlers.delete(resolvedSessionId);
+    if (work && work.onRunning === onRunning) work.onRunning = null;
+    if (resolvedSessionId) {
+      activeHandlers.delete(resolvedSessionId);
+      activeConfigSyncHandlers.delete(resolvedSessionId);
+      activePermissionHandlers.delete(resolvedSessionId);
+    }
   }
 }
 
@@ -760,7 +850,14 @@ function waitForWorkChange(work: SessionWork, timeoutMs: number): Promise<boolea
   });
 }
 
-export function cancelClaudeAcp(acpSessionId: string): void {
+/**
+ * Stop the Nova session's turn. Remembered for the whole turn, so a Stop during
+ * session setup or before the prompt starts still ends it; the ACP session id,
+ * when known, also interrupts work already running.
+ */
+export function cancelClaudeAcp(novaSessionId: string, acpSessionId: string | null): void {
+  turnAbortByNovaSession.get(novaSessionId)?.abort();
+  if (!acpSessionId) return;
   // A turn held open for background work has no prompt to interrupt; end it here.
   releaseSessionWork(acpSessionId);
   const agent = findAgentForAcpSession(acpSessionId);

@@ -14,12 +14,15 @@ import { logger } from '../classes/logger';
 
 const IdParamsSchema = Type.Object({ id: Type.String() });
 
+/** Whole minutes only: the scheduler multiplies this into a run interval. */
+const IntervalMinutesSchema = Type.Integer({ minimum: 1 });
+
 const CreateAutomationBodySchema = Type.Object({
   name: Type.Optional(Type.String()),
   workspaceId: Type.Optional(Type.String()),
   agentType: Type.Optional(Type.String()),
   prompt: Type.Optional(Type.String()),
-  intervalMinutes: Type.Optional(Type.Number()),
+  intervalMinutes: Type.Optional(IntervalMinutesSchema),
   enabled: Type.Optional(Type.Boolean())
 });
 
@@ -27,7 +30,7 @@ const UpdateAutomationBodySchema = Type.Object({
   name: Type.Optional(Type.String()),
   agentType: Type.Optional(Type.String()),
   prompt: Type.Optional(Type.String()),
-  intervalMinutes: Type.Optional(Type.Number()),
+  intervalMinutes: Type.Optional(IntervalMinutesSchema),
   enabled: Type.Optional(Type.Boolean())
 });
 
@@ -68,8 +71,8 @@ export async function automationRoutes(fastifyBase: FastifyInstance): Promise<vo
     const body = request.body;
     if (!body.workspaceId) return reply.code(400).send({ error: 'workspaceId is required' });
     if (!body.prompt?.trim()) return reply.code(400).send({ error: 'prompt is required' });
-    if (!body.intervalMinutes || body.intervalMinutes < 1)
-      return reply.code(400).send({ error: 'intervalMinutes must be >= 1' });
+    if (body.intervalMinutes === undefined)
+      return reply.code(400).send({ error: 'intervalMinutes is required' });
 
     const workspace = await db.getWorkspace(body.workspaceId);
     if (!workspace) return reply.code(404).send({ error: 'Workspace not found' });
@@ -106,9 +109,6 @@ export async function automationRoutes(fastifyBase: FastifyInstance): Promise<vo
       const body = request.body;
       const automation = await db.getAutomation(id);
       if (!automation) return reply.code(404).send({ error: 'Automation not found' });
-
-      if (body.intervalMinutes !== undefined && body.intervalMinutes < 1)
-        return reply.code(400).send({ error: 'intervalMinutes must be >= 1' });
 
       // when interval changes, recalculate nextRunAt
       let nextRunAt: string | undefined;
@@ -166,7 +166,7 @@ export async function automationRoutes(fastifyBase: FastifyInstance): Promise<vo
       preHandler: jwtPreHandler,
       schema: {
         params: IdParamsSchema,
-        querystring: Type.Object({ limit: Type.Optional(Type.String()) })
+        querystring: Type.Object({ limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })) })
       }
     },
     async (request, reply) => {
@@ -174,7 +174,7 @@ export async function automationRoutes(fastifyBase: FastifyInstance): Promise<vo
       const { limit } = request.query;
       const automation = await db.getAutomation(id);
       if (!automation) return reply.code(404).send({ error: 'Automation not found' });
-      const runs = await db.listRunsByAutomation(id, limit ? parseInt(limit, 10) : 20);
+      const runs = await db.listRunsByAutomation(id, limit ?? 20);
       return reply.send(runs);
     }
   );

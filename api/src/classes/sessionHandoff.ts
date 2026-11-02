@@ -37,10 +37,17 @@ export async function startContinueInNewChat(
   if (getActiveRun(sessionId) || handoffsInFlight.has(sessionId)) {
     throw new ConflictError('Agent is busy');
   }
-  if ((await db.listSessionMessagesPage(sessionId, 0, 1)).messages.length === 0) {
-    throw new BadRequestError('Nothing to continue from yet');
-  }
+  // Claim the slot before the next await so a double click cannot start two handoffs.
   handoffsInFlight.add(sessionId);
+  try {
+    if ((await db.listSessionMessagesPage(sessionId, 0, 1)).messages.length === 0) {
+      throw new BadRequestError('Nothing to continue from yet');
+    }
+  } catch (err) {
+    handoffsInFlight.delete(sessionId);
+    throw err;
+  }
+  // continueInNewChat releases the slot when it finishes.
   void continueInNewChat({ sessionId, text, imagePaths });
 }
 

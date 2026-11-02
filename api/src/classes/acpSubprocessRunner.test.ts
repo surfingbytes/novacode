@@ -329,6 +329,32 @@ describe('runAcpSubprocessPrompt', () => {
     expect(methods).toContain('session/new');
   });
 
+  it.each([
+    ['fail-if-mcp', 0],
+    ['fail-load-new-if-mcp', 1],
+  ])('emits the reset notice only when context is really lost after the MCP-less retry (%s)', async (mode, expected) => {
+    const { workDir } = setupMock(mode);
+    const events: string[] = [];
+
+    const result = await runAcpSubprocessPrompt(
+      {
+        command: process.execPath,
+        args: [MOCK_AGENT_PATH],
+        cwd: workDir,
+        novaSessionId: `nova-reset-${mode}`,
+        acpSessionId: 'existing-session-42',
+        promptText: 'hello',
+        logTag: 'testAcp',
+        mcpServers: [{ type: 'http', name: 'joplin', url: 'http://joplin-mcp:3000/mcp', headers: [] }],
+      },
+      (line) => events.push(line)
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.acpSessionId).toBe(expected ? MOCK_SESSION_ID : 'existing-session-42');
+    expect(events.filter((line) => line.includes('"session_reset_notice"'))).toHaveLength(expected);
+  });
+
   it('routes ACP permission requests through the injected handler', async () => {
     const { workDir, logPath } = setupMock('prompt-permission');
     const requests: string[] = [];
@@ -470,6 +496,98 @@ describe('runAcpSubprocessPrompt', () => {
 
     expect(result.error).toMatch(/no output for \d+s and was stopped/);
   }, 10_000);
+
+  it('pauses the idle timeout while a permission request waits on the user', async () => {
+    process.env.ACP_PROMPT_IDLE_TIMEOUT_MS = '250';
+    const { workDir } = setupMock('prompt-permission');
+
+    const result = await runMock('nova-idle-permission', null, workDir, () => {}, async () => {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      return { outcome: { outcome: 'selected', optionId: 'allow-once' } };
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.stopReason).toBe('end_turn');
+  }, 10_000);
+
+  it('re-arms the idle timeout once the permission request is answered', async () => {
+    process.env.ACP_PROMPT_IDLE_TIMEOUT_MS = '250';
+    const { workDir } = setupMock('prompt-permission-then-hang');
+
+    const result = await runMock('nova-idle-permission-rearm', null, workDir, () => {}, async () => ({
+      outcome: { outcome: 'selected', optionId: 'allow-once' },
+    }));
+
+    expect(result.error).toMatch(/no output for \d+s and was stopped/);
+  }, 10_000);
+
+  it('pauses the idle timeout while cursor/ask_question waits on the user', async () => {
+    process.env.ACP_PROMPT_IDLE_TIMEOUT_MS = '250';
+    const { workDir } = setupMock('prompt-ask-question');
+
+    const result = await runMock(
+      'nova-idle-ask',
+      null,
+      workDir,
+      () => {},
+      undefined,
+      async () => {
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        return { outcome: { outcome: 'answered', answers: [{ questionId: 'q1', selectedOptionIds: ['plan'] }] } };
+      },
+      true
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.stopReason).toBe('end_turn');
+  }, 10_000);
+
+  it('times out a hang during session setup', async () => {
+    process.env.ACP_PROMPT_IDLE_TIMEOUT_MS = '250';
+    const { workDir } = setupMock('hang-initialize');
+
+    const result = await runMock('nova-setup-hang', null, workDir);
+
+    expect(result.error).toMatch(/did not finish session setup within \d+s and was stopped/);
+  }, 10_000);
+
+  it('cancels promptly during session setup', async () => {
+    const { workDir } = setupMock('hang-initialize');
+
+    const started = Date.now();
+    const pending = runMock('nova-setup-cancel', 'existing-session-42', workDir);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    cancelAcpSubprocess('nova-setup-cancel');
+    const result = await pending;
+
+    expect(result.error).toBeDefined();
+    expect(result.acpSessionId).toBe('existing-session-42');
+    expect(Date.now() - started).toBeLessThan(2_500);
+  }, 10_000);
+
+  it('passes the resolved mode/model to onConfigSync after session setup', async () => {
+    const { workDir } = setupMock('prompt-ok');
+    const syncs: Array<{ modeId?: string; modelId?: string }> = [];
+
+    const result = await runAcpSubprocessPrompt(
+      {
+        command: process.execPath,
+        args: [MOCK_AGENT_PATH],
+        cwd: workDir,
+        novaSessionId: 'nova-config-sync',
+        acpSessionId: null,
+        promptText: 'hello',
+        logTag: 'testAcp',
+        mode: 'plan',
+        model: 'mock-model',
+      },
+      () => {},
+      (sync) => syncs.push(sync)
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(syncs).toContainEqual({ modeId: 'plan', modelId: 'mock-model' });
+  });
 
   it('keeps the prompt alive when a subagent emits session/update on a different session id', async () => {
     process.env.ACP_PROMPT_IDLE_TIMEOUT_MS = '250';

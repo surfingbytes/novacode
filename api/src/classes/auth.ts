@@ -24,6 +24,8 @@ interface JwtPayload {
   id: string;
   /** User token version at signing; tokens without it count as version 0. */
   v?: number;
+  /** Id of the API key this session was minted from; the session dies with the key. */
+  k?: string;
   iat: number;
   exp: number;
 }
@@ -37,9 +39,15 @@ async function getJwtSecret(): Promise<string> {
   return config.jwtSecret;
 }
 
-export async function signToken(username: string, id: string, tokenVersion: number): Promise<string> {
+export async function signToken(
+  username: string,
+  id: string,
+  tokenVersion: number,
+  apiTokenId?: string
+): Promise<string> {
   const secret = await getJwtSecret();
-  return jwt.sign({ username, id, v: tokenVersion }, secret, { expiresIn: JWT_EXPIRES_IN });
+  const payload = apiTokenId ? { username, id, v: tokenVersion, k: apiTokenId } : { username, id, v: tokenVersion };
+  return jwt.sign(payload, secret, { expiresIn: JWT_EXPIRES_IN });
 }
 
 function cookieHeaderFromRequest(request: FastifyRequest): string | undefined {
@@ -71,15 +79,20 @@ async function verifyToken(token: string): Promise<JwtPayload> {
   return jwt.verify(token, secret) as JwtPayload;
 }
 
-export async function authenticateToken(
-  token: string
-): Promise<{ id: string; username: string } | null> {
+interface AuthenticatedUser {
+  id: string;
+  username: string;
+  /** Set when the request is authenticated by an API key, or by a session minted from one. */
+  apiTokenId?: string;
+}
+
+export async function authenticateToken(token: string): Promise<AuthenticatedUser | null> {
   if (!token) {
     return null;
   }
   if (isApiKeyToken(token)) {
-    const user = await db.getUserByApiToken(token);
-    return user ? { id: user.id, username: user.username } : null;
+    const found = await db.getUserByApiToken(token);
+    return found ? { id: found.user.id, username: found.user.username, apiTokenId: found.tokenId } : null;
   }
   try {
     const payload = await verifyToken(token);
@@ -93,6 +106,13 @@ export async function authenticateToken(
     // Password changes bump the version, so older JWTs stop working.
     if ((payload.v ?? 0) !== user.tokenVersion) {
       return null;
+    }
+    // Sessions minted from an API key stop working once that key is deleted or rotated.
+    if (payload.k !== undefined) {
+      if (typeof payload.k !== 'string' || !(await db.apiTokenExists(user.id, payload.k))) {
+        return null;
+      }
+      return { id: user.id, username: user.username, apiTokenId: payload.k };
     }
     return { id: user.id, username: user.username };
   } catch {
@@ -165,9 +185,10 @@ export async function checkCredentials(
   return user;
 }
 
-export async function createAuthUser(username: string, password: string): Promise<UserModel> {
+/** Creates the initial account; null when an account already exists. */
+export async function createFirstAuthUser(username: string, password: string): Promise<UserModel | null> {
   const passwordHash = hashPassword(password);
-  return db.createUser(username, passwordHash);
+  return db.createFirstUser(username, passwordHash);
 }
 
 export async function changePassword(

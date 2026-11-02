@@ -66,6 +66,11 @@ interface ActiveRun {
 /** Runs still in flight, by orchestrator id (a stopped run lives on until its running steps end). */
 const activeRuns = new Map<string, ActiveRun>();
 
+/** Whether a run of the orchestrator is in flight (also after Stop, until its running steps end). */
+export function isOrchestratorRunActive(orchestratorId: string): boolean {
+  return activeRuns.has(orchestratorId);
+}
+
 /** Names of the steps a still-finishing earlier run works on, or null when no run is in flight. */
 export function inFlightRunSteps(orchestratorId: string): string[] | null {
   const run = activeRuns.get(orchestratorId);
@@ -322,8 +327,17 @@ async function runStepTurn(ctx: StepContext, index: number, opts: StepTurnOption
   return result.error ? { error: result.error } : { messages: result.messages ?? [] };
 }
 
-/** Create the step's session and run its prompt to completion. */
-async function runStep(ctx: StepContext, index: number, worktreeCwd: string | null): Promise<void> {
+/**
+ * Create the step's session and run its prompt to completion. `integrate` (parallel
+ * runs) brings the step's work into the run before the step counts as done; it
+ * returns an error message when that fails.
+ */
+async function runStep(
+  ctx: StepContext,
+  index: number,
+  worktreeCwd: string | null,
+  integrate?: () => Promise<string | null>
+): Promise<void> {
   const task = ctx.payload.subtasks[index];
   if (task.kind === 'merge') {
     // Only "Merge again" (the step run alone) merges the kept branch; one-by-one runs work in the workspace.
@@ -342,12 +356,14 @@ async function runStep(ctx: StepContext, index: number, worktreeCwd: string | nu
     prompt: buildStepPrompt(task, ctx.payload, spec, index),
     worktreeCwd
   });
-  if (result.error) {
+  // Still `running` meanwhile, so no dependent starts before the work is in.
+  const error = result.error ?? (integrate ? await integrate().catch((err) => (err instanceof Error ? err.message : String(err))) : null);
+  if (error) {
     markStepFinished(task, 'failed');
-    task.runNote = result.error;
+    task.runNote = error;
   } else {
     markStepFinished(task, 'done');
-    ctx.payload.handoffLog = appendHandoff(ctx.payload.handoffLog, index + 1, task.name, summarizeStepHandoff(result.messages));
+    ctx.payload.handoffLog = appendHandoff(ctx.payload.handoffLog, index + 1, task.name, summarizeStepHandoff(result.messages ?? []));
   }
   await ctx.persist();
 }
@@ -424,6 +440,8 @@ async function runMergeStep(
     return;
   }
   task.mergeRef = ref;
+  // A run that died (server restart) left the integration worktree, which would keep the branch from being deleted.
+  await removeWorktree(repo.root, integrationDirOf(ctx.orchestratorId));
   const kept = `The merged result is kept on branch ${ref.branch}; run this step again to retry.`;
   const applied = await applyCommitRangeToWorkingTree(repo.root, ref.base, ref.branch);
   if (applied.ok) {
@@ -497,8 +515,12 @@ async function runSequential(ctx: StepContext, startIndex: number): Promise<void
   }
 }
 
-function stepBranch(orchestratorId: string, label: string): string {
+export function stepBranch(orchestratorId: string, label: string): string {
   return `nova/${orchestratorId.slice(0, 8)}/${label}`;
+}
+
+function integrationDirOf(orchestratorId: string): string {
+  return join(worktreesRootDir(), orchestratorId, 'integration');
 }
 
 const RESOLVE_CONFLICTS_PROMPT = (stepName: string, files: string[]) => `You are resolving git merge conflicts in this repository (an integration worktree of a Nova orchestrator run).
@@ -516,7 +538,7 @@ Resolve every conflict so the result keeps the intent of BOTH sides (use the spe
 async function runParallel(ctx: StepContext, repo: RepoInfo): Promise<void> {
   const subtasks = ctx.payload.subtasks;
   const runRoot = join(worktreesRootDir(), ctx.orchestratorId);
-  const integrationDir = join(runRoot, 'integration');
+  const integrationDir = integrationDirOf(ctx.orchestratorId);
   const integrationBranch = stepBranch(ctx.orchestratorId, 'integration');
   // Plans saved before merge steps existed get theirs now.
   if (ensureMergeStep(subtasks)) await ctx.persist();
@@ -526,6 +548,12 @@ async function runParallel(ctx: StepContext, repo: RepoInfo): Promise<void> {
 
   const base = await createSnapshotCommit(repo.root, ctx.gitEnv);
   await addWorktree(repo.root, integrationDir, integrationBranch, base);
+  if (!subtasks[mergeIndex].runResult) {
+    // Steps finished in this run exist only on the integration branch until the merge step applies it:
+    // recorded now, so a run that fails or dies (server restart) first leaves it to "Merge again".
+    subtasks[mergeIndex].mergeRef = { base, branch: integrationBranch };
+    await ctx.persist();
+  }
 
   let mergeChain: Promise<void> = Promise.resolve();
   const withMergeLock = <T>(fn: () => Promise<T>): Promise<T> => {
@@ -566,67 +594,73 @@ async function runParallel(ctx: StepContext, repo: RepoInfo): Promise<void> {
     const stepBase = await withMergeLock(() => headCommit(integrationDir));
     await addWorktree(repo.root, dir, branch, stepBase);
     const linked = await linkIgnoredEntries(repo.root, dir);
-    await runStep(ctx, index, join(dir, repo.subdir));
-    await commitAll(dir, `Orchestrator step ${index + 1}: ${task.name}`, ctx.gitEnv, linked);
+    const commit = () => commitAll(dir, `Orchestrator step ${index + 1}: ${task.name}`, ctx.gitEnv, linked);
+    // Commit and merge into the integration branch before the step counts as done.
+    const integrate = async (): Promise<string | null> => {
+      await commit();
+      return withMergeLock(async () => {
+        const merged = await mergeBranch(integrationDir, branch, `Merge orchestrator step ${index + 1}: ${task.name}`, ctx.gitEnv);
+        if (merged.ok) return null;
+        if (merged.conflicts.length > 0 && (await resolveConflicts(task.name, merged.conflicts))) return null;
+        if ((await unmergedFiles(integrationDir)).length > 0 || merged.conflicts.length === 0) {
+          await abortMerge(integrationDir);
+        }
+        return `Merging failed (${merged.conflicts.join(', ') || merged.error})`;
+      });
+    };
+    await runStep(ctx, index, join(dir, repo.subdir), integrate);
     if (task.sessionId) await db.setSessionWorktreePath(task.sessionId, null);
 
     if (task.runResult !== 'done') {
+      // A failed turn's changes aren't committed yet (nothing to commit after a failed merge).
+      await commit();
       await removeWorktree(repo.root, dir);
       task.runNote = `${task.runNote ?? 'Step failed'} — its changes are kept on branch ${branch}.`;
       task.keptBranch = { base: stepBase, branch };
       await ctx.persist();
       return;
     }
-    await withMergeLock(async () => {
-      const merged = await mergeBranch(integrationDir, branch, `Merge orchestrator step ${index + 1}: ${task.name}`, ctx.gitEnv);
-      if (!merged.ok) {
-        const bResolved = merged.conflicts.length > 0 && (await resolveConflicts(task.name, merged.conflicts));
-        if (!bResolved) {
-          if ((await unmergedFiles(integrationDir)).length > 0 || merged.conflicts.length === 0) {
-            await abortMerge(integrationDir);
-          }
-          await removeWorktree(repo.root, dir);
-          markStepFinished(task, 'failed');
-          task.runNote = `Merging failed (${merged.conflicts.join(', ') || merged.error}); changes are kept on branch ${branch}.`;
-          task.keptBranch = { base: stepBase, branch };
-          await ctx.persist();
-          return;
-        }
-      }
-      await removeWorktree(repo.root, dir);
-      await deleteBranch(repo.root, branch);
-    });
+    await removeWorktree(repo.root, dir);
+    await deleteBranch(repo.root, branch);
   };
 
   const running = new Map<number, Promise<void>>();
-  for (;;) {
-    if (skipBlockedSteps(subtasks)) await ctx.persist();
-    const bStopped = await ctx.isStopped();
-    if (!bStopped) {
-      const { maxParallel } = await ctx.settings();
-      const ready = findRunnableSteps(subtasks).filter((index) => !running.has(index) && !autoIndexes.has(index));
-      for (const index of ready.slice(0, Math.max(0, maxParallel - running.size))) {
-        const promise = runWorktreeStep(index)
-          .catch(async (err) => {
-            logger.warn({ err, orchestratorId: ctx.orchestratorId, index }, 'Orchestrator step failed');
-            markStepFinished(subtasks[index], 'failed');
-            subtasks[index].runNote = err instanceof Error ? err.message : String(err);
-            await ctx.persist();
-          })
-          .finally(() => running.delete(index));
-        running.set(index, promise);
+  try {
+    for (;;) {
+      if (skipBlockedSteps(subtasks)) await ctx.persist();
+      const bStopped = await ctx.isStopped();
+      if (!bStopped) {
+        const { maxParallel } = await ctx.settings();
+        const ready = findRunnableSteps(subtasks).filter((index) => !running.has(index) && !autoIndexes.has(index));
+        for (const index of ready.slice(0, Math.max(0, maxParallel - running.size))) {
+          const promise = runWorktreeStep(index)
+            .catch(async (err) => {
+              logger.warn({ err, orchestratorId: ctx.orchestratorId, index }, 'Orchestrator step failed');
+              markStepFinished(subtasks[index], 'failed');
+              subtasks[index].runNote = err instanceof Error ? err.message : String(err);
+              await ctx.persist();
+            })
+            .finally(() => running.delete(index));
+          running.set(index, promise);
+        }
       }
+      if (running.size === 0) {
+        if (bStopped && ctx.run.bResumePending) continue;
+        // Nothing runs and nothing is ready (or the run was stopped): it can't be resumed any more.
+        ctx.run.bResumable = false;
+        break;
+      }
+      const woken = new Promise<void>((resolve) => {
+        ctx.run.wake = resolve;
+      });
+      await Promise.race([...running.values(), woken]);
     }
-    if (running.size === 0) {
-      if (bStopped && ctx.run.bResumePending) continue;
-      // Nothing runs and nothing is ready (or the run was stopped): it can't be resumed any more.
-      ctx.run.bResumable = false;
-      break;
-    }
-    const woken = new Promise<void>((resolve) => {
-      ctx.run.wake = resolve;
-    });
-    await Promise.race([...running.values(), woken]);
+  } catch (err) {
+    // Let started steps end so their work reaches the integration branch (kept for "Merge again").
+    ctx.run.bResumable = false;
+    await Promise.allSettled([...running.values()]);
+    await removeWorktree(repo.root, integrationDir);
+    throw err;
   }
 
   // Merge whatever was integrated, even after a stop, so finished work isn't stranded
@@ -724,14 +758,17 @@ async function runOrchestratorSteps(workspaceId: string, orchestratorId: string,
       name: workspace.gitUserName ?? undefined,
       email: workspace.gitUserEmail ?? undefined
     }),
+    // A failed save is logged and the chain goes on: each save writes the whole state, so the next one catches up.
     persist: () => {
-      persistChain = persistChain.then(() =>
-        updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
-          runCurrentStep: finishedCount(subtasks),
-          runTotalSteps: subtasks.length,
-          subtasksJson: serializeSubtasksPayload(payload)
-        })
-      );
+      persistChain = persistChain
+        .then(() =>
+          updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
+            runCurrentStep: finishedCount(subtasks),
+            runTotalSteps: subtasks.length,
+            subtasksJson: serializeSubtasksPayload(payload)
+          })
+        )
+        .catch((err) => logger.warn({ err, orchestratorId }, 'Could not save the orchestrator run state'));
       return persistChain.then(() => undefined);
     },
     isStopped: async () => (await db.getOrchestrator(orchestratorId))?.runStatus !== 'running' && !run.bResumePending
@@ -812,6 +849,11 @@ async function runOrchestratorSteps(workspaceId: string, orchestratorId: string,
       task.waitingQuestion = null;
     }
     const message = error instanceof Error ? error.message : String(error);
+    const unmerged = subtasks.find((task) => task.kind === 'merge' && task.mergeRef && task.runResult !== 'done');
+    if (unmerged?.mergeRef && !unmerged.runResult) {
+      markStepFinished(unmerged, 'failed');
+      unmerged.runNote = `Run stopped: ${message}\nThe finished steps' work is kept on branch ${unmerged.mergeRef.branch}; run this step to merge it into the workspace.`;
+    }
     const firstOpen = subtasks.find((task) => !task.runResult || task.runResult === 'failed');
     if (firstOpen && !firstOpen.runNote) firstOpen.runNote = `Run stopped: ${message}`;
     await persistChain.catch(() => {});

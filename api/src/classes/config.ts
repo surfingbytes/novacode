@@ -252,6 +252,18 @@ export const config = {
 
 // --------------------------------------------- Functions ---------------------------------------------
 
+/** Quoted git config value: `"` and `\` escaped, so it cannot end the line or inject keys. */
+function gitConfigValue(value: string): string {
+  const escaped = value
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\t/g, '\\t')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\x00-\x1f\x7f]/g, '');
+  return `"${escaped}"`;
+}
+
 // write (or update) configDir/.gitconfig with safe.directory = * and optional global user identity.
 // Preserves other sections (e.g. includeIf) so custom git config survives restarts.
 export function writeGlobalGitConfig(
@@ -280,8 +292,8 @@ export function writeGlobalGitConfig(
 
   const flushUserTrailing = (): void => {
     if (section !== 'user') return;
-    if (name && !wroteUserName) out.push(`\tname = ${name}`);
-    if (email && !wroteUserEmail) out.push(`\temail = ${email}`);
+    if (name && !wroteUserName) out.push(`\tname = ${gitConfigValue(name)}`);
+    if (email && !wroteUserEmail) out.push(`\temail = ${gitConfigValue(email)}`);
   };
 
   for (const line of lines) {
@@ -309,7 +321,7 @@ export function writeGlobalGitConfig(
       if (/^\s*name\s*=/.test(line)) {
         if (name) {
           if (!wroteUserName) {
-            out.push(`\tname = ${name}`);
+            out.push(`\tname = ${gitConfigValue(name)}`);
             wroteUserName = true;
           }
           continue;
@@ -318,7 +330,7 @@ export function writeGlobalGitConfig(
       if (/^\s*email\s*=/.test(line)) {
         if (email) {
           if (!wroteUserEmail) {
-            out.push(`\temail = ${email}`);
+            out.push(`\temail = ${gitConfigValue(email)}`);
             wroteUserEmail = true;
           }
           continue;
@@ -341,8 +353,8 @@ export function writeGlobalGitConfig(
 
   if ((name || email) && !sawUser) {
     out.push('[user]');
-    if (name) out.push(`\tname = ${name}`);
-    if (email) out.push(`\temail = ${email}`);
+    if (name) out.push(`\tname = ${gitConfigValue(name)}`);
+    if (email) out.push(`\temail = ${gitConfigValue(email)}`);
   }
 
   const content =

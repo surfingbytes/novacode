@@ -181,13 +181,14 @@ describe('claude adapter cancel', () => {
     await vi.waitFor(() => expect(finish).toBeDefined());
 
     await adapter.cancel('nova-1');
-    expect(mocks.cancelClaudeAcp).toHaveBeenCalledWith('acp-9');
+    expect(mocks.cancelClaudeAcp).toHaveBeenCalledWith('nova-1', 'acp-9');
     expect(onSessionId).toHaveBeenCalledWith('acp-9');
 
     finish!();
     await running;
     mocks.cancelClaudeAcp.mockClear();
     await adapter.cancel('nova-1');
-    expect(mocks.cancelClaudeAcp).not.toHaveBeenCalled();
+    // No ACP session once the run ended; claudeAcp ignores the Nova id without a turn.
+    expect(mocks.cancelClaudeAcp).toHaveBeenCalledWith('nova-1', null);
   });
 });

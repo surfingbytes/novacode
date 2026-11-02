@@ -144,6 +144,30 @@ describe('sequential run', () => {
   });
 });
 
+describe('saving run state', () => {
+  it('keeps saving after one save fails and completes the run', async () => {
+    mocks.db.getOrchestrator.mockResolvedValue({ id: 'o1', name: 'Plan', agentType: 'claude', runStatus: 'running', sourceSessionId: null });
+    mocks.db.getWorkspace.mockResolvedValue({ id: 'w1', path: '/ws' });
+    mocks.createSessionWithAgent.mockResolvedValue({ session: { id: 'step-s1', modelSelection: 'auto', sessionMode: 'default' } });
+    mocks.dispatchPromptAndWait.mockResolvedValue({ messages: [] });
+    mocks.updateOrchestratorAndBroadcast.mockRejectedValueOnce(new Error('database busy')).mockResolvedValue(undefined);
+    const payload: OrchestratorSubtasksPayload = {
+      sharedContext: '',
+      handoffLog: '',
+      subtasks: [
+        { name: 'Step 1', prompt: 'do it' },
+        { name: 'Step 2', prompt: 'then this' }
+      ]
+    };
+
+    await runOrchestrator('w1', 'o1', payload, { mode: 'sequential' });
+
+    expect(payload.subtasks.map((task) => task.runResult)).toEqual(['done', 'done']);
+    expect(mocks.updateOrchestratorAndBroadcast.mock.calls.length).toBeGreaterThan(2);
+    expect(mocks.updateOrchestratorAndBroadcast).toHaveBeenLastCalledWith('w1', 'o1', expect.objectContaining({ runStatus: 'completed' }));
+  });
+});
+
 describe('step timing', () => {
   it('stamps worker, merge and verify steps when they start and end; skipped steps get no timing', async () => {
     mocks.db.getOrchestrator.mockResolvedValue({ id: 'o1', name: 'Plan', agentType: 'claude', runStatus: 'running', sourceSessionId: null });
@@ -253,6 +277,97 @@ describe('parallel run in a git workspace', () => {
     expect(mocks.git.createSnapshotCommit).toHaveBeenCalledTimes(3);
     expect(mocks.git.changedFiles).toHaveBeenCalledWith('/repo', 'snap-1', 'snap-3');
     expect(mocks.updateOrchestratorAndBroadcast).toHaveBeenLastCalledWith('w1', 'o1', expect.objectContaining({ runStatus: 'failed', runChangedFiles: 3 }));
+  });
+
+  const setUpParallelRun = () => {
+    const orchestrator = { id: 'o1', name: 'Plan', agentType: 'claude', runStatus: 'running', sourceSessionId: null, maxParallel: 2 };
+    mocks.db.getOrchestrator.mockResolvedValue(orchestrator);
+    mocks.db.getWorkspace.mockResolvedValue({ id: 'w1', path: '/repo' });
+    let sessionCount = 0;
+    mocks.createSessionWithAgent.mockImplementation(async () => ({
+      session: { id: `step-s${++sessionCount}`, modelSelection: 'auto', sessionMode: 'default' }
+    }));
+    mocks.dispatchPromptAndWait.mockResolvedValue({ messages: [] });
+    mocks.updateOrchestratorAndBroadcast.mockResolvedValue(undefined);
+    mocks.git.resolveRepo.mockResolvedValue({ root: '/repo', subdir: '' });
+    mocks.git.createSnapshotCommit.mockResolvedValue('snap');
+    mocks.git.headCommit.mockResolvedValue('integration-head');
+    mocks.git.linkIgnoredEntries.mockResolvedValue([]);
+    mocks.git.unmergedFiles.mockResolvedValue([]);
+    mocks.git.branchExists.mockResolvedValue(true);
+    mocks.git.applyCommitRangeToWorkingTree.mockResolvedValue({ ok: true, bChanged: true });
+    mocks.git.changedFiles.mockResolvedValue([]);
+    const payload: OrchestratorSubtasksPayload = {
+      sharedContext: '',
+      handoffLog: '',
+      subtasks: [
+        { name: 'Step 1', prompt: 'do it' },
+        { name: 'Step 2', prompt: 'then this', dependsOn: [0] },
+        { name: 'Merge into workspace', prompt: 'merge', kind: 'merge' }
+      ]
+    };
+    return { orchestrator, payload };
+  };
+
+  it('marks a step done and starts its dependents only after its work is merged into the integration branch', async () => {
+    const { payload } = setUpParallelRun();
+    let finishMerge: (result: { ok: true }) => void = () => {};
+    mocks.git.mergeBranch.mockReturnValueOnce(new Promise((resolve) => (finishMerge = resolve))).mockResolvedValue({ ok: true });
+
+    const done = runOrchestrator('w1', 'o1', payload, { mode: 'parallel' });
+    await vi.waitFor(() => expect(mocks.git.mergeBranch).toHaveBeenCalledOnce());
+    expect(mocks.git.commitAll).toHaveBeenCalledOnce();
+    expect(payload.subtasks[0].runResult).toBe('running');
+    expect(mocks.createSessionWithAgent).toHaveBeenCalledOnce();
+
+    finishMerge({ ok: true });
+    await done;
+
+    expect(payload.subtasks.map((task) => task.runResult)).toEqual(['done', 'done', 'done']);
+    expect(mocks.createSessionWithAgent).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails a step whose merge fails without ever starting its dependents', async () => {
+    const { payload } = setUpParallelRun();
+    mocks.git.mergeBranch.mockResolvedValue({ ok: false, conflicts: [], error: 'merge broke' });
+
+    await runOrchestrator('w1', 'o1', payload, { mode: 'parallel' });
+
+    expect(payload.subtasks[0]).toMatchObject({
+      runResult: 'failed',
+      runNote: 'Merging failed (merge broke) — its changes are kept on branch nova/o1/step-1.',
+      keptBranch: { base: 'integration-head', branch: 'nova/o1/step-1' }
+    });
+    expect(payload.handoffLog).toBe('');
+    expect(mocks.git.abortMerge).toHaveBeenCalledOnce();
+    expect(payload.subtasks[1].runResult).toBe('skipped');
+    expect(mocks.createSessionWithAgent).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the integration branch for "Merge again" when the run fails before its merge step', async () => {
+    const { orchestrator, payload } = setUpParallelRun();
+    mocks.git.mergeBranch.mockResolvedValue({ ok: true });
+    // The database goes away once the first step is done.
+    mocks.db.getOrchestrator.mockImplementation(async () => {
+      if (payload.subtasks[0].runResult === 'done') throw new Error('database gone');
+      return orchestrator;
+    });
+
+    await runOrchestrator('w1', 'o1', payload, { mode: 'parallel' });
+
+    const mergeRef = { base: 'snap', branch: 'nova/o1/integration' };
+    expect(payload.subtasks[0].runResult).toBe('done');
+    expect(payload.subtasks[2]).toMatchObject({ runResult: 'failed', mergeRef });
+    expect(payload.subtasks[2].runNote).toContain('kept on branch nova/o1/integration');
+    expect(mocks.git.applyCommitRangeToWorkingTree).not.toHaveBeenCalled();
+    expect(mocks.git.deleteBranch).not.toHaveBeenCalledWith('/repo', 'nova/o1/integration');
+    expect(mocks.git.removeWorktree).toHaveBeenCalledWith('/repo', '/worktrees/o1/integration');
+    // Saved as soon as the integration branch exists, so a server restart mid-run keeps it too.
+    const firstSaved = mocks.updateOrchestratorAndBroadcast.mock.calls
+      .map(([, , patch]) => patch.subtasksJson && JSON.parse(patch.subtasksJson))
+      .find((saved) => saved?.subtasks?.[2]?.mergeRef);
+    expect(firstSaved.subtasks.map((task: { runResult?: string }) => task.runResult ?? null)).toEqual([null, null, null]);
+    expect(mocks.updateOrchestratorAndBroadcast).toHaveBeenLastCalledWith('w1', 'o1', expect.objectContaining({ runStatus: 'failed' }));
   });
 
   it('never counts changed files for a single-step run', async () => {

@@ -21,6 +21,11 @@ interface CursorUpdateTodosParams {
 /** Last accepted todos from cursor/update_todos, keyed by ACP session id (survives per-turn subprocess restarts). */
 const cursorTodoStateBySession = new Map<string, CursorTodoItem[]>();
 
+/** Drop the stored todos of an ACP session (called when its Nova session is deleted). */
+export function clearCursorTodoState(acpSessionId: string): void {
+  cursorTodoStateBySession.delete(acpSessionId);
+}
+
 function normalizeCursorTodoStatus(status: unknown): CursorTodoItem['status'] {
   if (typeof status !== 'string') return 'pending';
   const normalized = status.toLowerCase().replace(/^todo_status_/, '').replace(/[\s-]+/g, '_');

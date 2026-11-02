@@ -330,6 +330,12 @@ export async function runAcpSubprocessPrompt(
   let bPromptInFlight = false;
   let bPromptIdleTimedOut = false;
   let promptIdleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Permission / ask_question requests waiting on the user; the idle watchdog is paused meanwhile. */
+  let pendingUserRequests = 0;
+  /** Initialize → session open → config must finish within the idle timeout too. */
+  let bSetupTimedOut = false;
+  let setupTimer: ReturnType<typeof setTimeout> | null = null;
+  let bCancelRequested = false;
   const streamingInput = new StreamingToolInputTracker();
   const backgroundTaskIds = new Set<string>();
   /** All Task toolCallIds seen this turn (for total count in the UI). */
@@ -511,6 +517,7 @@ export async function runAcpSubprocessPrompt(
     const timeoutMs = effectivePromptIdleTimeoutMs(promptIdleTimeoutMs(), streamingInput.bStreaming);
     if (!bPromptInFlight || timeoutMs <= 0) return;
     clearPromptIdleTimer();
+    if (pendingUserRequests > 0) return;
     promptIdleTimer = setTimeout(() => {
       bPromptIdleTimedOut = true;
       logger.warn({ logTag, novaSessionId, timeoutMs }, 'prompt idle timeout');
@@ -528,12 +535,24 @@ export async function runAcpSubprocessPrompt(
     armPromptIdleTimer();
   };
 
+  /** Keeps the idle watchdog paused while the user answers; re-arms after the last answer. */
+  const whileAwaitingUser = async <T>(request: () => T | Promise<T>): Promise<T> => {
+    pendingUserRequests++;
+    clearPromptIdleTimer();
+    try {
+      return await request();
+    } finally {
+      pendingUserRequests--;
+      armPromptIdleTimer();
+    }
+  };
+
   const app = buildClientApp(
     onConfigSync,
     params.cursorExtensions,
     () => sessionIdForCancel,
-    onRequestPermission,
-    onAskQuestion,
+    onRequestPermission ? (request) => whileAwaitingUser(() => onRequestPermission(request)) : undefined,
+    onAskQuestion ? (request) => whileAwaitingUser(() => onAskQuestion(request)) : undefined,
     () => (bPromptInFlight ? handleEvent : undefined)
   );
 
@@ -554,10 +573,12 @@ export async function runAcpSubprocessPrompt(
 
   const cancelRun = () => {
     void (async () => {
+      bCancelRequested = true;
       stopTranscriptPolling();
       backgroundTaskIds.clear();
       settleBackgroundTaskWait();
-      if (ctxRef && sessionIdForCancel) {
+      // During setup there is no turn to end gracefully: kill right away.
+      if (ctxRef && sessionIdForCancel && bPromptInFlight) {
         try {
           await ctxRef.notify(methods.agent.session.cancel, { sessionId: sessionIdForCancel });
         } catch {
@@ -584,6 +605,34 @@ export async function runAcpSubprocessPrompt(
   if (onConfigSync) {
     configSyncHandlers.set(novaSessionId, onConfigSync);
   }
+
+  const clearSetupTimer = (): void => {
+    if (setupTimer !== null) {
+      clearTimeout(setupTimer);
+      setupTimer = null;
+    }
+  };
+  const setupTimeoutMs = promptIdleTimeoutMs();
+  if (setupTimeoutMs > 0) {
+    // The prompt watchdog only runs once the prompt is in flight; a hang in
+    // initialize / session open / MCP setup would otherwise last forever.
+    setupTimer = setTimeout(() => {
+      bSetupTimedOut = true;
+      logger.warn({ logTag, novaSessionId, timeoutMs: setupTimeoutMs }, 'session setup timeout');
+      killProc();
+    }, setupTimeoutMs);
+  }
+
+  /** User-facing error when a watchdog stopped the agent, else null. */
+  const watchdogError = (): string | null => {
+    if (bPromptIdleTimedOut) {
+      return `Agent produced no output for ${Math.round(promptIdleTimeoutMs() / 1000)}s and was stopped.`;
+    }
+    if (bSetupTimedOut) {
+      return `Agent did not finish session setup within ${Math.round(setupTimeoutMs / 1000)}s and was stopped.`;
+    }
+    return null;
+  };
 
   try {
     return await Promise.race([spawnFailure, app.connectWith(stream, async (ctx) => {
@@ -646,7 +695,6 @@ export async function runAcpSubprocessPrompt(
           return { sessionId: acpSessionId, response: loaded, isFresh: false };
         } catch (err) {
           logger.warn({ logTag, novaSessionId, err }, 'loadSession failed, starting fresh session');
-          handleEvent(sessionResetNoticeEventLine());
           activeHandlers.delete(acpSessionId);
           const created = await newSession(servers);
           return { sessionId: created.sessionId, response: created, isFresh: true };
@@ -675,6 +723,9 @@ export async function runAcpSubprocessPrompt(
         if (notice) handleEvent(notice);
         opened = await loadOrCreateSession([]);
       }
+      // Only once the final attempt settled: the MCP-less retry may resume the
+      // conversation after the first attempt fell back to a fresh session.
+      if (acpSessionId && opened.isFresh) handleEvent(sessionResetNoticeEventLine());
 
       const sessionResponse = opened.response;
       const resolvedSessionId = opened.sessionId;
@@ -720,10 +771,9 @@ export async function runAcpSubprocessPrompt(
       const requestedModel = params.model?.trim();
       resolvedModeId = requestedMode && requestedMode !== 'default' ? requestedMode : resolvedModeId;
       resolvedModelId = requestedModel || resolvedModelId;
-      emitSessionConfigSync(handleEvent, {
-        modeId: resolvedModeId,
-        modelId: resolvedModelId,
-      });
+      const resolvedSync = { modeId: resolvedModeId, modelId: resolvedModelId };
+      if (resolvedSync.modeId || resolvedSync.modelId) onConfigSync?.(resolvedSync);
+      emitSessionConfigSync(handleEvent, resolvedSync);
 
       activeHandlers.set(resolvedSessionId, handleEvent);
       try {
@@ -742,6 +792,10 @@ export async function runAcpSubprocessPrompt(
         const finalPromptText = params.transformPrompt
           ? params.transformPrompt(basePromptText, resolvedSessionId)
           : basePromptText;
+        clearSetupTimer();
+        if (bSetupTimedOut || bCancelRequested) {
+          throw new Error(bCancelRequested ? 'Cancelled during session setup.' : 'Session setup timed out.');
+        }
         bPromptInFlight = true;
         armPromptIdleTimer();
         const resp = (await ctx.request(methods.agent.session.prompt, {
@@ -758,10 +812,11 @@ export async function runAcpSubprocessPrompt(
             'parent prompt finished; waiting for background subagents'
           );
           await waitForBackgroundTasks();
-          if (bPromptIdleTimedOut) {
+          const stoppedError = watchdogError();
+          if (stoppedError) {
             return {
               acpSessionId: resolvedSessionId,
-              error: `Agent produced no output for ${Math.round(promptIdleTimeoutMs() / 1000)}s and was stopped.`,
+              error: stoppedError,
               resolvedModeId,
               resolvedModelId,
             };
@@ -775,10 +830,11 @@ export async function runAcpSubprocessPrompt(
           resolvedModelId,
         };
       } catch (err) {
-        if (bPromptIdleTimedOut) {
+        const stoppedError = watchdogError();
+        if (stoppedError) {
           return {
             acpSessionId: resolvedSessionId,
-            error: `Agent produced no output for ${Math.round(promptIdleTimeoutMs() / 1000)}s and was stopped.`,
+            error: stoppedError,
             resolvedModeId,
             resolvedModelId,
           };
@@ -805,11 +861,9 @@ export async function runAcpSubprocessPrompt(
   } catch (err) {
     resolvePromptSettled();
     clearPromptIdleTimer();
-    if (bPromptIdleTimedOut) {
-      return {
-        acpSessionId: sessionIdForCancel ?? '',
-        error: `Agent produced no output for ${Math.round(promptIdleTimeoutMs() / 1000)}s and was stopped.`,
-      };
+    const stoppedError = watchdogError();
+    if (stoppedError) {
+      return { acpSessionId: sessionIdForCancel ?? '', error: stoppedError };
     }
     // Preserve the ACP session id resolved this turn (session/new or session/load):
     // when a cancel kills the subprocess mid-prompt, connectWith rejects even though
@@ -818,6 +872,7 @@ export async function runAcpSubprocessPrompt(
     const errorDetail = extractAgentErrorDetail(err);
     return { acpSessionId: sessionIdForCancel ?? '', error: errorDetail.message, errorDetail };
   } finally {
+    clearSetupTimer();
     clearPromptIdleTimer();
     stopTranscriptPolling();
     activeRuns.delete(novaSessionId);

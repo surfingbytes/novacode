@@ -24,6 +24,10 @@ interface ForegroundEvents {
 class FakeClaudeAgent {
   static instances: FakeClaudeAgent[] = [];
   static nextSessionNumber = 0;
+  /** newSession / resumeSession never settle (a hung CLI). */
+  static hangSetup = false;
+  /** Extra fields of every newSession response (modes, config options). */
+  static sessionResponse: object = {};
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly client: any;
   readonly options: { foreground?: (sessionId: string) => ForegroundEvents };
@@ -32,6 +36,8 @@ class FakeClaudeAgent {
   pendingPrompt: PendingPrompt | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sessionParams: any[] = [];
+  promptCount = 0;
+  cancelCount = 0;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(client: any, _logger?: unknown, options: { foreground?: (sessionId: string) => ForegroundEvents } = {}) {
@@ -64,24 +70,38 @@ class FakeClaudeAgent {
 
   async newSession(params: object): Promise<{ sessionId: string }> {
     this.sessionParams.push(params);
+    if (FakeClaudeAgent.hangSetup) await new Promise(() => {});
     const sessionId = `acp-${++FakeClaudeAgent.nextSessionNumber}`;
     this.sessions[sessionId] = {};
-    return { sessionId };
+    return { sessionId, ...FakeClaudeAgent.sessionResponse };
   }
 
   async resumeSession(params: { sessionId: string }): Promise<object> {
     this.sessionParams.push(params);
+    if (FakeClaudeAgent.hangSetup) await new Promise(() => {});
     this.sessions[params.sessionId] = {};
     return {};
   }
 
+  /** Like the adapter: the switch is announced with a current_mode_update. */
+  async setSessionMode(params: { sessionId: string; modeId: string }): Promise<object> {
+    await this.client.sessionUpdate({
+      sessionId: params.sessionId,
+      update: { sessionUpdate: 'current_mode_update', currentModeId: params.modeId }
+    });
+    return {};
+  }
+
   prompt(): Promise<{ stopReason: string }> {
+    this.promptCount++;
     return new Promise((resolve, reject) => {
       this.pendingPrompt = { resolve, reject };
     });
   }
 
-  async cancel(): Promise<void> {}
+  async cancel(): Promise<void> {
+    this.cancelCount++;
+  }
 
   async dispose(): Promise<void> {
     this.disposed = true;
@@ -146,6 +166,8 @@ beforeEach(async () => {
   process.env['ACP_PROMPT_IDLE_TIMEOUT_MS'] = '0';
   FakeClaudeAgent.instances = [];
   FakeClaudeAgent.nextSessionNumber = 0;
+  FakeClaudeAgent.hangSetup = false;
+  FakeClaudeAgent.sessionResponse = {};
   claudeAcp = await import('./claudeAcp.js');
   claudeAcp.setClaudeAcpAgentCtorForTests(FakeClaudeAgent);
 });
@@ -430,7 +452,7 @@ describe('embedded Claude follow-up work', () => {
     await vi.advanceTimersByTimeAsync(10_000);
     expect(await isSettled(result)).toBe(false);
 
-    claudeAcp.cancelClaudeAcp('acp-1');
+    claudeAcp.cancelClaudeAcp('nova-1', 'acp-1');
     await flush();
     await expect(result).resolves.toMatchObject({ stopReason: 'end_turn' });
   });
@@ -506,8 +528,114 @@ describe('embedded Claude follow-up work', () => {
     expect(agent.disposed).toBe(false);
     expect(await isSettled(result)).toBe(false);
 
-    claudeAcp.cancelClaudeAcp('acp-1');
+    claudeAcp.cancelClaudeAcp('nova-1', 'acp-1');
     await flush();
     await expect(result).resolves.toMatchObject({ stopReason: 'end_turn' });
+  });
+});
+
+describe('embedded Claude turn start', () => {
+  it('never sends the prompt when Stop is pressed before it starts', async () => {
+    let finishPrefix: (prefix: string) => void = () => {};
+    const result = claudeAcp.runClaudeAcp(
+      {
+        novaSessionId: 'nova-1',
+        acpSessionId: null,
+        cwd: '/tmp',
+        promptText: 'hi',
+        getFreshSessionPrefix: () => new Promise((resolve) => (finishPrefix = resolve))
+      },
+      () => {}
+    );
+    await flush();
+    const agent = FakeClaudeAgent.instances[0]!;
+
+    claudeAcp.cancelClaudeAcp('nova-1', 'acp-1');
+    finishPrefix('rules');
+    await expect(result).resolves.toEqual({ acpSessionId: 'acp-1', stopReason: 'cancelled' });
+    expect(agent.promptCount).toBe(0);
+  });
+
+  it('cancels again once a turn stopped while starting becomes active', async () => {
+    const { result, agent } = await startTurn('nova-1');
+    // Stop lands before Claude Code took the prompt in; activation would undo it.
+    claudeAcp.cancelClaudeAcp('nova-1', 'acp-1');
+    await flush();
+    expect(agent.cancelCount).toBe(1);
+
+    agent.foreground('acp-1').running();
+    await flush();
+    expect(agent.cancelCount).toBe(2);
+
+    agent.pendingPrompt!.resolve({ stopReason: 'cancelled' });
+    await expect(result).resolves.toMatchObject({ stopReason: 'cancelled' });
+  });
+
+  it('does not re-cancel when a turn that was not stopped becomes active', async () => {
+    const { result, agent } = await startTurn('nova-1');
+    agent.foreground('acp-1').running();
+    await flush();
+    expect(agent.cancelCount).toBe(0);
+    agent.foreground('acp-1').ended({ stopReason: 'end_turn' });
+    await finishTurn(agent);
+    await expect(result).resolves.toMatchObject({ stopReason: 'end_turn' });
+  });
+
+  it('ends a turn whose newSession hangs when Stop is pressed', async () => {
+    FakeClaudeAgent.hangSetup = true;
+    const result = claudeAcp.runClaudeAcp(
+      { novaSessionId: 'nova-1', acpSessionId: null, cwd: '/tmp', promptText: 'hi' },
+      () => {}
+    );
+    await flush();
+
+    claudeAcp.cancelClaudeAcp('nova-1', null);
+    await expect(result).resolves.toEqual({ acpSessionId: '', stopReason: 'cancelled' });
+    expect(FakeClaudeAgent.instances[0]!.promptCount).toBe(0);
+  });
+
+  it('stops a turn whose resumeSession hangs past the idle timeout', async () => {
+    process.env['ACP_PROMPT_IDLE_TIMEOUT_MS'] = '300000';
+    FakeClaudeAgent.hangSetup = true;
+    const result = claudeAcp.runClaudeAcp(
+      { novaSessionId: 'nova-1', acpSessionId: 'acp-old', cwd: '/tmp', promptText: 'hi' },
+      () => {}
+    );
+    await flush();
+    const agent = FakeClaudeAgent.instances[0]!;
+
+    await vi.advanceTimersByTimeAsync(299_000);
+    expect(await isSettled(result)).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(result).resolves.toEqual({
+      acpSessionId: 'acp-old',
+      error: 'Agent session did not start within 300s and was stopped.'
+    });
+    expect(agent.disposed).toBe(true);
+    expect(agent.promptCount).toBe(0);
+  });
+
+  it('reports the mode applied during session setup', async () => {
+    FakeClaudeAgent.sessionResponse = {
+      modes: { currentModeId: 'default', availableModes: [{ id: 'default' }, { id: 'plan' }] }
+    };
+    const syncs: Array<{ modeId?: string }> = [];
+    const events: string[] = [];
+    const result = claudeAcp.runClaudeAcp(
+      { novaSessionId: 'nova-1', acpSessionId: null, cwd: '/tmp', promptText: 'hi', mode: 'plan' },
+      (line) => events.push(line),
+      (sync) => syncs.push(sync)
+    );
+    await flush();
+    const agent = FakeClaudeAgent.instances[0]!;
+
+    expect(syncs.length).toBeGreaterThan(0);
+    // The stale mode of the session response must not follow the switch.
+    expect(syncs.every((sync) => sync.modeId === 'plan')).toBe(true);
+    expect(events.some((line) => line.includes('current_mode_update'))).toBe(true);
+
+    await finishTurn(agent);
+    await result;
   });
 });

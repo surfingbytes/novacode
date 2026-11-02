@@ -20,6 +20,7 @@ import { parseSubtasksPayloadString, serializeSubtasksPayload } from '../classes
 import { broadcastOrchestratorUpsert, updateOrchestratorAndBroadcast } from '../classes/orchestratorEvents';
 import { publishSpecStatus } from '../classes/sessionSpecStatus';
 import { markStepNeedsInput } from '../classes/orchestratorRunner';
+import { planLockedReason } from './orchestrator';
 
 // -------------------------------------------- Tools --------------------------------------------
 
@@ -169,9 +170,8 @@ async function callNovaTool(sessionId: string, name: string, args: Record<string
   if (name === 'orchestrator_save_plan') {
     const validated = validatePlanSteps(args.steps);
     if ('error' in validated) return fail(validated.error);
-    if (existing?.runStatus === 'running') {
-      return fail('The plan is running right now; wait until it finishes or ask the user to stop it.');
-    }
+    const locked = existing ? planLockedReason(existing) : null;
+    if (locked) return fail(locked);
     const previous = parseSubtasksPayloadString(existing?.subtasksJson);
     const subtasks = buildPlanSubtasks(validated.steps, previous?.subtasks ?? []);
     const bKeptResults = subtasks.some((task) => task.runResult === 'done');

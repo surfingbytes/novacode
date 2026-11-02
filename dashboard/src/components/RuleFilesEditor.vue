@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // node_modules
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 
 // components
 import ConfirmModal from '@/components/ConfirmModal.vue';
@@ -59,6 +59,10 @@ const newRuleFilename = ref('');
 const selectedTemplateId = ref<string | null>(null);
 const bCreatingRule = ref(false);
 const createRuleError = ref<string | null>(null);
+/** Bumped on workspace change; responses from an older workspace are discarded. */
+let workspaceGen = 0;
+/** Bumped per loadFile; older read responses are discarded. */
+let loadSeq = 0;
 
 // -------------------------------------------------- Computed --------------------------------------------------
 
@@ -127,11 +131,15 @@ async function fetchFiles(): Promise<void> {
   if (!bIsGlobal.value && !workspaceId.value) {
     return;
   }
+  const gen = workspaceGen;
   bListLoading.value = true;
   listError.value = null;
   bRulesDirMissing.value = false;
   try {
     const { data } = await rulesApi().list();
+    if (gen !== workspaceGen) {
+      return;
+    }
     files.value = data ?? [];
     if (files.value.length > 0) {
       // Initial selection without unsaved-change prompt.
@@ -143,6 +151,9 @@ async function fetchFiles(): Promise<void> {
       originalContent.value = '';
     }
   } catch (e: unknown) {
+    if (gen !== workspaceGen) {
+      return;
+    }
     const caughtError = e as {
       response?: { status?: number; data?: { error?: string; code?: string } };
       message?: string;
@@ -161,7 +172,9 @@ async function fetchFiles(): Promise<void> {
       listError.value = caughtError.response?.data?.error ?? 'Failed to load rules';
     }
   } finally {
-    bListLoading.value = false;
+    if (gen === workspaceGen) {
+      bListLoading.value = false;
+    }
   }
 }
 
@@ -169,13 +182,24 @@ async function loadFile(filename: string): Promise<void> {
   if (!bIsGlobal.value && !workspaceId.value) {
     return;
   }
+  const seq = ++loadSeq;
+  const gen = workspaceGen;
+  // Drop responses for a file/workspace that is no longer selected.
+  const bIsCurrent = (): boolean =>
+    seq === loadSeq && gen === workspaceGen && selectedFilename.value === filename;
   bContentLoading.value = true;
   saveError.value = null;
   try {
     const { data } = await rulesApi().read(filename);
+    if (!bIsCurrent()) {
+      return;
+    }
     content.value = data.content ?? '';
     originalContent.value = content.value;
   } catch (e: unknown) {
+    if (!bIsCurrent()) {
+      return;
+    }
     const caughtError = e as {
       response?: { status?: number; data?: { error?: string; code?: string } };
       message?: string;
@@ -192,7 +216,9 @@ async function loadFile(filename: string): Promise<void> {
     content.value = '';
     originalContent.value = '';
   } finally {
-    bContentLoading.value = false;
+    if (seq === loadSeq) {
+      bContentLoading.value = false;
+    }
   }
 }
 
@@ -227,13 +253,21 @@ async function saveCurrent(): Promise<void> {
   if ((!bIsGlobal.value && !workspaceId.value) || !selectedFilename.value || !hasUnsavedChanges.value) {
     return;
   }
+  const gen = workspaceGen;
+  const savedContent = content.value;
   bSaving.value = true;
   saveError.value = null;
   try {
-    await rulesApi().update(selectedFilename.value, content.value);
-    originalContent.value = content.value;
+    await rulesApi().update(selectedFilename.value, savedContent);
+    if (gen !== workspaceGen) {
+      return;
+    }
+    originalContent.value = savedContent;
     showSuccess('Rule saved');
   } catch (e: unknown) {
+    if (gen !== workspaceGen) {
+      return;
+    }
     const caughtError = e as {
       response?: { status?: number; data?: { error?: string; code?: string } };
       message?: string;
@@ -453,6 +487,36 @@ async function submitRename(): Promise<void> {
     bRenaming.value = false;
   }
 }
+
+function resetForWorkspaceChange(): void {
+  workspaceGen++;
+  loadSeq++;
+  files.value = [];
+  listError.value = null;
+  bRulesDirMissing.value = false;
+  selectedFilename.value = null;
+  content.value = '';
+  originalContent.value = '';
+  bContentLoading.value = false;
+  saveError.value = null;
+  bShowDiscardConfirm.value = false;
+  pendingSelectFilename.value = null;
+  fileToDelete.value = null;
+  deleteError.value = null;
+  cancelRename();
+  closeNewRuleModal();
+}
+
+// -------------------------------------------------- Watchers --------------------------------------------------
+
+// The workspace RouterView is unkeyed, so this component is reused across workspaces.
+watch(workspaceId, () => {
+  if (bIsGlobal.value) {
+    return;
+  }
+  resetForWorkspaceChange();
+  void fetchFiles();
+});
 
 // -------------------------------------------------- Lifecycle --------------------------------------------------
 

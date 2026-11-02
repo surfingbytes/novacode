@@ -77,10 +77,16 @@ export function useSessionUsage(options: UseSessionUsageOptions) {
     return accountUsageLabel.value;
   });
 
+  /** Bumped per fetch and on reset so a reply for an earlier request/session is dropped. */
+  let usageFetchSeq = 0;
+
   // -------------------------------------------------- Methods --------------------------------------------------
   async function fetchUsageTurns(): Promise<void> {
+    const seq = ++usageFetchSeq;
+    const sessionId = options.sessionId();
     try {
-      const response = await sessionsApi.listUsage(options.workspaceId(), options.sessionId());
+      const response = await sessionsApi.listUsage(options.workspaceId(), sessionId);
+      if (seq !== usageFetchSeq || options.sessionId() !== sessionId) return;
       usageTurns.value = response.data.turns;
       usageSummary.value = response.data.summary ?? null;
       const latest = usageTurns.value[0];
@@ -116,6 +122,7 @@ export function useSessionUsage(options: UseSessionUsageOptions) {
 
   /** Clears per-session usage (the chat switched to another session). */
   function resetUsage(): void {
+    usageFetchSeq += 1;
     usageTurns.value = [];
     usageSummary.value = null;
   }

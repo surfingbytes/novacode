@@ -63,6 +63,9 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
   const bSavingSessionConfig = ref(false);
   let modelSelectionSaveSeq = 0;
   let sessionModeSaveSeq = 0;
+  let sessionConfigSaveSeq = 0;
+  /** Bumped by `resetAgentOptions` so saves started for a previous session are dropped. */
+  let sessionEpoch = 0;
 
   // -------------------------------------------------- Computed --------------------------------------------------
   const displaySessionMode = computed(() => {
@@ -106,6 +109,13 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
   );
 
   // -------------------------------------------------- Methods --------------------------------------------------
+
+  /** Returns a check that is false once the view moved to another session. */
+  function captureSession(): () => boolean {
+    const epoch = sessionEpoch;
+    const sessionId = ctx.sessionId();
+    return () => epoch === sessionEpoch && ctx.sessionId() === sessionId;
+  }
 
   function syncAcpReportedFromOptions(): void {
     if (acpReportedModeId.value && !modeOptions.value.some((m) => m.id === acpReportedModeId.value)) {
@@ -207,6 +217,8 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
   }
 
   async function persistSessionConfig(next: Record<string, string>): Promise<void> {
+    const seq = ++sessionConfigSaveSeq;
+    const bSameSession = captureSession();
     const prev = { ...sessionConfig.value };
     const prevSession = ctx.session.value;
     sessionConfig.value = next;
@@ -218,13 +230,15 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
       const { data: updated } = await sessionsApi.update(ctx.workspaceId(), ctx.sessionId(), {
         sessionConfigJson: next
       });
+      if (!bSameSession() || seq !== sessionConfigSaveSeq) return;
       ctx.session.value = updated;
       sessionConfig.value = updated.sessionConfigJson ?? next;
     } catch {
+      if (!bSameSession() || seq !== sessionConfigSaveSeq) return;
       sessionConfig.value = prev;
       ctx.session.value = prevSession;
     } finally {
-      bSavingSessionConfig.value = false;
+      if (bSameSession() && seq === sessionConfigSaveSeq) bSavingSessionConfig.value = false;
     }
   }
 
@@ -255,6 +269,7 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
 
   async function syncSessionModeFromAgent(modeId: string): Promise<void> {
     const seq = ++sessionModeSaveSeq;
+    const bSameSession = captureSession();
     const prev = sessionMode.value;
     const prevSession = ctx.session.value;
     sessionMode.value = modeId;
@@ -265,12 +280,12 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
       const { data: updated } = await sessionsApi.update(ctx.workspaceId(), ctx.sessionId(), {
         sessionMode: modeId
       });
-      if (seq !== sessionModeSaveSeq) return;
+      if (!bSameSession() || seq !== sessionModeSaveSeq) return;
       ctx.session.value = updated;
       sessionMode.value = normalizeStoredMode(updated.sessionMode);
       acpReportedModeId.value = null;
     } catch {
-      if (seq !== sessionModeSaveSeq) return;
+      if (!bSameSession() || seq !== sessionModeSaveSeq) return;
       sessionMode.value = prev;
       ctx.session.value = prevSession;
     }
@@ -290,6 +305,7 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
 
   async function persistModelSelection(newModelSelection: string): Promise<void> {
     const seq = ++modelSelectionSaveSeq;
+    const bSameSession = captureSession();
     const prev = modelSelection.value;
     const prevSession = ctx.session.value;
     acpReportedModelId.value = null;
@@ -302,15 +318,15 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
       const { data: updated } = await sessionsApi.update(ctx.workspaceId(), ctx.sessionId(), {
         modelSelection: newModelSelection
       });
-      if (seq !== modelSelectionSaveSeq) return;
+      if (!bSameSession() || seq !== modelSelectionSaveSeq) return;
       ctx.session.value = updated;
       modelSelection.value = updated.modelSelection ?? newModelSelection;
     } catch {
-      if (seq !== modelSelectionSaveSeq) return;
+      if (!bSameSession() || seq !== modelSelectionSaveSeq) return;
       modelSelection.value = prev;
       ctx.session.value = prevSession;
     } finally {
-      if (seq === modelSelectionSaveSeq) bSavingModelSelection.value = false;
+      if (bSameSession() && seq === modelSelectionSaveSeq) bSavingModelSelection.value = false;
     }
   }
 
@@ -330,6 +346,7 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
 
   async function persistSessionMode(newSessionMode: string): Promise<void> {
     const seq = ++sessionModeSaveSeq;
+    const bSameSession = captureSession();
     const prev = sessionMode.value;
     const prevSession = ctx.session.value;
     sessionMode.value = newSessionMode;
@@ -341,15 +358,15 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
       const { data: updated } = await sessionsApi.update(ctx.workspaceId(), ctx.sessionId(), {
         sessionMode: newSessionMode
       });
-      if (seq !== sessionModeSaveSeq) return;
+      if (!bSameSession() || seq !== sessionModeSaveSeq) return;
       ctx.session.value = updated;
       sessionMode.value = updated.sessionMode ?? newSessionMode;
     } catch {
-      if (seq !== sessionModeSaveSeq) return;
+      if (!bSameSession() || seq !== sessionModeSaveSeq) return;
       sessionMode.value = prev;
       ctx.session.value = prevSession;
     } finally {
-      if (seq === sessionModeSaveSeq) bSavingSessionMode.value = false;
+      if (bSameSession() && seq === sessionModeSaveSeq) bSavingSessionMode.value = false;
     }
   }
 
@@ -373,6 +390,10 @@ export function useAgentOptions(ctx: UseAgentOptionsContext) {
   /** Reset everything (session switch). */
   function resetAgentOptions(): void {
     loadAgentOptionsSeq++;
+    sessionEpoch++;
+    bSavingModelSelection.value = false;
+    bSavingSessionMode.value = false;
+    bSavingSessionConfig.value = false;
     bAgentOptionsLoaded.value = false;
     bAgentOptionsLoadFailed.value = false;
     bModelsLoading.value = false;

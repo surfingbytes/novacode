@@ -39,13 +39,20 @@ async function checkClaudeAutoContinue(): Promise<void> {
           onHistory: () => {},
         };
 
-        await dispatchPrompt({
+        const result = await dispatchPrompt({
           sessionId: session.id,
           text: 'continue',
           model: 'auto',
           mode: session.sessionMode,
           subscriber: mockSubscriber,
         });
+
+        // Not started (e.g. 'Agent is busy'): keep the reset time so the next check retries.
+        // requeue=false means 'continue' was already saved — retrying would repeat it.
+        if (result.error && result.requeue !== false) {
+          logger.info({ sessionId: session.id, error: result.error }, 'Auto-continue not started, retrying later');
+          continue;
+        }
 
         await db.updateSession(session.id, { claudeLimitResetAt: null });
       }

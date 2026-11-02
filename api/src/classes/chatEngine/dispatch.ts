@@ -51,14 +51,34 @@ export function cancelRun(sessionId: string): void {
   }
 }
 
-export async function dispatchPrompt(
-  opts: DispatchPromptOpts
-): Promise<{ error?: string; errorCode?: AgentErrorCode; requeue?: boolean }> {
-  const { sessionId, text, model, mode, imagePaths = [], subscriber } = opts;
+/** Sessions whose run is being set up (claimed before the first await, until `activeRuns` holds the run). */
+const startingRuns = new Set<string>();
 
-  if (activeRuns.has(sessionId)) {
+type DispatchResult = { error?: string; errorCode?: AgentErrorCode; requeue?: boolean };
+
+export async function dispatchPrompt(opts: DispatchPromptOpts): Promise<DispatchResult> {
+  const { sessionId } = opts;
+  if (activeRuns.has(sessionId) || startingRuns.has(sessionId)) {
     return { error: 'Agent is busy', requeue: true };
   }
+  startingRuns.add(sessionId);
+  const progress = { userMessageSaved: false };
+  try {
+    return await startRun(opts, progress);
+  } catch (err) {
+    logger.error({ err, sessionId }, 'Failed to start agent run');
+    // Once the user message is saved, requeueing would send it twice.
+    return { error: 'Failed to start agent run', requeue: !progress.userMessageSaved };
+  } finally {
+    startingRuns.delete(sessionId);
+  }
+}
+
+async function startRun(
+  opts: DispatchPromptOpts,
+  progress: { userMessageSaved: boolean }
+): Promise<DispatchResult> {
+  const { sessionId, text, model, mode, imagePaths = [], subscriber } = opts;
 
   const session = await db.getSession(sessionId);
   if (!session) {
@@ -118,6 +138,7 @@ export async function dispatchPrompt(
           }
         : {}),
     }, { fromPosition: userPosition });
+    progress.userMessageSaved = true;
     if (fresh) broadcastSessionListUpsert(fresh.workspaceId, fresh);
   } catch (err) {
     currentMessages.pop();
@@ -557,6 +578,9 @@ export function dispatchPromptAndWait(opts: {
         const classifiedError = classifyAgentError(result.error, { agentLabel: 'Agent' });
         finish({ error: classifiedError.message, errorCode: classifiedError.code });
       }
+    }).catch((err: unknown) => {
+      const classifiedError = classifyAgentError(err instanceof Error ? err.message : String(err), { agentLabel: 'Agent' });
+      finish({ error: classifiedError.message, errorCode: classifiedError.code });
     });
   });
 }

@@ -7,8 +7,12 @@ const { prismaMock } = vi.hoisted(() => ({
       findUnique: vi.fn(),
       findFirst: vi.fn(),
       findMany: vi.fn(),
-      update: vi.fn()
-    }
+      update: vi.fn(),
+      count: vi.fn(),
+      create: vi.fn()
+    },
+    $executeRaw: vi.fn(),
+    $transaction: vi.fn()
   }
 }));
 
@@ -16,7 +20,7 @@ vi.mock('./client', () => ({ prisma: prismaMock }));
 
 // classes
 import { encrypt } from '../encryption';
-import { getFirstUser, getUserById, listUsers, updateUser } from './users';
+import { getFirstUser, getUserById, listUsers, updateUser, userDb } from './users';
 
 const KEY_HEX = 'a'.repeat(64);
 
@@ -94,5 +98,30 @@ describe('claude token encryption at rest', () => {
     prismaMock.user.findUnique.mockResolvedValue(userRow(stored));
 
     expect((await getUserById('user-1'))?.claudeToken).toBeNull();
+  });
+});
+
+describe('createFirstUser', () => {
+  beforeEach(() => {
+    prismaMock.$transaction.mockImplementation(async (fn: (tx: typeof prismaMock) => unknown) => fn(prismaMock));
+    prismaMock.user.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => data);
+  });
+
+  it('takes the setup lock before checking for users, then creates the account', async () => {
+    prismaMock.user.count.mockResolvedValue(0);
+
+    const user = await userDb.createFirstUser('admin', 'hash');
+
+    expect(user).toMatchObject({ username: 'admin', passwordHash: 'hash' });
+    const lockOrder = prismaMock.$executeRaw.mock.invocationCallOrder[0]!;
+    expect(lockOrder).toBeLessThan(prismaMock.user.count.mock.invocationCallOrder[0]!);
+    expect(String(prismaMock.$executeRaw.mock.calls[0]![0])).toContain('pg_advisory_xact_lock');
+  });
+
+  it('returns null without creating when an account already exists', async () => {
+    prismaMock.user.count.mockResolvedValue(1);
+
+    expect(await userDb.createFirstUser('second', 'hash')).toBeNull();
+    expect(prismaMock.user.create).not.toHaveBeenCalled();
   });
 });

@@ -6,11 +6,12 @@ const mocks = vi.hoisted(() => {
   process.env['JWT_SECRET'] = 'test-secret-'.padEnd(48, 'x');
   return {
     hasAnyUser: vi.fn(),
-    createUser: vi.fn(),
+    createFirstUser: vi.fn(),
     getUserById: vi.fn(),
     getUserByUsername: vi.fn(),
     updateUser: vi.fn(),
     getUserByApiToken: vi.fn(),
+    apiTokenExists: vi.fn(),
     listApiTokens: vi.fn(),
     clearVibeApiKey: vi.fn()
   };
@@ -21,11 +22,12 @@ vi.mock('../classes/database', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../classes/database')>()),
   db: {
     hasAnyUser: (...args: unknown[]) => mocks.hasAnyUser(...args),
-    createUser: (...args: unknown[]) => mocks.createUser(...args),
+    createFirstUser: (...args: unknown[]) => mocks.createFirstUser(...args),
     getUserById: (...args: unknown[]) => mocks.getUserById(...args),
     getUserByUsername: (...args: unknown[]) => mocks.getUserByUsername(...args),
     updateUser: (...args: unknown[]) => mocks.updateUser(...args),
     getUserByApiToken: (...args: unknown[]) => mocks.getUserByApiToken(...args),
+    apiTokenExists: (...args: unknown[]) => mocks.apiTokenExists(...args),
     listApiTokens: (...args: unknown[]) => mocks.listApiTokens(...args)
   }
 }));
@@ -82,7 +84,10 @@ beforeEach(() => {
   vi.stubEnv('AUTH_LOCAL_LOGIN', '');
   users = [];
   mocks.hasAnyUser.mockImplementation(async () => users.length > 0);
-  mocks.createUser.mockImplementation(async (username: string, passwordHash: string) => {
+  mocks.createFirstUser.mockImplementation(async (username: string, passwordHash: string) => {
+    if (users.length > 0) {
+      return null;
+    }
     const user = { id: `u${users.length + 1}`, username, passwordHash, tokenVersion: 0 };
     users.push(user);
     return user;
@@ -133,7 +138,23 @@ describe('POST /api/auth/setup', () => {
     const res = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { username: 'a', password: 'short' } });
 
     expect(res.statusCode).toBe(400);
-    expect(mocks.createUser).not.toHaveBeenCalled();
+    expect(mocks.createFirstUser).not.toHaveBeenCalled();
+  });
+
+  it('answers 400 when a concurrent setup created the account after the pre-check', async () => {
+    mocks.hasAnyUser.mockResolvedValue(false);
+    mocks.createFirstUser.mockResolvedValue(null);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/setup',
+      payload: { username: 'second', password: 'whatever123' }
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'Account already exists; sign in instead' });
+    expect(res.headers['set-cookie']).toBeUndefined();
+    expect(mocks.clearVibeApiKey).not.toHaveBeenCalled();
   });
 });
 
@@ -258,7 +279,7 @@ describe('protected routes (jwtPreHandler)', () => {
 
   it('accepts a Bearer nck_ API key looked up in the database', async () => {
     await setupUser();
-    mocks.getUserByApiToken.mockImplementation(async (token: string) => (token === 'nck_good' ? users[0] : null));
+    mocks.getUserByApiToken.mockImplementation(async (token: string) => (token === 'nck_good' ? { user: users[0], tokenId: 'k1' } : null));
 
     const res = await app.inject({ url, headers: { authorization: 'Bearer nck_good' } });
 
@@ -331,6 +352,49 @@ describe('POST /api/auth/validate', () => {
 
     expect(res.statusCode).toBe(401);
     expect(res.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('binds a session minted from an API key to that key, so removing the key revokes it', async () => {
+    await setupUser();
+    const keys = new Set(['k1']);
+    mocks.getUserByApiToken.mockImplementation(async (token: string) =>
+      token === 'nck_good' && keys.has('k1') ? { user: users[0], tokenId: 'k1' } : null
+    );
+    mocks.apiTokenExists.mockImplementation(async (userId: string, tokenId: string) => userId === 'u1' && keys.has(tokenId));
+
+    const minted = await app.inject({ method: 'POST', url: '/api/auth/validate', headers: { authorization: 'Bearer nck_good' } });
+    expect(minted.statusCode).toBe(200);
+    const cookie = sessionCookieFrom(minted.headers['set-cookie']);
+
+    // The minted cookie works and refreshes into a cookie that stays bound to the key.
+    const refreshed = await app.inject({
+      method: 'POST',
+      url: '/api/auth/validate',
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(cookie)}` }
+    });
+    expect(refreshed.statusCode).toBe(200);
+    const refreshedCookie = sessionCookieFrom(refreshed.headers['set-cookie']);
+
+    keys.delete('k1');
+
+    for (const c of [cookie, refreshedCookie]) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/auth/validate',
+        headers: { cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(c)}` }
+      });
+      expect(res.statusCode).toBe(401);
+    }
+  });
+
+  it('does not tie password sessions to API keys', async () => {
+    const token = await setupUser();
+    mocks.apiTokenExists.mockResolvedValue(false);
+
+    const res = await app.inject({ method: 'POST', url: '/api/auth/validate', headers: { authorization: `Bearer ${token}` } });
+
+    expect(res.statusCode).toBe(200);
+    expect(mocks.apiTokenExists).not.toHaveBeenCalled();
   });
 });
 

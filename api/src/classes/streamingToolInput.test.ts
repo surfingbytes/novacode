@@ -7,6 +7,16 @@ function line(update: Record<string, unknown>): string {
 }
 
 describe('StreamingToolInputTracker', () => {
+  it('ends the window on the full-input refinement (content, no status)', () => {
+    const tracker = new StreamingToolInputTracker();
+    tracker.observe(line({ sessionUpdate: 'tool_call', toolCallId: 't1', status: 'pending', rawInput: {} }));
+    tracker.observe(line({ sessionUpdate: 'tool_call_update', toolCallId: 't1', rawInput: { name: 'Plan' } }));
+    expect(tracker.bStreaming).toBe(true);
+
+    tracker.observe(line({ sessionUpdate: 'tool_call_update', toolCallId: 't1', rawInput: { name: 'Plan', steps: [] }, content: [] }));
+    expect(tracker.bStreaming).toBe(false);
+  });
+
   it('streams from a pending tool_call until an update carries a status', () => {
     const tracker = new StreamingToolInputTracker();
     expect(tracker.bStreaming).toBe(false);

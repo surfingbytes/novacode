@@ -9,7 +9,7 @@ import { createSessionWithAgent } from '../classes/sessionService';
 import { jwtPreHandler } from '../classes/auth';
 import { AGENT_ROUTE_RATE_LIMIT } from '../classes/rateLimits';
 import { resolveWorkspaceAbsolutePath } from '../classes/workspacePaths';
-import { applyCommitRangeToWorkingTree, branchExists, deleteBranch, resolveRepo } from '../classes/gitWorktrees';
+import { applyCommitRangeToWorkingTree, branchExists, deleteBranch, moveBranchAside, resolveRepo } from '../classes/gitWorktrees';
 import {
   cloneSubtasksForNewPlan,
   collectStepSessionIdsFromSubtasksJson,
@@ -20,17 +20,39 @@ import {
   serializeSubtasksPayload
 } from '../classes/orchestratorPayload';
 import { ensureMergeStep, MERGE_STEP_NAME } from '../classes/orchestratorPlan';
-import { deleteSessionImages } from '../classes/sessionImages';
 import { broadcastWorkspaceSessionsRefresh } from '../classes/wsBroadcast';
 import { broadcastOrchestratorUpsert, updateOrchestratorAndBroadcast } from '../classes/orchestratorEvents';
 import { broadcastSessionListUpsert } from '../classes/sessionListBroadcast';
-import { checkRunPreconditions, claimRunResume, finishRunResume, inFlightRunSteps, runOrchestrator } from '../classes/orchestratorRunner';
+import {
+  checkRunPreconditions,
+  claimRunResume,
+  finishRunResume,
+  inFlightRunSteps,
+  isOrchestratorRunActive,
+  runOrchestrator,
+  stepBranch
+} from '../classes/orchestratorRunner';
+import { disposeSession } from '../classes/dispose';
 
 // types
 import type { AgentType, OrchestratorRunMode, SubTask } from '../@types/index';
 
 const AGENT_TYPES: AgentType[] = ['cursor-agent', 'claude', 'mistral-vibe', 'open-code', 'codex'];
 const MAX_PARALLEL_LIMIT = 8;
+
+/** Plans whose run request is being handled (held until the run is registered), so a double click starts one run. */
+const startingRuns = new Set<string>();
+
+/** Why the plan's steps can't be replaced now (the runner would overwrite them), or null. */
+export function planLockedReason(orchestrator: { id: string; runStatus?: string | null }): string | null {
+  if (orchestrator.runStatus === 'running') {
+    return 'The plan is running right now; wait until it finishes or ask the user to stop it.';
+  }
+  if (isOrchestratorRunActive(orchestrator.id)) {
+    return 'The previous run is still stopping, try again shortly.';
+  }
+  return null;
+}
 
 function parseAgentType(raw: unknown): AgentType | undefined {
   return typeof raw === 'string' && (AGENT_TYPES as string[]).includes(raw) ? (raw as AgentType) : undefined;
@@ -120,6 +142,32 @@ async function createPlannerSession(workspaceId: string, input: PlannerSessionIn
   });
   if (result.session) broadcastSessionListUpsert(workspaceId, result.session);
   return result;
+}
+
+/**
+ * A parallel run recreates `nova/<id>/step-N` from scratch for every step it runs, so kept branches with
+ * those names are renamed first (`…-2`, `…-3`); their steps' `keptBranch` follows. Returns an error message or null.
+ */
+async function moveKeptBranchesAside(workspacePath: string, orchestratorId: string, subtasks: SubTask[]): Promise<string | null> {
+  const reused = new Set(subtasks.map((_, index) => stepBranch(orchestratorId, `step-${index + 1}`)));
+  const kept = subtasks.filter((task) => task.keptBranch && reused.has(task.keptBranch.branch));
+  if (kept.length === 0) return null;
+  const repo = await resolveRepo(workspacePath);
+  if ('error' in repo) return repo.error;
+  try {
+    for (const task of kept) {
+      const keptBranch = task.keptBranch!;
+      if (!(await branchExists(repo.root, keptBranch.branch))) {
+        // Deleted outside the app: nothing left to keep.
+        delete task.keptBranch;
+        continue;
+      }
+      task.keptBranch = { ...keptBranch, branch: await moveBranchAside(repo.root, keptBranch.branch) };
+    }
+  } catch (err) {
+    return `Could not keep the failed steps' branches: ${err instanceof Error ? err.message : String(err)}`;
+  }
+  return null;
 }
 
 export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void> {
@@ -257,6 +305,10 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       if (body.isFavorite === true && (body.archived ?? orchestrator.archived)) {
         return reply.code(400).send({ error: 'Archived orchestrators cannot be favorited' });
       }
+      const locked = 'subtasksJson' in body ? planLockedReason(orchestrator) : null;
+      if (locked) {
+        return reply.code(409).send({ error: locked });
+      }
       const mergedSubtasks =
         'subtasksJson' in body
           ? mergeSubtasksJsonPatch(body.subtasksJson ?? null, orchestrator.subtasksJson)
@@ -312,6 +364,10 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
         return reply.code(404).send({ error: 'Orchestrator not found' });
       }
+      // Stop the run first so it starts no new steps, then cancel its running steps while disposing their sessions.
+      if (orchestrator.runStatus === 'running') {
+        await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, { runStatus: 'stopped' });
+      }
       const stepSessionIds = [
         ...new Set([
           ...collectStepSessionIdsFromSubtasksJson(orchestrator.subtasksJson),
@@ -319,8 +375,10 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
         ])
       ];
       if (stepSessionIds.length > 0) {
+        for (const id of stepSessionIds) {
+          await disposeSession(id, workspaceId);
+        }
         await db.deleteManySessions(stepSessionIds, workspaceId);
-        await Promise.all(stepSessionIds.map((id) => deleteSessionImages(id)));
         broadcastWorkspaceSessionsRefresh(workspaceId);
       }
       await db.deleteOrchestrator(orchestratorId);
@@ -375,135 +433,159 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
       const { workspaceId, orchestratorId } = request.params;
       const body = request.body;
       const mode: OrchestratorRunMode = body.mode === 'parallel' ? 'parallel' : 'sequential';
-
-      const orchestrator = await db.getOrchestrator(orchestratorId);
-      if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
-        return reply.code(404).send({ error: 'Orchestrator not found' });
-      }
-      const workspace = await db.getWorkspace(workspaceId);
-      if (!workspace) {
-        return reply.code(404).send({ error: 'Workspace not found' });
-      }
-
-      if (orchestrator.runStatus === 'running') {
+      // Claimed before the first await and held until the run is registered (or the request fails), so
+      // a second request sees the first one's "running" status or its in-flight run.
+      if (startingRuns.has(orchestratorId)) {
         return reply.code(409).send({ error: 'Run already in progress' });
       }
-      const finishing = inFlightRunSteps(orchestratorId);
-      if (finishing) {
-        // A plain run of the same mode resumes the stopped run: free slots take the next steps.
-        const bPlainRun = !body.next && body.onlyIndex === undefined && !body.fresh && (mode === 'parallel' || !body.startIndex);
-        if (bPlainRun && claimRunResume(orchestratorId, mode)) {
-          try {
-            const updated = await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
-              runStatus: 'running',
-              unread: false
-            });
-            return reply.code(202).send(updated ?? orchestrator);
-          } finally {
-            finishRunResume(orchestratorId);
+      startingRuns.add(orchestratorId);
+      try {
+        const orchestrator = await db.getOrchestrator(orchestratorId);
+        if (!orchestrator || orchestrator.workspaceId !== workspaceId) {
+          return reply.code(404).send({ error: 'Orchestrator not found' });
+        }
+        const workspace = await db.getWorkspace(workspaceId);
+        if (!workspace) {
+          return reply.code(404).send({ error: 'Workspace not found' });
+        }
+
+        if (orchestrator.runStatus === 'running') {
+          return reply.code(409).send({ error: 'Run already in progress' });
+        }
+        const finishing = inFlightRunSteps(orchestratorId);
+        if (finishing) {
+          // A plain run of the same mode resumes the stopped run: free slots take the next steps.
+          const bPlainRun = !body.next && body.onlyIndex === undefined && !body.fresh && (mode === 'parallel' || !body.startIndex);
+          if (bPlainRun && claimRunResume(orchestratorId, mode)) {
+            try {
+              const updated = await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
+                runStatus: 'running',
+                unread: false
+              });
+              return reply.code(202).send(updated ?? orchestrator);
+            } finally {
+              finishRunResume(orchestratorId);
+            }
+          }
+          const steps = finishing.map((name) => `"${name}"`).join(', ');
+          return reply.code(409).send({
+            error: `The stopped run is still finishing ${steps || 'a step'}. Wait for it to end, or stop that step's agent in its session, then run again.`
+          });
+        }
+
+        const payload = parseSubtasksPayloadString(orchestrator.subtasksJson);
+        if (!payload?.subtasks.length) {
+          return reply.code(400).send({
+            error: orchestrator.subtasksJson?.trim()
+              ? 'Invalid subtasksJson'
+              : 'No steps yet. Ask the planning chat to create the plan first.'
+          });
+        }
+        const subtasks = payload.subtasks;
+        // A merge step run alone keeps its branch to merge. `keptBranch` stays: the branch still
+        // holds the failed attempt's work until the user applies or discards it.
+        const clearResult = (index: number, bKeepMergeRef = false) => {
+          delete subtasks[index].runResult;
+          delete subtasks[index].sessionId;
+          delete subtasks[index].runNote;
+          delete subtasks[index].waitingQuestion;
+          delete subtasks[index].startedAt;
+          delete subtasks[index].finishedAt;
+          if (!bKeepMergeRef) delete subtasks[index].mergeRef;
+        };
+
+        let onlyIndex = typeof body.onlyIndex === 'number' ? body.onlyIndex : undefined;
+        if (body.next) {
+          // Interrupted steps count as not run.
+          subtasks.forEach((task, index) => task.runResult === 'running' && clearResult(index));
+          onlyIndex = findRunnableSteps(subtasks)[0];
+          if (onlyIndex === undefined) {
+            return reply.code(400).send({ error: 'No step is ready — every step is done or waits for a failed step.' });
           }
         }
-        const steps = finishing.map((name) => `"${name}"`).join(', ');
-        return reply.code(409).send({
-          error: `The stopped run is still finishing ${steps || 'a step'}. Wait for it to end, or stop that step's agent in its session, then run again.`
-        });
-      }
-
-      const payload = parseSubtasksPayloadString(orchestrator.subtasksJson);
-      if (!payload?.subtasks.length) {
-        return reply.code(400).send({
-          error: orchestrator.subtasksJson?.trim()
-            ? 'Invalid subtasksJson'
-            : 'No steps yet. Ask the planning chat to create the plan first.'
-        });
-      }
-      const subtasks = payload.subtasks;
-      // A merge step run alone keeps its branch to merge.
-      const clearResult = (index: number, bKeepMergeRef = false) => {
-        delete subtasks[index].runResult;
-        delete subtasks[index].sessionId;
-        delete subtasks[index].runNote;
-        delete subtasks[index].waitingQuestion;
-        delete subtasks[index].startedAt;
-        delete subtasks[index].finishedAt;
-        delete subtasks[index].keptBranch;
-        if (!bKeepMergeRef) delete subtasks[index].mergeRef;
-      };
-
-      let onlyIndex = typeof body.onlyIndex === 'number' ? body.onlyIndex : undefined;
-      if (body.next) {
-        // Interrupted steps count as not run.
-        subtasks.forEach((task, index) => task.runResult === 'running' && clearResult(index));
-        onlyIndex = findRunnableSteps(subtasks)[0];
-        if (onlyIndex === undefined) {
-          return reply.code(400).send({ error: 'No step is ready — every step is done or waits for a failed step.' });
+        const startIndex = Math.max(0, body.startIndex ?? 0);
+        if (onlyIndex !== undefined && (onlyIndex < 0 || onlyIndex >= subtasks.length)) {
+          return reply.code(400).send({ error: 'Invalid step index.' });
         }
-      }
-      const startIndex = Math.max(0, body.startIndex ?? 0);
-      if (onlyIndex !== undefined && (onlyIndex < 0 || onlyIndex >= subtasks.length)) {
-        return reply.code(400).send({ error: 'Invalid step index.' });
-      }
-      if (onlyIndex === undefined && startIndex >= subtasks.length) {
-        return reply.code(400).send({ error: 'No steps to run from startIndex.' });
-      }
+        if (onlyIndex === undefined && startIndex >= subtasks.length) {
+          return reply.code(400).send({ error: 'No steps to run from startIndex.' });
+        }
 
-      const options = { mode, ...(onlyIndex !== undefined ? { onlyIndex } : { startIndex }) };
-      const blocked = await checkRunPreconditions(resolveWorkspaceAbsolutePath(workspace.path), options);
-      if (blocked) {
-        return reply.code(409).send({ error: blocked });
-      }
-
-      if (mode === 'parallel' && onlyIndex === undefined) {
-        // Plans saved before merge steps existed get theirs now, so it shows from the start.
-        ensureMergeStep(subtasks);
-      }
-      if (onlyIndex !== undefined) {
-        clearResult(onlyIndex, true);
-      } else if (body.fresh) {
-        // "Run all again": start over in either mode.
-        subtasks.forEach((_, index) => clearResult(index));
-      } else if (mode === 'sequential' && startIndex > 0) {
-        // "Run from here": earlier steps keep their results and handoff notes.
-        for (let index = startIndex; index < subtasks.length; index++) clearResult(index);
-      } else {
-        // Plain run, same in both modes: keep finished steps (their work is already in the
-        // workspace); merge and verification re-run with the rest.
-        if (subtasks.some((task) => task.kind === 'merge' && task.runResult === 'failed' && task.mergeRef)) {
+        // Steps of an earlier parallel run that failed, was stopped or died (server restart) before
+        // its merge step finished are "done" but their work exists only on the merge step's branch.
+        if (
+          onlyIndex === undefined &&
+          !body.fresh &&
+          subtasks.some((task) => task.kind === 'merge' && task.mergeRef && task.runResult !== 'done')
+        ) {
           return reply.code(409).send({
             error: `The last run's result is not merged into the workspace yet. Run the "${MERGE_STEP_NAME}" step first, or use "Run all again" to start over.`
           });
         }
-        subtasks.forEach((task, index) => task.runResult !== 'done' && clearResult(index));
-        if (subtasks.some((task) => !task.kind && !task.runResult)) {
-          subtasks.forEach((task, index) => task.kind && clearResult(index));
+
+        const options = { mode, ...(onlyIndex !== undefined ? { onlyIndex } : { startIndex }) };
+        const blocked = await checkRunPreconditions(resolveWorkspaceAbsolutePath(workspace.path), options);
+        if (blocked) {
+          return reply.code(409).send({ error: blocked });
         }
-        if (subtasks.every((task) => task.runResult === 'done')) {
-          return reply.code(400).send({ error: 'Every step is done. Use "Run all again" to start over.' });
+        if (mode === 'parallel' && onlyIndex === undefined) {
+          const moveError = await moveKeptBranchesAside(resolveWorkspaceAbsolutePath(workspace.path), orchestratorId, subtasks);
+          if (moveError) {
+            // Branches renamed before the failure stay findable (nothing else in the payload changed yet).
+            await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, { subtasksJson: serializeSubtasksPayload(payload) });
+            return reply.code(409).send({ error: moveError });
+          }
         }
+
+        if (mode === 'parallel' && onlyIndex === undefined) {
+          // Plans saved before merge steps existed get theirs now, so it shows from the start.
+          ensureMergeStep(subtasks);
+        }
+        if (onlyIndex !== undefined) {
+          clearResult(onlyIndex, true);
+        } else if (body.fresh) {
+          // "Run all again": start over in either mode.
+          subtasks.forEach((_, index) => clearResult(index));
+        } else if (mode === 'sequential' && startIndex > 0) {
+          // "Run from here": earlier steps keep their results and handoff notes.
+          for (let index = startIndex; index < subtasks.length; index++) clearResult(index);
+        } else {
+          // Plain run, same in both modes: keep finished steps (their work is already in the
+          // workspace); merge and verification re-run with the rest.
+          subtasks.forEach((task, index) => task.runResult !== 'done' && clearResult(index));
+          if (subtasks.some((task) => !task.kind && !task.runResult)) {
+            subtasks.forEach((task, index) => task.kind && clearResult(index));
+          }
+          if (subtasks.every((task) => task.runResult === 'done')) {
+            return reply.code(400).send({ error: 'Every step is done. Use "Run all again" to start over.' });
+          }
+        }
+        // Handoff notes follow their steps: only steps that keep their result keep their note; a step
+        // that runs again reports again (otherwise its old block would stay next to the new one).
+        payload.handoffLog = filterHandoffLog(
+          payload.handoffLog,
+          subtasks.flatMap((task, index) => (task.runResult ? [index] : []))
+        );
+
+        await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
+          runStatus: 'running',
+          unread: false,
+          runMode: mode,
+          runCurrentStep: subtasks.filter((task) => task.runResult).length,
+          runTotalSteps: subtasks.length,
+          runStartedAt: new Date().toISOString(),
+          // Full runs count their changed files at the end; single-step runs keep the last count.
+          ...(onlyIndex === undefined && { runChangedFiles: null }),
+          subtasksJson: serializeSubtasksPayload(payload)
+        });
+
+        void runOrchestrator(workspaceId, orchestratorId, payload, options);
+
+        const updated = await db.getOrchestrator(orchestratorId);
+        return reply.code(202).send(updated);
+      } finally {
+        startingRuns.delete(orchestratorId);
       }
-      // Handoff notes follow their steps: only steps that keep their result keep their note; a step
-      // that runs again reports again (otherwise its old block would stay next to the new one).
-      payload.handoffLog = filterHandoffLog(
-        payload.handoffLog,
-        subtasks.flatMap((task, index) => (task.runResult ? [index] : []))
-      );
-
-      await updateOrchestratorAndBroadcast(workspaceId, orchestratorId, {
-        runStatus: 'running',
-        unread: false,
-        runMode: mode,
-        runCurrentStep: subtasks.filter((task) => task.runResult).length,
-        runTotalSteps: subtasks.length,
-        runStartedAt: new Date().toISOString(),
-        // Full runs count their changed files at the end; single-step runs keep the last count.
-        ...(onlyIndex === undefined && { runChangedFiles: null }),
-        subtasksJson: serializeSubtasksPayload(payload)
-      });
-
-      void runOrchestrator(workspaceId, orchestratorId, payload, options);
-
-      const updated = await db.getOrchestrator(orchestratorId);
-      return reply.code(202).send(updated);
     }
   );
 
@@ -546,8 +628,9 @@ export async function orchestratorRoutes(fastify: FastifyInstance): Promise<void
     if (!workspace) {
       return { code: 404, error: 'Workspace not found' };
     }
-    if (orchestrator.runStatus === 'running') {
-      return { code: 409, error: 'Run already in progress' };
+    const locked = planLockedReason(orchestrator);
+    if (locked) {
+      return { code: 409, error: orchestrator.runStatus === 'running' ? 'Run already in progress' : locked };
     }
     const payload = parseSubtasksPayloadString(orchestrator.subtasksJson);
     const step = payload?.subtasks[index];

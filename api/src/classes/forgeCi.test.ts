@@ -139,11 +139,20 @@ describe('fix-build prompt', () => {
 describe('ciWatcher.diffFinishedRuns', () => {
   it('reports only runs that were active before and finished now', () => {
     const previous = new Map([
-      [1, run(1, 'running')],
-      [2, run(2, 'queued')]
+      ['run:1', run(1, 'running')],
+      ['run:2', run(2, 'queued')]
     ]);
-    const finished = diffFinishedRuns(previous, [run(1, 'success'), run(2, 'running'), run(3, 'failure')]);
+    const finished = diffFinishedRuns(previous, [run(1, 'success'), run(2, 'running'), run(3, 'failure')], 'actions');
     expect(finished.map((r) => r.id)).toEqual([1]);
-    expect(diffFinishedRuns(null, [run(1, 'success')])).toEqual([]);
+    expect(diffFinishedRuns(null, [run(1, 'success')], 'actions')).toEqual([]);
+  });
+
+  it('matches commit statuses by context and commit, since each update gets a new id', () => {
+    const status = (id: number, state: string, sha = 'abc'): CiRun =>
+      commitStatusesToRuns({ sha, statuses: [{ id, status: state, context: 'ci/woodpecker' }] }, FORGE, 'main')[0]!;
+    const previous = new Map([['status:abc:ci/woodpecker', status(10, 'pending')]]);
+    expect(diffFinishedRuns(previous, [status(11, 'success')], 'commit-status').map((r) => r.id)).toEqual([11]);
+    // Same context on a different commit is a different run.
+    expect(diffFinishedRuns(previous, [status(12, 'success', 'def')], 'commit-status')).toEqual([]);
   });
 });

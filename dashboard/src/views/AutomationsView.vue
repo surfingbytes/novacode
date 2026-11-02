@@ -120,42 +120,68 @@ function workspaceName(id: string): string {
 }
 
 async function selectAutomation(a: Automation): Promise<void> {
+  if (selectedAutomation.value?.id !== a.id) {
+    runs.value = [];
+  }
   selectedAutomation.value = a;
   selectedRun.value = null;
   await fetchRuns(a.id);
 }
 
+/** Bumped per runs request; only the latest one for the still-selected automation may write `runs`. */
+let runsSeq = 0;
+
 async function fetchRuns(automationId: string): Promise<void> {
+  const seq = ++runsSeq;
   bRunsLoading.value = true;
   try {
     const response = await automationsApi.listRuns(automationId, 50);
-    runs.value = response.data ?? [];
+    if (seq === runsSeq && selectedAutomation.value?.id === automationId) {
+      runs.value = response.data ?? [];
+    }
   } catch (err) {
-    notifyApiError(err, 'Load runs failed');
+    if (seq === runsSeq && selectedAutomation.value?.id === automationId) {
+      notifyApiError(err, 'Load runs failed');
+    }
   } finally {
-    bRunsLoading.value = false;
+    if (seq === runsSeq) {
+      bRunsLoading.value = false;
+    }
   }
 }
 
 // refresh automations list + selected runs silently
 async function pollSelected(): Promise<void> {
-  if (selectedAutomation.value) {
-    try {
-      const response = await automationsApi.list();
-      automations.value = response.data ?? [];
-      // update selected automation object
-      const updated = automations.value.find((a) => a.id === selectedAutomation.value!.id);
-      if (updated) {
-        selectedAutomation.value = updated;
-      }
-    } catch {
-      // Background poll; the next tick retries and the last good list stays shown.
+  const selectedId = selectedAutomation.value?.id;
+  if (!selectedId) {
+    return;
+  }
+  try {
+    const response = await automationsApi.list();
+    automations.value = response.data ?? [];
+    // update selected automation object (unless the selection changed meanwhile)
+    const updated = automations.value.find((a) => a.id === selectedId);
+    if (updated && selectedAutomation.value?.id === selectedId) {
+      selectedAutomation.value = updated;
     }
-    try {
-      const response = await automationsApi.listRuns(selectedAutomation.value.id, 50);
+  } catch {
+    // Background poll; the next tick retries and the last good list stays shown.
+  }
+  if (selectedAutomation.value?.id !== selectedId) {
+    return;
+  }
+  const seq = ++runsSeq;
+  try {
+    const response = await automationsApi.listRuns(selectedId, 50);
+    if (seq === runsSeq && selectedAutomation.value?.id === selectedId) {
       runs.value = response.data ?? [];
-    } catch {
-      // Background poll; the next tick retries and the last good runs stay shown.
+    }
+  } catch {
+    // Background poll; the next tick retries and the last good runs stay shown.
+  } finally {
+    // This request superseded any in-flight fetchRuns, so it owns the loading flag.
+    if (seq === runsSeq) {
+      bRunsLoading.value = false;
     }
   }
 }

@@ -252,4 +252,31 @@ describe('workspaces store bootstrap', () => {
     expect(store.allSessions).toHaveLength(1);
     expect(createManagedSocket).toHaveBeenCalledTimes(2);
   });
+
+  it('keeps live session events that arrive while a list refresh is in flight', async () => {
+    vi.mocked(workspaceApi.listAll).mockResolvedValue({ data: [workspaceFixture()] } as never);
+    vi.mocked(sessionsApi.listAll).mockResolvedValueOnce({ data: [sessionFixture()] } as never);
+    vi.mocked(createManagedSocket).mockClear();
+    const store = useWorkspacesStore();
+    await store.setActiveWorkspace('ws-1');
+    const socketOptions = vi.mocked(createManagedSocket).mock.calls.at(-1)![0];
+    const serverSends = (message: unknown) => socketOptions.onMessage(JSON.stringify(message));
+
+    let finishList: (value: unknown) => void = () => undefined;
+    vi.mocked(sessionsApi.listAll).mockReturnValueOnce(
+      new Promise((resolve) => (finishList = resolve)) as never
+    );
+    const refresh = store.fetchAllSessions();
+    serverSends({ type: 'busy-changed', id: 'sess-1', busy: true });
+    serverSends({ type: 'session-upsert', session: sessionFixture({ id: 'sess-2', name: 'Brand new' }) });
+    // Stale snapshot taken before both events.
+    finishList({ data: [sessionFixture({ busy: false })] });
+    await refresh;
+
+    expect(store.allSessions.map((session) => [session.id, session.busy ?? false])).toEqual([
+      ['sess-2', false],
+      ['sess-1', true]
+    ]);
+  });
 });
+

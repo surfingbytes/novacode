@@ -9,7 +9,7 @@ import {
   signToken,
   extractRequestToken,
   authenticateToken,
-  createAuthUser,
+  createFirstAuthUser,
   changePassword,
   changeUsername,
   jwtPreHandler,
@@ -127,7 +127,10 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: 'Account already exists; sign in instead' });
       }
       const { username, password } = request.body;
-      const user = await createAuthUser(username, password);
+      const user = await createFirstAuthUser(username, password);
+      if (!user) {
+        return reply.code(400).send({ error: 'Account already exists; sign in instead' });
+      }
       clearVibeApiKey(config.configDir);
       const token = await signToken(user.username, user.id, user.tokenVersion);
       attachSessionCookie(request, reply, token);
@@ -313,7 +316,8 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       if (!user) {
         return reply.code(401).send({ error: 'Invalid token' });
       }
-      const refreshed = await signToken(user.username, user.id, user.tokenVersion);
+      // Keep the API key binding so deleting or rotating the key revokes this session too.
+      const refreshed = await signToken(user.username, user.id, user.tokenVersion, authUser?.apiTokenId);
       attachSessionCookie(request, reply, refreshed);
       return { valid: true, username: user.username };
     }

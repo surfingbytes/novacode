@@ -17,9 +17,12 @@ export function effectivePromptIdleTimeoutMs(configuredMs: number, bStreamingInp
 
 /**
  * Tracks tool calls whose input has not finished streaming: from their `pending`
- * `tool_call` until the first update that carries a status. The adapter sends no
- * status when the input completes, so the window also covers the run of a tool
- * that reports no progress; the normal timeout resumes once it settles.
+ * `tool_call` until the input is complete. The adapter sends no status then, and
+ * only its full-input refinement can carry `content` (partial refinements never
+ * do), so the window ends on a status-less update with `content` or on any status
+ * update. The adapter drops a `content` equal to what it sent before (e.g. an MCP
+ * tool's empty content), so then the window also covers the run of a tool that
+ * reports no progress; the normal timeout resumes once it settles.
  */
 export class StreamingToolInputTracker {
   private readonly pending = new Set<string>();
@@ -45,7 +48,7 @@ export class StreamingToolInputTracker {
       else this.pending.delete(toolCallId);
       return;
     }
-    if (update.sessionUpdate === 'tool_call_update' && status) {
+    if (update.sessionUpdate === 'tool_call_update' && (status || 'content' in update)) {
       this.pending.delete(toolCallId);
     }
   }

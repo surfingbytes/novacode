@@ -80,6 +80,8 @@ const bSaving = ref<boolean>(false);
 const saveResult = ref<'success' | 'error' | null>(null);
 const saveErrorMessage = ref<string>('');
 let saveResultTimer: ReturnType<typeof setTimeout> | null = null;
+/** Bumped per file read; older responses are discarded. */
+let readSeq = 0;
 /** Content as last read from / written to disk; compared against the editor to detect unsaved edits. */
 const loadedContent = ref<string>('');
 /** Live Monaco content (markdown edits live in fileContent via MdEditor v-model). */
@@ -191,6 +193,11 @@ function pathToRestore(): string | null {
 }
 
 const readFilePath = async (path: string, bEmit = true): Promise<void> => {
+  const seq = ++readSeq;
+  const workspaceId = props.workspaceId;
+  // A response for a file/workspace that is no longer selected must not land in the editor.
+  const bIsCurrent = (): boolean =>
+    seq === readSeq && selectedPath.value === path && props.workspaceId === workspaceId;
   selectedPath.value = path;
   commitOpenPath(path, bEmit);
   readError.value = null;
@@ -200,16 +207,24 @@ const readFilePath = async (path: string, bEmit = true): Promise<void> => {
   loadedContent.value = '';
   editorContent.value = '';
   try {
-    const response = await filesApi.read(props.workspaceId, path);
+    const response = await filesApi.read(workspaceId, path);
+    if (!bIsCurrent()) {
+      return;
+    }
     fileContent.value = response.data.content;
     fileEncoding.value = response.data.encoding;
     loadedContent.value = response.data.content;
     editorContent.value = response.data.content;
   } catch (error: unknown) {
+    if (!bIsCurrent()) {
+      return;
+    }
     const errorWithMessage = error as { response?: { data?: { error?: string } }; message?: string };
     readError.value = errorWithMessage?.response?.data?.error ?? errorWithMessage?.message ?? 'Failed to read file';
   } finally {
-    bReadLoading.value = false;
+    if (seq === readSeq) {
+      bReadLoading.value = false;
+    }
   }
 };
 
@@ -319,7 +334,8 @@ async function revealAndOpen(path: string): Promise<void> {
 }
 
 const saveFile = async (): Promise<void> => {
-  if (!selectedPath.value) {
+  // While a read is in flight the editor holds no content for selectedPath yet.
+  if (!selectedPath.value || bReadLoading.value) {
     return;
   }
   const content = bIsMarkdownFile.value

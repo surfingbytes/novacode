@@ -33,7 +33,7 @@ vi.mock('../workspacePaths', () => ({
 }));
 
 // classes
-import { dispatchPrompt } from './dispatch';
+import { dispatchPrompt, dispatchPromptAndWait } from './dispatch';
 import { isSessionBusy } from './state';
 
 // types
@@ -124,5 +124,58 @@ describe('dispatchPrompt planning chat note', () => {
     await vi.waitFor(() => expect(runClaudeAcp).toHaveBeenCalled());
 
     expect(runClaudeAcp.mock.calls[0][0].promptText).toBe('hi');
+  });
+});
+
+describe('dispatchPrompt concurrency', () => {
+  it('lets only one of two concurrent dispatches start a run', async () => {
+    const [first, second] = await Promise.all([
+      dispatchPrompt({ sessionId: 's1', text: 'a', subscriber: makeSubscriber() }),
+      dispatchPrompt({ sessionId: 's1', text: 'b', subscriber: makeSubscriber() })
+    ]);
+
+    expect(first).toEqual({});
+    expect(second).toEqual({ error: 'Agent is busy', requeue: true });
+    await vi.waitFor(() => expect(isSessionBusy('s1')).toBe(false));
+    expect(runClaudeAcp).toHaveBeenCalledOnce();
+  });
+
+  it('releases the session after an early return', async () => {
+    dbMock.getSession.mockResolvedValueOnce(null);
+    expect(await dispatchPrompt({ sessionId: 's1', text: 'a', subscriber: makeSubscriber() }))
+      .toEqual({ error: 'Session not found', requeue: true });
+
+    expect(await dispatchPrompt({ sessionId: 's1', text: 'b', subscriber: makeSubscriber() })).toEqual({});
+    await vi.waitFor(() => expect(isSessionBusy('s1')).toBe(false));
+  });
+});
+
+describe('dispatchPrompt setup failures', () => {
+  it('requeues and releases the session when setup throws before the user message is saved', async () => {
+    dbMock.getSession.mockRejectedValueOnce(new Error('db down'));
+
+    const result = await dispatchPrompt({ sessionId: 's1', text: 'a', subscriber: makeSubscriber() });
+
+    expect(result).toEqual({ error: 'Failed to start agent run', requeue: true });
+    expect(await dispatchPrompt({ sessionId: 's1', text: 'b', subscriber: makeSubscriber() })).toEqual({});
+    await vi.waitFor(() => expect(isSessionBusy('s1')).toBe(false));
+  });
+
+  it('does not requeue when setup throws after the user message is saved', async () => {
+    dbMock.getFirstUser.mockRejectedValueOnce(new Error('db down'));
+
+    const result = await dispatchPrompt({ sessionId: 's1', text: 'a', subscriber: makeSubscriber() });
+
+    expect(result).toEqual({ error: 'Failed to start agent run', requeue: false });
+    expect(isSessionBusy('s1')).toBe(false);
+  });
+
+  it('dispatchPromptAndWait resolves with the error instead of waiting for its timeout', async () => {
+    dbMock.getFirstUser.mockRejectedValueOnce(new Error('db down'));
+
+    const result = await dispatchPromptAndWait({ sessionId: 's1', text: 'a', timeoutMs: 60_000 });
+
+    expect(result.error).toBeTruthy();
+    expect(result.messages).toBeUndefined();
   });
 });

@@ -80,6 +80,9 @@ type AppSettings = {
   workspaceBrowseRoot: string;
 };
 
+/** Git identity goes into the global .gitconfig; newlines/control chars could inject config keys. */
+const GitIdentityValue = Type.String({ pattern: '^[^\\x00-\\x1f\\x7f]*$' });
+
 const AppSettingsSchema = Type.Object({
   gitUserName: Type.Union([Type.String(), Type.Null()]),
   gitUserEmail: Type.Union([Type.String(), Type.Null()]),
@@ -148,8 +151,8 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       preHandler: jwtPreHandler,
       schema: {
         body: Type.Object({
-          gitUserName: Type.Optional(Type.Union([Type.String(), Type.Null()])),
-          gitUserEmail: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+          gitUserName: Type.Optional(Type.Union([GitIdentityValue, Type.Null()])),
+          gitUserEmail: Type.Optional(Type.Union([GitIdentityValue, Type.Null()])),
           theme: Type.Optional(Type.String()),
           autoTheme: Type.Optional(Type.Boolean()),
           darkTheme: Type.Optional(Type.String()),

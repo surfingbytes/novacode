@@ -18,6 +18,7 @@ import {
   headCommit,
   linkIgnoredEntries,
   mergeBranch,
+  moveBranchAside,
   resolveRepo
 } from './gitWorktrees';
 
@@ -149,6 +150,26 @@ describe('gitWorktrees', () => {
     const conflicted = await filesWithConflictMarkers(repo, ['a.txt']);
     // Either the three-way apply left markers, or nothing was applied; both are recoverable by the merge agent.
     expect(conflicted.length === 0 || conflicted[0] === 'a.txt').toBe(true);
+  });
+});
+
+describe('moveBranchAside', () => {
+  it('renames a kept branch to the first free suffix so a new worktree on its name starts fresh', async () => {
+    const base = await headCommit(repo);
+    await sh(repo, ['branch', 'nova/o1/step-1-2', base]);
+    const keptDir = join(root, 'kept');
+    await addWorktree(repo, keptDir, 'nova/o1/step-1', base);
+    await writeFile(join(keptDir, 'a.txt'), 'kept work\n');
+    await commitAll(keptDir, 'failed attempt', ENV);
+    const keptHead = await headCommit(keptDir);
+    await sh(repo, ['worktree', 'remove', '--force', keptDir]);
+
+    expect(await moveBranchAside(repo, 'nova/o1/step-1')).toBe('nova/o1/step-1-3');
+    expect(await branchExists(repo, 'nova/o1/step-1')).toBe(false);
+
+    await addWorktree(repo, join(root, 'again'), 'nova/o1/step-1', base);
+    expect(await sh(repo, ['rev-parse', 'nova/o1/step-1-3'])).toBe(keptHead);
+    expect(await sh(repo, ['rev-parse', 'nova/o1/step-1'])).toBe(base);
   });
 });
 

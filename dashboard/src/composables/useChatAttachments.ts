@@ -4,7 +4,7 @@
  */
 
 // node_modules
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
 // classes
 import { apiErrorMessage, sessionsApi } from '@/classes/api';
@@ -23,7 +23,9 @@ export interface UseChatAttachmentsOptions {
 export function useChatAttachments(options: UseChatAttachmentsOptions) {
   // -------------------------------------------------- Refs --------------------------------------------------
   const pendingImages = ref<PendingAttachment[]>([]);
-  const bUploadingImage = ref(false);
+  /** Concurrent uploads in flight — send stays disabled until all of them settle. */
+  const uploadsInFlight = ref(0);
+  const bUploadingImage = computed(() => uploadsInFlight.value > 0);
 
   // -------------------------------------------------- Methods --------------------------------------------------
   function uploadAttachmentFile(file: File): void {
@@ -34,15 +36,13 @@ export function useChatAttachments(options: UseChatAttachmentsOptions) {
       const canPreviewLocally =
         /^(image\/(png|jpeg|gif|webp))$/i.test(file.type) ||
         /\.(png|jpe?g|gif|webp)$/i.test(file.name);
-      bUploadingImage.value = true;
+      const sessionId = options.sessionId();
+      uploadsInFlight.value += 1;
       try {
         const mimeType = file.type || 'application/octet-stream';
-        const { data } = await sessionsApi.uploadImage(
-          options.sessionId(),
-          base64,
-          mimeType,
-          file.name
-        );
+        const { data } = await sessionsApi.uploadImage(sessionId, base64, mimeType, file.name);
+        // The composer moved to another session meanwhile: it must not get this file.
+        if (options.sessionId() !== sessionId) return;
         // Server may convert HEIC→JPEG; trust the stored filename for previewability.
         const isImage = /\.(png|jpe?g|gif|webp)$/i.test(data.filename);
         pendingImages.value.push({
@@ -51,15 +51,16 @@ export function useChatAttachments(options: UseChatAttachmentsOptions) {
           dataUrl: isImage
             ? canPreviewLocally
               ? dataUrl
-              : sessionsApi.imageUrl(options.sessionId(), data.filename)
+              : sessionsApi.imageUrl(sessionId, data.filename)
             : '',
           serverPath: data.path,
           isImage
         });
       } catch (error) {
+        if (options.sessionId() !== sessionId) return;
         options.onUploadError(apiErrorMessage(error, 'Failed to upload file'));
       } finally {
-        bUploadingImage.value = false;
+        uploadsInFlight.value -= 1;
       }
     };
     reader.readAsDataURL(file);

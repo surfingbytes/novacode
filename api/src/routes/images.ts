@@ -16,6 +16,11 @@ import { IMAGE_DIR } from '../classes/sessionImages';
 // --------------------------------------------- Config ---------------------------------------------
 
 const SessionParamsSchema = Type.Object({ sessionId: Type.String() });
+const UploadBodySchema = Type.Object({
+  data: Type.String(),
+  mimeType: Type.Optional(Type.String()),
+  filename: Type.Optional(Type.String())
+});
 const ImageParamsSchema = Type.Object({ sessionId: Type.String(), filename: Type.String() });
 
 /** HEIC/HEIF are accepted on upload then converted to JPEG for agents + browsers. */
@@ -162,17 +167,24 @@ function buildAttachmentFilename(raw: string | undefined, ext: string): string {
   return `${stem}${ext}`;
 }
 
-function allocateUniqueFilename(dir: string, desired: string): string {
-  if (!existsSync(join(dir, desired))) {
-    return desired;
-  }
+/**
+ * Writes `buf` under `desired`, or `stem-N.ext` when taken. Exclusive create (`wx`) makes the
+ * name claim atomic, so parallel uploads with the same name never overwrite each other.
+ */
+async function writeUniqueFile(dir: string, desired: string, buf: Buffer): Promise<string> {
   const ext = extname(desired);
-  const stem = desired.slice(0, -ext.length);
-  let n = 1;
-  while (existsSync(join(dir, `${stem}-${n}${ext}`))) {
-    n += 1;
+  const stem = ext ? desired.slice(0, -ext.length) : desired;
+  for (let n = 0; ; n += 1) {
+    const filename = n === 0 ? desired : `${stem}-${n}${ext}`;
+    try {
+      await writeFile(join(dir, filename), buf, { flag: 'wx' });
+      return filename;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw err;
+      }
+    }
   }
-  return `${stem}-${n}${ext}`;
 }
 
 function isHeicUpload(mimeType: string, ext: string): boolean {
@@ -200,18 +212,19 @@ export async function imageRoutes(fastify: FastifyInstance): Promise<void> {
     {
       preHandler: jwtPreHandler,
       bodyLimit: config.uploadBodyLimitBytes,
-      schema: { params: SessionParamsSchema }
+      schema: { params: SessionParamsSchema, body: UploadBodySchema }
     },
     async (request, reply) => {
       const { sessionId } = request.params;
-      const body = request.body as { data: string; mimeType: string; filename?: string };
+      const body = request.body;
+      const mimeType = body.mimeType ?? '';
 
       const session = await db.getSession(sessionId);
       if (!session) {
         return reply.code(404).send({ error: 'Session not found' });
       }
 
-      let ext = resolveExtension(body.mimeType, body.filename);
+      let ext = resolveExtension(mimeType, body.filename);
 
       const dir = join(IMAGE_DIR, sessionId);
 
@@ -223,7 +236,7 @@ export async function imageRoutes(fastify: FastifyInstance): Promise<void> {
 
       const raw = Buffer.from(body.data, 'base64');
       let buf: Buffer = raw;
-      if (isHeicUpload(body.mimeType, ext)) {
+      if (isHeicUpload(mimeType, ext)) {
         try {
           buf = await heicBufferToJpeg(raw);
           ext = '.jpg';
@@ -232,9 +245,8 @@ export async function imageRoutes(fastify: FastifyInstance): Promise<void> {
         }
       }
 
-      const filename = allocateUniqueFilename(dir, buildAttachmentFilename(body.filename, ext));
+      const filename = await writeUniqueFile(dir, buildAttachmentFilename(body.filename, ext), buf);
       const filePath = join(dir, filename);
-      await writeFile(filePath, buf);
 
       return reply.code(201).send({ path: filePath, filename });
     }

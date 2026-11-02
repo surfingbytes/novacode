@@ -127,4 +127,26 @@ describe('automationScheduler run-finished broadcast', () => {
       expect.objectContaining({ status: 'failed', error: 'Timed out', finishedAt: storedFinishedAt() })
     );
   });
+
+  it('releases the running lock and fails the run when a DB write throws before the session starts', async () => {
+    updateAutomation.mockRejectedValueOnce(new Error('db down'));
+    dispatchPromptAndWait.mockResolvedValue({ messages: [] });
+    await runAutomation('a1');
+    expect(updateAutomationRun).toHaveBeenCalledWith('r1', expect.objectContaining({ status: 'failed', error: 'db down' }));
+    expect(updateAutomation).toHaveBeenLastCalledWith('a1', { lastRunStatus: 'failed', lastRunError: 'db down' });
+    expect(createSessionWithAgent).not.toHaveBeenCalled();
+
+    // The id was released, so the next run proceeds.
+    await runAutomation('a1');
+    expect(createSessionWithAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the running lock when loading the automation throws', async () => {
+    getAutomation.mockRejectedValueOnce(new Error('db down'));
+    await expect(runAutomation('a1')).resolves.toBeUndefined();
+    expect(createAutomationRun).not.toHaveBeenCalled();
+    dispatchPromptAndWait.mockResolvedValue({ messages: [] });
+    await runAutomation('a1');
+    expect(createAutomationRun).toHaveBeenCalledTimes(1);
+  });
 });

@@ -28,6 +28,9 @@ import {
 import { getClaudePlanUsage } from '../classes/claudePlanUsage';
 import { logger } from '../classes/logger';
 
+/** Providers the OpenCode login writes keys under (`sk-…` keys go to openai); logout clears them all. */
+const OPENCODE_LOGIN_PROVIDER_IDS = ['opencode-go', 'openai'] as const;
+
 const cursorUsageBucketSchema = Type.Object({
   enabled: Type.Boolean(),
   usedCents: Type.Number(),
@@ -313,7 +316,7 @@ export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
             parsed && typeof parsed === 'object' && !Array.isArray(parsed)
               ? parsed as Record<string, unknown>
               : {};
-          delete data['opencode-go'];
+          for (const providerId of OPENCODE_LOGIN_PROVIDER_IDS) delete data[providerId];
           writeFileSync(authPath, JSON.stringify(data, null, 2), 'utf8');
         } catch {
           rmSync(authPath, { force: true });
@@ -327,7 +330,7 @@ export async function agentAuthRoutes(fastify: FastifyInstance): Promise<void> {
             parsed && typeof parsed === 'object' && !Array.isArray(parsed)
               ? parsed as Record<string, unknown>
               : {};
-          delete data['opencode-go'];
+          for (const providerId of OPENCODE_LOGIN_PROVIDER_IDS) delete data[providerId];
           writeFileSync(legacyAuthPath, JSON.stringify(data, null, 2), 'utf8');
         } catch {
           // ignore malformed legacy auth cleanup

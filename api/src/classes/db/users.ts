@@ -72,10 +72,24 @@ export async function listUsers(): Promise<UserModel[]> {
   return Promise.all(users.map((user) => withPlainClaudeToken(user)));
 }
 
-async function createUser(username: string, passwordHash: string): Promise<UserModel> {
-  const id = randomUUID();
-  const createdAt = new Date().toISOString();
-  return prisma.user.create({ data: { id, username, passwordHash, createdAt } });
+/** Arbitrary key for the transaction-scoped advisory lock that serializes first-run setup. */
+const FIRST_USER_LOCK_KEY = 7_315_204_118n;
+
+/**
+ * Creates the account only when no user exists yet. The advisory lock makes the
+ * check and insert atomic, so concurrent setups cannot both create an account.
+ * Returns null when a user already exists.
+ */
+async function createFirstUser(username: string, passwordHash: string): Promise<UserModel | null> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${FIRST_USER_LOCK_KEY})`;
+    if ((await tx.user.count()) > 0) {
+      return null;
+    }
+    const id = randomUUID();
+    const createdAt = new Date().toISOString();
+    return tx.user.create({ data: { id, username, passwordHash, createdAt } });
+  });
 }
 
 export async function updateUser(
@@ -111,7 +125,7 @@ export async function updateUser(
   return withPlainClaudeToken(await prisma.user.update({ where: { id }, data }));
 }
 
-async function getUserByApiToken(token: string): Promise<UserModel | null> {
+async function getUserByApiToken(token: string): Promise<{ user: UserModel; tokenId: string } | null> {
   const tokenHash = hashApiToken(token);
   const row = await prisma.apiToken.findUnique({
     where: { tokenHash },
@@ -128,7 +142,11 @@ async function getUserByApiToken(token: string): Promise<UserModel | null> {
       .update({ where: { id: row.id }, data: { lastUsedAt: new Date().toISOString() } })
       .catch((err) => logger.warn({ err, tokenId: row.id }, 'Failed to update API token lastUsedAt'));
   }
-  return withPlainClaudeToken(row.user);
+  return { user: await withPlainClaudeToken(row.user), tokenId: row.id };
+}
+
+async function apiTokenExists(userId: string, tokenId: string): Promise<boolean> {
+  return (await prisma.apiToken.count({ where: { id: tokenId, userId } })) > 0;
 }
 
 async function listApiTokens(userId: string): Promise<
@@ -180,9 +198,10 @@ export const userDb = {
   getUserById,
   getFirstUser,
   listUsers,
-  createUser,
+  createFirstUser,
   updateUser,
   getUserByApiToken,
+  apiTokenExists,
   listApiTokens,
   countApiTokens,
   createApiToken,

@@ -28,6 +28,37 @@ import type {
 } from '@/@types/index';
 
 const LIST_RETRY_DELAYS_MS = [1000, 3000];
+
+/** A live session event recorded while a list fetch is in flight, re-applied on its result. */
+type SessionListEvent =
+  | { type: 'upsert'; session: Session }
+  | { type: 'deleted'; id: string }
+  | { type: 'busy'; id: string; busy: boolean; busySubagents?: Session['busySubagents'] };
+
+/** Applies an event to a list without side effects (notifications, read sync). */
+function applySessionListEvent(sessions: Session[], event: SessionListEvent): Session[] {
+  if (event.type === 'deleted') {
+    return sessions.filter((session) => session.id !== event.id);
+  }
+  if (event.type === 'busy') {
+    return sessions.map((session) =>
+      session.id === event.id
+        ? {
+            ...session,
+            busy: event.busy,
+            busySubagents: event.busy ? (event.busySubagents ?? session.busySubagents ?? null) : null
+          }
+        : session
+    );
+  }
+  const index = sessions.findIndex((session) => session.id === event.session.id);
+  if (index === -1) {
+    return [event.session, ...sessions];
+  }
+  const updated = [...sessions];
+  updated[index] = { ...sessions[index], ...event.session };
+  return updated;
+}
 const NOTIFICATION_QUESTION_MAX_LENGTH = 140;
 
 function truncateText(text: string, maxLength: number): string {
@@ -66,6 +97,14 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
   let workspacesInitialized = false;
   let workspacesInitPromise: Promise<void> | null = null;
   let sessionsInitPromise: Promise<void> | null = null;
+  /** One journal per in-flight `fetchAllSessions`; `null` = a snapshot superseded that fetch. */
+  const pendingListJournals = new Set<{ events: SessionListEvent[] | null }>();
+
+  function journalSessionEvent(event: SessionListEvent): void {
+    for (const journal of pendingListJournals) {
+      journal.events?.push(event);
+    }
+  }
 
   // -------------------------------------------------- Computed --------------------------------------------------
   const activeSessions = computed<Session[]>(() => {
@@ -287,11 +326,17 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     if (!sessionsInitialized) {
       bSessionsLoading.value = true;
     }
+    // Live events that land while the request is in flight are newer than its
+    // result; replay them on top so the list cannot jump back.
+    const journal: { events: SessionListEvent[] | null } = { events: [] };
+    pendingListJournals.add(journal);
     try {
       const orchestratorsRequest = orchestratorApi.listAll().catch(() => null);
       const response = await withUnreachableRetry(() => sessionsApi.listAll());
-      allSessions.value = response.data ?? [];
-      syncReadSessionsToNotifications(allSessions.value);
+      if (journal.events) {
+        allSessions.value = journal.events.reduce(applySessionListEvent, response.data ?? []);
+        syncReadSessionsToNotifications(allSessions.value);
+      }
       const orchestratorsResponse = await orchestratorsRequest;
       if (orchestratorsResponse?.data) {
         useOrchestratorsStore().applySummaries(orchestratorsResponse.data);
@@ -303,6 +348,7 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
         bSessionsLoadFailed.value = true;
       }
     } finally {
+      pendingListJournals.delete(journal);
       bSessionsLoading.value = false;
     }
   };
@@ -328,6 +374,10 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
             | { type: 'ping' };
 
           if (messagePayload.type === 'global-snapshot') {
+            // Fresher than any list request already in flight: drop their results.
+            for (const journal of pendingListJournals) {
+              journal.events = null;
+            }
             allSessions.value = messagePayload.sessions ?? [];
             syncReadSessionsToNotifications(allSessions.value);
             if (messagePayload.orchestrators) {
@@ -337,13 +387,21 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
             sessionsInitialized = true;
           } else if (messagePayload.type === 'session-upsert') {
             if (messagePayload.session) {
+              journalSessionEvent({ type: 'upsert', session: messagePayload.session });
               upsertSession(messagePayload.session);
             }
           } else if (messagePayload.type === 'session-deleted') {
             if (messagePayload.id) {
+              journalSessionEvent({ type: 'deleted', id: messagePayload.id });
               removeSession(messagePayload.id);
             }
           } else if (messagePayload.type === 'busy-changed') {
+            journalSessionEvent({
+              type: 'busy',
+              id: messagePayload.id,
+              busy: messagePayload.busy,
+              busySubagents: messagePayload.busySubagents
+            });
             setSessionBusy(messagePayload.id, messagePayload.busy, messagePayload.busySubagents);
           } else if (messagePayload.type === 'orchestrator-upsert') {
             if (messagePayload.orchestrator) {
@@ -474,6 +532,10 @@ export const useWorkspacesStore = defineStore('workspaces', () => {
     workspacesInitialized = false;
     workspacesInitPromise = null;
     sessionsInitPromise = null;
+    for (const journal of pendingListJournals) {
+      journal.events = null;
+    }
+    pendingListJournals.clear();
   }
 
   const reorderWorkspaces = async (ids: string[]): Promise<void> => {

@@ -6,7 +6,7 @@
  */
 
 // node_modules
-import { ref } from 'vue';
+import { ref, toRaw } from 'vue';
 
 // classes
 import { buildChatWsUrl, type AgentErrorCode } from '@/classes/api';
@@ -34,6 +34,11 @@ import type {
   ChatWsServerMessage
 } from '@/@types/index';
 import { resolvePlanDisplayTitle } from '@novacode/shared';
+
+// -------------------------------------------------- Constants --------------------------------------------------
+
+/** Give up waiting for a `history-page` reply so "load older" cannot stay disabled forever. */
+const LOAD_MORE_TIMEOUT_MS = 15_000;
 
 // -------------------------------------------------- Context --------------------------------------------------
 
@@ -92,6 +97,9 @@ export function useChatSocket(ctx: UseChatSocketContext) {
   const streamingRawLines: string[] = [];
   const seenVibeMessageIds = new Set<string>();
   const seenVibeToolCallIds = new Set<string>();
+  /** Optimistic user turns not yet confirmed by `prompt-started` (raw objects). */
+  const unconfirmedUserMessages = new WeakSet<ChatMessage>();
+  let loadMoreTimer: ReturnType<typeof setTimeout> | null = null;
 
   let socket: ManagedSocket | null = null;
   /** Bumped on disconnect/reset so late frames from a prior socket are ignored. */
@@ -116,6 +124,25 @@ export function useChatSocket(ctx: UseChatSocketContext) {
   function clearChatError(): void {
     chatError.value = null;
     chatErrorCode.value = null;
+  }
+
+  function clearLoadingMore(): void {
+    if (loadMoreTimer) {
+      clearTimeout(loadMoreTimer);
+      loadMoreTimer = null;
+    }
+    bLoadingMore.value = false;
+  }
+
+  function pushOptimisticUserMessage(text: string, imagePaths: string[]): void {
+    const message: ChatMessage = {
+      role: 'user',
+      content: text,
+      imagePaths: imagePaths.length > 0 ? imagePaths : undefined,
+      createdAt: new Date().toISOString()
+    };
+    unconfirmedUserMessages.add(message);
+    messages.value.push(message);
   }
 
   // -------------------------------------------------- Frame handlers --------------------------------------------------
@@ -154,7 +181,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     }
     messages.value = [...older, ...messages.value];
     bHasMore.value = msg.hasMore ?? false;
-    bLoadingMore.value = false;
+    clearLoadingMore();
     ctx.onHistoryPage();
     ctx.onMessagesChanged?.();
   }
@@ -167,13 +194,22 @@ export function useChatSocket(ctx: UseChatSocketContext) {
       imagePaths: prompt.imagePaths ?? []
     };
     const imagePaths = prompt.imagePaths?.length ? prompt.imagePaths : undefined;
-    const last = messages.value[messages.value.length - 1];
-    const bSameOptimistic =
-      last?.role === 'user' &&
-      (last.content ?? '') === prompt.text &&
-      JSON.stringify(last.imagePaths ?? []) === JSON.stringify(imagePaths ?? []);
-    if (bSameOptimistic && last) {
-      last.createdAt = prompt.createdAt;
+    const imageKey = JSON.stringify(imagePaths ?? []);
+    const optimisticIndex = messages.value.findIndex(
+      (m) =>
+        unconfirmedUserMessages.has(toRaw(m)) &&
+        (m.content ?? '') === prompt.text &&
+        JSON.stringify(m.imagePaths ?? []) === imageKey
+    );
+    if (optimisticIndex !== -1) {
+      const optimistic = messages.value[optimisticIndex];
+      unconfirmedUserMessages.delete(toRaw(optimistic));
+      optimistic.createdAt = prompt.createdAt;
+      // Sent while another turn was still running: move it after that turn.
+      if (optimisticIndex !== messages.value.length - 1) {
+        messages.value.splice(optimisticIndex, 1);
+        messages.value.push(optimistic);
+      }
     } else {
       messages.value.push({
         role: 'user',
@@ -376,6 +412,8 @@ export function useChatSocket(ctx: UseChatSocketContext) {
       },
       onConnectionChange: (bConnected) => {
         if (epoch !== socketEpoch) return;
+        // A page request on the old connection will never be answered.
+        clearLoadingMore();
         bWsConnected.value = bConnected;
         if (bConnected) {
           bWsReconnecting.value = false;
@@ -400,6 +438,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
       socket.close();
       socket = null;
     }
+    clearLoadingMore();
     clearChatError();
     connect();
   }
@@ -410,6 +449,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     socket = null;
     bWsConnected.value = false;
     bWsReconnecting.value = false;
+    clearLoadingMore();
   }
 
   // -------------------------------------------------- Outgoing --------------------------------------------------
@@ -424,15 +464,14 @@ export function useChatSocket(ctx: UseChatSocketContext) {
       return false;
     }
     clearChatError();
-    lastPromptRequest.value = { text: payload.text, imagePaths: payload.imagePaths };
-    // Show the user turn immediately so a late/stale empty history frame cannot
-    // leave a named session with a blank pane.
-    messages.value.push({
-      role: 'user',
-      content: payload.text,
-      imagePaths: payload.imagePaths.length > 0 ? payload.imagePaths : undefined,
-      createdAt: new Date().toISOString()
-    });
+    // While a turn runs the server only queues the prompt (the queue UI shows it);
+    // `prompt-started` appends it once it actually runs.
+    if (!bIsStreaming.value) {
+      lastPromptRequest.value = { text: payload.text, imagePaths: payload.imagePaths };
+      // Show the user turn immediately so a late/stale empty history frame cannot
+      // leave a named session with a blank pane.
+      pushOptimisticUserMessage(payload.text, payload.imagePaths);
+    }
     bHistoryLoaded.value = true;
     bIsStreaming.value = true;
     socket.send({
@@ -451,12 +490,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     if (!lastPromptRequest.value || !socket || !bWsConnected.value) return;
     clearChatError();
     const { text, imagePaths } = lastPromptRequest.value;
-    messages.value.push({
-      role: 'user',
-      content: text,
-      imagePaths: imagePaths.length > 0 ? imagePaths : undefined,
-      createdAt: new Date().toISOString()
-    });
+    pushOptimisticUserMessage(text, imagePaths);
     bHistoryLoaded.value = true;
     bIsStreaming.value = true;
     socket.send({
@@ -521,7 +555,12 @@ export function useChatSocket(ctx: UseChatSocketContext) {
 
   function loadOlderMessages(): void {
     if (!socket || !bWsConnected.value) return;
+    clearLoadingMore();
     bLoadingMore.value = true;
+    loadMoreTimer = setTimeout(() => {
+      loadMoreTimer = null;
+      bLoadingMore.value = false;
+    }, LOAD_MORE_TIMEOUT_MS);
     socket.send({ type: 'load-more', offset: messages.value.length });
   }
 
@@ -553,7 +592,7 @@ export function useChatSocket(ctx: UseChatSocketContext) {
     pendingQuestions.value = [];
     lastPromptRequest.value = null;
     bHasMore.value = false;
-    bLoadingMore.value = false;
+    clearLoadingMore();
     clearChatError();
   }
 

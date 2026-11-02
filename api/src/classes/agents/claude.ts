@@ -97,10 +97,9 @@ export const claudeAdapter: AgentAdapter = {
     }
   },
 
-  /** No-op until the ACP session id is known; callers re-cancel from onSessionId. */
+  /** Also honoured before the ACP session id is known (session setup). */
   async cancel(sessionId: string): Promise<void> {
-    const acpSessionId = acpSessionIdByNovaSession.get(sessionId);
-    if (acpSessionId) cancelClaudeAcp(acpSessionId);
+    cancelClaudeAcp(sessionId, acpSessionIdByNovaSession.get(sessionId) ?? null);
   },
 
   async close(sessionId: string): Promise<void> {

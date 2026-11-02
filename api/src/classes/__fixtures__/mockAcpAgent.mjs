@@ -8,6 +8,10 @@
  *             'ignore-cancel'        — session/prompt never responds (forces hard kill)
  *             'fail-load'            — session/load responds with a JSON-RPC error
  *             'fail-new-if-mcp'      — session/new errors when mcpServers is non-empty
+ *             'fail-if-mcp'          — session/new and session/load error when mcpServers is non-empty
+ *             'fail-load-new-if-mcp' — session/load always errors; session/new errors with MCP
+ *             'hang-initialize'      — initialize never responds
+ *             'prompt-permission-then-hang' — like prompt-permission, but stays silent after the answer
  *             'prompt-permission'    — session/prompt asks the client for tool permission first
  *             'prompt-ask-question'  — session/prompt asks via cursor/ask_question first
  *             'prompt-update-todos'  — session/prompt sends cursor/update_todos first
@@ -99,6 +103,7 @@ rl.on('line', (line) => {
 
   if (!isRequest && msg.id === pendingPermissionRequestId) {
     pendingPermissionRequestId = null;
+    if (mode === 'prompt-permission-then-hang') return;
     settlePrompt(msg.result?.outcome?.outcome === 'selected' ? 'end_turn' : 'rejected');
     return;
   }
@@ -126,6 +131,7 @@ rl.on('line', (line) => {
 
   switch (msg.method) {
     case 'initialize':
+      if (mode === 'hang-initialize') break;
       send({
         jsonrpc: '2.0',
         id: msg.id,
@@ -133,7 +139,7 @@ rl.on('line', (line) => {
       });
       break;
     case 'session/new':
-      if (mode === 'fail-new-if-mcp' && Array.isArray(msg.params?.mcpServers) && msg.params.mcpServers.length > 0) {
+      if ((mode === 'fail-new-if-mcp' || mode === 'fail-if-mcp' || mode === 'fail-load-new-if-mcp') && Array.isArray(msg.params?.mcpServers) && msg.params.mcpServers.length > 0) {
         send({
           jsonrpc: '2.0',
           id: msg.id,
@@ -144,7 +150,11 @@ rl.on('line', (line) => {
       }
       break;
     case 'session/load':
-      if (mode === 'fail-load') {
+      if (
+        mode === 'fail-load' ||
+        mode === 'fail-load-new-if-mcp' ||
+        (mode === 'fail-if-mcp' && Array.isArray(msg.params?.mcpServers) && msg.params.mcpServers.length > 0)
+      ) {
         send({
           jsonrpc: '2.0',
           id: msg.id,
@@ -161,7 +171,7 @@ rl.on('line', (line) => {
     case 'session/prompt':
       if (mode === 'hang-until-cancel' || mode === 'ignore-cancel') {
         pendingPromptId = msg.id;
-      } else if (mode === 'prompt-permission') {
+      } else if (mode === 'prompt-permission' || mode === 'prompt-permission-then-hang') {
         pendingPromptId = msg.id;
         pendingPermissionRequestId = 'mock-permission-request-1';
         send({

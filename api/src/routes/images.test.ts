@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance, type LightMyRequestResponse } from 'fastify';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 // Mock factories run before static imports, so load node modules dynamically here.
@@ -11,7 +11,9 @@ vi.mock('../classes/sessionImages', async () => {
   return { IMAGE_DIR: mkdtempSync(path.join(tmpdir(), 'nova-images-route-')) };
 });
 
-vi.mock('../classes/database', () => ({ db: {} }));
+vi.mock('../classes/database', () => ({
+  db: { getSession: async (id: string): Promise<{ id: string } | null> => (id === 'up' ? { id } : null) }
+}));
 
 vi.mock('../classes/auth', () => ({
   jwtPreHandler: async (): Promise<void> => {},
@@ -112,5 +114,34 @@ describe('GET /api/sessions/:sessionId/images/:filename', () => {
   it('answers 401 without auth', async () => {
     const res = await get('pic.png', false);
     expect(res.statusCode).toBe(401);
+  });
+});
+
+describe('POST /api/sessions/:sessionId/images', () => {
+  const upload = (payload: Record<string, unknown>): Promise<LightMyRequestResponse> =>
+    app.inject({ method: 'POST', url: '/api/sessions/up/images', payload });
+
+  it('answers 400 when data is missing', async () => {
+    const res = await upload({ mimeType: 'image/png', filename: 'a.png' });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('keeps every parallel upload with the same name', async () => {
+    const bodies = Array.from({ length: 8 }, (_, i) => `file-${i}`);
+
+    const results = await Promise.all(
+      bodies.map((text) =>
+        upload({ data: Buffer.from(text).toString('base64'), mimeType: 'text/plain', filename: 'same.txt' })
+      )
+    );
+
+    expect(results.map((r) => r.statusCode)).toEqual(bodies.map(() => 201));
+    const names = results.map((r) => r.json().filename as string);
+    expect(new Set(names).size).toBe(bodies.length);
+    const dir = join(imageDir, 'up');
+    expect((await readdir(dir)).sort()).toEqual([...names].sort());
+    const contents = await Promise.all(names.map((n) => readFile(join(dir, n), 'utf8')));
+    expect(contents.sort()).toEqual([...bodies].sort());
   });
 });

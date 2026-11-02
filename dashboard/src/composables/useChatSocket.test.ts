@@ -224,6 +224,63 @@ describe('useChatSocket', () => {
     expect(JSON.parse(ws.sent[0])).toMatchObject({ type: 'prompt', text: 'go', model: 'auto' });
   });
 
+  it('does not append a prompt sent mid-run until the server starts it', () => {
+    const { chat, ws } = connectOpen();
+    cleanup = chat.disconnect;
+    ws.serverMessage(frame({ type: 'history', messages: [] }));
+    chat.sendPrompt({ text: 'one', model: 'auto', mode: 'agent', imagePaths: [] });
+    ws.serverMessage(
+      frame({ type: 'prompt-started', prompt: { text: 'one', createdAt: '2026-01-01T00:00:01.000Z' } })
+    );
+
+    chat.sendPrompt({ text: 'two', model: 'auto', mode: 'agent', imagePaths: [] });
+    expect(chat.messages.value.map((m) => m.content)).toEqual(['one']);
+    expect(JSON.parse(ws.sent[1])).toMatchObject({ type: 'prompt', text: 'two' });
+
+    ws.serverMessage(textChunk('answer'));
+    ws.serverMessage(frame({ type: 'done' }));
+    ws.serverMessage(
+      frame({ type: 'prompt-started', prompt: { text: 'two', createdAt: '2026-01-01T00:00:03.000Z' } })
+    );
+
+    expect(chat.messages.value.map((m) => m.role)).toEqual(['user', 'assistant', 'user']);
+    expect(chat.messages.value[2]?.content).toBe('two');
+  });
+
+  it('moves an unconfirmed optimistic turn after the run it was queued behind', () => {
+    const { chat, ws } = connectOpen();
+    cleanup = chat.disconnect;
+    // Client believes it is idle while the server is still finishing a turn.
+    chat.sendPrompt({ text: 'go', model: 'auto', mode: 'agent', imagePaths: [] });
+    ws.serverMessage(textChunk('earlier answer'));
+    ws.serverMessage(frame({ type: 'done' }));
+    ws.serverMessage(
+      frame({ type: 'prompt-started', prompt: { text: 'go', createdAt: '2026-01-01T00:00:05.000Z' } })
+    );
+
+    expect(chat.messages.value.map((m) => m.role)).toEqual(['assistant', 'user']);
+    expect(chat.messages.value[1]?.createdAt).toBe('2026-01-01T00:00:05.000Z');
+  });
+
+  it('clears the load-more spinner on a drop and after a timeout', () => {
+    const { chat, ws } = connectOpen();
+    cleanup = chat.disconnect;
+    ws.serverMessage(frame({ type: 'history', messages: [userMsg('a')], hasMore: true }));
+
+    chat.loadOlderMessages();
+    expect(chat.bLoadingMore.value).toBe(true);
+    ws.serverClose(1006);
+    expect(chat.bLoadingMore.value).toBe(false);
+
+    vi.advanceTimersByTime(1000);
+    const next = FakeWebSocket.instances[1];
+    next.serverOpen();
+    chat.loadOlderMessages();
+    expect(chat.bLoadingMore.value).toBe(true);
+    vi.advanceTimersByTime(15_000);
+    expect(chat.bLoadingMore.value).toBe(false);
+  });
+
   it('goes idle and surfaces the error on an error frame', () => {
     const { chat, ws } = connectOpen();
     cleanup = chat.disconnect;
