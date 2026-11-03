@@ -54,6 +54,8 @@ export function useChatScroll(options: UseChatScrollOptions) {
   /** True while the mouse button is held inside the list (scrollbar drag). */
   let bPointerScrolling = false;
   let touchStartY: number | null = null;
+  /** Previous scrollTop, to tell upward (user) moves from downward follow-scrolls. */
+  let lastScrollTop = 0;
 
   // -------------------------------------------------- Scroll management --------------------------------------------------
 
@@ -97,6 +99,7 @@ export function useChatScroll(options: UseChatScrollOptions) {
     } else {
       el.scrollTop = el.scrollHeight;
     }
+    lastScrollTop = el.scrollTop;
     endIgnoreScrollEvents();
   }
 
@@ -127,12 +130,29 @@ export function useChatScroll(options: UseChatScrollOptions) {
   }
 
   function onMessagesScroll(): void {
-    // While the pointer is held on the scrollbar, every scroll event is the user's.
-    if (!bPointerScrolling && shouldIgnoreScrollEvent()) {
+    const el = messagesEl.value;
+    const scrollTop = el?.scrollTop ?? 0;
+    const bMovedUp = scrollTop < lastScrollTop - 1;
+    lastScrollTop = scrollTop;
+    // An upward move away from the bottom is always the user (or find-in-chat):
+    // follow-scrolls only go down, and growing content does not move scrollTop
+    // (overflow-anchor: none). Never drop it inside an ignore window.
+    if (bMovedUp && el && el.scrollHeight - scrollTop - el.clientHeight > 2) {
+      bPinnedToBottom.value = false;
+      bShowScrollToBottom.value = true;
+    } else if (bPointerScrolling || !shouldIgnoreScrollEvent()) {
+      // Re-pin only while moving down. Smooth wheel / touch scrolling starts with
+      // tiny steps that stay inside the 80px threshold; re-pinning on those snapped
+      // the user back to the bottom on the next streamed chunk.
+      if (!bMovedUp && isScrolledToBottom()) {
+        bPinnedToBottom.value = true;
+        bShowScrollToBottom.value = false;
+      } else if (!bPinnedToBottom.value) {
+        bShowScrollToBottom.value = true;
+      }
+    } else {
       return;
     }
-    bPinnedToBottom.value = isScrolledToBottom();
-    bShowScrollToBottom.value = !bPinnedToBottom.value;
     if (!props.bHasMore || props.bLoadingMore) return;
     if (messagesEl.value && messagesEl.value.scrollTop < 100) {
       options.onLoadOlder();
@@ -274,11 +294,13 @@ export function useChatScroll(options: UseChatScrollOptions) {
   );
 
   // On-screen keyboard resizes the viewport — keep the latest message visible.
+  // Only while pinned: mobile browsers also resize the visual viewport when the
+  // URL bar hides/shows during a scroll, which would yank a reader back down.
   watch(
     () => props.viewportHeight,
     async () => {
       await nextTick();
-      await scrollToBottom();
+      await scrollToBottomIfPinned();
     }
   );
 
