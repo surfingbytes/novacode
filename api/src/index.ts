@@ -27,6 +27,7 @@ import { isLocalLoginEnabled, readOidcSettings } from './classes/oidc';
 import { cancelAllRuns, startClaudeAutoContinue, stopClaudeAutoContinue } from './classes/chatEngine';
 import { closeAllAcpSessions } from './classes/acpSessionClose';
 import { cancelAllOrchestratorRuns } from './classes/orchestratorRunner';
+import { installStepFollowUpTracking, waitForStepFollowUps } from './classes/orchestratorFollowUps';
 
 // routes
 import { broadcastServerShutdown } from './classes/wsBroadcast';
@@ -81,6 +82,7 @@ async function shutdown(fastify: FastifyInstance, signal: string): Promise<void>
   // Orchestrators first: a step whose turn is cancelled before its run is failed would count as done.
   await shutdownPart('cancel orchestrator runs', () => cancelAllOrchestratorRuns(SHUTDOWN_REASON));
   await shutdownPart('cancel chat runs', () => cancelAllRuns(SHUTDOWN_REASON));
+  await shutdownPart('save orchestrator step follow-ups', () => waitForStepFollowUps());
   await shutdownPart('close ACP sessions', () => closeAllAcpSessions(SHUTDOWN_REASON));
   await shutdownPart('stop PTY sessions', () => sessionManager.stopAll());
   await shutdownPart('stop workspace terminals', () => workspaceTerminalManager.stopAll());
@@ -115,6 +117,7 @@ function startBackgroundServices(): void {
   startAutomationScheduler();
   startCiWatcher();
   startClaudeAutoContinue();
+  installStepFollowUpTracking();
 
   void applyReachableMcpAutoload(config.configDir)
     .then((autoload) => {
