@@ -39,7 +39,7 @@ import { defaultAskQuestionResponse, parseAskQuestionParams } from './acpAskQues
 import type { AcpAskQuestionHandler, AcpAskQuestionResponse } from './acpAskQuestion';
 import { nodeReadableToWeb, nodeWritableToWeb } from './acpStreams';
 import { StreamingToolInputTracker, effectivePromptIdleTimeoutMs } from './streamingToolInput';
-import { extractAgentErrorDetail, type AgentErrorDetail } from './agentError';
+import { extractAgentErrorDetail, isAuthRequiredError, type AgentErrorDetail } from './agentError';
 import {
   emitCursorPlanRequest,
   emitCursorTaskActivity,
@@ -200,6 +200,10 @@ const CONTEXT_RESET_NOTICE_TEXT =
 /** Serialized stream event for the reset notice (persisted in session messages, rendered by the dashboard). */
 export function sessionResetNoticeEventLine(): string {
   return JSON.stringify({ type: 'session_reset_notice', text: CONTEXT_RESET_NOTICE_TEXT });
+}
+
+function isAuthError(err: unknown): boolean {
+  return isAuthRequiredError(err, extractAgentErrorDetail(err));
 }
 
 function delay(ms: number): Promise<void> {
@@ -694,6 +698,8 @@ export async function runAcpSubprocessPrompt(
           phase('session:load:done');
           return { sessionId: acpSessionId, response: loaded, isFresh: false };
         } catch (err) {
+          // A fresh session would fail the same way and lose the conversation.
+          if (isAuthError(err)) throw err;
           logger.warn({ logTag, novaSessionId, err }, 'loadSession failed, starting fresh session');
           activeHandlers.delete(acpSessionId);
           const created = await newSession(servers);
@@ -707,7 +713,8 @@ export async function runAcpSubprocessPrompt(
       try {
         opened = await loadOrCreateSession(mcpServers);
       } catch (err) {
-        if (mcpServers.length === 0) {
+        // Auth failures are not caused by MCP; retrying without it only misreports them.
+        if (mcpServers.length === 0 || isAuthError(err)) {
           throw err;
         }
         logger.warn(

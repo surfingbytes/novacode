@@ -10,6 +10,7 @@ import '@xterm/xterm/css/xterm.css';
 // classes
 import { buildWsUrl } from '@/classes/api';
 import { createManagedSocket, type ManagedSocket } from '@/lib/wsClient';
+import { useToastStore } from '@/stores/toasts';
 
 // types
 import type { WsServerMessage, WsClientMessage } from '@/@types/index';
@@ -103,14 +104,7 @@ const onTouchEnd = (): void => {
   touchLastY = null;
 };
 
-const copyTerminalText = async (): Promise<void> => {
-  if (!term) {
-    return;
-  }
-  const text = term.getSelection() || serializeAddon?.serialize() || '';
-  if (!text) {
-    return;
-  }
+const writeClipboard = async (text: string): Promise<void> => {
   try {
     await navigator.clipboard.writeText(text);
   } catch {
@@ -124,6 +118,29 @@ const copyTerminalText = async (): Promise<void> => {
     document.execCommand('copy');
     ta.remove();
   }
+};
+
+/** xterm activates links on mouseup of any button: only left-click opens, right-click copies. */
+const handleTerminalLink = (event: MouseEvent, uri: string): void => {
+  if (event.button === 2) {
+    void writeClipboard(uri).then(() => useToastStore().success('Link copied'));
+    return;
+  }
+  if (event.button !== 0) {
+    return;
+  }
+  window.open(uri, '_blank', 'noopener,noreferrer');
+};
+
+const copyTerminalText = async (): Promise<void> => {
+  if (!term) {
+    return;
+  }
+  const text = term.getSelection() || serializeAddon?.serialize() || '';
+  if (!text) {
+    return;
+  }
+  await writeClipboard(text);
   bCopied.value = true;
   if (copiedTimer) {
     clearTimeout(copiedTimer);
@@ -365,7 +382,7 @@ onMounted((): void => {
   serializeAddon = new SerializeAddon();
   term.loadAddon(fitAddon);
   term.loadAddon(serializeAddon);
-  term.loadAddon(new WebLinksAddon());
+  term.loadAddon(new WebLinksAddon(handleTerminalLink));
   term.open(containerEl.value);
   fitAddon.fit();
 

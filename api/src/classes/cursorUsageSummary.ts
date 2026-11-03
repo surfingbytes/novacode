@@ -56,22 +56,28 @@ function readCursorAccessToken(configDir: string): string | null {
   }
 }
 
-/** WorkOS user id from JWT `sub` (`auth0|user_…` → `user_…`). */
-export function userIdFromAccessToken(accessToken: string): string | null {
-  const parts = accessToken.split('.');
+/** Unverified JWT claims, or null when the token is not a decodable JWT. */
+export function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split('.');
   if (parts.length < 2) return null;
   try {
-    const payload = JSON.parse(
+    const payload: unknown = JSON.parse(
       Buffer.from(parts[1] + '='.repeat((4 - (parts[1].length % 4)) % 4), 'base64url').toString(
         'utf8'
       )
-    ) as { sub?: unknown };
-    if (typeof payload.sub !== 'string' || !payload.sub) return null;
-    const sep = payload.sub.indexOf('|');
-    return sep >= 0 ? payload.sub.slice(sep + 1) : payload.sub;
+    );
+    return payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
   } catch {
     return null;
   }
+}
+
+/** WorkOS user id from JWT `sub` (`auth0|user_…` → `user_…`). */
+export function userIdFromAccessToken(accessToken: string): string | null {
+  const sub = decodeJwtPayload(accessToken)?.sub;
+  if (typeof sub !== 'string' || !sub) return null;
+  const sep = sub.indexOf('|');
+  return sep >= 0 ? sub.slice(sep + 1) : sub;
 }
 
 export function buildWorkosSessionCookie(accessToken: string): string | null {

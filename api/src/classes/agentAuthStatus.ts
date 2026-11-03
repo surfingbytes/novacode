@@ -20,6 +20,7 @@ import {
   isTimeoutError,
   type CursorAuthCheck
 } from './agentError';
+import { decodeJwtPayload } from './cursorUsageSummary';
 import { hasAnyOpenCodeAuth } from './openCodeProviders';
 
 // types
@@ -41,13 +42,46 @@ export const clearCursorAuthCache = (): void => {
   cursorAuthCache = null;
 };
 
+/** Cursor rejects tokens a few minutes before `exp`; treat that window as expired. */
+const CURSOR_TOKEN_EXPIRY_MARGIN_MS = 10 * 60_000;
+
+const jwtExpiryMs = (token: unknown): number | null => {
+  if (typeof token !== 'string') return null;
+  const exp = decodeJwtPayload(token)?.exp;
+  return typeof exp === 'number' ? exp * 1000 : null;
+};
+
+/**
+ * Judge auth.json by token expiry: the CLI can renew the access token while the
+ * refresh token is valid. Null when the expiry can't be read (ask the CLI).
+ */
+const cursorAuthFileCheck = (authPath: string): CursorAuthCheck | null => {
+  let tokens: { accessToken?: unknown; refreshToken?: unknown };
+  try {
+    tokens = JSON.parse(readFileSync(authPath, 'utf8'));
+  } catch {
+    return null;
+  }
+  const expiries = [jwtExpiryMs(tokens.accessToken), jwtExpiryMs(tokens.refreshToken)];
+  if (expiries.every((exp) => exp === null)) return null;
+  const validUntil = Math.max(...expiries.map((exp) => exp ?? 0));
+  if (validUntil - CURSOR_TOKEN_EXPIRY_MARGIN_MS > Date.now()) {
+    return { authenticated: true, status: 'authenticated' };
+  }
+  return {
+    authenticated: false,
+    status: 'unauthenticated',
+    message: 'Cursor CLI login has expired. Log in to Cursor again.'
+  };
+};
+
 export const checkCursorAuth = async (): Promise<CursorAuthCheck> => {
   const authPath = join(config.configDir, CURSOR_AUTH_FILE);
 
-  if (existsSync(authPath)) {
-    const authenticated: CursorAuthCheck = { authenticated: true, status: 'authenticated' };
-    cursorAuthCache = { result: authenticated, at: Date.now() };
-    return authenticated;
+  const fileCheck = existsSync(authPath) ? cursorAuthFileCheck(authPath) : null;
+  if (fileCheck) {
+    cursorAuthCache = { result: fileCheck, at: Date.now() };
+    return fileCheck;
   }
   if (cursorAuthCache && Date.now() - cursorAuthCache.at < CURSOR_AUTH_TTL_MS) {
     return cursorAuthCache.result;

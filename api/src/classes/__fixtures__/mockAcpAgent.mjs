@@ -10,6 +10,7 @@
  *             'fail-new-if-mcp'      — session/new errors when mcpServers is non-empty
  *             'fail-if-mcp'          — session/new and session/load error when mcpServers is non-empty
  *             'fail-load-new-if-mcp' — session/load always errors; session/new errors with MCP
+ *             'fail-auth'            — session/new and session/load error with ACP auth_required
  *             'hang-initialize'      — initialize never responds
  *             'prompt-permission-then-hang' — like prompt-permission, but stays silent after the answer
  *             'prompt-permission'    — session/prompt asks the client for tool permission first
@@ -139,17 +140,25 @@ rl.on('line', (line) => {
       });
       break;
     case 'session/new':
+      if (mode === 'fail-auth') {
+        send({ jsonrpc: '2.0', id: msg.id, error: { code: -32000, message: 'Authentication required' } });
+        break;
+      }
       if ((mode === 'fail-new-if-mcp' || mode === 'fail-if-mcp' || mode === 'fail-load-new-if-mcp') && Array.isArray(msg.params?.mcpServers) && msg.params.mcpServers.length > 0) {
         send({
           jsonrpc: '2.0',
           id: msg.id,
-          error: { code: -32000, message: 'mcp failed' },
+          error: { code: -32603, message: 'mcp failed' },
         });
       } else {
         send({ jsonrpc: '2.0', id: msg.id, result: { sessionId: SESSION_ID } });
       }
       break;
     case 'session/load':
+      if (mode === 'fail-auth') {
+        send({ jsonrpc: '2.0', id: msg.id, error: { code: -32000, message: 'Authentication required' } });
+        break;
+      }
       if (
         mode === 'fail-load' ||
         mode === 'fail-load-new-if-mcp' ||
@@ -158,7 +167,7 @@ rl.on('line', (line) => {
         send({
           jsonrpc: '2.0',
           id: msg.id,
-          error: { code: -32000, message: 'session not found' },
+          error: { code: -32603, message: 'session not found' },
         });
       } else {
         send({

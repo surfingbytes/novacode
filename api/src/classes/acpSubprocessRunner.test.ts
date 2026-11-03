@@ -186,6 +186,34 @@ describe('runAcpSubprocessPrompt', () => {
     expect(events.some((line) => line.includes('mcp_unavailable_notice'))).toBe(true);
   });
 
+  it('reports auth failures without blaming MCP or starting a fresh session', async () => {
+    const { workDir, logPath } = setupMock('fail-auth');
+    const events: string[] = [];
+
+    const result = await runAcpSubprocessPrompt(
+      {
+        command: process.execPath,
+        args: [MOCK_AGENT_PATH],
+        cwd: workDir,
+        novaSessionId: 'nova-auth-fail',
+        acpSessionId: 'existing-session-42',
+        promptText: 'hello',
+        logTag: 'testAcp',
+        mcpServers: [
+          { type: 'http', name: 'joplin', url: 'http://joplin-mcp:3000/mcp', headers: [] }
+        ]
+      },
+      (line) => events.push(line)
+    );
+
+    expect(result.error).toContain('Authentication required');
+    const methods = readMockLog(logPath).map((m) => m.method);
+    expect(methods.filter((m) => m === 'session/load')).toHaveLength(1);
+    expect(methods).not.toContain('session/new');
+    expect(events.some((line) => line.includes('mcp_unavailable_notice'))).toBe(false);
+    expect(events.some((line) => line.includes('session_reset_notice'))).toBe(false);
+  });
+
   it('resumes an existing ACP session via session/load on follow-up turns', async () => {
     const { workDir, logPath } = setupMock('prompt-ok');
 
