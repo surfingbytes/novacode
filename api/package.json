@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "^0.99.1",
-    "@agentclientprotocol/sdk": "^2.1.0",
+    "@agentclientprotocol/sdk": "^2.2.0",
     "@fastify/compress": "^9.3.0",
     "@fastify/cors": "^11.3.0",
     "@fastify/helmet": "^13.1.0",
@@ -24,7 +24,7 @@
     "@fastify/swagger": "^9.9.2",
     "@fastify/swagger-ui": "^6.1.2",
     "@fastify/type-provider-typebox": "^6.1.0",
-    "@fastify/websocket": "^11.3.0",
+    "@fastify/websocket": "^11.3.6",
     "@novacode/shared": "file:../shared",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
@@ -46,12 +46,12 @@
     "@types/pg": "^8.20.0",
     "@types/web-push": "^3.6.4",
     "@types/ws": "^8.18.1",
-    "eslint": "^10.13.0",
+    "eslint": "^10.14.0",
     "jiti": "^2.7.0",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.1",
     "vitest": "^5.0.5",
-    "ws": "^8.22.0"
+    "ws": "^8.22.1"
   }
 }
