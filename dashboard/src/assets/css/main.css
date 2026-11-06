@@ -789,6 +789,8 @@ hr {
 
   /* mobile: bottom — keep above scrolling/editor content */
   @apply flex items-stretch fixed bottom-0 left-0 right-0 z-20 bg-bg border-t border-border mb-0 h-12;
+  /* rail sidebar sits in flow from the pane breakpoint — start after it */
+  @apply pane:left-[var(--nav-sidebar-w,0px)];
   a {
     @apply flex-1 flex items-center justify-center text-center px-3 py-2  pb-1.5 text-sm font-medium  transition-colors flex items-center gap-1.5;
     &.is-active {
@@ -797,7 +799,7 @@ hr {
   }
 
   /* desktop: inline */
-  @apply md:relative md:border-b md:border-t-0 md:h-auto md:gap-1 md:mb-6;
+  @apply md:relative md:left-auto md:border-b md:border-t-0 md:h-auto md:gap-1 md:mb-6;
 
   a {
     @apply md:flex-0 md:border-b-2 md:border-transparent md:hover:border-text-primary;

@@ -117,7 +117,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="flex h-full bg-bg">
+  <div
+    class="flex h-full bg-bg"
+    :style="{ '--nav-sidebar-w': bSidebarCollapsed ? '56px' : '232px' }"
+  >
     <!-- Sidebar -->
     <NavSidebar
       :is-open="bSidebarIsOpen"
