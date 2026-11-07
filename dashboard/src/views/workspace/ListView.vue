@@ -363,13 +363,9 @@ onMounted((): void => {
   <PageShell>
     <!-- Header -->
     <div class="ws-header">
-      <div>
+      <div class="ws-header__heading">
         <div class="nc-eyebrow ws-eyebrow">// workspaces</div>
         <h1 class="ws-title">Workspaces</h1>
-        <p class="ws-subtitle">
-          Pick a project to start a session, browse files, or manage git. Paths are under
-          <code class="ws-path-pill nc-mono">{{ workspaceBrowseRoot }}</code>.
-        </p>
       </div>
       <button
         v-if="!store.bIsLoading && store.workspaces.length > 0"
@@ -379,6 +375,10 @@ onMounted((): void => {
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14 M5 12h14"/></svg>
         Add workspace
       </button>
+      <p class="ws-subtitle">
+        Pick a project to start a session, browse files, or manage git. Paths are under
+        <code class="ws-path-pill nc-mono">{{ workspaceBrowseRoot }}</code>.
+      </p>
     </div>
 
     <!-- Loading -->
@@ -633,11 +633,22 @@ onMounted((): void => {
 
 /* ── page header ─────────────────────────────────────────── */
 .ws-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'heading button'
+    'subtitle subtitle';
+  align-items: start;
+  column-gap: 16px;
   margin-bottom: 32px;
+}
+
+.ws-header__heading {
+  grid-area: heading;
+}
+
+.ws-header > .ws-add-btn {
+  grid-area: button;
 }
 
 .ws-title {
@@ -649,6 +660,7 @@ onMounted((): void => {
 }
 
 .ws-subtitle {
+  grid-area: subtitle;
   font-size: 13px;
   color: var(--fg-subtle);
   margin: 0;
