@@ -15,10 +15,8 @@ interface PendingPrompt {
 }
 
 interface ForegroundEvents {
-  running: () => void;
-  awaitingUser: () => void;
-  ended: (outcome: { stopReason?: string }) => void;
-  failed: (error: unknown) => void;
+  running: () => Promise<void>;
+  ended: () => Promise<void>;
 }
 
 class FakeClaudeAgent {
@@ -30,7 +28,6 @@ class FakeClaudeAgent {
   static sessionResponse: object = {};
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly client: any;
-  readonly options: { foreground?: (sessionId: string) => ForegroundEvents };
   disposed = false;
   sessions: Record<string, object> = {};
   pendingPrompt: PendingPrompt | null = null;
@@ -40,15 +37,16 @@ class FakeClaudeAgent {
   cancelCount = 0;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  constructor(client: any, _logger?: unknown, options: { foreground?: (sessionId: string) => ForegroundEvents } = {}) {
+  constructor(client: any) {
     this.client = client;
-    this.options = options;
     FakeClaudeAgent.instances.push(this);
   }
 
-  /** The adapter's foreground reporter for an ACP session (a fresh one per work start). */
+  /** The adapter's foreground work of an ACP session, reported as SDK session state frames. */
   foreground(sessionId: string): ForegroundEvents {
-    return this.options.foreground!(sessionId);
+    const state = (value: string) =>
+      this.sdkMessage(sessionId, { type: 'system', subtype: 'session_state_changed', state: value });
+    return { running: () => state('running'), ended: () => state('idle') };
   }
 
   /** Raw SDK message the adapter forwards via `_claude/sdkMessage`. */
@@ -101,6 +99,18 @@ class FakeClaudeAgent {
 
   async cancel(): Promise<void> {
     this.cancelCount++;
+  }
+
+  async closeSession(): Promise<object> {
+    return {};
+  }
+
+  async deleteSession(): Promise<object> {
+    return {};
+  }
+
+  async setSessionConfigOption(): Promise<object> {
+    return {};
   }
 
   async dispose(): Promise<void> {
@@ -169,7 +179,7 @@ beforeEach(async () => {
   FakeClaudeAgent.hangSetup = false;
   FakeClaudeAgent.sessionResponse = {};
   claudeAcp = await import('./claudeAcp.js');
-  claudeAcp.setClaudeAcpAgentCtorForTests(FakeClaudeAgent);
+  claudeAcp.setClaudeAgentFactoryForTests((client) => new FakeClaudeAgent(client) as never);
 });
 
 afterEach(() => {
@@ -408,9 +418,9 @@ describe('embedded Claude follow-up work', () => {
     const events: string[] = [];
     const { result, agent } = await startTurn('nova-1', (line) => events.push(line));
     const turn = agent.foreground('acp-1');
-    turn.running();
+    await turn.running();
     await agent.backgroundTasks('acp-1', ['build']);
-    turn.ended({ stopReason: 'end_turn' });
+    await turn.ended();
     agent.finishPrompt();
 
     await vi.advanceTimersByTimeAsync(10 * 60_000);
@@ -424,7 +434,7 @@ describe('embedded Claude follow-up work', () => {
     expect(await isSettled(result)).toBe(false);
 
     const cycle = agent.foreground('acp-1');
-    cycle.running();
+    await cycle.running();
     await agent.client.sessionUpdate({
       sessionId: 'acp-1',
       update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Build is green.' } }
@@ -432,7 +442,7 @@ describe('embedded Claude follow-up work', () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(await isSettled(result)).toBe(false);
 
-    cycle.ended({ stopReason: 'end_turn' });
+    await cycle.ended();
     await agent.sdkMessage('acp-1', { type: 'result' });
     await vi.advanceTimersByTimeAsync(FOLLOWUP_GRACE_MS + 1);
     await expect(result).resolves.toMatchObject({ stopReason: 'end_turn' });
@@ -450,7 +460,7 @@ describe('embedded Claude follow-up work', () => {
     await vi.advanceTimersByTimeAsync(500);
 
     const cycle = agent.foreground('acp-1');
-    cycle.running();
+    await cycle.running();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(await isSettled(result)).toBe(false);
 
@@ -458,9 +468,9 @@ describe('embedded Claude follow-up work', () => {
       sessionId: 'acp-1',
       update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Done.' } }
     });
-    cycle.ended({ stopReason: 'max_tokens' });
+    await cycle.ended();
     await vi.advanceTimersByTimeAsync(FOLLOWUP_GRACE_MS + 1);
-    await expect(result).resolves.toMatchObject({ stopReason: 'max_tokens' });
+    await expect(result).resolves.toMatchObject({ stopReason: 'end_turn' });
     expect(events.some((line) => line.includes('Done.'))).toBe(true);
   });
 
@@ -499,7 +509,7 @@ describe('embedded Claude follow-up work', () => {
     // Once the follow-up cycle streams, silence is again a hang.
     await agent.backgroundTasks('acp-1', []);
     const cycle = agent.foreground('acp-1');
-    cycle.running();
+    await cycle.running();
     await vi.advanceTimersByTimeAsync(300_000);
     expect(agent.disposed).toBe(true);
     await expect(result).resolves.toMatchObject({ error: expect.stringContaining('no output') });
@@ -519,12 +529,12 @@ describe('embedded Claude follow-up work', () => {
     expect(await isSettled(result)).toBe(false);
 
     const cycle = agent.foreground('acp-1');
-    cycle.running();
+    await cycle.running();
     await agent.client.sessionUpdate({
       sessionId: 'acp-1',
       update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Render done.' } }
     });
-    cycle.ended({ stopReason: 'end_turn' });
+    await cycle.ended();
     await agent.sdkMessage('acp-1', { type: 'result' });
     await vi.advanceTimersByTimeAsync(FOLLOWUP_GRACE_MS + 1);
     await expect(result).resolves.toMatchObject({ stopReason: 'end_turn' });
@@ -593,7 +603,7 @@ describe('embedded Claude turn start', () => {
     await flush();
     expect(agent.cancelCount).toBe(1);
 
-    agent.foreground('acp-1').running();
+    await agent.foreground('acp-1').running();
     await flush();
     expect(agent.cancelCount).toBe(2);
 
@@ -603,10 +613,10 @@ describe('embedded Claude turn start', () => {
 
   it('does not re-cancel when a turn that was not stopped becomes active', async () => {
     const { result, agent } = await startTurn('nova-1');
-    agent.foreground('acp-1').running();
+    await agent.foreground('acp-1').running();
     await flush();
     expect(agent.cancelCount).toBe(0);
-    agent.foreground('acp-1').ended({ stopReason: 'end_turn' });
+    await agent.foreground('acp-1').ended();
     await finishTurn(agent);
     await expect(result).resolves.toMatchObject({ stopReason: 'end_turn' });
   });

@@ -202,7 +202,7 @@ The Docker image installs the CLIs. After starting the app:
 | Agent | How Nova Code talks to it |
 |-------|---------------------------|
 | **Cursor** | `cursor-agent acp` subprocess per turn (`CURSOR_COMMAND`) |
-| **Claude** | In-process `@agentclientprotocol/claude-agent-acp` |
+| **Claude** | `@agentclientprotocol/claude-agent-acp` subprocess |
 | **Mistral Vibe** | `vibe-acp` subprocess per turn; API key in Settings (`~/.vibe/.env` under `/config`) |
 | **OpenCode** | `opencode acp` subprocess per turn |
 | **Codex** | `codex-acp` subprocess per turn; API key in Settings |

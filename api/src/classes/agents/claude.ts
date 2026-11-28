@@ -1,21 +1,22 @@
 /**
- * Claude runs in-process through the embedded `@agentclientprotocol/claude-agent-acp` agent.
+ * Claude runs through the `@agentclientprotocol/claude-agent-acp` agent, one child process per session.
  */
 
 // node_modules
 import { PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
-import type { NewSessionResponse, RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
+import type { RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
 
 // classes
 import { claudeTokenSessionMeta } from '../childEnv';
 import { config } from '../config';
 import { db } from '../database';
+import { spawnClaudeAgent } from '../claudeAgentProcess';
 import { cancelClaudeAcp, closeClaudeAcpForNovaSession, runClaudeAcp } from '../claudeAcp';
 import { autoApprovePermission, listCliModels } from './probes';
 import { agentOptionsFromSession, withOptionFallbacks } from './sessionOptions';
 
 // types
-import type { ClaudeAcpClient } from '../claudeAcp';
+import type { ClaudeAgentCallbacks } from '../claudeAgentProcess';
 import type {
   AgentAdapter,
   AgentConfigOptionsResult,
@@ -33,31 +34,29 @@ const claudeClientProxy = {
   sessionUpdate: async (): Promise<void> => {},
   requestPermission: async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> =>
     autoApprovePermission(params),
-  readTextFile: async (): Promise<{ content: string }> => ({ content: '' }),
-  writeTextFile: async (): Promise<Record<string, never>> => ({}),
   extNotification: async (_method: string, _params: Record<string, unknown>): Promise<void> => {},
-} satisfies Partial<ClaudeAcpClient>;
-
+} satisfies ClaudeAgentCallbacks;
 
 async function probeClaudeOptions(claudeToken?: string | null): Promise<AgentOptionsProbeResult | null> {
+  const agent = spawnClaudeAgent(claudeClientProxy);
   try {
-    const { ClaudeAcpAgent } = await import('@agentclientprotocol/claude-agent-acp');
-    const agent = new ClaudeAcpAgent(claudeClientProxy as unknown as ClaudeAcpClient);
     await agent.initialize({
       protocolVersion: PROTOCOL_VERSION,
       clientInfo: { name: 'nova-code', version: '1.0.0' },
       clientCapabilities: {},
     });
-    const resp = (await agent.newSession({
+    const resp = await agent.newSession({
       cwd: config.configDir,
       mcpServers: [],
       _meta: claudeTokenSessionMeta(claudeToken),
-    })) as NewSessionResponse;
+    });
     const options = agentOptionsFromSession(resp);
     await agent.closeSession({ sessionId: resp.sessionId }).catch(() => {});
     return options;
   } catch {
     return null;
+  } finally {
+    await agent.dispose();
   }
 }
 

@@ -1,20 +1,15 @@
 // node_modules
-// @agentclientprotocol/claude-agent-acp is ESM-only, so it is loaded with a dynamic import() at
-// runtime (module: nodenext keeps import() as-is in the CommonJS output). Types are import-type only.
-import type { ClaudeAcpAgent } from '@agentclientprotocol/claude-agent-acp';
 import { PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 import type {
   SessionNotification,
   RequestPermissionRequest,
   RequestPermissionResponse,
-  ReadTextFileRequest,
-  ReadTextFileResponse,
-  WriteTextFileRequest,
-  WriteTextFileResponse,
 } from '@agentclientprotocol/sdk';
 
 // classes
 import { claudeTokenSessionMeta } from './childEnv';
+import { CLAUDE_SDK_MESSAGE_METHOD, spawnClaudeAgent } from './claudeAgentProcess';
+import type { ClaudeAgent, ClaudeAgentCallbacks } from './claudeAgentProcess';
 import { applySessionMode, applySessionModel, applySessionConfig } from './acpSessionHelpers';
 import type { AcpSessionResponse } from './acpSessionHelpers';
 import { extractAgentErrorDetail } from './agentError';
@@ -26,9 +21,6 @@ import { novaMcpServerIfSession } from './novaMcp';
 import { buildPromptContent, sessionResetNoticeEventLine } from './acpSubprocessRunner';
 import { StreamingToolInputTracker, effectivePromptIdleTimeoutMs } from './streamingToolInput';
 import type { AcpPermissionHandler, AcpPromptAttachment, SessionConfigSyncHandler } from './acpSubprocessRunner';
-
-/** Client callbacks the embedded ClaudeAcpAgent invokes (SDK 2.0 removed AgentSideConnection). */
-export type ClaudeAcpClient = ConstructorParameters<typeof ClaudeAcpAgent>[0];
 
 export type AcpEventHandler = (line: string) => void;
 // Re-used by any ACP agent added later (Mistral, etc.).
@@ -43,8 +35,9 @@ const activePermissionHandlers = new Map<string, AcpPermissionHandler>();
 // Claude Code keeps working after a prompt's result: background Bash commands and
 // subagents run on, and when one finishes it starts a model cycle on its own (the
 // `task-notification` follow-up) that streams its output outside any prompt. The
-// adapter reports that work through its `foreground` constructor option and, with
-// `emitRawSDKMessages`, the SDK's background task level signal. A turn stays open
+// adapter reports that work through the raw SDK messages requested with
+// `emitRawSDKMessages`: the SDK's session state (`running` / `idle`) and its
+// background task level signal. A turn stays open
 // until that work drains so the follow-up lands in the same assistant message
 // instead of being dropped. Live, a finished task is announced by the SDK's
 // `system/task_notification` frame; the `user` record with a task-notification
@@ -59,6 +52,7 @@ const FOLLOWUP_START_TIMEOUT_MS = 120_000;
 const CLAUDE_SESSION_META = {
   claudeCode: {
     emitRawSDKMessages: [
+      { type: 'system', subtype: 'session_state_changed' },
       { type: 'system', subtype: 'background_tasks_changed' },
       { type: 'system', subtype: 'task_notification' },
       { type: 'user', origin: 'task-notification' },
@@ -94,8 +88,6 @@ interface SessionWork {
   liveTaskIds: Set<string>;
   /** Every live task seen since the current turn started, for the running/total badge. */
   seenTaskIds: Set<string>;
-  /** Stop reason of the last foreground work that ended. */
-  lastStopReason: string | undefined;
   /** Set by cancel / dispose: a held turn ends at once. */
   released: boolean;
   waiters: Set<() => void>;
@@ -113,7 +105,6 @@ function getSessionWork(acpSessionId: string): SessionWork {
       followupPendingSince: null,
       liveTaskIds: new Set(),
       seenTaskIds: new Set(),
-      lastStopReason: undefined,
       released: false,
       waiters: new Set(),
       onRunning: null,
@@ -161,33 +152,26 @@ function emitBackgroundTaskCounts(acpSessionId: string, work: SessionWork): void
   );
 }
 
-function makeForegroundEvents(acpSessionId: string): {
-  running: () => void;
-  awaitingUser: () => void;
-  ended: (outcome: { stopReason?: string }) => void;
-  failed: (error: unknown) => void;
-} {
-  const setForeground = (foreground: boolean, stopReason?: string): void => {
-    const work = getSessionWork(acpSessionId);
-    work.foreground = foreground;
-    if (foreground) work.followupPendingSince = null;
-    if (stopReason) work.lastStopReason = stopReason;
-    touchAcpSession(acpSessionId);
-    wakeSessionWork(work);
-    if (foreground) work.onRunning?.();
-  };
-  return {
-    running: () => setForeground(true),
-    awaitingUser: () => {},
-    ended: (outcome) => setForeground(false, outcome?.stopReason),
-    failed: () => setForeground(false),
-  };
+function setForeground(acpSessionId: string, foreground: boolean): void {
+  const work = getSessionWork(acpSessionId);
+  work.foreground = foreground;
+  if (foreground) work.followupPendingSince = null;
+  touchAcpSession(acpSessionId);
+  wakeSessionWork(work);
+  if (foreground) work.onRunning?.();
 }
 
 /** Raw SDK messages (`_claude/sdkMessage`) that describe follow-up work. */
 function trackRawSdkMessage(acpSessionId: string, message: Record<string, unknown>): void {
   const work = getSessionWork(acpSessionId);
   touchAcpSession(acpSessionId);
+  // The SDK's session state is the adapter's foreground work: a turn or a self-started cycle.
+  // `requires_action` (a permission or question is open) is still running work.
+  if (message.type === 'system' && message.subtype === 'session_state_changed') {
+    if (message.state === 'idle') setForeground(acpSessionId, false);
+    else if (message.state === 'running' || !work.foreground) setForeground(acpSessionId, true);
+    return;
+  }
   if (message.type === 'system' && message.subtype === 'background_tasks_changed') {
     const tasks = Array.isArray(message.tasks) ? (message.tasks as Array<Record<string, unknown>>) : [];
     work.liveTaskIds = new Set(
@@ -224,10 +208,9 @@ function trackRawSdkMessage(acpSessionId: string, message: Record<string, unknow
   }
 }
 
-// One ClaudeAcpAgent per Nova session so parallel chats cannot share query/task
+// One claude-agent-acp process per Nova session so parallel chats cannot share query/task
 // state inside a singleton agent (which previously made two sessions feel like one).
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const agentsByNovaSession = new Map<string, any>();
+const agentsByNovaSession = new Map<string, ClaudeAgent>();
 const novaByAcpSession = new Map<string, string>();
 const initializedNovaSessions = new Set<string>();
 
@@ -382,7 +365,7 @@ async function handlePermissionRequest(
   return { outcome: { outcome: 'cancelled' } };
 }
 
-// Duck-typed ACP client proxy satisfying the ClaudeAcpClient interface at runtime.
+// Callbacks of the claude-agent-acp connection.
 // Notifications are forwarded as raw JSON — the frontend parses them natively.
 const acpClientProxy = {
   sessionUpdate: async (notification: SessionNotification): Promise<void> => {
@@ -393,55 +376,33 @@ const acpClientProxy = {
     }
   },
   requestPermission: handlePermissionRequest,
-  readTextFile: async (_params: ReadTextFileRequest): Promise<ReadTextFileResponse> => {
-    return { content: '' };
-  },
-  writeTextFile: async (_params: WriteTextFileRequest): Promise<WriteTextFileResponse> => {
-    return {};
-  },
   // Claude ACP ≥0.84 sends `_auth/status_update` (and similar) via extNotification;
   // unknown methods are meant to be dropped silently by clients. `_claude/sdkMessage`
   // carries the raw SDK messages requested in CLAUDE_SESSION_META.
   extNotification: async (method: string, params: Record<string, unknown>): Promise<void> => {
-    if (method !== '_claude/sdkMessage') return;
+    if (method !== CLAUDE_SDK_MESSAGE_METHOD) return;
     const sessionId = typeof params.sessionId === 'string' ? params.sessionId : null;
     const message =
       params.message && typeof params.message === 'object' ? (params.message as Record<string, unknown>) : null;
     if (sessionId && message) trackRawSdkMessage(sessionId, message);
   },
-} satisfies Partial<ClaudeAcpClient>;
+} satisfies ClaudeAgentCallbacks;
 
 // --------------------------------------------- Claude-specific agent ---------------------------------------------
 
-/** `ClaudeAcpAgent` constructor: client, optional logger, optional options (`foreground` reporter). */
-type ClaudeAcpAgentCtorType = new (
-  client: ClaudeAcpClient,
-  logger?: unknown,
-  options?: { foreground?: (sessionId: string) => ReturnType<typeof makeForegroundEvents> }
-) => any; // eslint-disable-line @typescript-eslint/no-explicit-any
+type ClaudeAgentFactory = (callbacks: ClaudeAgentCallbacks) => ClaudeAgent;
 
-let ClaudeAcpAgentCtor: ClaudeAcpAgentCtorType | null = null;
+let spawnAgent: ClaudeAgentFactory = spawnClaudeAgent;
 
-async function loadClaudeAcpAgentCtor(): Promise<ClaudeAcpAgentCtorType> {
-  if (!ClaudeAcpAgentCtor) {
-    const mod = await import('@agentclientprotocol/claude-agent-acp');
-    ClaudeAcpAgentCtor = mod.ClaudeAcpAgent as ClaudeAcpAgentCtorType;
-  }
-  return ClaudeAcpAgentCtor!;
+/** Test hook: substitute a fake agent (skips spawning the claude-agent-acp process). */
+export function setClaudeAgentFactoryForTests(factory: ClaudeAgentFactory): void {
+  spawnAgent = factory;
 }
 
-/** Test hook: substitute a fake ClaudeAcpAgent class (skips the ESM import). */
-export function setClaudeAcpAgentCtorForTests(ctor: ClaudeAcpAgentCtorType): void {
-  ClaudeAcpAgentCtor = ctor;
-}
-
-async function getAgentForNovaSession(novaSessionId: string): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+async function getAgentForNovaSession(novaSessionId: string): Promise<ClaudeAgent> {
   let agent = agentsByNovaSession.get(novaSessionId);
   if (!agent) {
-    const Ctor = await loadClaudeAcpAgentCtor();
-    agent = new Ctor(acpClientProxy as unknown as ClaudeAcpClient, undefined, {
-      foreground: makeForegroundEvents,
-    });
+    agent = spawnAgent(acpClientProxy);
     agentsByNovaSession.set(novaSessionId, agent);
     ensureIdleSweep();
     enforceAgentCap();
@@ -471,17 +432,9 @@ function rememberAcpBinding(novaSessionId: string, acpSessionId: string): void {
   novaByAcpSession.set(acpSessionId, novaSessionId);
 }
 
-function findAgentForAcpSession(acpSessionId: string): any | null { // eslint-disable-line @typescript-eslint/no-explicit-any
+function findAgentForAcpSession(acpSessionId: string): ClaudeAgent | null {
   const novaSessionId = novaByAcpSession.get(acpSessionId);
-  if (novaSessionId) {
-    return agentsByNovaSession.get(novaSessionId) ?? null;
-  }
-  // Fallback scan — bindings are set before prompt, but cancel during startup
-  // may race ahead of rememberAcpBinding.
-  for (const agent of agentsByNovaSession.values()) {
-    if (agent?.sessions?.[acpSessionId]) return agent;
-  }
-  return null;
+  return novaSessionId ? (agentsByNovaSession.get(novaSessionId) ?? null) : null;
 }
 
 // --------------------------------------------- Public API ---------------------------------------------
@@ -756,7 +709,6 @@ async function runClaudeAcpTurn(
     const turnWork = getSessionWork(sessionId);
     work = turnWork;
     turnWork.released = false;
-    turnWork.lastStopReason = undefined;
     turnWork.followupPendingSince = null;
     turnWork.seenTaskIds = new Set(turnWork.liveTaskIds);
     // A cancel sent before Claude Code takes the prompt in is undone when the turn
@@ -772,15 +724,14 @@ async function runClaudeAcpTurn(
       prompt: buildPromptContent(finalPromptText, params.attachments),
     });
     if (bPromptIdleTimedOut) return idleTimeoutError();
-    let stopReason: string | undefined = resp.stopReason;
+    const stopReason: string | undefined = resp.stopReason;
     if (stopReason !== 'cancelled' && !signal.aborted) {
-      const followup = await holdForFollowupWork(sessionId, turnWork, {
+      await holdForFollowupWork(sessionId, turnWork, {
         setWatchdogPaused,
         timedOut: () => bPromptIdleTimedOut,
         novaSessionId,
       });
       if (bPromptIdleTimedOut) return idleTimeoutError();
-      if (followup) stopReason = turnWork.lastStopReason ?? stopReason;
     }
     return { acpSessionId: sessionId, stopReason };
   } catch (err) {
